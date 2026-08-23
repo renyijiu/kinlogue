@@ -1,0 +1,5 @@
+import KinloguePlatform
+
+typealias LANSessionLifecycleState = KinloguePlatform.LANSessionLifecycleState
+typealias LANSessionLifecycleEvent = KinloguePlatform.LANSessionLifecycleEvent
+typealias LANSessionLifecycleMonitor = KinloguePlatform.LANSessionLifecycleMonitor

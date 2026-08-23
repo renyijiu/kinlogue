@@ -1,0 +1,33 @@
+{
+  "originHash" : "7b9ed1f6986bc62d2959d1e680387848ab4567dd698a92095dce5985621e85d9",
+  "pins" : [
+    {
+      "identity" : "dicom-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ThalesMMS/DICOM-Swift.git",
+      "state" : {
+        "revision" : "9ae0851e134af274651b646519b8a7aaeee05f05",
+        "version" : "1.3.3"
+      }
+    },
+    {
+      "identity" : "swift-argument-parser",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-argument-parser",
+      "state" : {
+        "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
+        "version" : "1.8.2"
+      }
+    },
+    {
+      "identity" : "zipfoundation",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/weichsel/ZIPFoundation.git",
+      "state" : {
+        "revision" : "22787ffb59de99e5dc1fbfe80b19c97a904ad48d",
+        "version" : "0.9.20"
+      }
+    }
+  ],
+  "version" : 3
+}

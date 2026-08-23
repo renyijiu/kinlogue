@@ -1,0 +1,289 @@
+name: Ad-hoc candidate release
+
+on:
+  push:
+    tags:
+      - "v[0-9]*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to package, for example v0.3.0
+        required: true
+        type: string
+
+concurrency:
+  group: candidate-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Build and verify ad-hoc candidate
+    runs-on: macos-26
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    outputs:
+      source_revision: ${{ steps.validate-release.outputs.source_revision }}
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Checkout the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release inputs
+        id: validate-release
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          short_version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw \
+            -expect string packaging/Info.plist)"
+          [[ "$RELEASE_TAG" == "v$short_version" ]]
+          source_revision="$(git rev-parse --verify HEAD)"
+          tag_revision="$(git rev-parse --verify "$RELEASE_TAG^{commit}")"
+          [[ "$tag_revision" == "$source_revision" ]]
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            [[ "$source_revision" == "$GITHUB_SHA" ]]
+          fi
+          echo "source_revision=$source_revision" >>"$GITHUB_OUTPUT"
+
+      - name: Run release gates
+        run: |
+          scripts/lint.sh
+          scripts/privacy-history-guard.sh
+          scripts/privacy-guard.sh
+          scripts/test.sh
+
+      - name: Prepare clean-source candidate input
+        run: scripts/verify-app.sh --require-clean-source
+
+      - name: Verify the DICOM decoder XPC runtime boundary
+        run: scripts/verify-dicom-xpc.sh --use-verified-app
+
+      - name: Package ad-hoc candidate
+        run: scripts/package-adhoc-candidate.sh "$RELEASE_TAG"
+
+      - name: Record release paths
+        run: |
+          version="${RELEASE_TAG#v}"
+          release_directory="dist/release/$RELEASE_TAG-adhoc"
+          {
+            echo "RELEASE_DIRECTORY=$release_directory"
+            echo "RELEASE_ARTIFACT=$release_directory/Kinlogue-$version-arm64-adhoc.zip"
+          } >>"$GITHUB_ENV"
+
+      - name: Upload workflow evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Kinlogue-${{ env.RELEASE_TAG }}-arm64-adhoc-candidate
+          path: ${{ env.RELEASE_DIRECTORY }}
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish ad-hoc candidate
+    needs: package
+    runs-on: macos-26
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      SOURCE_REVISION: ${{ needs.package.outputs.source_revision }}
+      CANDIDATE_DIRECTORY: candidate
+
+    steps:
+      - name: Download verified candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Kinlogue-${{ env.RELEASE_TAG }}-arm64-adhoc-candidate
+          path: ${{ env.CANDIDATE_DIRECTORY }}
+
+      - name: Validate publication inputs
+        run: |
+          set -euo pipefail
+          shopt -s dotglob nullglob
+
+          version="${RELEASE_TAG#v}"
+          artifact_name="Kinlogue-$version-arm64-adhoc.zip"
+          candidate_directory="$PWD/$CANDIDATE_DIRECTORY"
+          metadata="$candidate_directory/release-metadata.json"
+          expected_names="$(printf '%s\n' \
+            "$artifact_name" \
+            "$artifact_name.sha256" \
+            INSTALL.md \
+            SHA256SUMS \
+            pre-distribution-verification-report.json \
+            release-metadata.json | LC_ALL=C sort)"
+
+          entries=("$candidate_directory"/*)
+          [[ "${#entries[@]}" -eq 6 ]]
+          for entry in "${entries[@]}"; do
+            [[ -f "$entry" && ! -L "$entry" ]]
+          done
+          actual_names="$(for entry in "${entries[@]}"; do
+            basename "$entry"
+          done | LC_ALL=C sort)"
+          [[ "$actual_names" == "$expected_names" ]]
+
+          cd "$candidate_directory"
+          checksum_names=()
+          while read -r digest filename extra; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ && -z "${extra:-}" ]]
+            case "$filename" in
+              "$artifact_name"|INSTALL.md|release-metadata.json|pre-distribution-verification-report.json) ;;
+              *) exit 1 ;;
+            esac
+            checksum_names+=("$filename")
+          done <SHA256SUMS
+          [[ "${#checksum_names[@]}" -eq 4 ]]
+          actual_checksum_names="$(printf '%s\n' "${checksum_names[@]}" | LC_ALL=C sort)"
+          expected_checksum_names="$(printf '%s\n' \
+            "$artifact_name" \
+            INSTALL.md \
+            pre-distribution-verification-report.json \
+            release-metadata.json | LC_ALL=C sort)"
+          [[ "$actual_checksum_names" == "$expected_checksum_names" ]]
+          /usr/bin/shasum -a 256 -c SHA256SUMS
+
+          read -r declared_artifact_hash declared_artifact_name extra \
+            <"$artifact_name.sha256"
+          [[ "$declared_artifact_hash" =~ ^[0-9a-f]{64}$ \
+            && "$declared_artifact_name" == "$artifact_name" \
+            && -z "${extra:-}" \
+            && "$(/usr/bin/wc -l <"$artifact_name.sha256" | /usr/bin/tr -d ' ')" == 1 ]]
+          artifact_hash="$(/usr/bin/shasum -a 256 -- "$artifact_name" \
+            | /usr/bin/awk '{print $1}')"
+          [[ "$declared_artifact_hash" == "$artifact_hash" ]]
+
+          metadata_value() {
+            /usr/bin/plutil -extract "$1" raw -expect string "$metadata"
+          }
+          [[ "$(metadata_value releaseTag)" == "$RELEASE_TAG" \
+            && "$(metadata_value sourceRevision)" == "$SOURCE_REVISION" \
+            && "$(metadata_value distributionStatus)" == publicPrereleaseUnnotarized \
+            && "$(metadata_value artifact.file)" == "$artifact_name" \
+            && "$(metadata_value artifact.architecture)" == arm64 \
+            && "$(metadata_value artifact.sha256)" == "$artifact_hash" \
+            && "$(metadata_value signing.kind)" == AdHoc \
+            && "$(metadata_value notarization.status)" == NotAvailable ]]
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            [[ "$SOURCE_REVISION" == "$GITHUB_SHA" ]]
+          fi
+
+          echo "RELEASE_ARTIFACT=$candidate_directory/$artifact_name" >>"$GITHUB_ENV"
+
+      - name: Attest the candidate ZIP
+        if: vars.ENABLE_ARTIFACT_ATTESTATION == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ env.RELEASE_ARTIFACT }}
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          existing_release_id="$(
+            gh api --paginate --slurp \
+              "repos/$GH_REPO/releases?per_page=100" \
+              --jq "map(.[]) | map(select(.tag_name == \"$RELEASE_TAG\")) | .[0].id // empty"
+          )"
+          if [[ -n "$existing_release_id" ]]; then
+            echo "A GitHub release already exists for $RELEASE_TAG; refusing to replace it." >&2
+            exit 1
+          fi
+
+          draft_release_id=""
+          cleanup_new_draft() {
+            status="$?"
+            trap - EXIT
+            if [[ "$status" -ne 0 && -n "$draft_release_id" ]]; then
+              current_release="$(
+                gh api "repos/$GH_REPO/releases/$draft_release_id" \
+                  --jq '[.id, .tag_name, .draft] | @tsv' 2>/dev/null || true
+              )"
+              expected_release="${draft_release_id}"$'\t'"${RELEASE_TAG}"$'\t'true
+              if [[ "$current_release" == "$expected_release" ]]; then
+                if ! gh api --method DELETE \
+                  "repos/$GH_REPO/releases/$draft_release_id" --silent; then
+                  echo "Failed to clean up workflow-created draft release $draft_release_id." >&2
+                fi
+              else
+                echo "Refusing to delete a release that is not the workflow-created draft." >&2
+              fi
+            fi
+            exit "$status"
+          }
+          trap cleanup_new_draft EXIT
+
+          remote_reference="$(
+            gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" \
+              --jq '[.object.type, .object.sha] | @tsv'
+          )"
+          IFS=$'\t' read -r remote_object_type remote_object_sha \
+            <<<"$remote_reference"
+          peel_depth=0
+          while [[ "$remote_object_type" == tag ]]; do
+            ((peel_depth += 1))
+            [[ "$peel_depth" -le 8 ]]
+            remote_reference="$(
+              gh api "repos/$GH_REPO/git/tags/$remote_object_sha" \
+                --jq '[.object.type, .object.sha] | @tsv'
+            )"
+            IFS=$'\t' read -r remote_object_type remote_object_sha \
+              <<<"$remote_reference"
+          done
+          [[ "$remote_object_type" == commit ]]
+          [[ "$remote_object_sha" == "$SOURCE_REVISION" ]]
+
+          draft_release_id="$(
+            gh api --method POST "repos/$GH_REPO/releases" \
+              -f tag_name="$RELEASE_TAG" \
+              -f target_commitish="$SOURCE_REVISION" \
+              -f name="Kinlogue $RELEASE_TAG ad-hoc candidate" \
+              -F "body=@$CANDIDATE_DIRECTORY/INSTALL.md" \
+              -F draft=true \
+              -F prerelease=true \
+              -f make_latest=false \
+              --jq .id
+          )"
+
+          gh release upload "$RELEASE_TAG" \
+            "$RELEASE_ARTIFACT" \
+            "$RELEASE_ARTIFACT.sha256" \
+            "$CANDIDATE_DIRECTORY/SHA256SUMS" \
+            "$CANDIDATE_DIRECTORY/INSTALL.md" \
+            "$CANDIDATE_DIRECTORY/release-metadata.json" \
+            "$CANDIDATE_DIRECTORY/pre-distribution-verification-report.json"
+
+          version="${RELEASE_TAG#v}"
+          artifact_name="Kinlogue-$version-arm64-adhoc.zip"
+          expected_uploaded_names="$(printf '%s\n' \
+            "$artifact_name" \
+            "$artifact_name.sha256" \
+            INSTALL.md \
+            SHA256SUMS \
+            pre-distribution-verification-report.json \
+            release-metadata.json | LC_ALL=C sort)"
+          actual_uploaded_names="$(
+            gh api --paginate \
+              "repos/$GH_REPO/releases/$draft_release_id/assets?per_page=100" \
+              --jq '.[].name' | LC_ALL=C sort
+          )"
+          [[ "$actual_uploaded_names" == "$expected_uploaded_names" ]]
+
+          gh api --method PATCH "repos/$GH_REPO/releases/$draft_release_id" \
+            -F draft=false \
+            -F prerelease=true \
+            --silent
+          draft_release_id=""

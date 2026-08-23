@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, test, and verify bundle
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH: "4"
+      KINLOGUE_PRIMARY_TEST_TIMEOUT_SECONDS: "1200"
+      KINLOGUE_ISOLATED_TEST_TIMEOUT_SECONDS: "180"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Lint Swift sources and package graph
+        run: scripts/lint.sh
+
+      - name: Enforce privacy disclosures and fixture policy
+        run: scripts/privacy-guard.sh
+
+      - name: Run the full test suite
+        run: scripts/test.sh
+
+      - name: Build and verify the release bundle
+        run: scripts/verify-app.sh --require-clean-source
+
+      - name: Verify the DICOM decoder XPC runtime boundary
+        run: scripts/verify-dicom-xpc.sh --use-verified-app

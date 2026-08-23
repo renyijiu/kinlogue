@@ -1,0 +1,32 @@
+name: Feature request
+description: Propose a focused improvement without sharing private data.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe needs with synthetic examples. Never attach real medical records, credentials, private paths, screenshots of user data, recovery codes, or backup files.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should Kinlogue solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Explain the smallest useful behavior and its privacy implications.
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Product boundaries
+      options:
+        - label: This proposal does not ask Kinlogue to diagnose, recommend treatment, or silently upload medical data.
+          required: true
+        - label: All examples are synthetic and non-identifying.
+          required: true

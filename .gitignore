@@ -1,0 +1,28 @@
+.DS_Store
+.build/
+.swiftpm/
+.context/
+dist/
+DerivedData/
+*.xcarchive
+
+# Local credentials and signing material. The privacy guard still scans the
+# working tree so ignored files cannot be mistaken for publishable fixtures.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+
+# User-created encrypted checkpoints are private even though their payload is
+# authenticated and encrypted.
+*.kinloguebackup
+
+PrivateFixtures/
+private-medical-records/
+real-medical-records/
+*.xcuserstate

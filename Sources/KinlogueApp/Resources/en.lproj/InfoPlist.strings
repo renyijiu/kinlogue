@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "Kinlogue";
+"CFBundleName" = "Kinlogue";
+"NSLocalNetworkUsageDescription" = "When you explicitly start receiving, allow devices on the same local network to upload documents to this Mac.";

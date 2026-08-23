@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kinlogue 云端备份与同步方向调研</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f1e4;
+      --surface: #fffdf7;
+      --surface-soft: #edf5f1;
+      --surface-warm: #fbe9d5;
+      --surface-info: #e8f0f5;
+      --text: #173b35;
+      --muted: #526761;
+      --line: #ccd8d2;
+      --brand: #1e6254;
+      --brand-strong: #12483e;
+      --accent: #b86127;
+      --warn: #86501e;
+      --danger: #8b3535;
+      --shadow: 0 12px 34px rgba(30, 98, 84, 0.09);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15.5px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    }
+    a { color: var(--brand-strong); text-underline-offset: 3px; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .9em;
+      overflow-wrap: anywhere;
+    }
+    .page { width: min(94vw, 960px); margin: 0 auto; padding: 42px 0 64px; }
+    .hero {
+      padding: 34px 36px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--brand);
+      font-size: .75rem;
+      font-weight: 750;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { line-height: 1.25; letter-spacing: -.015em; }
+    h1 { margin: 0; font-size: clamp(2rem, 5vw, 3rem); }
+    h2 { margin: 0 0 18px; font-size: 1.55rem; }
+    h3 { margin: 0; font-size: 1.2rem; }
+    .dek { max-width: 72ch; margin: 16px 0 0; font-size: 1.06rem; color: var(--muted); }
+    .meta, .stats, .chips { display: flex; flex-wrap: wrap; gap: 9px; }
+    .meta { margin-top: 22px; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-soft);
+      color: var(--brand-strong);
+      font-size: .78rem;
+      font-weight: 680;
+    }
+    .stats { margin-top: 16px; }
+    .stat { min-width: 132px; padding: 10px 13px; border-radius: 13px; background: var(--surface-warm); color: var(--warn); }
+    .stat b { display: block; font-size: 1.25rem; }
+    nav, section { margin-top: 28px; }
+    .topnav, .jump-list {
+      padding: 15px 18px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--surface);
+    }
+    .topnav ul, .jump-list ol { margin: 0; padding-left: 1.25rem; columns: 2; column-gap: 32px; }
+    .topnav li, .jump-list li { margin: 4px 0; break-inside: avoid; }
+    .panel {
+      padding: 26px 28px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+    }
+    p, li { max-width: 76ch; }
+    .callout { padding: 16px 18px; border-radius: 14px; background: var(--surface-warm); color: #61380f; }
+    .callout.info { background: var(--surface-info); color: #24485b; }
+    .callout strong { color: inherit; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th, td { padding: 11px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--brand-strong); background: var(--surface-soft); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
+    .table-wrap table { min-width: 790px; }
+    .idea {
+      margin-top: 18px;
+      padding: 24px 26px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: 0 7px 22px rgba(30, 98, 84, .055);
+      scroll-margin-top: 18px;
+    }
+    .idea-head { display: flex; align-items: flex-start; gap: 13px; }
+    .rank {
+      flex: 0 0 auto;
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 11px;
+      background: var(--brand);
+      color: white;
+      font-weight: 780;
+    }
+    .idea dl { display: grid; grid-template-columns: 104px 1fr; gap: 7px 14px; margin: 18px 0 0; }
+    .idea dt { color: var(--muted); font-size: .78rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+    .idea dd { margin: 0; }
+    .idea .chips { margin-top: 12px; }
+    .chip.conf { background: #e5f3e9; color: #245637; }
+    .chip.cx { background: #f7ead8; color: #75461a; }
+    .diagram {
+      margin: 20px 0 4px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fbfaf5;
+      overflow-x: auto;
+    }
+    .diagram svg { display: block; width: 100%; min-width: 720px; height: auto; }
+    .diagram figcaption { margin-top: 8px; color: var(--muted); font-size: .82rem; }
+    .sources li { margin: 7px 0; }
+    footer { margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: .8rem; }
+    @media (max-width: 680px) {
+      .page { width: min(94vw, 680px); padding-top: 18px; }
+      .hero, .panel, .idea { padding: 21px 19px; border-radius: 16px; }
+      .topnav ul, .jump-list ol { columns: 1; }
+      .idea dl { grid-template-columns: 1fr; gap: 2px; }
+      .idea dd { margin-bottom: 8px; }
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #10211e;
+        --surface: #172d29;
+        --surface-soft: #203b35;
+        --surface-warm: #3c2d20;
+        --surface-info: #203640;
+        --text: #edf4ef;
+        --muted: #b6c6c0;
+        --line: #365149;
+        --brand: #65aa98;
+        --brand-strong: #9cd4c5;
+        --accent: #edaa72;
+        --warn: #f0c28e;
+        --shadow: none;
+      }
+      .callout { color: #f7dab9; }
+      .callout.info { color: #c4e0ed; }
+      .diagram { background: #132722; }
+      .chip.conf { background: #244331; color: #bce4c7; }
+      .chip.cx { background: #45321e; color: #f2cc9a; }
+    }
+    @media print {
+      body { background: white; color: #172e29; }
+      .page { width: 100%; padding: 0; }
+      .hero, .panel, .idea { box-shadow: none; break-inside: avoid; }
+      a { color: inherit; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">Ideation · Research-backed directions</p>
+      <h1>Kinlogue 云端备份与同步方向调研</h1>
+      <p class="dek">结论先行：近期应做“可验证、客户端加密、与云厂商无关的版本化备份”，不应直接把正在使用的 Vault 放进同步目录；多设备双向同步应另立项目。iCloud/CloudKit 技术上可接入，但当前 Apple 审核规则对个人健康信息构成明确阻断。</p>
+      <div class="meta" aria-label="Document metadata">
+        <span class="chip">日期 <time datetime="2026-08-13">2026-08-13</time></span>
+        <span class="chip">主题 <code>cloud-backup-and-sync</code></span>
+        <span class="chip">模式 <code>repo-grounded</code></span>
+        <span class="chip">焦点 iCloud 与其他云端备份/同步方案</span>
+      </div>
+      <div class="stats" aria-label="Ideation summary">
+        <div class="stat"><b>43</b>原始候选</div>
+        <div class="stat"><b>20</b>去重与组合</div>
+        <div class="stat"><b>7</b>最终方向</div>
+        <div class="stat"><b>5</b>覆盖轴</div>
+      </div>
+    </header>
+
+    <nav class="topnav" aria-label="Document navigation">
+      <ul>
+        <li><a href="#grounding-context">Grounding Context</a></li>
+        <li><a href="#topic-axes">Topic Axes</a></li>
+        <li><a href="#ranked-ideas">Ranked Ideas</a></li>
+        <li><a href="#rejection-summary">Rejection Summary</a></li>
+        <li><a href="#sources-references">Sources &amp; References</a></li>
+      </ul>
+    </nav>
+
+    <section id="grounding-context" class="panel">
+      <p class="eyebrow">Evidence before options</p>
+      <h2>Grounding Context</h2>
+      <p><strong>Codebase Context.</strong> Kinlogue 当前没有“服务端数据”；权威事实源是固定在 App Sandbox 的本机明文 Vault。完整状态不只是确认原件：<code>library.json</code> 与不可变对象保存成员、记录、OCR、草稿和 DICOM，<code>lan-inbox/inbox.json</code> 另有一套待确认手机文件状态。现有“导出原始文件 ZIP”明确排除 catalog、OCR、草稿和 inbox，不能恢复应用。</p>
+      <p>现有存储结构非常适合生成一致恢复点：不可变对象先发布、manifest 最后原子替换，<code>VaultRevision</code> 记录 generation、commit ID 与 catalog digest，读取和提交会完整验证对象图并失败关闭。可复用的关键先例是固定 revision 的流式原件导出；不能直接复用的是 <code>readSnapshot</code>，它只有 32 个对象 / 128 MiB 的上限。</p>
+      <div class="callout">
+        <strong>iCloud 的决定性约束：</strong> Apple 当前 App Review Guideline 5.1.3(ii) 写明，健康管理类 App 不得把个人健康信息存入 iCloud。故 iCloud Drive 与 CloudKit 即使技术可行，也不应进入面向 Mac App Store 的生产路线，除非 Apple 对 Kinlogue 的具体数据流给出明确书面澄清。客户端加密不能被擅自理解为该条款的例外。
+      </div>
+      <p>CloudKit 的私有数据库、<code>CKSyncEngine</code>、encrypted values 与 <code>CKAsset</code> 在工程上都能表达类似对象/manifest 的模型；但 Apple 也说明，用户重置 iCloud Keychain 后，加密 zone 可能永久无法解密，需要从仍存在的本地副本重建。因此它不能单独承担“Mac 与 Keychain 同时丢失”的灾难恢复承诺。</p>
+
+      <figure class="diagram" aria-labelledby="recovery-flow-caption">
+        <svg viewBox="0 0 900 180" role="img" aria-label="Provider-neutral backup and restore concept">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#1e6254"/>
+            </marker>
+          </defs>
+          <rect x="20" y="45" width="170" height="86" rx="15" fill="#edf5f1" stroke="#1e6254" stroke-width="2"/>
+          <text x="105" y="79" text-anchor="middle" font-size="16" font-weight="700" fill="#12483e">本机 Vault</text>
+          <text x="105" y="104" text-anchor="middle" font-size="13" fill="#36564e">固定 revision + 完整对象图</text>
+          <line x1="194" y1="88" x2="244" y2="88" stroke="#1e6254" stroke-width="3" marker-end="url(#arrow)"/>
+          <rect x="250" y="45" width="180" height="86" rx="15" fill="#fbe9d5" stroke="#b86127" stroke-width="2"/>
+          <text x="340" y="79" text-anchor="middle" font-size="16" font-weight="700" fill="#6d3a14">加密 checkpoint</text>
+          <text x="340" y="104" text-anchor="middle" font-size="13" fill="#6d3a14">自描述 · 认证 · 版本化</text>
+          <line x1="434" y1="88" x2="484" y2="88" stroke="#1e6254" stroke-width="3" marker-end="url(#arrow)"/>
+          <rect x="490" y="45" width="170" height="86" rx="15" fill="#e8f0f5" stroke="#4b768c" stroke-width="2"/>
+          <text x="575" y="79" text-anchor="middle" font-size="16" font-weight="700" fill="#24485b">目的地适配器</text>
+          <text x="575" y="104" text-anchor="middle" font-size="13" fill="#365b6d">目录 / S3 / 未来服务</text>
+          <line x1="664" y1="88" x2="714" y2="88" stroke="#1e6254" stroke-width="3" marker-end="url(#arrow)"/>
+          <rect x="720" y="45" width="160" height="86" rx="15" fill="#edf5f1" stroke="#1e6254" stroke-width="2"/>
+          <text x="800" y="79" text-anchor="middle" font-size="16" font-weight="700" fill="#12483e">隔离恢复验证</text>
+          <text x="800" y="104" text-anchor="middle" font-size="13" fill="#36564e">验图 · 迁移 · 重启打开</text>
+        </svg>
+        <figcaption id="recovery-flow-caption">方向性示意：恢复格式是稳定“货柜”，云服务只是可替换的运输与保管端；成功标准在最右侧的恢复验证，而不是上传返回 200。</figcaption>
+      </figure>
+
+      <h3>方案对比</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>方案</th><th>防整机丢失</th><th>隐私/密钥</th><th>主要成本与风险</th><th>判断</th></tr></thead>
+          <tbody>
+            <tr><td>Time Machine</td><td>取决于外置或网络目标</td><td>由系统备份配置决定</td><td>用户可能未启用、目标不可用；不是 App 可验证恢复</td><td>最低基线，不是产品方案</td></tr>
+            <tr><td>iCloud Drive / CloudKit</td><td>可以</td><td>CloudKit 支持加密，但 Keychain 重置可导致永久丢失</td><td>账号/配额/冲突；Apple 健康信息 iCloud 审核规则</td><td><strong>当前不推荐</strong></td></tr>
+            <tr><td>用户选择的非 iCloud 目录</td><td>若目录由外部云/NAS 同步则可以</td><td>Kinlogue 先客户端加密；独立恢复秘密</td><td>bookmark 失效、外部同步状态不可控、需排除 iCloud 目的地</td><td><strong>最佳 MVP 目标</strong></td></tr>
+            <tr><td>BYO S3 / B2 / R2</td><td>强</td><td>客户端加密；最小权限/短期凭据</td><td>outbound entitlement、凭据 UX、重试/分块、供应商差异</td><td>第二阶段优选</td></tr>
+            <tr><td>Kinlogue 托管云</td><td>强</td><td>可做端到端密文，但需完整账户与密钥生命周期</td><td>运营、安全、删除请求、数据地域、合规与成本最高</td><td>用户量验证后再考虑</td></tr>
+            <tr><td>多设备双向同步</td><td>同步副本不是备份</td><td>另需设备身份与密钥共享</td><td>离线冲突、删除传播、回滚与合并语义</td><td>独立项目</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="topic-axes" class="panel">
+      <p class="eyebrow">Surface map</p>
+      <h2>Topic Axes</h2>
+      <ol>
+        <li>一致快照与可恢复性</li>
+        <li>备份范围与版本兼容</li>
+        <li>隐私、加密与密钥恢复</li>
+        <li>云平台接入与发布门禁</li>
+        <li>从单向备份演进到多设备同步的冲突与删除语义</li>
+      </ol>
+    </section>
+
+    <section id="ranked-ideas">
+      <p class="eyebrow">Qualified survivors</p>
+      <h2>Ranked Ideas</h2>
+      <nav class="jump-list" aria-label="Ranked idea links">
+        <ol>
+          <li><a href="#idea-1">Provider-neutral Kinlogue Backup Format</a></li>
+          <li><a href="#idea-2">Restore proof, not upload success</a></li>
+          <li><a href="#idea-3">客户端认证加密 + 独立恢复秘密</a></li>
+          <li><a href="#idea-4">Two-scope recovery point</a></li>
+          <li><a href="#idea-5">Append-only recovery ledger</a></li>
+          <li><a href="#idea-6">One recovery core, three targets</a></li>
+          <li><a href="#idea-7">Backup-first device continuity</a></li>
+        </ol>
+      </nav>
+
+      <article id="idea-1" class="idea">
+        <div class="idea-head"><span class="rank">1</span><div><h3>1. Provider-neutral Kinlogue Backup Format</h3><div class="chips"><span class="chip conf">Confidence 94%</span><span class="chip cx">Complexity High</span></div></div></div>
+        <dl>
+          <dt>Description</dt><dd>定义独立于当前目录布局和云厂商的自描述恢复 envelope。它固定一个 Vault revision，声明备份格式、catalog/inbox schema、范围、对象清单、长度/摘要、兼容 reader 与认证信息；恢复只能先进入 staging，完成验图和版本处理后再激活。</dd>
+          <dt>Axis</dt><dd>一致快照与可恢复性</dd>
+          <dt>Basis</dt><dd><code>direct:</code> <code>docs/storage.md</code> 证明当前 Vault 已使用不可变对象、manifest 原子提交、generation/digest 校验和非破坏性失败关闭；<code>VaultCatalog.reachableObjectReferences</code> 已定义 canonical 可达图。现有导出恰好因缺少恢复 manifest 而不能成为备份。</dd>
+          <dt>Rationale</dt><dd>先冻结“什么才算可恢复”，才能在不牺牲正确性的前提下比较目录、S3、R2 或未来托管服务。它还是后续版本迁移与恢复测试的长期 ABI。</dd>
+          <dt>Downsides</dt><dd>需要新的全库流式 snapshot、认证格式、容量预算、历史格式 reader/migrator 和整库激活事务；不能用短暂锁后目录复制来替代对象 pinning/lease。</dd>
+        </dl>
+      </article>
+
+      <article id="idea-2" class="idea">
+        <div class="idea-head"><span class="rank">2</span><div><h3>2. Restore proof, not upload success</h3><div class="chips"><span class="chip conf">Confidence 95%</span><span class="chip cx">Complexity Medium</span></div></div></div>
+        <dl>
+          <dt>Description</dt><dd>把“已创建”“已送达”“已验证”“已完成恢复演练”分成四个用户可见状态。只有把远端恢复点下载到隔离 staging、验证认证与对象图、执行必要迁移并以当前 App 重新打开成功，才显示最近可恢复时间点。</dd>
+          <dt>Axis</dt><dd>一致快照与可恢复性</dd>
+          <dt>Basis</dt><dd><code>direct:</code> 当前导出已经在发布前复核固定 revision 和每个 entry，但文档明确它不可恢复；Vault 对缺失、损坏和不支持版本均失败关闭。<code>reasoned:</code> 上传成功只能证明云端收到了字节，不能证明密钥、格式和对象集合可用。</dd>
+          <dt>Rationale</dt><dd>它直接回答用户真正关心的 RPO：最近哪一个时间点被证明可以带回，而不是最近一次 HTTP 200。</dd>
+          <dt>Downsides</dt><dd>恢复演练需要额外磁盘、I/O 和后台调度；“重启打开”如何自动化必须避免让临时 Vault 污染生产身份。</dd>
+        </dl>
+      </article>
+
+      <article id="idea-3" class="idea">
+        <div class="idea-head"><span class="rank">3</span><div><h3>3. 客户端认证加密 + 独立恢复秘密</h3><div class="chips"><span class="chip conf">Confidence 93%</span><span class="chip cx">Complexity High</span></div></div></div>
+        <dl>
+          <dt>Description</dt><dd>每个 checkpoint 在离开 Mac 前以认证加密保护内容和敏感关系 metadata；本机 Keychain 可以保存便利解锁材料，但必须另有不依赖原 Mac、原 Keychain 或云账号的恢复秘密。首份成功备份前应完成一次重新输入或干净环境恢复验证。</dd>
+          <dt>Axis</dt><dd>隐私、加密与密钥恢复</dd>
+          <dt>Basis</dt><dd><code>direct:</code> 当前 Vault 是明文，SHA-256 只检测意外损坏，不提供保密、认证或防回滚；隐私文档要求未来升级同时设计密钥生命周期、迁移、失败恢复和重启校验。<code>external:</code> Apple 说明 CloudKit 加密数据在 iCloud Keychain 重置后可能永久丢失。</dd>
+          <dt>Rationale</dt><dd>灾难恢复不能让“Mac 丢失”和“解密能力丢失”处于同一故障域，也不能把病历明文交给云运营者。</dd>
+          <dt>Downsides</dt><dd>恢复秘密的展示、确认、轮换、遗失与支持体验都很难；完全隐藏时间、流量和大小模式代价很高，不能宣称云端无法推断任何 metadata。</dd>
+        </dl>
+      </article>
+
+      <article id="idea-4" class="idea">
+        <div class="idea-head"><span class="rank">4</span><div><h3>4. Two-scope recovery point</h3><div class="chips"><span class="chip conf">Confidence 91%</span><span class="chip cx">Complexity Medium</span></div></div></div>
+        <dl>
+          <dt>Description</dt><dd>由一个父 descriptor 明确绑定两个可分别验证的范围：长期保留的主 Vault，以及可选或短期保留的 LAN inbox。恢复时用户可以只带回已归档资料，也可以连待确认手机文件一起恢复；进行中的 partial 和迟到任务必须有明确排除/终止语义。</dd>
+          <dt>Axis</dt><dd>备份范围与版本兼容</dd>
+          <dt>Basis</dt><dd><code>direct:</code> <code>library.json</code> 和 <code>lan-inbox/inbox.json</code> 是两套独立 logical commit point；inbox 还包含 blob、derived、terminal 与 receipt。当前原件 ZIP 对这些内容全部不可达。</dd>
+          <dt>Rationale</dt><dd>“完整数据”不能是模糊承诺。把范围显式化，可避免恢复后重复投递、归档项目复活或用户以为未确认资料也受保护。</dd>
+          <dt>Downsides</dt><dd>需要定义跨两个 head 的一致 cut；inbox 的敏感性、短期价值和成本可能与主 Vault 不同，默认是否包含需要用户研究。</dd>
+        </dl>
+      </article>
+
+      <article id="idea-5" class="idea">
+        <div class="idea-head"><span class="rank">5</span><div><h3>5. Append-only recovery ledger with retention</h3><div class="chips"><span class="chip conf">Confidence 90%</span><span class="chip cx">Complexity Medium</span></div></div></div>
+        <dl>
+          <dt>Description</dt><dd>每次发布新的不可变 generation，而不是覆盖唯一的 <code>latest.zip</code>。保留多个已验证恢复点；“latest”只是可重建指针。S3 Object Lock、R2 Bucket Locks 等可在明确配置时增强保留，但 Kinlogue 的格式本身仍须使用不可变 key 和延迟垃圾回收。</dd>
+          <dt>Axis</dt><dd>备份范围与版本兼容</dd>
+          <dt>Basis</dt><dd><code>direct:</code> 本机 Vault 已是不可变对象 + 原子 head 的结构，外部删除当前也不等于擦除历史副本。<code>external:</code> S3 Object Lock 依赖 Versioning 并提供 WORM 保留；R2 Bucket Locks 可阻止指定期限内删除和覆盖。</dd>
+          <dt>Rationale</dt><dd>备份不仅要抵御硬盘损坏，还要抵御误删、损坏状态同步、勒索或泄露凭据后删除所有历史。</dd>
+          <dt>Downsides</dt><dd>保留与彻底删除天然冲突；需要可解释的保留期、容量/费用预算与远端清除状态。并非所有“S3 兼容”服务都提供 versioning 或 lock。</dd>
+        </dl>
+      </article>
+
+      <article id="idea-6" class="idea">
+        <div class="idea-head"><span class="rank">6</span><div><h3>6. One recovery core, three increasingly capable targets</h3><div class="chips"><span class="chip conf">Confidence 92%</span><span class="chip cx">Complexity Medium → High</span></div></div></div>
+        <dl>
+          <dt>Description</dt><dd>所有目标 round-trip 同一种加密 checkpoint。第一目标是用户通过系统面板授权的<strong>非 iCloud</strong>目录（外置盘、NAS 或由其他 File Provider 同步的目录）；第二目标是客户端加密的 S3/B2/R2；只有用户量和运营能力成立后，才考虑 Kinlogue 托管服务。</dd>
+          <dt>Axis</dt><dd>云平台接入与发布门禁</dd>
+          <dt>Basis</dt><dd><code>direct:</code> 当前生产已有 user-selected read/write entitlement，却没有 outbound network、iCloud 或 CloudKit entitlement，发布脚本还会拒绝额外 capability。<code>external:</code> security-scoped bookmarks 支持持久授权但可能 stale；Apple 当前规则阻断个人健康信息进入 iCloud。</dd>
+          <dt>Rationale</dt><dd>它先交付真实防丢失价值，同时把账号、凭据、云 SDK、数据地域和安全运营从恢复正确性中解耦。</dd>
+          <dt>Downsides</dt><dd>目录目标的外部同步状态不受 Kinlogue 控制；S3 需要 outbound entitlement、凭据或短期 token；托管服务会改变“无账号、无云服务”的产品边界并承担合规义务。</dd>
+        </dl>
+        <div class="callout info"><strong>iCloud 定位：</strong>保留为政策研究项，而不是这里的一个目标。技术原型只有在 Apple 对具体用例给出可审计澄清后才有进入生产路线的意义。</div>
+      </article>
+
+      <article id="idea-7" class="idea">
+        <div class="idea-head"><span class="rank">7</span><div><h3>7. Backup-first device continuity</h3><div class="chips"><span class="chip conf">Confidence 86%</span><span class="chip cx">Complexity Medium</span></div></div></div>
+        <dl>
+          <dt>Description</dt><dd>先通过已验证恢复解决“换 Mac / 原 Mac 丢失 / 第二台 Mac 接管”：新设备恢复后显式成为唯一写入者，旧设备重新出现时不能自动覆盖远端历史。只有真实需求证明需要两台同时编辑时，才另行设计多主同步。</dd>
+          <dt>Axis</dt><dd>从单向备份演进到多设备同步的冲突与删除语义</dd>
+          <dt>Basis</dt><dd><code>direct:</code> Kinlogue 当前是一台 Mac、单操作员产品；generation CAS 只解决同一 Vault root 的旧代提交冲突，不是分布式合并算法。<code>reasoned:</code> 换机连续性可以用完整状态接管解决，而多主同步还必须具备设备身份、因果操作、显式冲突和删除 tombstone。</dd>
+          <dt>Rationale</dt><dd>它让用户更早摆脱单机故障点，又不会把共享目录或最后写入者覆盖误称为安全同步。</dd>
+          <dt>Downsides</dt><dd>真正可靠的 writer takeover 仍需认证设备身份和远端 fencing；若用户确实长期在两台 Mac 同时编辑，它只能推迟、不能消除同步需求。</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section id="rejection-summary" class="panel">
+      <p class="eyebrow">What did not survive</p>
+      <h2>Rejection Summary</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Idea</th><th>Reason Rejected</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>短暂双 head fence 后复制</td><td>短锁释放后对象仍可能被清理；必须有对象 pinning 或持有协调 lease，降为 Idea 1 的实现问题。</td></tr>
+            <tr><td>2</td><td>历史格式恢复转换器</td><td>有价值，但属于恢复协议的组件，不是独立方向。</td></tr>
+            <tr><td>3</td><td>加密不透明布局可阻止所有推断</td><td>依据被反驳：时间、大小、流量和访问模式仍会泄漏；只能作为有限 threat-model 加固。</td></tr>
+            <tr><td>4</td><td>用户选择目录</td><td>作为第一目的地保留在 Idea 6，不单独占一个方向。</td></tr>
+            <tr><td>5</td><td>S3-compatible 目的地</td><td>作为第二目的地保留在 Idea 6；“兼容 S3”本身不保证 versioning/retention。</td></tr>
+            <tr><td>6</td><td>独立 Backup Relay</td><td>隔离、认证和 entitlement 设计尚未成立，不能声称主 App 的能力边界天然不变。</td></tr>
+            <tr><td>7</td><td>iCloud 技术分支</td><td>当前是强制政策门禁，不是可推荐的生产交付方向。</td></tr>
+            <tr><td>8</td><td>Time Machine 提示</td><td>是有用基线建议，但不是 Kinlogue 可验证的恢复能力。</td></tr>
+            <tr><td>9</td><td>只靠 writer epoch 接管</td><td>没有认证设备身份和远端 fencing 就不完整；合并进 Idea 7。</td></tr>
+            <tr><td>10</td><td>真同步 mutation ledger</td><td>保存为 Idea 7 的未来触发条件；当前超出备份目标且实现负担远高于已验证价值。</td></tr>
+            <tr><td>11</td><td>删除、保留、远端擦除三分</td><td>是 Idea 4/5 必须包含的生命周期语义，不单独成为方向。</td></tr>
+            <tr><td>12</td><td>恢复健康状态阶梯</td><td>作为 Idea 2 的产品呈现方式保留。</td></tr>
+            <tr><td>13</td><td>干净 Mac 灾难测试</td><td>作为 Idea 2/3 的核心验收标准保留。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="sources-references" class="panel sources">
+      <p class="eyebrow">Primary evidence</p>
+      <h2>Sources &amp; References</h2>
+      <ul>
+        <li><a href="https://github.com/renyijiu/kinlogue/blob/main/docs/storage.md">Kinlogue storage invariants</a> — Vault/inbox layout, commit points, export and future backup boundary.</li>
+        <li><a href="https://github.com/renyijiu/kinlogue/blob/main/docs/privacy-and-security.md">Kinlogue privacy and security engineering</a> — plaintext threat model and future encryption requirements.</li>
+        <li><a href="https://github.com/renyijiu/kinlogue/blob/main/Sources/KinlogueCore/Domain/VaultCatalog.swift">VaultCatalog</a> — canonical reachable object graph.</li>
+        <li><a href="https://github.com/renyijiu/kinlogue/blob/main/Sources/KinlogueCore/Storage/VaultProtocols.swift">Vault storage protocols</a> — revision, snapshot limits and generation CAS.</li>
+        <li><a href="https://developer.apple.com/app-store/review/guidelines/">Apple App Review Guidelines</a> — Guideline 5.1.3(ii) and personal health information in iCloud.</li>
+        <li><a href="https://developer.apple.com/documentation/cloudkit/encrypting-user-data">Apple: Encrypting User Data with CloudKit</a> — encrypted values/assets and iCloud Keychain reset failure semantics.</li>
+        <li><a href="https://developer.apple.com/documentation/cloudkit/deciding-whether-cloudkit-is-right-for-your-app">Apple: Deciding whether CloudKit is right for your app</a> — iCloud Documents, Core Data, CKSyncEngine and manual CloudKit choices.</li>
+        <li><a href="https://developer.apple.com/documentation/foundation/nsubiquitouskeyvaluestore">Apple: NSUbiquitousKeyValueStore</a> — 1 MiB / 1024-key limits and sensitive-data warning.</li>
+        <li><a href="https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox">Apple: Accessing files from the macOS App Sandbox</a> — user-selected folders and security-scoped bookmarks.</li>
+        <li><a href="https://support.apple.com/mac-backup">Apple: How to back up your Mac</a> — Time Machine baseline and iCloud sync distinction.</li>
+        <li><a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html">AWS S3 Object Lock</a> — WORM retention tied to S3 Versioning.</li>
+        <li><a href="https://developers.cloudflare.com/r2/buckets/bucket-locks/">Cloudflare R2 Bucket Locks</a> — prevention of deletion/overwrite for a retention period.</li>
+        <li><a href="https://supabase.com/docs/guides/storage/s3/compatibility">Supabase S3 compatibility</a> — explicit lack of S3 versioning.</li>
+      </ul>
+    </section>
+
+    <footer class="composition-signal">Composed <time datetime="2026-08-13T11:41:48+08:00">2026-08-13T11:41:48+08:00</time> by <code>ce-ideate</code> from the user prompt about Kinlogue cloud backup, iCloud sync, and alternatives.</footer>
+  </main>
+</body>
+</html>
