@@ -2,6 +2,12 @@
 
 本文件是项目知识库的追加式日志。每个条目记录一次可复核的 ingest、query、lint 或重大文档维护；不要改写历史条目来伪造当前状态。最新状态以专题页和代码/测试为准。
 
+## [2026-08-24] ci/reliability | 验收扫描回归使用私有合成仓库根
+
+- **合并后远端 RED**：PR #3 四项检查全绿并 squash 合并后，同一 tree 的 `main` push 在 177.46 秒 cold build 与 inventory planning 后，让独立 `AcceptanceScanScriptTests` 持续到 180 秒 deadline 并返回 124；进程诊断精确留下 `swift-package → swiftpm-testing → zsh → rg`。scanner 的内部夹具此前仍为每个参数化 case 扫描真实 `.build`，因此运行时间取决于当前 cold-build 体积，而不是业务或泄漏断言。
+- **修复与边界**：内部测试模式现在只接受夹具私有、非符号链接、当前用户所有且权限 `0700` 的 `Repository` 根，并以它替代真实仓库扫描根；新增回归把 run-specific canary 写入合成 `.build` 并要求 `KLA_SCAN_MATCH`。未设置内部测试根的生产路径仍扫描真实 source、tests、scripts、packaging、docs、`.build`、`dist`、安装 App、运行产物与崩溃报告，工具缺失、身份错误和扫描错误继续失败关闭。
+- **本机验证**：focused scanner 14/1 在约 8.7 秒通过；`KINLOGUE_BUILD_JOBS=2 scripts/test.sh` 又完成 derived XCTest 13/13、与候选账本一致的主测试、storage 33/1、条件别名 1/0、DICOM 17/1、验收扫描 14/1、安装 LAN 1/1 与 Socket/RSS 1/1。lint、文档、隐私、shell 语法和 diff 门禁通过；App/XPC 与新 PR 远端检查仍以后续复验为准。
+
 ## [2026-08-24] ci/reliability | 同步故障注入不再阻塞 cooperative executor
 
 - **远端 RED 与精确根因边界**：PR #3 的 fresh macOS 26 / Swift 6.3.3 专用 runner 在 230.68 秒完成 test bundle cold build；直接 `xcrun xctest` 随后通过前 6 个 derived-artifact case，但 `testProductionStoreBudgetIsReservedBeforeAnyDerivedActorHop` 启动后没有返回，最终由 180 秒 deadline 以 124 终止，诊断只留下对应 `xctest` 根进程。这推翻了“剩余问题只在 SwiftPM/XCTest 启动握手”的假设，并把故障限定到该并发测试。

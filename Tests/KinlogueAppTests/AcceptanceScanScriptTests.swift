@@ -40,6 +40,23 @@ struct AcceptanceScanScriptTests {
     }
 
     @Test
+    func repositoryBuildArtifactLeaksFailTheScan() throws {
+        let fixture = try AcceptanceScanFixture(
+            runID: AcceptanceSyntheticLeak.canary.runID
+        )
+        defer { fixture.remove() }
+        try fixture.installInRepositoryBuild(.canary)
+
+        let result = try fixture.runScanner()
+
+        #expect(result.status == 1)
+        #expect(result.event["code"] as? String == "KLA_SCAN_MATCH")
+        #expect(result.event["ok"] as? Bool == false)
+        #expect((result.event["count"] as? Int ?? 0) > 0)
+        #expect(result.hasCanonicalDigest)
+    }
+
+    @Test
     func aNonstandardValidatedHomePathFailsTheScan() throws {
         let fixture = try AcceptanceScanFixture(
             runID: "d00000000000000000000010"
@@ -169,6 +186,23 @@ struct AcceptanceScanScriptTests {
         )
         defer { fixture.remove() }
         try fixture.installDataRootSymlink()
+
+        let result = try fixture.runScanner()
+
+        #expect(result.status == 70)
+        #expect(result.event["code"] as? String == "KLA_SCAN_ERROR")
+        #expect(result.event["ok"] as? Bool == false)
+        #expect((result.event["count"] as? Int ?? 0) > 0)
+        #expect(result.hasCanonicalDigest)
+    }
+
+    @Test
+    func scannerErrorsFailClosedForAnInternalRepositorySymlink() throws {
+        let fixture = try AcceptanceScanFixture(
+            runID: "e00000000000000000000005"
+        )
+        defer { fixture.remove() }
+        try fixture.installRepositoryRootSymlink()
 
         let result = try fixture.runScanner()
 
@@ -325,6 +359,10 @@ private final class AcceptanceScanFixture {
         root.appendingPathComponent("NonstandardHome", isDirectory: true)
     }
 
+    private var repositoryRoot: URL {
+        root.appendingPathComponent("Repository", isDirectory: true)
+    }
+
     init(runID: String) throws {
         self.runID = runID
         root = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
@@ -337,6 +375,7 @@ private final class AcceptanceScanFixture {
             root.appendingPathComponent("CrashReports", isDirectory: true)
         )
         try createPrivateDirectory(simulatedHome)
+        try createPrivateDirectory(repositoryRoot)
     }
 
     func install(_ leak: AcceptanceSyntheticLeak) throws {
@@ -355,6 +394,18 @@ private final class AcceptanceScanFixture {
         )
         try leak.payload.write(
             to: dataRoot.appendingPathComponent("ignored-leak.bin"),
+            options: .withoutOverwriting
+        )
+    }
+
+    func installInRepositoryBuild(_ leak: AcceptanceSyntheticLeak) throws {
+        let buildRoot = repositoryRoot.appendingPathComponent(
+            ".build",
+            isDirectory: true
+        )
+        try createPrivateDirectory(buildRoot)
+        try leak.payload.write(
+            to: buildRoot.appendingPathComponent("synthetic-leak.bin"),
             options: .withoutOverwriting
         )
     }
@@ -430,6 +481,19 @@ private final class AcceptanceScanFixture {
         try createPrivateDirectory(target)
         try FileManager.default.createSymbolicLink(
             at: dataRoot,
+            withDestinationURL: target
+        )
+    }
+
+    func installRepositoryRootSymlink() throws {
+        try FileManager.default.removeItem(at: repositoryRoot)
+        let target = root.appendingPathComponent(
+            "repository-symlink-target",
+            isDirectory: true
+        )
+        try createPrivateDirectory(target)
+        try FileManager.default.createSymbolicLink(
+            at: repositoryRoot,
             withDestinationURL: target
         )
     }

@@ -43,6 +43,8 @@ planner 将清单标识规范化为 SwiftPM 实际过滤标识，以完整 targe
 
 在分区 0 中，验收扫描在 inventory build 完成后、Core/primary helper 与跨进程 storage 之前运行；它仍是 `--no-parallel -j 1` 的独立门禁。后续 fresh runner 证据证明统一的 70 不是 helper churn，而是 GitHub macOS 26 镜像缺少 scanner 明确要求的 `rg`；CI 在测试前通过固定版本与 SHA-256 的引导脚本补齐该工具，scanner 对工具缺失继续失败关闭。提前运行的顺序仍隔离扫描与真实进程门禁，但不再被描述成这次 70 的根因修复。
 
+验收 scanner 的生产路径继续扫描真实 `Sources/`、`Tests/`、`scripts/`、`packaging/`、`docs/`、`.build/`、`dist/`、安装 App、运行产物和崩溃报告。只有已受私有目录身份与权限校验约束的内部合成测试模式改用夹具内的 `Repository` 根；夹具显式把 canary 放进合成 `.build` 并要求扫描失败。这样测试不会因反复读取当前 cold-build 目录而受其体积影响，也没有缩小真实验收扫描范围。
+
 行为改动先跑受影响 target 的 focused tests，再按风险扩到 `scripts/test.sh`。涉及存储、HTTP、生命周期、重试、XPC 或发布脚本时，至少核对一次真实跨层链路，不能只依赖全 mock 测试。
 
 ## Test target 责任
