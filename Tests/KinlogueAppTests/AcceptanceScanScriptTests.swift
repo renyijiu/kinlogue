@@ -3,6 +3,7 @@ import Darwin
 import Foundation
 import Testing
 
+@Suite(.serialized)
 struct AcceptanceScanScriptTests {
     @Test(arguments: AcceptanceSyntheticLeak.allCases)
     func everySyntheticLeakFailsTheScan(

@@ -51,6 +51,7 @@ final class StorageProcessFixture: @unchecked Sendable {
     )
     private let writeLock = NSLock()
     private let stateLock = NSLock()
+    private let exitObserver = StorageProcessExitObserver()
     private var acceptedTerminationStatus: Int32?
 
     init() throws {
@@ -58,6 +59,10 @@ final class StorageProcessFixture: @unchecked Sendable {
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = FileHandle.nullDevice
+        let exitObserver = self.exitObserver
+        process.terminationHandler = { process in
+            exitObserver.complete(with: process.terminationStatus)
+        }
     }
 
     var isRunning: Bool { process.isRunning }
@@ -157,12 +162,7 @@ final class StorageProcessFixture: @unchecked Sendable {
 
     @discardableResult
     func waitForExit() async -> Int32 {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                self.process.waitUntilExit()
-                continuation.resume(returning: self.process.terminationStatus)
-            }
-        }
+        await exitObserver.wait()
     }
 
     func waitForReader() async {
@@ -248,6 +248,40 @@ final class StorageProcessFixture: @unchecked Sendable {
             && metadata.st_mode & S_IFMT == S_IFREG
             && metadata.st_uid == geteuid()
             && access(url.path, X_OK) == 0
+    }
+}
+
+// SAFETY: `lock` protects the single terminal status and every continuation.
+// Continuations are removed under the lock and resumed exactly once outside it.
+private final class StorageProcessExitObserver: @unchecked Sendable {
+    private let lock = NSLock()
+    private var status: Int32?
+    private var waiters: [CheckedContinuation<Int32, Never>] = []
+
+    func wait() async -> Int32 {
+        await withCheckedContinuation { continuation in
+            let completedStatus: Int32? = lock.withLock {
+                if let status { return status }
+                waiters.append(continuation)
+                return nil
+            }
+            if let completedStatus {
+                continuation.resume(returning: completedStatus)
+            }
+        }
+    }
+
+    func complete(with status: Int32) {
+        let pending: [CheckedContinuation<Int32, Never>] = lock.withLock {
+            guard self.status == nil else { return [] }
+            self.status = status
+            let pending = waiters
+            waiters.removeAll(keepingCapacity: false)
+            return pending
+        }
+        for waiter in pending {
+            waiter.resume(returning: status)
+        }
     }
 }
 

@@ -2,27 +2,24 @@ import CryptoKit
 import Darwin
 import Foundation
 import NIOCore
-import Testing
+import XCTest
 @testable import KinlogueCore
 @testable import KinloguePlatform
 
-@Suite(.serialized)
-struct LANDerivedArtifactSinkTests {
-    @Test
-    func productionAdmissionUsesTheDocumentedStoreAndOwnerBounds() {
-        #expect(
-            LANPendingWriteAdmission.Limits.derivedProduction
-                == .init(
-                    maximumPendingBytesPerOwner: 4 * 1_024 * 1_024,
-                    maximumTotalPendingBytes: 16 * 1_024 * 1_024,
-                    maximumPendingChunksPerOwner: 64,
-                    maximumTotalPendingChunks: 256
-                )
+final class LANDerivedArtifactSinkTests: XCTestCase {
+    func testProductionAdmissionUsesTheDocumentedStoreAndOwnerBounds() {
+        XCTAssertEqual(
+            LANPendingWriteAdmission.Limits.derivedProduction,
+            .init(
+                maximumPendingBytesPerOwner: 4 * 1_024 * 1_024,
+                maximumTotalPendingBytes: 16 * 1_024 * 1_024,
+                maximumPendingChunksPerOwner: 64,
+                maximumTotalPendingChunks: 256
+            )
         )
     }
 
-    @Test
-    func productionStoreBudgetIsReservedBeforeAnyDerivedActorHop() async throws {
+    func testProductionStoreBudgetIsReservedBeforeAnyDerivedActorHop() async throws {
         let chunkByteCount = 4 * 1_024 * 1_024
         let admission = try LANPendingWriteAdmission(limits: .derivedProduction)
         let fixtures = try (0..<4).map { _ in try DerivedDescriptorFixture() }
@@ -51,24 +48,24 @@ struct LANDerivedArtifactSinkTests {
         }
 
         let writes = sinks.enumerated().map { index, sink in
-            Task {
-                try await sink.write(
+            runDerivedSynchronousWriteOnDedicatedThread {
+                sink.write(
                     Data(repeating: UInt8(0x70 + index), count: chunkByteCount)
-                ).value
+                )
             }
         }
         try await preActorGate.waitUntilEntered()
 
-        #expect(
-            admission.currentUsage
-                == .init(
-                    activeOwnerCount: 4,
-                    pendingByteCount: 4 * chunkByteCount,
-                    pendingChunkCount: 4
-                )
+        XCTAssertEqual(
+            admission.currentUsage,
+            .init(
+                activeOwnerCount: 4,
+                pendingByteCount: 4 * chunkByteCount,
+                pendingChunkCount: 4
+            )
         )
-        #expect(injector.occurrenceCount(for: .admittedBeforeActorHop) == 4)
-        #expect(injector.occurrenceCount(for: .beforeWrite) == 0)
+        XCTAssertEqual(injector.occurrenceCount(for: .admittedBeforeActorHop), 4)
+        XCTAssertEqual(injector.occurrenceCount(for: .beforeWrite), 0)
 
         let rejectedWrite = Task {
             try await sinks[0].write(
@@ -76,34 +73,33 @@ struct LANDerivedArtifactSinkTests {
             ).value
         }
         try await rejectionSignal.wait()
-        #expect(admission.highWaterMark.pendingByteCount == 4 * chunkByteCount)
-        #expect(injector.occurrenceCount(for: .beforeDataCopy) == 4)
-        #expect(injector.occurrenceCount(for: .admittedBeforeActorHop) == 4)
+        XCTAssertEqual(admission.highWaterMark.pendingByteCount, 4 * chunkByteCount)
+        XCTAssertEqual(injector.occurrenceCount(for: .beforeDataCopy), 4)
+        XCTAssertEqual(injector.occurrenceCount(for: .admittedBeforeActorHop), 4)
         let postRejectionWrite = sinks[0].write(
             Data(repeating: 0x7e, count: chunkByteCount)
         )
-        await #expect(throws: LANInboxError.invalidState) {
+        await assertThrows(LANInboxError.invalidState) {
             try await postRejectionWrite.value
         }
-        #expect(injector.occurrenceCount(for: .beforeDataCopy) == 4)
+        XCTAssertEqual(injector.occurrenceCount(for: .beforeDataCopy), 4)
 
         preActorGate.release()
-        await #expect(throws: LANInboxError.invalidState) {
+        await assertThrows(LANInboxError.invalidState) {
             try await writes[0].value
         }
         for write in writes.dropFirst() { try await write.value }
-        await #expect(throws: LANInboxError.resourceLimitExceeded) {
+        await assertThrows(LANInboxError.resourceLimitExceeded) {
             try await rejectedWrite.value
         }
         for sink in sinks { await sink.abort() }
-        #expect(
-            admission.currentUsage
-                == .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
+        XCTAssertEqual(
+            admission.currentUsage,
+            .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
         )
     }
 
-    @Test
-    func emptyDataAndBuffersDoNotConsumeDerivedTurnsAndCloseWithFinish() async throws {
+    func testEmptyDataAndBuffersDoNotConsumeDerivedTurnsAndCloseWithFinish() async throws {
         let fixture = try DerivedDescriptorFixture()
         defer { fixture.destroy() }
         let recorder = DerivedCallbackRecorder()
@@ -126,31 +122,31 @@ struct LANDerivedArtifactSinkTests {
         let bufferWrites = (0...64).map { _ in sink.write(emptyBuffer) }
 
         for write in dataWrites + bufferWrites { try await write.value }
-        #expect(
-            admission.currentUsage
-                == .init(activeOwnerCount: 1, pendingByteCount: 0, pendingChunkCount: 0)
+        XCTAssertEqual(
+            admission.currentUsage,
+            .init(activeOwnerCount: 1, pendingByteCount: 0, pendingChunkCount: 0)
         )
-        #expect(injector.occurrenceCount(for: .beforeDataCopy) == 0)
-        #expect(injector.occurrenceCount(for: .admittedBeforeActorHop) == 0)
-        #expect(injector.occurrenceCount(for: .writeQueued) == 0)
-        #expect(injector.occurrenceCount(for: .beforeWrite) == 0)
+        XCTAssertEqual(injector.occurrenceCount(for: .beforeDataCopy), 0)
+        XCTAssertEqual(injector.occurrenceCount(for: .admittedBeforeActorHop), 0)
+        XCTAssertEqual(injector.occurrenceCount(for: .writeQueued), 0)
+        XCTAssertEqual(injector.occurrenceCount(for: .beforeWrite), 0)
 
         _ = try await sink.finish()
-        await #expect(throws: LANInboxError.invalidState) {
+        await assertThrows(LANInboxError.invalidState) {
             try await sink.write(Data()).value
         }
-        await #expect(throws: LANInboxError.invalidState) {
+        await assertThrows(LANInboxError.invalidState) {
             try await sink.write(emptyBuffer).value
         }
-        #expect(
-            admission.currentUsage
-                == .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
+        XCTAssertEqual(
+            admission.currentUsage,
+            .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
         )
-        #expect(await recorder.abortCount == 0)
+        let abortCount = await recorder.abortCount
+        XCTAssertEqual(abortCount, 0)
     }
 
-    @Test
-    func sharedAdmissionAppliesTotalLimitsAcrossOwners() throws {
+    func testSharedAdmissionAppliesTotalLimitsAcrossOwners() throws {
         let admission = try makeDerivedAdmission(
             ownerBytes: 8,
             totalBytes: 8,
@@ -161,25 +157,24 @@ struct LANDerivedArtifactSinkTests {
         let secondOwner = admission.acquireOwner()
         let firstPermit = try firstOwner.acquire(byteCount: 8)
 
-        #expect(throws: LANInboxError.resourceLimitExceeded) {
+        assertThrows(LANInboxError.resourceLimitExceeded) {
             try secondOwner.acquire(byteCount: 1)
         }
-        #expect(
-            admission.currentUsage
-                == .init(activeOwnerCount: 2, pendingByteCount: 8, pendingChunkCount: 1)
+        XCTAssertEqual(
+            admission.currentUsage,
+            .init(activeOwnerCount: 2, pendingByteCount: 8, pendingChunkCount: 1)
         )
 
         firstPermit.release()
         firstOwner.release()
         secondOwner.release()
-        #expect(
-            admission.currentUsage
-                == .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
+        XCTAssertEqual(
+            admission.currentUsage,
+            .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
         )
     }
 
-    @Test
-    func streamsMultipleChunkKindsAndSyncsBeforeOneReplayableFinalize() async throws {
+    func testStreamsMultipleChunkKindsAndSyncsBeforeOneReplayableFinalize() async throws {
         let fixture = try DerivedDescriptorFixture()
         defer { fixture.destroy() }
         let recorder = DerivedCallbackRecorder()
@@ -213,19 +208,21 @@ struct LANDerivedArtifactSinkTests {
         let completed = try await sink.finish()
         let replayed = try await sink.finish()
         let expected = first + second
-        #expect(completed == replayed)
-        #expect(completed.attemptID == fixture.attemptID)
-        #expect(completed.byteCount == expected.count)
-        #expect(completed.sha256Digest == Data(SHA256.hash(data: expected)))
-        #expect(await recorder.finalizedArtifacts == [completed])
-        #expect(await recorder.finalizedBytes == [expected])
-        #expect(await recorder.abortCount == 0)
-        #expect(events.snapshot == ["synced", "finalized"])
-        #expect(try fixture.canAcquireExclusiveLock())
+        XCTAssertEqual(completed, replayed)
+        XCTAssertEqual(completed.attemptID, fixture.attemptID)
+        XCTAssertEqual(completed.byteCount, expected.count)
+        XCTAssertEqual(completed.sha256Digest, Data(SHA256.hash(data: expected)))
+        let finalizedArtifacts = await recorder.finalizedArtifacts
+        let finalizedBytes = await recorder.finalizedBytes
+        let abortCount = await recorder.abortCount
+        XCTAssertEqual(finalizedArtifacts, [completed])
+        XCTAssertEqual(finalizedBytes, [expected])
+        XCTAssertEqual(abortCount, 0)
+        XCTAssertEqual(events.snapshot, ["synced", "finalized"])
+        XCTAssertTrue(try fixture.canAcquireExclusiveLock())
     }
 
-    @Test
-    func concurrentFinishesJoinAndAbortCannotRunBesideFinalization() async throws {
+    func testConcurrentFinishesJoinAndAbortCannotRunBesideFinalization() async throws {
         let fixture = try DerivedDescriptorFixture()
         defer { fixture.destroy() }
         let recorder = DerivedCallbackRecorder()
@@ -254,23 +251,26 @@ struct LANDerivedArtifactSinkTests {
         let racingAborts = (0..<8).map { _ in
             Task { await sink.abort() }
         }
-        await #expect(throws: LANInboxError.invalidState) {
+        await assertThrows(LANInboxError.invalidState) {
             try await sink.write(Data("too-late".utf8)).value
         }
         await finalizeGate.release()
 
         let firstResult = try await firstFinish.value
         for task in joinedFinishes {
-            #expect(try await task.value == firstResult)
+            let joinedResult = try await task.value
+            XCTAssertEqual(joinedResult, firstResult)
         }
         for task in racingAborts { await task.value }
-        #expect(try await sink.finish() == firstResult)
-        #expect(await recorder.finalizedArtifacts == [firstResult])
-        #expect(await recorder.abortCount == 0)
+        let replayedResult = try await sink.finish()
+        let finalizedArtifacts = await recorder.finalizedArtifacts
+        let abortCount = await recorder.abortCount
+        XCTAssertEqual(replayedResult, firstResult)
+        XCTAssertEqual(finalizedArtifacts, [firstResult])
+        XCTAssertEqual(abortCount, 0)
     }
 
-    @Test
-    func concurrentAbortsJoinOneDescriptorBoundCallbackAndRejectFinishAndWrite() async throws {
+    func testConcurrentAbortsJoinOneDescriptorBoundCallbackAndRejectFinishAndWrite() async throws {
         let fixture = try DerivedDescriptorFixture()
         defer { fixture.destroy() }
         let recorder = DerivedCallbackRecorder()
@@ -304,21 +304,23 @@ struct LANDerivedArtifactSinkTests {
                 return false
             }
         }
-        await #expect(throws: LANInboxError.invalidState) {
+        await assertThrows(LANInboxError.invalidState) {
             try await sink.write(Data("too-late".utf8)).value
         }
         await abortGate.release()
 
         await firstAbort.value
         for task in joinedAborts { await task.value }
-        #expect(await finishWhileAborting.value)
-        #expect(await recorder.abortCount == 1)
-        #expect(await recorder.finalizedArtifacts.isEmpty)
-        #expect(try fixture.canAcquireExclusiveLock())
+        let finishWasRejected = await finishWhileAborting.value
+        let abortCount = await recorder.abortCount
+        let finalizedArtifacts = await recorder.finalizedArtifacts
+        XCTAssertTrue(finishWasRejected)
+        XCTAssertEqual(abortCount, 1)
+        XCTAssertTrue(finalizedArtifacts.isEmpty)
+        XCTAssertTrue(try fixture.canAcquireExclusiveLock())
     }
 
-    @Test
-    func writeFailureAndRacingTerminalCallsStillAbortExactlyOnce() async throws {
+    func testWriteFailureAndRacingTerminalCallsStillAbortExactlyOnce() async throws {
         let fixture = try DerivedDescriptorFixture()
         defer { fixture.destroy() }
         let recorder = DerivedCallbackRecorder()
@@ -362,17 +364,19 @@ struct LANDerivedArtifactSinkTests {
         }
         await abortGate.release()
 
-        await #expect(throws: SyntheticDerivedSinkFailure.self) {
+        await assertThrows(SyntheticDerivedSinkFailure.self) {
             try await failingWrite.value
         }
         await joinedAbort.value
-        #expect(await rejectedFinish.value)
-        #expect(await recorder.abortCount == 1)
-        #expect(await recorder.finalizedArtifacts.isEmpty)
+        let finishWasRejected = await rejectedFinish.value
+        let abortCount = await recorder.abortCount
+        let finalizedArtifacts = await recorder.finalizedArtifacts
+        XCTAssertTrue(finishWasRejected)
+        XCTAssertEqual(abortCount, 1)
+        XCTAssertTrue(finalizedArtifacts.isEmpty)
     }
 
-    @Test
-    func thirdPendingChunkIsRejectedBeforeCopyAndDrainsExactlyOnce() async throws {
+    func testThirdPendingChunkIsRejectedBeforeCopyAndDrainsExactlyOnce() async throws {
         let fixture = try DerivedDescriptorFixture()
         defer { fixture.destroy() }
         let admission = try makeDerivedAdmission(
@@ -418,40 +422,42 @@ struct LANDerivedArtifactSinkTests {
             point: .beforeDataCopy,
             expectedCount: 2
         )
-        #expect(
-            admission.currentUsage
-                == .init(activeOwnerCount: 1, pendingByteCount: 8, pendingChunkCount: 2)
+        XCTAssertEqual(
+            admission.currentUsage,
+            .init(activeOwnerCount: 1, pendingByteCount: 8, pendingChunkCount: 2)
         )
 
         let rejected = Task { try await sink.write(Data([0x43])).value }
         try await rejectionSignal.wait()
-        #expect(injector.occurrenceCount(for: .beforeDataCopy) == 2)
-        #expect(
-            admission.highWaterMark
-                == .init(pendingByteCount: 8, pendingChunkCount: 2)
+        XCTAssertEqual(injector.occurrenceCount(for: .beforeDataCopy), 2)
+        XCTAssertEqual(
+            admission.highWaterMark,
+            .init(pendingByteCount: 8, pendingChunkCount: 2)
         )
-        #expect(await recorder.abortCount == 0)
+        let preReleaseAbortCount = await recorder.abortCount
+        XCTAssertEqual(preReleaseAbortCount, 0)
 
         writeGate.release()
-        await #expect(throws: LANInboxError.invalidState) {
+        await assertThrows(LANInboxError.invalidState) {
             try await first.value
         }
-        await #expect(throws: LANInboxError.invalidState) {
+        await assertThrows(LANInboxError.invalidState) {
             try await second.value
         }
-        await #expect(throws: LANInboxError.resourceLimitExceeded) {
+        await assertThrows(LANInboxError.resourceLimitExceeded) {
             try await rejected.value
         }
-        #expect(await recorder.abortCount == 1)
-        #expect(await recorder.finalizedArtifacts.isEmpty)
-        #expect(
-            admission.currentUsage
-                == .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
+        let abortCount = await recorder.abortCount
+        let finalizedArtifacts = await recorder.finalizedArtifacts
+        XCTAssertEqual(abortCount, 1)
+        XCTAssertTrue(finalizedArtifacts.isEmpty)
+        XCTAssertEqual(
+            admission.currentUsage,
+            .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
         )
     }
 
-    @Test
-    func tinyChunksCannotExceedConfiguredHighWaterMark() async throws {
+    func testTinyChunksCannotExceedConfiguredHighWaterMark() async throws {
         let fixture = try DerivedDescriptorFixture()
         defer { fixture.destroy() }
         let admission = try makeDerivedAdmission(
@@ -497,34 +503,34 @@ struct LANDerivedArtifactSinkTests {
         let rejected = Task { try await sink.write(Data([0xff])).value }
         try await rejectionSignal.wait()
 
-        #expect(injector.occurrenceCount(for: .beforeDataCopy) == 4)
-        #expect(
-            admission.currentUsage
-                == .init(activeOwnerCount: 1, pendingByteCount: 4, pendingChunkCount: 4)
+        XCTAssertEqual(injector.occurrenceCount(for: .beforeDataCopy), 4)
+        XCTAssertEqual(
+            admission.currentUsage,
+            .init(activeOwnerCount: 1, pendingByteCount: 4, pendingChunkCount: 4)
         )
-        #expect(
-            admission.highWaterMark
-                == .init(pendingByteCount: 4, pendingChunkCount: 4)
+        XCTAssertEqual(
+            admission.highWaterMark,
+            .init(pendingByteCount: 4, pendingChunkCount: 4)
         )
 
         writeGate.release()
         for task in admitted {
-            await #expect(throws: LANInboxError.invalidState) {
+            await assertThrows(LANInboxError.invalidState) {
                 try await task.value
             }
         }
-        await #expect(throws: LANInboxError.resourceLimitExceeded) {
+        await assertThrows(LANInboxError.resourceLimitExceeded) {
             try await rejected.value
         }
-        #expect(await recorder.abortCount == 1)
-        #expect(
-            admission.currentUsage
-                == .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
+        let abortCount = await recorder.abortCount
+        XCTAssertEqual(abortCount, 1)
+        XCTAssertEqual(
+            admission.currentUsage,
+            .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
         )
     }
 
-    @Test
-    func byteBufferRetainedCapacityIsRejectedWithoutEnteringIO() async throws {
+    func testByteBufferRetainedCapacityIsRejectedWithoutEnteringIO() async throws {
         let fixture = try DerivedDescriptorFixture()
         defer { fixture.destroy() }
         let admission = try makeDerivedAdmission(
@@ -552,24 +558,27 @@ struct LANDerivedArtifactSinkTests {
         )
         var backing = ByteBufferAllocator().buffer(capacity: 32)
         backing.writeInteger(UInt8(0x51))
-        let slice = try #require(backing.getSlice(at: 0, length: 1))
-        #expect(slice.readableBytes == 1)
-        #expect(slice.storageCapacity >= 32)
+        let slice = try XCTUnwrap(backing.getSlice(at: 0, length: 1))
+        XCTAssertEqual(slice.readableBytes, 1)
+        XCTAssertGreaterThanOrEqual(slice.storageCapacity, 32)
 
-        await #expect(throws: LANInboxError.resourceLimitExceeded) {
+        await assertThrows(LANInboxError.resourceLimitExceeded) {
             try await sink.write(slice).value
         }
-        #expect(injector.occurrenceCount(for: .beforeWrite) == 0)
-        #expect(await recorder.abortCount == 1)
-        #expect(admission.highWaterMark == .init(pendingByteCount: 0, pendingChunkCount: 0))
-        #expect(
-            admission.currentUsage
-                == .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
+        let abortCount = await recorder.abortCount
+        XCTAssertEqual(injector.occurrenceCount(for: .beforeWrite), 0)
+        XCTAssertEqual(abortCount, 1)
+        XCTAssertEqual(
+            admission.highWaterMark,
+            .init(pendingByteCount: 0, pendingChunkCount: 0)
+        )
+        XCTAssertEqual(
+            admission.currentUsage,
+            .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
         )
     }
 
-    @Test
-    func abortRacingQueuedFinishDrainsPermitAndOwnsTerminalTransition() async throws {
+    func testAbortRacingQueuedFinishDrainsPermitAndOwnsTerminalTransition() async throws {
         let fixture = try DerivedDescriptorFixture()
         defer { fixture.destroy() }
         let admission = try makeDerivedAdmission(
@@ -612,29 +621,30 @@ struct LANDerivedArtifactSinkTests {
         try await abortRequested.wait()
 
         writeGate.release()
-        await #expect(throws: LANInboxError.invalidState) {
+        await assertThrows(LANInboxError.invalidState) {
             try await writing.value
         }
-        await #expect(throws: LANInboxError.invalidState) {
+        await assertThrows(LANInboxError.invalidState) {
             try await finishing.value
         }
         await aborting.value
-        #expect(await recorder.abortCount == 1)
-        #expect(await recorder.finalizedArtifacts.isEmpty)
-        #expect(
-            admission.currentUsage
-                == .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
+        let abortCount = await recorder.abortCount
+        let finalizedArtifacts = await recorder.finalizedArtifacts
+        XCTAssertEqual(abortCount, 1)
+        XCTAssertTrue(finalizedArtifacts.isEmpty)
+        XCTAssertEqual(
+            admission.currentUsage,
+            .init(activeOwnerCount: 0, pendingByteCount: 0, pendingChunkCount: 0)
         )
     }
 
-    @Test
-    func rejectsNonPrivateOrHardLinkedDescriptorsAtOwnershipTransfer() throws {
+    func testRejectsNonPrivateOrHardLinkedDescriptorsAtOwnershipTransfer() throws {
         let wrongMode = try DerivedDescriptorFixture(
             mode: 0o640,
             minimumDescriptor: 4_096
         )
         defer { wrongMode.destroy() }
-        #expect(throws: LANInboxError.invalidState) {
+        assertThrows(LANInboxError.invalidState) {
             _ = try LANDerivedArtifactSink(
                 attemptID: wrongMode.attemptID,
                 descriptor: wrongMode.transferDescriptor(),
@@ -644,15 +654,15 @@ struct LANDerivedArtifactSinkTests {
         }
         let wrongModeResult = fcntl(wrongMode.rawDescriptor, F_GETFD)
         let wrongModeError = errno
-        #expect(wrongModeResult == -1)
-        #expect(wrongModeError == EBADF)
+        XCTAssertEqual(wrongModeResult, -1)
+        XCTAssertEqual(wrongModeError, EBADF)
 
         let hardLinked = try DerivedDescriptorFixture(
             addHardLink: true,
             minimumDescriptor: 4_096
         )
         defer { hardLinked.destroy() }
-        #expect(throws: LANInboxError.invalidState) {
+        assertThrows(LANInboxError.invalidState) {
             _ = try LANDerivedArtifactSink(
                 attemptID: hardLinked.attemptID,
                 descriptor: hardLinked.transferDescriptor(),
@@ -662,8 +672,55 @@ struct LANDerivedArtifactSinkTests {
         }
         let hardLinkResult = fcntl(hardLinked.rawDescriptor, F_GETFD)
         let hardLinkError = errno
-        #expect(hardLinkResult == -1)
-        #expect(hardLinkError == EBADF)
+        XCTAssertEqual(hardLinkResult, -1)
+        XCTAssertEqual(hardLinkError, EBADF)
+    }
+}
+
+private func assertThrows<T>(
+    _ expected: LANInboxError,
+    file: StaticString = #filePath,
+    line: UInt = #line,
+    _ operation: () throws -> T
+) {
+    XCTAssertThrowsError(try operation(), file: file, line: line) { error in
+        guard let actual = error as? LANInboxError else {
+            XCTFail("unexpected error: \(error)", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(actual, expected, file: file, line: line)
+    }
+}
+
+private func assertThrows<T>(
+    _ expected: LANInboxError,
+    file: StaticString = #filePath,
+    line: UInt = #line,
+    _ operation: () async throws -> T
+) async {
+    do {
+        _ = try await operation()
+        XCTFail("expected \(expected)", file: file, line: line)
+    } catch let actual as LANInboxError {
+        XCTAssertEqual(actual, expected, file: file, line: line)
+    } catch {
+        XCTFail("unexpected error: \(error)", file: file, line: line)
+    }
+}
+
+private func assertThrows<T, Failure: Error>(
+    _ expectedType: Failure.Type,
+    file: StaticString = #filePath,
+    line: UInt = #line,
+    _ operation: () async throws -> T
+) async {
+    do {
+        _ = try await operation()
+        XCTFail("expected \(expectedType)", file: file, line: line)
+    } catch is Failure {
+        return
+    } catch {
+        XCTFail("unexpected error: \(error)", file: file, line: line)
     }
 }
 
@@ -785,8 +842,8 @@ private actor DerivedCallbackRecorder {
 
     func recordAbort(descriptor: Int32) {
         var metadata = stat()
-        #expect(fstat(descriptor, &metadata) == 0)
-        #expect((metadata.st_mode & S_IFMT) == S_IFREG)
+        XCTAssertEqual(fstat(descriptor, &metadata), 0)
+        XCTAssertEqual(metadata.st_mode & S_IFMT, S_IFREG)
         abortCount += 1
     }
 }
@@ -883,6 +940,22 @@ private func waitForDerivedOccurrence(
     while injector.occurrenceCount(for: point) < expectedCount {
         if clock.now >= deadline { throw DerivedSinkGateTimeout() }
         try await Task.sleep(for: .milliseconds(1))
+    }
+}
+
+/// `write` deliberately performs admission before it returns its asynchronous
+/// task. Fault-injection gates around that synchronous boundary must not block
+/// Swift's cooperative executor or the test can starve its own release task.
+private func runDerivedSynchronousWriteOnDedicatedThread(
+    _ write: @escaping @Sendable () -> Task<Void, Error>
+) -> Task<Void, Error> {
+    Task {
+        let admittedWrite = await withCheckedContinuation { continuation in
+            Thread.detachNewThread {
+                continuation.resume(returning: write())
+            }
+        }
+        try await admittedWrite.value
     }
 }
 

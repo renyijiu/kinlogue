@@ -9,6 +9,7 @@
 - 完整 App bundle、签名、XPC 和安装验收要求 `/Applications/Xcode.app/Contents/Developer`。
 - 当前 CI 工具链和锁定依赖不证明最低 macOS 14/15 的独立机器兼容性。
 - `Package.resolved`、SwiftNIO、ZIPFoundation 和 DICOM-Swift 的精确版本由 package graph 与 bundle 门禁验证。
+- `scan-acceptance.sh` 要求 `ripgrep`；GitHub Actions 的质量与发布 package job 使用仓库脚本下载固定的 14.1.1 Apple Silicon archive，核对 SHA-256 后才把私有工具目录加入后续步骤的 `PATH`，不使用可漂移的 Homebrew 安装。
 
 ## 验证命令
 
@@ -17,7 +18,7 @@
 | `scripts/lint.sh` | 源码卫生、warnings-as-errors build、package graph 和文档结构 | 运行时行为或安装验收 |
 | `swift build --disable-sandbox` | 当前 SwiftPM 源码可编译 | 完整 `.app`、签名、资源或 XPC |
 | `scripts/compile-localizations.sh --check` | String Catalog 与提交资源一致 | 人工语言/VoiceOver 检查 |
-| `scripts/test.sh` | Core、Platform、App、跨进程和脚本安全主套件；随后独立真实 Socket/RSS 门禁 | clean-source bundle、真实设备和人工矩阵 |
+| `scripts/test.sh` | Core、Platform、App 和脚本安全主套件；随后独立运行条件式大小写别名、跨进程 storage、DICOM 导入集成、验收扫描、安装 LAN 生产 HTTP 与真实 Socket/RSS 门禁 | clean-source bundle、真实设备和人工矩阵 |
 | `scripts/privacy-guard.sh` | 私有 fixture、隐私措辞、canary 和 forbidden values | 运行中系统权限或用户环境 |
 | `scripts/privacy-history-guard.sh [--ref <ref>]...` | public-bound reachable Git 历史中的已删除附件、`.env`/私钥路径、完整格式恢复码、常见凭据、私密库存证据和 forbidden values | PR/Issue/Actions log、release asset、fork 或托管平台缓存 |
 | `scripts/verify-package-graph.sh <dump-package.json>` | target/product/依赖 allow-list | 最终 Mach-O/link map |
@@ -32,9 +33,15 @@
 
 ## 测试证据规则
 
-`scripts/test.sh` 把 Swift Testing 的唯一成功 summary 保存为权限 `0600` 的临时日志，并以 `KINLOGUE_REQUIRE_TEST_EVIDENCE=1` 交给 `scripts/verify-docs.sh`。evidence mode 缺少文件、出现多个 summary 或 tests/suites 与当前候选账本不一致时都会失败。
+`scripts/test.sh` 把各主 target 的 Swift Testing 成功 summary 保存为权限 `0600` 的同一临时日志，并以 `KINLOGUE_REQUIRE_TEST_EVIDENCE=1` 交给 `scripts/verify-docs.sh`。evidence mode 缺少文件、没有成功 summary，或所有 summary 汇总后的 tests/suites 与当前候选主账不一致时都会失败。独立的 XCTest、条件式和真实进程门禁由各自非零退出状态失败关闭，不重复计入该 Swift Testing 主账。
 
-定向 `--filter` 只证明受影响路径，不更新全量测试清单。真实 Socket/RSS 压力 case 从普通并发主套件分离，以单 worker 和显式环境变量运行，避免其他测试污染资源基线。
+定向 `--filter` 只证明受影响路径，不更新全量测试清单。全量运行先以 `swift build --build-tests --disable-swift-testing --enable-xctest` 构建 test bundle，再由 `xcrun xctest -XCTest` 为 `LANDerivedArtifactSinkTests` 的 13 个固定 case 分别启动有界进程，并逐项核对精确 1/0 通过摘要；随后从 `swift test list` 取得其余可执行 inventory。Core 使用一个 `--no-parallel` helper，Platform/App 每个短生命周期 helper 最多包含两个完整多项测试容器，其余单项容器每批最多 16 项。容器不会跨 helper 拆分，本机主账路径共 49 个 Platform/App helper。
+
+macOS 26 远端已连续证明 derived-artifact 的 fresh runner 先后可能停在 SwiftPM 测试运行握手和具体 XCTest case。禁用 Swift Testing 后由 SwiftPM 启动 XCTest 的路径完成 189.40 秒 cold build，但 `swift-package` 与 `xctest` 又共同存活 18 分 43 秒且没有测试事件；改为直接 `xcrun xctest` 后，230.68 秒 cold build 和前 6 个 case 均成功，随后 `testProductionStoreBudgetIsReservedBeforeAnyDerivedActorHop` 启动但在 180 秒 deadline 内不返回。该测试原先从 cooperative executor 启动四个任务，再让每项同步阻塞在 actor hop 前的故障注入闸门；小型 runner 可因此耗尽负责恢复测试方法的 executor。现在只有这段刻意同步阻塞的测试调用由独立 OS 线程发起，生产 sink、内存上限和断言不变。专用命令仍只让 SwiftPM build test bundle，再为 13 个固定 case 分别启动 `xcrun xctest`，任何 case 缺少精确 1/0 摘要均失败。GitHub CI 仍使用三个全新 runner：`0/3` 与 `1/3` 以确定性模数分别运行主账的 25 与 24 个 helper，`2/3` 在 inventory/list 前只运行 derived-artifact XCTest 13/1，成功后仍运行文档门禁。本机默认 `0/1` 先执行同一门禁，再运行完整主账。
+
+planner 将清单标识规范化为 SwiftPM 实际过滤标识，以完整 target 前缀和词边界避免前缀误匹配，并对未知 target、运行标识冲突、缺失隔离门禁、缺失专用容器、重复或遗漏匹配失败关闭；每个 shard 同时冻结预期 tests/suites。分片监督器先从有界输出尾部去除 ANSI 控制序列、统一空白，再匹配精确成功 summary；匹配后才启动 5 秒退出宽限期并输出不含测试内容的期望/已观察计数标记。监督器在 helper 存活期间持续记录自己的后代 PID 与进程启动身份；即使 SwiftPM 测试进程另建 process group 或在前台命令退出后被重新托管，也只会向仍匹配该身份的本分片后代发信号。若 helper 仍不收敛，监督器清理这些已跟踪进程后记为成功；命令在宽限期内返回的非零状态、错配/缺失 summary、清理不完整，或在外层 deadline 前 5 秒触发的内层超时仍失败关闭。各 shard 使用同一已构建 test bundle；本机完整路径的所有成功 summary（兼容单数 `suite` 与复数 `suites`）汇总后仍必须精确匹配候选主账。CI 只把 SwiftPM build jobs 限为两个。该边界避免真实进程、锁、网络和文件同步测试在近千条用例共用的长生命周期 helper 中累积进程级状态，同时不减少测试或放宽断言。仅在大小写不敏感卷启用的别名锁测试不进入固定主账，而是单独串行运行；跨进程 storage target、带真实 I/O/取消时限的 DICOM 导入集成、验收扫描、安装 LAN 生产 HTTP 探针和真实 Socket/RSS 压力 case 也继续分离，分别以 `--no-parallel`、`-j 1` 运行并拥有独立 deadline；扫描 suite 自身保留 serialized trait，RSS case 仍要求显式环境变量。跨进程 storage fixture 通过 `Process.terminationHandler` 驱动的多等待者观察器收敛退出状态，不在后台 GCD worker 上调用可能失去唤醒的 `waitUntilExit()`。
+
+在分区 0 中，验收扫描在 inventory build 完成后、Core/primary helper 与跨进程 storage 之前运行；它仍是 `--no-parallel -j 1` 的独立门禁。后续 fresh runner 证据证明统一的 70 不是 helper churn，而是 GitHub macOS 26 镜像缺少 scanner 明确要求的 `rg`；CI 在测试前通过固定版本与 SHA-256 的引导脚本补齐该工具，scanner 对工具缺失继续失败关闭。提前运行的顺序仍隔离扫描与真实进程门禁，但不再被描述成这次 70 的根因修复。
 
 行为改动先跑受影响 target 的 focused tests，再按风险扩到 `scripts/test.sh`。涉及存储、HTTP、生命周期、重试、XPC 或发布脚本时，至少核对一次真实跨层链路，不能只依赖全 mock 测试。
 
@@ -53,7 +60,7 @@
 
 ### GitHub Actions
 
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) 在 main pull request、main push 和手工触发时依次运行 lint、隐私、全量测试、clean-source bundle 验证和同一 bundle 的 DICOM XPC 门禁。workflow 使用最小 token 权限、固定 action SHA、30 分钟 job 上限，以及主测试/隔离门禁各自的 deadline。`pull_request_target` 被禁止。
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) 在 main pull request、main push 和手工触发时依次运行 lint、隐私、全量测试、clean-source bundle 验证和同一 bundle 的 DICOM XPC 门禁。质量 job 在这些门禁前运行 [`install-ci-ripgrep.sh`](../scripts/install-ci-ripgrep.sh)，只接受固定版本、固定 archive 名与固定 SHA-256 的 Apple Silicon 二进制；release package job 使用同一入口。workflow 使用最小 token 权限、固定 action SHA、30 分钟 job 上限，以及主测试/隔离门禁各自的 deadline。`pull_request_target` 被禁止。
 
 [`codeql.yml`](../.github/workflows/codeql.yml) 在独立 macOS runner 上以 manual build 分析 Swift，只有分析 job 取得 `security-events: write`；checkout 与 CodeQL action 均固定完整 SHA。Dependabot 同时维护 SwiftPM git 依赖和 GitHub Actions pin，更新仍必须经过相同 CI、隐私与人工 review，不能自动扩大依赖或权限边界。
 
