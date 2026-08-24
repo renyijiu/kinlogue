@@ -2,6 +2,10 @@
 
 本文件是项目知识库的追加式日志。每个条目记录一次可复核的 ingest、query、lint 或重大文档维护；不要改写历史条目来伪造当前状态。最新状态以专题页和代码/测试为准。
 
+## [2026-08-24] repository/governance | 统一公开仓库名称
+
+- **仓库身份**：公开仓库现在统一使用 `renyijiu/kinlogue`；Issue 模板中的私密漏洞报告入口已同步到新的 Security Advisory 地址，并由治理回归锁定。生产代码与兼容性文件名中的 `publication` 表示恢复点发布协议，不是仓库名称，因此保持不变。
+
 ## [2026-08-24] docs/release | 同步验收扫描当前计数
 
 - **事实修正**：验收 scanner 新增合成 `.build` 泄漏和非法 `Repository` 符号链接两项回归后，独立 suite 的当前计数为 14 tests / 1 suite；[`acceptance/current-release.md`](acceptance/current-release.md) 从旧的 12/1 同步为 14/1。只修正文档计数，不改变实现、发布边界或既有验收结论。

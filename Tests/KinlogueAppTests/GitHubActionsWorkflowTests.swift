@@ -8,6 +8,7 @@ struct GitHubActionsWorkflowTests {
         let contributing = try contents("CONTRIBUTING.md")
         let pullRequestTemplate = try contents(".github/PULL_REQUEST_TEMPLATE.md")
         let bugTemplate = try contents(".github/ISSUE_TEMPLATE/bug_report.yml")
+        let issueTemplateConfig = try contents(".github/ISSUE_TEMPLATE/config.yml")
         let dependabot = try contents(".github/dependabot.yml")
         let codeQL = try contents(".github/workflows/codeql.yml")
         let ignoreRules = try contents(".gitignore")
@@ -17,6 +18,10 @@ struct GitHubActionsWorkflowTests {
             #expect(policy.localizedCaseInsensitiveContains("synthetic"))
         }
         #expect(security.localizedCaseInsensitiveContains("private vulnerability reporting"))
+        #expect(issueTemplateConfig.contains(
+            "https://github.com/renyijiu/kinlogue/security/advisories/new"
+        ))
+        #expect(!issueTemplateConfig.contains("renyijiu/kinlogue-public"))
         #expect(dependabot.contains("package-ecosystem: swift"))
         #expect(dependabot.contains("package-ecosystem: github-actions"))
 
