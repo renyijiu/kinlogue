@@ -56,6 +56,7 @@ if [[ -z "$CURRENT_UID" || -z "$CURRENT_USER" \
 fi
 
 INTERNAL_SCAN_TEST_ROOT="${KINLOGUE_ACCEPTANCE_INTERNAL_SCAN_TEST_ROOT:-}"
+SCAN_REPO_DIR="$REPO_DIR"
 if [[ -n "$INTERNAL_SCAN_TEST_ROOT" ]]; then
   if ! /usr/bin/printf '%s\n' "$INTERNAL_SCAN_TEST_ROOT" \
       | /usr/bin/grep -Eq \
@@ -67,6 +68,15 @@ if [[ -n "$INTERNAL_SCAN_TEST_ROOT" ]]; then
     emit_result "KLA_SCAN_ERROR" false 1 "$(zero_digest)"
     exit 70
   fi
+  INTERNAL_SCAN_TEST_REPOSITORY="$INTERNAL_SCAN_TEST_ROOT/Repository"
+  if [[ ! -d "$INTERNAL_SCAN_TEST_REPOSITORY" \
+      || -L "$INTERNAL_SCAN_TEST_REPOSITORY" \
+      || "$(/usr/bin/stat -f '%u:%Lp' \
+        "$INTERNAL_SCAN_TEST_REPOSITORY" 2>/dev/null)" != "$CURRENT_UID:700" ]]; then
+    emit_result "KLA_SCAN_ERROR" false 1 "$(zero_digest)"
+    exit 70
+  fi
+  SCAN_REPO_DIR="$INTERNAL_SCAN_TEST_REPOSITORY"
 fi
 
 PRIVACY_HOME_DIRECTORY="$USER_HOME_DIRECTORY"
@@ -125,13 +135,13 @@ else
 fi
 
 SCAN_ROOTS=(
-  "$REPO_DIR/Sources"
-  "$REPO_DIR/Tests"
-  "$REPO_DIR/scripts"
-  "$REPO_DIR/packaging"
-  "$REPO_DIR/docs"
-  "$REPO_DIR/.build"
-  "$REPO_DIR/dist"
+  "$SCAN_REPO_DIR/Sources"
+  "$SCAN_REPO_DIR/Tests"
+  "$SCAN_REPO_DIR/scripts"
+  "$SCAN_REPO_DIR/packaging"
+  "$SCAN_REPO_DIR/docs"
+  "$SCAN_REPO_DIR/.build"
+  "$SCAN_REPO_DIR/dist"
   "$INSTALLED_APP"
   "$ACCEPTANCE_TEMP_ROOT"
   "$UNCONTAINED_ROOT"
@@ -139,14 +149,14 @@ SCAN_ROOTS=(
 PRIVACY_SCAN_ROOTS=(
   "$SANDBOX_CONTAINER_DATA"
   "$UNCONTAINED_ROOT"
-  "$REPO_DIR/dist/acceptance-report.json"
+  "$SCAN_REPO_DIR/dist/acceptance-report.json"
   "$ACCEPTANCE_TEMP_ROOT"
   "${REPORT_CANDIDATES[@]}"
 )
 PDF_PRIVACY_SCAN_ROOTS=(
   "$ACCEPTANCE_TEMP_ROOT"
   "$UNCONTAINED_ROOT"
-  "$REPO_DIR/dist/acceptance-report.json"
+  "$SCAN_REPO_DIR/dist/acceptance-report.json"
   "${REPORT_CANDIDATES[@]}"
 )
 SOURCE_VAULT_RELATIVE_PATH="Library/Application Support/Kinlogue/Acceptance/$RUN_ID/SourceVault"
@@ -344,7 +354,7 @@ done
 scan_pattern_in_app_bundle_except_executable \
   "$PDF_HEADER_PATTERN" "$INSTALLED_APP"
 scan_pattern_in_app_bundle_except_executable \
-  "$PDF_HEADER_PATTERN" "$REPO_DIR/dist/Kinlogue.app"
+  "$PDF_HEADER_PATTERN" "$SCAN_REPO_DIR/dist/Kinlogue.app"
 for root in "${PRIVACY_SCAN_ROOTS[@]}"; do
   scan_pattern_in_root "$ABSOLUTE_USER_PATH_PREFIX" "$root"
 done
