@@ -47,24 +47,55 @@ struct GitHubActionsWorkflowTests {
     @Test
     func ciUsesRepositoryGatesWithReadOnlyPermissionsAndPinnedActions() throws {
         let workflow = try contents(".github/workflows/ci.yml")
+        let ripgrepInstaller = try contents("scripts/install-ci-ripgrep.sh")
 
         #expect(workflow.contains("pull_request:"))
         #expect(workflow.contains("push:"))
         #expect(workflow.contains("runs-on: macos-26"))
+        #expect(workflow.components(separatedBy: "runs-on: macos-26").count - 1 == 3)
         #expect(!workflow.contains("runs-on: macos-15"))
         #expect(workflow.contains("timeout-minutes: 30"))
         #expect(!workflow.contains("timeout-minutes: 90"))
+        #expect(workflow.contains("KINLOGUE_BUILD_JOBS: \"2\""))
+        #expect(!workflow.contains("SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH"))
         #expect(workflow.contains("KINLOGUE_PRIMARY_TEST_TIMEOUT_SECONDS: \"1200\""))
         #expect(workflow.contains("KINLOGUE_ISOLATED_TEST_TIMEOUT_SECONDS: \"180\""))
+        #expect(workflow.contains("KINLOGUE_PRIMARY_TEST_PARTITION: \"0/3\""))
+        #expect(workflow.contains("KINLOGUE_PRIMARY_TEST_PARTITION: \"1/3\""))
+        #expect(workflow.contains("KINLOGUE_PRIMARY_TEST_PARTITION: \"2/3\""))
+        #expect(workflow.contains("name: Complementary test partition"))
+        #expect(workflow.contains("name: Dedicated LAN derived-artifact tests"))
+        #expect(workflow.contains("scripts/install-ci-ripgrep.sh"))
+        #expect(workflow.contains("$GITHUB_WORKSPACE/.build/ci-tools/bin"))
+        #expect(workflow.contains(">> \"$GITHUB_PATH\""))
         #expect(workflow.contains("permissions:\n  contents: read"))
         #expect(workflow.contains("scripts/lint.sh"))
         #expect(workflow.contains("scripts/privacy-guard.sh"))
         #expect(workflow.contains("scripts/test.sh"))
+        #expect(workflow.components(separatedBy: "run: scripts/test.sh").count - 1 == 3)
         #expect(workflow.contains("scripts/verify-app.sh"))
         #expect(workflow.contains(
             "scripts/verify-dicom-xpc.sh --use-verified-app"
         ))
         #expect(!workflow.contains("pull_request_target"))
+        #expect(!workflow.contains("brew install"))
+        #expect(ripgrepInstaller.contains("RIPGREP_VERSION=\"14.1.1\""))
+        #expect(ripgrepInstaller.contains(
+            "24ad76777745fbff131c8fbc466742b011f925bfa4fffa2ded6def23b5b937be"
+        ))
+        #expect(ripgrepInstaller.contains("aarch64-apple-darwin.tar.gz"))
+        #expect(ripgrepInstaller.contains("--proto '=https'"))
+        #expect(ripgrepInstaller.contains("/usr/bin/shasum -a 256"))
+        #expect(!ripgrepInstaller.contains("brew install"))
+
+        let installer = try #require(workflow.range(
+            of: "scripts/install-ci-ripgrep.sh"
+        ))
+        let lint = try #require(workflow.range(
+            of: "scripts/lint.sh",
+            range: installer.upperBound..<workflow.endIndex
+        ))
+        #expect(installer.lowerBound < lint.lowerBound)
         try expectExternalActionsPinned(in: workflow)
     }
 
@@ -102,6 +133,9 @@ struct GitHubActionsWorkflowTests {
         #expect(!packageJob.contains("id-token: write"))
         #expect(!packageJob.contains("attestations: write"))
         #expect(packageJob.contains("scripts/package-adhoc-candidate.sh"))
+        #expect(packageJob.contains("scripts/install-ci-ripgrep.sh"))
+        #expect(packageJob.contains("$GITHUB_WORKSPACE/.build/ci-tools/bin"))
+        #expect(packageJob.contains(">> \"$GITHUB_PATH\""))
         #expect(!packageJob.contains("gh release create"))
         #expect(publishJob.contains("needs: package"))
         #expect(publishJob.contains(
@@ -145,12 +179,16 @@ struct GitHubActionsWorkflowTests {
         #expect(publicationValidation.contains(#"[[ "${#entries[@]}" -eq 6 ]]"#))
 
         let inputValidationRange = try #require(packageJob.range(of: releaseInputValidation))
+        let installerRange = try #require(packageJob.range(
+            of: "scripts/install-ci-ripgrep.sh"
+        ))
         let releaseGatesRange = try #require(packageJob.range(of: releaseGates))
         let cleanSourceRange = try #require(packageJob.range(of: cleanSourceVerification))
         let dicomRuntimeRange = try #require(packageJob.range(of: dicomRuntimeVerification))
         let packagingRange = try #require(packageJob.range(of: packaging))
         let uploadRange = try #require(packageJob.range(of: "      - name: Upload workflow evidence"))
-        #expect(inputValidationRange.lowerBound < releaseGatesRange.lowerBound)
+        #expect(inputValidationRange.lowerBound < installerRange.lowerBound)
+        #expect(installerRange.lowerBound < releaseGatesRange.lowerBound)
         #expect(releaseGatesRange.lowerBound < cleanSourceRange.lowerBound)
         #expect(cleanSourceRange.lowerBound < dicomRuntimeRange.lowerBound)
         #expect(dicomRuntimeRange.lowerBound < packagingRange.lowerBound)
@@ -424,6 +462,20 @@ struct GitHubActionsWorkflowTests {
             requiresTestEvidence: true
         )
         #expect(passedWithEvidence.status == 0, Comment(rawValue: passedWithEvidence.output))
+
+        let passedWithShardedEvidence = try runDocumentationVerifier(
+            repositoryRoot: passedFixture.root,
+            observedTestResult: """
+            Test run with 100 tests in 1 suite passed
+            Test run with 300 tests in 29 suites passed
+            Test run with 463 tests in 50 suites passed
+            """,
+            requiresTestEvidence: true
+        )
+        #expect(
+            passedWithShardedEvidence.status == 0,
+            Comment(rawValue: passedWithShardedEvidence.output)
+        )
 
         let wrongObservedCount = try runDocumentationVerifier(
             repositoryRoot: passedFixture.root,

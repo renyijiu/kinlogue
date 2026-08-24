@@ -51,6 +51,11 @@ jobs:
           fi
           echo "source_revision=$source_revision" >>"$GITHUB_OUTPUT"
 
+      - name: Install pinned ripgrep for acceptance scans
+        run: |
+          scripts/install-ci-ripgrep.sh
+          printf '%s\n' "$GITHUB_WORKSPACE/.build/ci-tools/bin" >> "$GITHUB_PATH"
+
       - name: Run release gates
         run: |
           scripts/lint.sh

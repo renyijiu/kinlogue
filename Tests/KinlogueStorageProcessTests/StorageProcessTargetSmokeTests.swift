@@ -37,6 +37,39 @@ func storageProcessFixtureRejectsAnIncompatibleProtocolHandshake() async throws 
 }
 
 @Test
+func storageProcessExitObservationDoesNotBlockAWorkerThread() throws {
+    let sourceURL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("FixtureProcess.swift")
+    let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+    #expect(source.contains("process.terminationHandler"))
+    #expect(!source.contains("process.waitUntilExit()"))
+}
+
+@Test
+func storageProcessExitObservationResumesConcurrentAndLateWaiters() async throws {
+    let process = try StorageProcessFixture()
+    do {
+        try process.start()
+        try await process.validateHandshake()
+        let first = Task { await process.waitForExit() }
+        let second = Task { await process.waitForExit() }
+
+        try await process.shutdown()
+
+        #expect(await first.value == 0)
+        #expect(await second.value == 0)
+        #expect(await process.waitForExit() == 0)
+    } catch {
+        process.terminateForCleanup()
+        _ = await process.waitForExit()
+        await process.waitForReader()
+        throw error
+    }
+}
+
+@Test
 func storageProcessFixtureLocatorRejectsAnAncestorDecoy() throws {
     let fixture = try StorageProcessVaultFixture()
     defer { try? fixture.removeOwnedParent() }

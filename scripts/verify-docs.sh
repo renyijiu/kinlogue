@@ -52,13 +52,17 @@ if [[ -n "${KINLOGUE_TEST_RESULT_FILE:-}" ]]; then
   [[ -f "$TEST_RESULT_FILE" && ! -L "$TEST_RESULT_FILE" ]] \
     || fail "the observed test result file is missing or linked"
   OBSERVED_TEST_SUMMARIES=("${(@f)$(/usr/bin/sed -nE \
-    's/.*Test run with ([0-9]+) tests in ([0-9]+) suites passed.*/\1 \2/p' \
+    's/.*Test run with ([0-9]+) tests in ([0-9]+) suites? passed.*/\1 \2/p' \
     "$TEST_RESULT_FILE")}")
-  [[ "${#OBSERVED_TEST_SUMMARIES[@]}" -eq 1 \
+  [[ "${#OBSERVED_TEST_SUMMARIES[@]}" -ge 1 \
       && -n "$OBSERVED_TEST_SUMMARIES[1]" ]] \
-    || fail "the full test output must contain exactly one passing test summary"
-  OBSERVED_TEST_COUNT="${OBSERVED_TEST_SUMMARIES[1]%% *}"
-  OBSERVED_SUITE_COUNT="${OBSERVED_TEST_SUMMARIES[1]##* }"
+    || fail "the full test output must contain at least one passing test summary"
+  OBSERVED_TEST_COUNT=0
+  OBSERVED_SUITE_COUNT=0
+  for observed_summary in "${OBSERVED_TEST_SUMMARIES[@]}"; do
+    OBSERVED_TEST_COUNT=$((OBSERVED_TEST_COUNT + ${observed_summary%% *}))
+    OBSERVED_SUITE_COUNT=$((OBSERVED_SUITE_COUNT + ${observed_summary##* }))
+  done
   [[ "$TEST_COUNT" == "$OBSERVED_TEST_COUNT" \
       && "$SUITE_COUNT" == "$OBSERVED_SUITE_COUNT" ]] \
     || fail "release facts do not match observed test result: $OBSERVED_TEST_COUNT tests / $OBSERVED_SUITE_COUNT suites"

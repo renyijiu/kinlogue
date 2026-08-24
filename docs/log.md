@@ -2,6 +2,59 @@
 
 本文件是项目知识库的追加式日志。每个条目记录一次可复核的 ingest、query、lint 或重大文档维护；不要改写历史条目来伪造当前状态。最新状态以专题页和代码/测试为准。
 
+## [2026-08-24] ci/reliability | 同步故障注入不再阻塞 cooperative executor
+
+- **远端 RED 与精确根因边界**：PR #3 的 fresh macOS 26 / Swift 6.3.3 专用 runner 在 230.68 秒完成 test bundle cold build；直接 `xcrun xctest` 随后通过前 6 个 derived-artifact case，但 `testProductionStoreBudgetIsReservedBeforeAnyDerivedActorHop` 启动后没有返回，最终由 180 秒 deadline 以 124 终止，诊断只留下对应 `xctest` 根进程。这推翻了“剩余问题只在 SwiftPM/XCTest 启动握手”的假设，并把故障限定到该并发测试。
+- **修复与边界**：该测试原先从 Swift cooperative executor 创建四个任务，再让每项同步等待 actor hop 前故障注入闸门；较小 executor 可能被四个等待者占满，负责观察入口和释放闸门的测试续体因而无法恢复。现在只把刻意同步阻塞的 `write` 调用放到独立 OS 线程，返回的真实生产 task 仍由测试异步等待；`LANDerivedArtifactSink`、生产 admission 上限、四所有者 16 MiB 高水位、拒绝/清理断言均未改变。专用脚本同时把 13 个固定 selector 拆成 13 个各自有 deadline 的 `xcrun xctest` 进程，并逐项要求精确 1/0 摘要，既避免 0-test 假成功，也把未来停滞绑定到单个无内容 selector。
+- **本机验证**：修复后的精确 case 与整组直接 XCTest 分别通过 1/1、13/13；`KINLOGUE_BUILD_JOBS=2 scripts/test.sh` 又在 152.27 秒构建后完成逐 case derived-artifact 13/13、主账 964/89、storage 33/1、条件别名 1/0、DICOM 17/1、验收扫描 12/1、安装 LAN 1/1 与 Socket/RSS 1/1。App bundle、DICOM XPC、隐私及远端新 head 仍以后续复验为准。
+
+## [2026-08-24] ci/reliability | SwiftPM 只构建专用 XCTest bundle
+
+- **远端 RED 与边界收窄**：PR #3 的 XCTest-only fresh `2/3` runner 在 189.40 秒完成 cold build，但随后 `swift-package` 父进程与其 `xctest` 子进程共同存活 18 分 43 秒，仍没有任何 suite/case 事件，最终由 1,200 秒 deadline 返回 124；同一 head 的主质量门禁和补充分区分别在 20 分 34 秒、6 分 4 秒通过。这否定了“只把 case 从 Swift Testing 迁到 XCTest 即可收敛”的假设，也证明失败位于 SwiftPM 测试运行握手或 XCTest bundle 启动边界，而不是编译或已报告的业务断言失败。
+- **proof-first 与修正**：脚本契约先要求 `--build-tests`、`--show-bin-path` 和 `xcrun xctest -XCTest KinloguePlatformTests.LANDerivedArtifactSinkTests` 的固定顺序，并在旧脚本缺少 build-only 入口时稳定 RED。专用路径现在只让 SwiftPM 构建禁用 Swift Testing 的 XCTest bundle，随后由 Xcode 的 `xcrun xctest` 直接运行固定 suite；另核对精确 `Executed 13 tests, with 0 failures (0 unexpected)` 摘要，避免错误选择器以 0 tests 返回成功。build、执行各有独立 deadline，13 个 case、断言和失败条件未减少。
+- **本机验证**：直接启动已构建 bundle 的单 case 与完整 suite 分别通过 1/1、13/13；真实 `KINLOGUE_PRIMARY_TEST_PARTITION=2/3 KINLOGUE_BUILD_JOBS=2 scripts/test.sh` 在 132.56 秒 build-only 后逐项完成 13/13、0 failure，并通过文档门禁。默认 `KINLOGUE_BUILD_JOBS=2 scripts/test.sh` 也完成 derived-artifact 13/1、主账 964/89、storage 33/1、大小写别名 1/0、DICOM 17/1、扫描 12/1、安装 LAN 1/1 与 Socket/RSS 1/1。更新后的远端专用 job 仍须以 PR 新 head 为准。
+
+## [2026-08-24] ci/reliability | derived 断言改走 XCTest-only 专用门禁
+
+- **远端 RED 与已否定假设**：PR #3 的 fresh `2/3` runner 已在同一个 `swift test --filter KinloguePlatformTests.LANDerivedArtifactSinkTests` 调用内完成 273.21 秒 cold build，但随后仍只留下 `swiftpm-testing-helper`，17 分钟没有任何测试事件并最终按 1,200 秒 deadline 返回 124。这否定了上一条“避免 cold inventory 后第二次 SwiftPM 启动即可收敛”的假设；失败边界是 macOS 26 上该 Swift Testing helper 路径，而不是 13 条业务断言的失败结果。
+- **proof-first 与修正**：脚本契约先要求专用命令显式包含 `--disable-swift-testing --enable-xctest` 并在旧实现稳定 RED。随后把 `LANDerivedArtifactSinkTests` 的同 13 个行为 case 与断言迁移到 XCTestCase；默认 `0/1` 与远端 `2/3` 都先走 XCTest-only 路径，planner 继续要求该容器存在但不再把它交给 Swift Testing shard。其余两个远端分区仍互斥覆盖主账 25 与 24 个 helper，没有删除断言或放宽 deadline。
+- **本机验证**：`2/3` 冷构建在 142.62 秒后直接完成 XCTest 13/13、0 failure，逐项输出全部 case 且未进入 Swift Testing runner；脚本安全回归 11/11 通过。默认 `0/1` 完整链随后通过：主账 964/89、derived XCTest 13/1、storage 33/1、条件别名 1/0、DICOM 17/1、验收扫描 12/1、安装 LAN 1/1 与 Socket/RSS 1/1；文档、隐私、脚本语法和 diff 门禁同时通过。远端 PR checks 与合并后 main 状态仍以后续运行结果为准。
+
+## [2026-08-24] ci/tooling | GitHub 扫描使用固定 SHA 的 ripgrep
+
+- **远端根因修正**：PR #3 新 head 已把验收扫描移到任何 primary/storage helper 前，但 12 项仍在合计约 0.5 秒内统一返回 `KLA_SCAN_ERROR` 70；这推翻了上一条日志对 helper churn 的归因。`scan-acceptance.sh` 在进入扫描循环前明确要求可执行 `rg`，而 GitHub macOS 26 runner 没有预装；该表现与仓库历史中已确认的 Codemagic 缺工具故障一致。
+- **供应链边界**：新增通用 CI 引导脚本，下载 ripgrep 14.1.1 的 `aarch64-apple-darwin` archive，核对既有已验证 SHA-256 `24ad76777745fbff131c8fbc466742b011f925bfa4fffa2ded6def23b5b937be` 后才安装到忽略的 `.build/ci-tools/bin`。GitHub quality 与 release package job 在后续门禁前把该目录写入 `GITHUB_PATH`；不使用 Homebrew，不进入 App bundle，下载、摘要、架构或版本不匹配均失败关闭。
+- **proof-first 与本机验证**：workflow/release 源码契约先因 installer 缺失得到 5 项 RED；实现后 2/2 GREEN。真实引导下载、摘要和版本检查通过；把该私有工具目录置于 `PATH` 后，完整 `AcceptanceScanScriptTests` 12/12 在 112.314 秒通过。App/bundle 门禁以本次后续验证为准。
+
+## [2026-08-24] ci/reliability | derived 专用分区使用单次 SwiftPM 调用
+
+- **远端 RED**：fresh `2/3` runner 先用 `swift test list` 完成 342.65 秒 cold build，并正确冻结 derived-artifact 13 tests / 1 suite；随后第二个 `swift test --skip-build` 进程在任何测试启动输出前停滞，最终由 175 秒内层上限返回 124。这否定了“仅换成 fresh runner 即可收敛”的假设，并把失败边界收窄为 cold inventory 后的第二次 SwiftPM 前端启动。
+- **修正与 proof-first**：保留三个 runner、planner 的全量覆盖/互斥契约和本机 `0/1` 完整路径；只有多 runner 的最后一个专用分区在 inventory/list 前提前分支，以一次 `swift test --filter KinloguePlatformTests.LANDerivedArtifactSinkTests` 同时完成 build 和执行，成功后仍运行文档门禁。源码顺序契约先因旧脚本缺少该直达路径稳定 RED，实现后 GREEN。
+- **本机验证**：真实 `KINLOGUE_PRIMARY_TEST_PARTITION=2/3 KINLOGUE_BUILD_JOBS=2 scripts/test.sh` 从构建到 derived 13/1 只启动一次 SwiftPM 测试命令并通过，文档门禁同时通过；完整 `TestScriptSafetyTests` 11/11 通过。更新后远端仍以 PR 新 head 为准，不把本机结果写成公共发布完成。
+
+## [2026-08-24] ci/reliability | 验收扫描在 helper churn 前运行
+
+- **远端 RED**：三 runner 的 PR #3 主 job 已成功完成全部 25 个 primary helper，随后验收扫描的每个合成 match/clean case 都在约 0.02 秒内统一返回安全错误 70；12 项测试累计 63 个期望失败。这不是某项泄漏断言失败，而是扫描子进程在同一 macOS 26 runner 经历 primary/storage helper churn 后无法建立运行条件。
+- **修正与验证**：只把现有 `AcceptanceScanScriptTests` 独立门禁移动到 inventory build 之后、Core/primary/storage 之前，并使用已构建 test bundle；skip 清单、12 项扫描内容、`--no-parallel -j 1`、180 秒 deadline 和其他隔离门禁均不变。源码顺序回归先在旧脚本稳定 RED，移动后 1/1 GREEN；真实扫描 12/12 在 66.277 秒通过。更新后远端仍以 PR 新 head 为准。
+
+## [2026-08-24] ci/reliability | derived-artifact suite 使用独立 fresh runner
+
+- **远端 RED**：两 runner 的 PR #3 运行先证明补充分区中的 `LANDeliveryPrerequisiteTests` 独立 helper 在 6 分 22 秒内成功；主分区随后在检查点恢复/发布 20/2 已成功后启动独立 `LANDerivedArtifactSinkTests` 13/1，却在任何测试启动输出前按 175 秒内层上限返回 124。这否定了“只需拆开两个 LAN 容器”的假设，并把不收敛边界收窄为 derived-artifact suite 不能复用已运行多个 helper 的远端 macOS 26 runner。
+- **修正与 proof-first**：planner 把 `LANDerivedArtifactSinkTests` 声明为专用 fresh-runner 容器；多 runner 模式保留最后一个分区只执行该容器，其余 shard 仍按确定性模数分配。本机默认 `0/1` 不变，仍覆盖完整清单。回归先让旧 planner 错把第三分区分给 Delivery，并让旧 workflow 因缺失第三 job 得到合计 8 项 RED；实现后 planner/workflow 2/2 GREEN，且证明三个分区互斥、并集精确等于全部 50 个 helper。
+- **本机验证**：正常 macOS 权限下 `2/3` 只运行 derived-artifact 13/1 并通过；`0/3` 运行 25 个 primary helper、Core、storage 33/1、条件别名锁 1/0、DICOM 17/1、扫描 12/1、安装 LAN 1/1 与 Socket/RSS 1/1；`1/3` 运行其余 24 个 primary helper。三个命令均为 exit 0。更新后远端 PR checks 仍须以新 head 为准，不把本机结果写成公共发布完成。
+
+## [2026-08-24] ci/reliability | 主测试按容器使用短生命周期串行 helper
+
+- **远端与本机 RED**：PR #3 的第二次 GitHub CI 在普通测试基本完成后仍保留 19 个 `KinlogueStorageProcessFixture` 子进程，主测试最终由 1,200 秒 deadline 以 124 终止。本机先把 storage target 从并发主套件分离并以 `--no-parallel -j 1` 完成 33/33；随后主套件又留下两个 `VaultMutationCoordinatorTests` 的真实 `/usr/bin/lockf` 子进程超过 9 分钟。全局串行后的远端运行不再残留子进程，却让唯一 Swift Testing helper 在检查点发布套件附近持续约 19 分钟；改成 target 级 helper 后，Platform 内检查点发布完整通过，仍在后续 `LANDeliveryPrerequisiteTests` 参数化用例处只剩 helper 并持续到 deadline。容器级分片远端连续两轮都证明该套件 16/16 和成功 summary 已完成，但 SwiftPM helper 随后仍驻留并由 180 秒 deadline 返回 124；第二轮监督器进程仍在而未记录已观察标记，把问题进一步限定为 Actions 原始输出流的 summary 解析。ANSI 规范化后的第三轮远端已记录 16/1 的已观察标记，紧接着 13/1 分片却在任何测试启动输出前超时；进程诊断同时显示 `swiftpm-testing` 已另建 process group。后代身份清理修正后的第四轮仍在相同的第 73 次 helper 启动、相同 13/1 分片、任何测试输出之前按内层 175 秒上限失败，证明剩余根因是重复 SwiftPM 前端启动的确定性累积，而不是该容器中的业务断言或未清理后代。把 88 个 shard 压到 49 后，第五轮远端在前 33 个合并 helper 全部成功后，仍让第 34 个 29/2 helper 在任何测试输出前超时；这否定了“只是 helper 启动次数”的单一因果。第六轮把 49 个 helper 分到两个全新 runner 后，分区 1 仍在更少的前置 helper 后让同一个 29/2 helper 在任何测试输出前超时；真实 planner 清单把它唯一映射到 `LANDeliveryPrerequisiteTests` 与 `LANDerivedArtifactSinkTests` 的组合，最终把边界收窄为这两个 suite 在 macOS 26 上的组合启动，而不是 runner 累积计数或最后可见业务断言的确定性死锁。
+- **修正与契约**：全量脚本先从可执行 test inventory 生成非重叠 shard；Core 保持单 helper，Platform/App 每个 helper 最多放入两个不拆分的完整多测试容器，单项容器每批最多 16 项，均保持 `--no-parallel`。planner 对未知 target、缺失隔离门禁、运行标识冲突、遗漏、重复和混合容器把隔离用例重新纳入全部失败关闭，并为每个 shard 冻结精确 tests/suites。监督器从有界二进制输出尾部去除 ANSI 控制序列、统一空白后匹配精确 summary，记录不含内容的期望/已观察计数；helper 存活时持续捕获后代 PID 与启动身份，即使后代另建 process group 或被重新托管，也只清理仍匹配身份的本分片进程。成功 summary 后保留 5 秒宽限；无 summary 的内层上限比外层 deadline 提前 5 秒，以便同一监督器先收敛后代。宽限期内的非零退出优先返回，错配/缺失 summary、超时或清理残留继续失败。target 分片与多 summary 契约先 RED→2/2 GREEN；真实清单随后依次暴露混合容器、单数 summary、顶层函数 target/signature 规范化和条件测试账本问题，每项均先补回归得到 RED 再修至 GREEN。1,042 个 specifier 在本机完整路径生成 50 个 Platform/App shard；GitHub CI 用确定性模数分成互斥的 `0/2` 与 `1/2` 两个全新 runner，各运行 25 个 helper，只由分区 0 承担 Core 和全部独立门禁；已证明不兼容的两个 LAN 容器固定拆成各一个 helper，其余容器配对不变。只在大小写不敏感卷启用的别名锁测试从固定主账分离为独立条件门禁。监督器回归先因脚本缺失 RED，随后证明跨进程组残留被收敛、summary 后即时非零仍返回 42、错配 summary 仍返回 124；ANSI summary 旧解析稳定返回 124 后转为 GREEN；另建 process group 的后代在旧实现上又稳定证明监督器返回成功但进程仍存活，修正后成功与无 summary 超时两条路径都能精确清理。两个完整容器共用 helper 的 planner 契约先在旧实现稳定得到 3 个 shard，再收敛为 2 个且保持所有 specifier 精确覆盖。分区契约的 proof-first 回归先让旧 planner 因额外参数失败，并让旧 workflow 因缺少第二 runner 得到 5 个精确断言 RED；实现后 2/2 GREEN。LAN 组合隔离回归再让旧 planner 精确得到 shard 总数 3、第二分区 1 个 fixture shard和同 pattern 包含两个 suite 的三项 RED；实现后总数 4、两分区各 2 个 fixture shard，且两个 suite 互斥、并集仍等于完整清单。
+- **验证**：外层沙箱内的单 helper 串行主套件在约 101 秒完成 974/91，只有依赖 `/bin/ps` 的 deadline tests 按设计失败关闭；同一精确命令在非沙箱权限下于 85.37 秒通过。检查点发布 suite 随后在同一工具链、每轮 15 秒硬截止下连续 30 轮通过。分片监督器聚焦回归和远端失败的 LAN 16/1 production wrapper 已本机通过；ANSI 规范化后的整链先完成 975/90，跨 process-group 后代修正后的 `KINLOGUE_BUILD_JOBS=2 scripts/test.sh` 再以 Core 与 88 个 Platform/App shard 精确汇总 977 tests / 90 suites，并通过关键相邻 16/1→13/1、条件别名锁 1/0、storage 33/1、DICOM 17/1、扫描 12/1、安装 LAN 1/1、Socket/RSS 1/1。49-shard 完整整链随后在正常 macOS 权限下精确汇总 977 tests / 90 suites，并通过条件别名锁 1/0、storage 33/1、DICOM 17/1、扫描 12/1、安装 LAN 1/1 和 Socket/RSS 1/1。最终 50-shard 契约的 `0/2` 与 `1/2` 本机整链均通过各自 25 个主分片；拆出的 Delivery 16/1 与 Derived 13/1 分别独立通过，分区 0 另通过 Core 和全部独立门禁，planner 回归同时证明两分区互斥且并集等于完整清单。更新后的远端 CI/CodeQL 仍以 PR 当前 head 为准，不把本机结果写成公共发布完成。
+
+## [2026-08-23] ci/reliability | 跨进程 fixture 退出观察不再阻塞 worker
+
+- **远端与本机 RED**：公开 baseline 的首个 GitHub Actions CI 在 lint、隐私门禁和全量测试构建完成后没有断言失败，但多个已经开始的跨进程/文件系统用例未收敛，最终由 1,200 秒 deadline 以退出码 124 终止。随后在同一 macOS 26 工具链把并发宽度降为 1，仍于 storage process 测试稳定停住；进程树证明 fixture 子进程已经退出，堆栈采样则精确落在后台 GCD worker 的 `Process.waitUntilExit()`。
+- **修正与边界**：fixture 在启动前安装 `Process.terminationHandler`，由锁保护的退出观察器缓存唯一终态并恢复并发或迟到的全部等待者；不再占用 worker 阻塞等待。主套件改用 SwiftPM 支持的 `--parallel --num-workers`，CI 固定两个 worker；DICOM 导入集成 17/1、验收扫描 12/1、安装 LAN 生产 HTTP 1/1 与真实 Socket/RSS 1/1 各自以 `--no-parallel` 独立运行。deadline、job 上限、覆盖和失败条件均未放宽。
+- **proof-first 与验证**：源码契约先在旧 fixture 上精确观察到缺少 termination handler 且仍调用 `waitUntilExit()`；真实 fixture 回归再要求并发两个等待者、shutdown 自身等待者和退出后的迟到等待者都取得同一个成功状态。首次本机完整修复通过后，PR #3 远端 RED 又证明实验性宽度变量未阻止小型 runner 在 16 秒内令验收扫描全部资源失败并再次超时；官方 worker CLI 与扫描隔离的契约继续先 RED。两次本机有界 worker 全量又各自只暴露 DICOM 导入集成的 1 个资源时限 issue，而同一 suite 独立复验 17/17、3.48 秒通过，因此将其纳入真实单 worker 门禁。最终 `scripts/test.sh` 通过：主套件 1,007 tests / 92 suites、DICOM 导入集成 17/1、验收扫描 12/1、安装 LAN 探针 1/1、真实 Socket/RSS 1/1；远端最终状态仍以 PR 自身的 CI/CodeQL 和合并后的 main workflow 为准。
+
 ## [2026-08-23] release/history | 从净化 tree 建立单根公开候选
 
 - **历史拓扑**：仅导出最终受控 `HEAD` tree，在隔离仓库建立一个 noreply 作者的 root commit；未复制旧 `.git`、branches、tags、PR refs、releases 或原 commit metadata。`git rev-list --count --all` 为 1，唯一根等于候选 HEAD。

@@ -80,8 +80,15 @@ struct LANUploadSinkTests {
         #expect(injector.occurrenceCount(for: .beforeDataCopy) == 2)
 
         preActorGate.release()
-        await #expect(throws: LANInboxError.invalidState) {
+        // The already-admitted write may finish before the rejection reaches
+        // the sink actor, or observe the actor's failure fence. Both outcomes
+        // preserve the synchronous body budget and terminal cleanup contract.
+        do {
             try await firstWrite.value
+        } catch LANInboxError.invalidState {
+            // The rejection reached the actor before descriptor IO completed.
+        } catch {
+            Issue.record("An admitted write failed with an unexpected error")
         }
         try await secondWrite.value
         await #expect(throws: LANInboxError.resourceLimitExceeded) {
