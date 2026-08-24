@@ -2,6 +2,10 @@
 
 本文件是项目知识库的追加式日志。每个条目记录一次可复核的 ingest、query、lint 或重大文档维护；不要改写历史条目来伪造当前状态。最新状态以专题页和代码/测试为准。
 
+## [2026-08-24] docs/release | 同步验收扫描当前计数
+
+- **事实修正**：验收 scanner 新增合成 `.build` 泄漏和非法 `Repository` 符号链接两项回归后，独立 suite 的当前计数为 14 tests / 1 suite；[`acceptance/current-release.md`](acceptance/current-release.md) 从旧的 12/1 同步为 14/1。只修正文档计数，不改变实现、发布边界或既有验收结论。
+
 ## [2026-08-24] ci/reliability | 验收扫描回归使用私有合成仓库根
 
 - **合并后远端 RED**：PR #3 四项检查全绿并 squash 合并后，同一 tree 的 `main` push 在 177.46 秒 cold build 与 inventory planning 后，让独立 `AcceptanceScanScriptTests` 持续到 180 秒 deadline 并返回 124；进程诊断精确留下 `swift-package → swiftpm-testing → zsh → rg`。scanner 的内部夹具此前仍为每个参数化 case 扫描真实 `.build`，因此运行时间取决于当前 cold-build 体积，而不是业务或泄漏断言。
