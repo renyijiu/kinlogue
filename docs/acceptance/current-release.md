@@ -8,7 +8,7 @@
 
 | 维度 | 当前状态 | 说明 |
 | --- | --- | --- |
-| 源码自动化 | `passed` | `scripts/test.sh` 已串行完成主套件 964 tests / 89 suites，并以逐 case 有界进程独立串行执行 derived-artifact XCTest 13/1、条件式大小写别名、storage process 33/1、DICOM 导入集成 17/1、验收扫描 12/1、安装 LAN 生产 HTTP 1/1 和真实双流 LAN RSS/背压 1/1 |
+| 源码自动化 | `passed` | `scripts/test.sh` 已串行完成主套件 964 tests / 89 suites，并以逐 case 有界进程独立串行执行 derived-artifact XCTest 13/1、条件式大小写别名、storage process 33/1、DICOM 导入集成 17/1、验收扫描 14/1、安装 LAN 生产 HTTP 1/1 和真实双流 LAN RSS/背压 1/1 |
 | clean-source bundle / XPC | `passed-local` | 当前 Mac 已从干净源码运行 `scripts/verify-app.sh --require-clean-source`，并对同一 ad-hoc bundle 通过 DICOM XPC 签名、raw fixture、crash/hang containment、日志 canary 与零 runtime socket 门禁；不代表 Developer ID、公证或最低系统矩阵 |
 | Git 历史隐私 | `verified-local` | 当前公开候选由净化 tree 建立为唯一 root commit，并已对该 ref 通过 history guard；推送后仍须在隔离 clone 对全部公开 refs 复验 |
 | 公开托管 | `external` | CI、CodeQL、Dependabot 与治理文件已入库；GitHub 安全设置、branch rules 和 workflow 运行属于可变远端状态，必须在托管平台实时核对，不把它们固化成 commit 内的永久结论 |
