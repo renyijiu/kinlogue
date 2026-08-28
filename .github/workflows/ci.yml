@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Show toolchain
         run: |
@@ -44,7 +46,9 @@ jobs:
         run: scripts/lint.sh
 
       - name: Enforce privacy disclosures and fixture policy
-        run: scripts/privacy-guard.sh
+        run: |
+          scripts/privacy-guard.sh
+          scripts/privacy-history-guard.sh --ref HEAD
 
       - name: Run the full test suite
         run: scripts/test.sh

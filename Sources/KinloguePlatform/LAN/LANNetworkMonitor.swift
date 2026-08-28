@@ -4,15 +4,18 @@ import Network
 public struct LANNetworkPathFingerprint: Equatable, Sendable {
     public let interfaceName: String
     public let host: String
+    public let networkPrefixLength: Int
     public let routeIsSatisfied: Bool
 
     public init(
         interfaceName: String,
         host: String,
+        networkPrefixLength: Int,
         routeIsSatisfied: Bool = true
     ) {
         self.interfaceName = interfaceName
         self.host = host
+        self.networkPrefixLength = networkPrefixLength
         self.routeIsSatisfied = routeIsSatisfied
     }
 }
@@ -69,7 +72,8 @@ public actor LANNetworkMonitor {
     ) {
         self.advertisedFingerprint = .init(
             interfaceName: advertisedAddress.interfaceName,
-            host: advertisedAddress.host
+            host: advertisedAddress.host,
+            networkPrefixLength: advertisedAddress.networkPrefixLength
         )
         self.snapshotSource = { try LANNetworkInterfaceResolver.currentSnapshots() }
         self.pathUpdateSource = LANNWPathUpdateSource()
@@ -86,7 +90,8 @@ public actor LANNetworkMonitor {
     ) {
         self.advertisedFingerprint = .init(
             interfaceName: advertisedAddress.interfaceName,
-            host: advertisedAddress.host
+            host: advertisedAddress.host,
+            networkPrefixLength: advertisedAddress.networkPrefixLength
         )
         self.snapshotSource = snapshotSource
         self.pathUpdateSource = pathUpdateSource
@@ -166,12 +171,14 @@ public actor LANNetworkMonitor {
         guard let exact = addresses.first(where: {
             $0.interfaceName == advertisedFingerprint.interfaceName
                 && $0.host == advertisedFingerprint.host
+                && $0.networkPrefixLength == advertisedFingerprint.networkPrefixLength
         }) else {
             return nil
         }
         return .init(
             interfaceName: exact.interfaceName,
             host: exact.host,
+            networkPrefixLength: exact.networkPrefixLength,
             routeIsSatisfied: routeIsSatisfied
         )
     }
@@ -186,6 +193,7 @@ private final class LANNWPathUpdateSource: LANNetworkPathUpdateSource, @unchecke
     private var started = false
     private var cancelled = false
     private var deliveredInitialPath = false
+    private var deliveredTerminalChange = false
 
     func start(onUpdate: @escaping @Sendable (LANNetworkPathObservation) -> Void) {
         let shouldStart = lock.withLock {
@@ -193,17 +201,25 @@ private final class LANNWPathUpdateSource: LANNetworkPathUpdateSource, @unchecke
             started = true
             monitor.pathUpdateHandler = { [weak self] path in
                 guard let self else { return }
-                let delivery: LANNetworkPathObservation.Delivery = self.lock.withLock {
-                    if self.deliveredInitialPath {
-                        return .changed
+                let observation: LANNetworkPathObservation? = self.lock.withLock {
+                    guard !self.cancelled else { return nil }
+                    if !self.deliveredInitialPath {
+                        self.deliveredInitialPath = true
+                        return .init(
+                            delivery: .initial,
+                            routeIsSatisfied: path.status == .satisfied
+                        )
                     }
-                    self.deliveredInitialPath = true
-                    return .initial
+                    guard !self.deliveredTerminalChange else { return nil }
+                    self.deliveredTerminalChange = true
+                    return .init(
+                        delivery: .changed,
+                        routeIsSatisfied: path.status == .satisfied
+                    )
                 }
-                onUpdate(.init(
-                    delivery: delivery,
-                    routeIsSatisfied: path.status == .satisfied
-                ))
+                if let observation {
+                    onUpdate(observation)
+                }
             }
             return true
         }

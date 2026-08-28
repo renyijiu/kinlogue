@@ -9,44 +9,106 @@ struct LANDeliveryPrerequisiteTests {
     @Test
     func oneEligibleAddressIsSelectedAutomatically() throws {
         let resolution = LANNetworkInterfaceResolver.resolve([
-            .init(name: "lo0", address: "127.0.0.1", isUp: true, isRunning: true),
-            .init(name: "en0", address: "192.168.1.23", isUp: true, isRunning: true),
-            .init(name: "en1", address: "169.254.10.2", isUp: true, isRunning: true),
+            .init(
+                name: "lo0",
+                address: "127.0.0.1",
+                networkPrefixLength: 8,
+                isUp: true,
+                isRunning: true
+            ),
+            .init(
+                name: "en0",
+                address: "192.168.1.23",
+                networkPrefixLength: 24,
+                isUp: true,
+                isRunning: true
+            ),
+            .init(
+                name: "en1",
+                address: "169.254.10.2",
+                networkPrefixLength: 16,
+                isUp: true,
+                isRunning: true
+            ),
         ])
 
-        #expect(resolution == .automatic(.init(interfaceName: "en0", host: "192.168.1.23")))
+        #expect(resolution == .automatic(.init(
+            interfaceName: "en0",
+            host: "192.168.1.23",
+            networkPrefixLength: 24
+        )))
     }
 
     @Test
     func multipleEligibleAddressesRequireAnExplicitChoice() throws {
         let candidates: [LANNetworkInterfaceSnapshot] = [
-            .init(name: "en5", address: "10.0.0.8", isUp: true, isRunning: true),
-            .init(name: "en0", address: "192.168.1.23", isUp: true, isRunning: true),
+            .init(
+                name: "en5",
+                address: "10.0.0.8",
+                networkPrefixLength: 8,
+                isUp: true,
+                isRunning: true
+            ),
+            .init(
+                name: "en0",
+                address: "192.168.1.23",
+                networkPrefixLength: 24,
+                isUp: true,
+                isRunning: true
+            ),
         ]
 
         #expect(LANNetworkInterfaceResolver.resolve(candidates) == .selectionRequired([
-            .init(interfaceName: "en0", host: "192.168.1.23"),
-            .init(interfaceName: "en5", host: "10.0.0.8"),
+            .init(interfaceName: "en0", host: "192.168.1.23", networkPrefixLength: 24),
+            .init(interfaceName: "en5", host: "10.0.0.8", networkPrefixLength: 8),
         ]))
         #expect(try LANNetworkInterfaceResolver.requireExactAddress("10.0.0.8", from: candidates)
-            == .init(interfaceName: "en5", host: "10.0.0.8"))
+            == .init(interfaceName: "en5", host: "10.0.0.8", networkPrefixLength: 8))
+        #expect(try LANNetworkInterfaceResolver.requireExactAddress(
+            .init(interfaceName: "en5", host: "10.0.0.8", networkPrefixLength: 8),
+            from: candidates
+        ) == .init(interfaceName: "en5", host: "10.0.0.8", networkPrefixLength: 8))
+        #expect(throws: LANNetworkInterfaceResolverError.self) {
+            try LANNetworkInterfaceResolver.requireExactAddress(
+                .init(interfaceName: "en5", host: "10.0.0.8", networkPrefixLength: 16),
+                from: candidates
+            )
+        }
     }
 
     @Test
     func canonicalIPv6AddressIsEligibleAndSelectable() throws {
         let candidates: [LANNetworkInterfaceSnapshot] = [
-            .init(name: "en0", address: "2001:db8::23", isUp: true, isRunning: true),
-            .init(name: "en0", address: "2001:0db8::23", isUp: true, isRunning: true),
-            .init(name: "en0", address: "fe80::1", isUp: true, isRunning: true),
+            .init(
+                name: "en0",
+                address: "2001:db8::23",
+                networkPrefixLength: 64,
+                isUp: true,
+                isRunning: true
+            ),
+            .init(
+                name: "en0",
+                address: "2001:0db8::23",
+                networkPrefixLength: 64,
+                isUp: true,
+                isRunning: true
+            ),
+            .init(
+                name: "en0",
+                address: "fe80::1",
+                networkPrefixLength: 64,
+                isUp: true,
+                isRunning: true
+            ),
         ]
 
         #expect(LANNetworkInterfaceResolver.resolve(candidates) == .automatic(
-            .init(interfaceName: "en0", host: "2001:db8::23")
+            .init(interfaceName: "en0", host: "2001:db8::23", networkPrefixLength: 64)
         ))
         #expect(try LANNetworkInterfaceResolver.requireExactAddress(
             "2001:db8::23",
             from: candidates
-        ) == .init(interfaceName: "en0", host: "2001:db8::23"))
+        ) == .init(interfaceName: "en0", host: "2001:db8::23", networkPrefixLength: 64))
     }
 
     @Test(arguments: [
@@ -66,7 +128,13 @@ struct LANDeliveryPrerequisiteTests {
     ])
     func wildcardLoopbackLinkLocalAndSubnetInputsAreRejected(_ address: String) {
         let candidates: [LANNetworkInterfaceSnapshot] = [
-            .init(name: "en0", address: "192.168.1.23", isUp: true, isRunning: true),
+            .init(
+                name: "en0",
+                address: "192.168.1.23",
+                networkPrefixLength: 24,
+                isUp: true,
+                isRunning: true
+            ),
         ]
 
         #expect(throws: LANNetworkInterfaceResolverError.self) {
@@ -75,12 +143,112 @@ struct LANDeliveryPrerequisiteTests {
     }
 
     @Test
+    func addressesWithoutAValidNonzeroNetworkPrefixAreIneligible() {
+        let snapshots: [LANNetworkInterfaceSnapshot] = [
+            .init(
+                name: "en0",
+                address: "192.168.1.23",
+                networkPrefixLength: nil,
+                isUp: true,
+                isRunning: true
+            ),
+            .init(
+                name: "en1",
+                address: "192.168.2.23",
+                networkPrefixLength: 0,
+                isUp: true,
+                isRunning: true
+            ),
+            .init(
+                name: "en2",
+                address: "192.168.3.23",
+                networkPrefixLength: 33,
+                isUp: true,
+                isRunning: true
+            ),
+        ]
+
+        #expect(LANNetworkInterfaceResolver.resolve(snapshots) == .unavailable)
+    }
+
+    @Test
+    func interfaceNetmasksRequireContiguousIPv4AndIPv6Bits() throws {
+        #expect(try #require(
+            LANIPAddress.parseCanonical("255.255.255.0")
+        ).contiguousNetworkPrefixLength == 24)
+        #expect(try #require(
+            LANIPAddress.parseCanonical("255.255.255.254")
+        ).contiguousNetworkPrefixLength == 31)
+        #expect(try #require(
+            LANIPAddress.parseCanonical("255.0.255.0")
+        ).contiguousNetworkPrefixLength == nil)
+        #expect(try #require(
+            LANIPAddress.parseCanonical("ffff:ffff:ffff:ffff::")
+        ).contiguousNetworkPrefixLength == 64)
+        #expect(try #require(
+            LANIPAddress.parseCanonical("ffff:fffe:ffff::")
+        ).contiguousNetworkPrefixLength == nil)
+    }
+
+    @Test
+    func peerAdmissionRequiresTheSelectedIPv4OrIPv6Prefix() {
+        let ipv4 = LANNetworkAddress(
+            interfaceName: "en0",
+            host: "192.168.7.42",
+            networkPrefixLength: 24
+        )
+        #expect(LANServerTransport.isPeerHost("192.168.7.1", on: ipv4))
+        #expect(LANServerTransport.isPeerHost("192.168.7.255", on: ipv4))
+        #expect(!LANServerTransport.isPeerHost("192.168.8.1", on: ipv4))
+
+        let ipv6 = LANNetworkAddress(
+            interfaceName: "en0",
+            host: "2001:db8:4:5::42",
+            networkPrefixLength: 64
+        )
+        #expect(LANServerTransport.isPeerHost("2001:db8:4:5::1", on: ipv6))
+        #expect(!LANServerTransport.isPeerHost("2001:db8:4:6::1", on: ipv6))
+        #expect(!LANServerTransport.isPeerHost("::ffff:192.168.7.1", on: ipv4))
+        #expect(!LANServerTransport.isPeerHost("not-an-address", on: ipv4))
+    }
+
+    @Test
+    func peerAdmissionHandlesMaximumAndOneBitPrefixes() {
+        let exactIPv4 = LANNetworkAddress(
+            interfaceName: "en0",
+            host: "192.0.2.9",
+            networkPrefixLength: 32
+        )
+        #expect(LANServerTransport.isPeerHost("192.0.2.9", on: exactIPv4))
+        #expect(!LANServerTransport.isPeerHost("192.0.2.8", on: exactIPv4))
+
+        let firstIPv6Bit = LANNetworkAddress(
+            interfaceName: "en0",
+            host: "2001:db8::1",
+            networkPrefixLength: 1
+        )
+        #expect(LANServerTransport.isPeerHost("7fff::1", on: firstIPv6Bit))
+        #expect(!LANServerTransport.isPeerHost("8000::1", on: firstIPv6Bit))
+
+        let exactIPv6 = LANNetworkAddress(
+            interfaceName: "en0",
+            host: "2001:db8::1",
+            networkPrefixLength: 128
+        )
+        #expect(LANServerTransport.isPeerHost("2001:db8::1", on: exactIPv6))
+        #expect(!LANServerTransport.isPeerHost("2001:db8::2", on: exactIPv6))
+    }
+
+    @Test
     func transportBindsOneNumericAddressAndRejectsConnectionsAfterStop() async throws {
         let received = LockedPayloads()
         let transport = LANServerTransport(testingByteSink: { bytes, peer in
             received.append(bytes, peer: peer)
         })
-        let endpoint = try await transport.start(host: "127.0.0.1", port: 0)
+        let endpoint = try await transport.start(
+            at: .init(interfaceName: "lo0", host: "127.0.0.1", networkPrefixLength: 8),
+            port: 0
+        )
         #expect(endpoint.host == "127.0.0.1")
         #expect(endpoint.port > 0)
 
@@ -106,7 +274,10 @@ struct LANDeliveryPrerequisiteTests {
         let transport = LANServerTransport(testingByteSink: { bytes, peer in
             received.append(bytes, peer: peer)
         })
-        let endpoint = try await transport.start(host: "127.0.0.1", port: 0)
+        let endpoint = try await transport.start(
+            at: .init(interfaceName: "lo0", host: "127.0.0.1", networkPrefixLength: 8),
+            port: 0
+        )
         let descriptor = try connectedSocket(to: endpoint)
         defer { _ = Darwin.close(descriptor) }
 
@@ -184,12 +355,26 @@ struct LANDeliveryPrerequisiteTests {
             startHook: { await gate.wait() }
         )
         let first = Task {
-            try await transport.start(host: "127.0.0.1", port: 0)
+            try await transport.start(
+                at: .init(
+                    interfaceName: "lo0",
+                    host: "127.0.0.1",
+                    networkPrefixLength: 8
+                ),
+                port: 0
+            )
         }
         await gate.waitUntilEntered()
 
         await #expect(throws: LANServerTransportError.alreadyStarted) {
-            try await transport.start(host: "127.0.0.1", port: 0)
+            try await transport.start(
+                at: .init(
+                    interfaceName: "lo0",
+                    host: "127.0.0.1",
+                    networkPrefixLength: 8
+                ),
+                port: 0
+            )
         }
         await gate.release()
         _ = try await first.value
@@ -204,7 +389,14 @@ struct LANDeliveryPrerequisiteTests {
             startHook: { await gate.wait() }
         )
         let start = Task {
-            try await transport.start(host: "127.0.0.1", port: 0)
+            try await transport.start(
+                at: .init(
+                    interfaceName: "lo0",
+                    host: "127.0.0.1",
+                    networkPrefixLength: 8
+                ),
+                port: 0
+            )
         }
         await gate.waitUntilEntered()
         let stop = Task { await transport.stop() }
@@ -216,7 +408,14 @@ struct LANDeliveryPrerequisiteTests {
         }
         await stop.value
         await #expect(throws: LANServerTransportError.stopped) {
-            try await transport.start(host: "127.0.0.1", port: 0)
+            try await transport.start(
+                at: .init(
+                    interfaceName: "lo0",
+                    host: "127.0.0.1",
+                    networkPrefixLength: 8
+                ),
+                port: 0
+            )
         }
     }
 
@@ -237,7 +436,36 @@ struct LANDeliveryPrerequisiteTests {
     func productionTransportRejectsNonExactOrUnsafeBinding(_ host: String) async {
         let transport = LANServerTransport { _, _ in }
         await #expect(throws: LANServerTransportError.invalidHost(host)) {
-            try await transport.start(host: host, port: 0)
+            try await transport.start(
+                at: .init(interfaceName: "synthetic", host: host, networkPrefixLength: 24),
+                port: 0
+            )
+        }
+        await transport.stop()
+    }
+
+    @Test
+    func productionTransportRejectsOutOfRangeNetworkPrefixes() async {
+        let transport = LANServerTransport { _, _ in }
+        await #expect(throws: LANServerTransportError.invalidNetworkPrefix(0)) {
+            try await transport.start(
+                at: .init(
+                    interfaceName: "en0",
+                    host: "192.0.2.1",
+                    networkPrefixLength: 0
+                ),
+                port: 0
+            )
+        }
+        await #expect(throws: LANServerTransportError.invalidNetworkPrefix(129)) {
+            try await transport.start(
+                at: .init(
+                    interfaceName: "en0",
+                    host: "2001:db8::1",
+                    networkPrefixLength: 129
+                ),
+                port: 0
+            )
         }
         await transport.stop()
     }
@@ -279,7 +507,10 @@ struct LANDeliveryPrerequisiteTests {
         let transport = LANServerTransport(testingByteSink: { bytes, peer in
             received.append(bytes, peer: peer)
         })
-        let endpoint = try await transport.start(host: "::1", port: 0)
+        let endpoint = try await transport.start(
+            at: .init(interfaceName: "lo0", host: "::1", networkPrefixLength: 128),
+            port: 0
+        )
         #expect(endpoint.urlAuthority == "[::1]:\(endpoint.port)")
 
         try send(Data("synthetic-ipv6".utf8), to: endpoint)
@@ -302,7 +533,10 @@ struct LANDeliveryPrerequisiteTests {
             },
             allowLoopbackForTesting: true
         )
-        let endpoint = try await transport.start(host: "127.0.0.1", port: 0)
+        let endpoint = try await transport.start(
+            at: .init(interfaceName: "lo0", host: "127.0.0.1", networkPrefixLength: 8),
+            port: 0
+        )
         let descriptor = try connectedSocket(to: endpoint)
         defer { _ = Darwin.close(descriptor) }
 
@@ -312,6 +546,48 @@ struct LANDeliveryPrerequisiteTests {
         }
         #expect(peers.snapshot().first?.host == "127.0.0.1")
         await transport.stop()
+    }
+
+    @Test
+    func offPrefixAndMissingPeersCloseBeforeTheChildInitializerRuns() throws {
+        let listeningAddress = LANNetworkAddress(
+            interfaceName: "en0",
+            host: "192.168.7.42",
+            networkPrefixLength: 24
+        )
+        let registry = LANChannelRegistry()
+        let peers = LockedPeers()
+        let initializer: LANServerTransport.ChildChannelInitializer = { channel, peer in
+            peers.append(peer)
+            return channel.eventLoop.makeSucceededFuture(())
+        }
+        let offPrefix = EmbeddedChannel()
+        let missingPeer = EmbeddedChannel()
+        defer {
+            _ = try? offPrefix.finish()
+            _ = try? missingPeer.finish()
+        }
+
+        try LANServerTransport.initializeAcceptedChannel(
+            offPrefix,
+            peer: .init(host: "192.168.8.1", port: 52_000),
+            listeningAddress: listeningAddress,
+            registry: registry,
+            childChannelInitializer: initializer,
+            allowingLoopback: false
+        ).wait()
+        try LANServerTransport.initializeAcceptedChannel(
+            missingPeer,
+            peer: nil,
+            listeningAddress: listeningAddress,
+            registry: registry,
+            childChannelInitializer: initializer,
+            allowingLoopback: false
+        ).wait()
+
+        #expect(peers.snapshot().isEmpty)
+        #expect(!offPrefix.isActive)
+        #expect(!missingPeer.isActive)
     }
 
     @Test
@@ -334,7 +610,10 @@ struct LANDeliveryPrerequisiteTests {
             },
             allowLoopbackForTesting: true
         )
-        let endpoint = try await transport.start(host: "127.0.0.1", port: 0)
+        let endpoint = try await transport.start(
+            at: .init(interfaceName: "lo0", host: "127.0.0.1", networkPrefixLength: 8),
+            port: 0
+        )
         let descriptor = try connectedSocket(to: endpoint)
         defer { _ = Darwin.close(descriptor) }
 

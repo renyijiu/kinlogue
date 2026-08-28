@@ -30,6 +30,15 @@ trap cleanup EXIT INT TERM HUP
 [[ "$(/usr/bin/uname -m)" == arm64 ]] \
   || fail "the pinned archive only supports Apple Silicon"
 
+if [[ -e "$RIPGREP_BIN" || -L "$RIPGREP_BIN" ]]; then
+  [[ -f "$RIPGREP_BIN" && ! -L "$RIPGREP_BIN" && -x "$RIPGREP_BIN" ]] \
+    || fail "the existing ripgrep executable was not a private regular file"
+  "$RIPGREP_BIN" --version 2>/dev/null \
+    | /usr/bin/grep -Eq \
+      "^ripgrep ${RIPGREP_VERSION//./\\.} \(rev [0-9a-f]{10,40}\)$" \
+    || fail "the existing ripgrep version did not match"
+fi
+
 TEMP_ROOT="$(/usr/bin/mktemp -d \
   /private/tmp/kinlogue-ci-tools.XXXXXXXX)" \
   || fail "the private download directory could not be created"
@@ -42,14 +51,16 @@ ARCHIVE_PATH="$TEMP_ROOT/$ARCHIVE_NAME"
   --tlsv1.2 \
   --output "$ARCHIVE_PATH" \
   "$DOWNLOAD_URL" \
+  >/dev/null 2>&1 \
   || fail "the pinned ripgrep archive could not be downloaded"
 
 ACTUAL_SHA256="$(/usr/bin/shasum -a 256 "$ARCHIVE_PATH" \
-  | /usr/bin/awk '{print $1}')"
+  2>/dev/null | /usr/bin/awk '{print $1}')"
 [[ "$ACTUAL_SHA256" == "$ARCHIVE_SHA256" ]] \
   || fail "the pinned ripgrep archive digest did not match"
 
 /usr/bin/tar -xzf "$ARCHIVE_PATH" -C "$TEMP_ROOT" \
+  >/dev/null 2>&1 \
   || fail "the pinned ripgrep archive could not be extracted"
 EXTRACTED_BIN="$TEMP_ROOT/ripgrep-${RIPGREP_VERSION}-aarch64-apple-darwin/rg"
 [[ -f "$EXTRACTED_BIN" && ! -L "$EXTRACTED_BIN" ]] \

@@ -107,11 +107,39 @@ for argument in "$@"; do
   fi
 done
 
+PRIMARY_TEST_LOG="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-primary-tests.XXXXXX")"
+PRIMARY_TEST_LIST="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-test-list.XXXXXX")"
+PRIMARY_TEST_SHARDS="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-test-shards.XXXXXX")"
+PRIMARY_TEST_INVENTORY="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-test-inventory.XXXXXX")"
+DERIVED_XCTEST_CASE_LIST="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-derived-cases.XXXXXX")"
+DERIVED_XCTEST_INVENTORY="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-derived-inventory.XXXXXX")"
+DERIVED_XCTEST_LOG="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-derived-xctest.XXXXXX")"
+/bin/chmod 600 \
+  "$PRIMARY_TEST_LOG" \
+  "$PRIMARY_TEST_LIST" \
+  "$PRIMARY_TEST_SHARDS" \
+  "$PRIMARY_TEST_INVENTORY" \
+  "$DERIVED_XCTEST_CASE_LIST" \
+  "$DERIVED_XCTEST_INVENTORY" \
+  "$DERIVED_XCTEST_LOG"
+trap '/bin/rm -f "$PRIMARY_TEST_LOG" "$PRIMARY_TEST_LIST" "$PRIMARY_TEST_SHARDS" "$PRIMARY_TEST_INVENTORY" "$DERIVED_XCTEST_CASE_LIST" "$DERIVED_XCTEST_INVENTORY" "$DERIVED_XCTEST_LOG"' \
+  EXIT HUP INT TERM
+
+if [[ "$RUN_ISOLATED_GATES" == true ]]; then
+  "$REPO_DIR/scripts/run-with-deadline.sh" \
+    "$KINLOGUE_PRIMARY_TEST_TIMEOUT_SECONDS" \
+    swift test "${SWIFT_TEST_ARGUMENTS[@]}" \
+      -j "$KINLOGUE_BUILD_JOBS" \
+      list > "$PRIMARY_TEST_LIST"
+  /usr/bin/ruby "$REPO_DIR/scripts/primary-test-shards.rb" \
+    --inventory-summary "$PRIMARY_TEST_LIST" > "$PRIMARY_TEST_INVENTORY"
+fi
+
 # The final remote partition is intentionally one fixed, expensive LAN suite.
 # SwiftPM only builds its XCTest bundle: hosted macOS 26 has stalled after a
 # successful cold build in SwiftPM's runners and while directly running the
-# whole XCTest class. Launch every fixed case in its own bounded process so a
-# loader or behavioral stall is isolated to one named, content-free selector.
+# whole XCTest class. Discover every built case and launch it in its own bounded
+# process so a loader or behavioral stall is isolated to one content-free selector.
 if [[ "$RUN_ISOLATED_GATES" == true \
       && ("$PRIMARY_PARTITION_COUNT" -eq 1 \
         || "$PRIMARY_PARTITION_INDEX" -eq $((PRIMARY_PARTITION_COUNT - 1))) ]]; then
@@ -133,27 +161,20 @@ if [[ "$RUN_ISOLATED_GATES" == true \
     print -u2 "dedicated XCTest bundle was not produced at the expected path"
     exit 70
   fi
-  DERIVED_XCTEST_LOG="$(
-    /usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-derived-xctest.XXXXXX"
-  )"
-  /bin/chmod 600 "$DERIVED_XCTEST_LOG"
-  trap '/bin/rm -f "$DERIVED_XCTEST_LOG"' EXIT HUP INT TERM
-  DERIVED_XCTEST_CASES=(
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testProductionAdmissionUsesTheDocumentedStoreAndOwnerBounds
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testProductionStoreBudgetIsReservedBeforeAnyDerivedActorHop
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testEmptyDataAndBuffersDoNotConsumeDerivedTurnsAndCloseWithFinish
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testSharedAdmissionAppliesTotalLimitsAcrossOwners
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testStreamsMultipleChunkKindsAndSyncsBeforeOneReplayableFinalize
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testConcurrentFinishesJoinAndAbortCannotRunBesideFinalization
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testConcurrentAbortsJoinOneDescriptorBoundCallbackAndRejectFinishAndWrite
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testWriteFailureAndRacingTerminalCallsStillAbortExactlyOnce
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testThirdPendingChunkIsRejectedBeforeCopyAndDrainsExactlyOnce
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testTinyChunksCannotExceedConfiguredHighWaterMark
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testByteBufferRetainedCapacityIsRejectedWithoutEnteringIO
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testAbortRacingQueuedFinishDrainsPermitAndOwnsTerminalTransition
-    KinloguePlatformTests.LANDerivedArtifactSinkTests/testRejectsNonPrivateOrHardLinkedDescriptorsAtOwnershipTransfer
-  )
-  for derived_xctest_case in "${DERIVED_XCTEST_CASES[@]}"; do
+  "$REPO_DIR/scripts/run-with-deadline.sh" \
+    "$KINLOGUE_PRIMARY_TEST_TIMEOUT_SECONDS" \
+    swift test "${SWIFT_TEST_ARGUMENTS[@]}" \
+      --skip-build \
+      --disable-swift-testing --enable-xctest \
+      list > "$DERIVED_XCTEST_INVENTORY"
+  /usr/bin/ruby "$REPO_DIR/scripts/discover-derived-xctest-cases.rb" \
+    "$DERIVED_XCTEST_INVENTORY" > "$DERIVED_XCTEST_CASE_LIST"
+  DERIVED_XCTEST_COUNT=0
+  while IFS= read -r derived_xctest_case; do
+    [[ -n "$derived_xctest_case" ]] || {
+      print -u2 "dedicated XCTest discovery emitted an empty selector"
+      exit 70
+    }
     print "KLT_DERIVED_XCTEST_CASE selector=$derived_xctest_case"
     : > "$DERIVED_XCTEST_LOG"
     "$REPO_DIR/scripts/run-with-deadline.sh" \
@@ -168,33 +189,25 @@ if [[ "$RUN_ISOLATED_GATES" == true \
       print -u2 "dedicated XCTest case did not emit its exact passing summary"
       exit 70
     fi
-  done
-  print "KLT_DERIVED_XCTEST_SUMMARY tests=13 failures=0"
-  /bin/rm -f "$DERIVED_XCTEST_LOG"
-  trap - EXIT HUP INT TERM
-  "$REPO_DIR/scripts/verify-docs.sh"
+    DERIVED_XCTEST_COUNT=$((DERIVED_XCTEST_COUNT + 1))
+  done < "$DERIVED_XCTEST_CASE_LIST"
+  [[ "$DERIVED_XCTEST_COUNT" -gt 0 ]] || {
+    print -u2 "dedicated XCTest discovery emitted no selectors"
+    exit 70
+  }
+  print "KLT_DERIVED_XCTEST_SUMMARY tests=$DERIVED_XCTEST_COUNT failures=0"
   if [[ "$PRIMARY_PARTITION_COUNT" -gt 1 ]]; then
+    KINLOGUE_REQUIRE_TEST_EVIDENCE=1 \
+      KINLOGUE_TEST_INVENTORY_FILE="$PRIMARY_TEST_INVENTORY" \
+      "$REPO_DIR/scripts/verify-docs.sh"
     exit 0
   fi
 fi
-
-PRIMARY_TEST_LOG="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-primary-tests.XXXXXX")"
-PRIMARY_TEST_LIST="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-test-list.XXXXXX")"
-PRIMARY_TEST_SHARDS="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-test-shards.XXXXXX")"
-/bin/chmod 600 "$PRIMARY_TEST_LOG"
-/bin/chmod 600 "$PRIMARY_TEST_LIST" "$PRIMARY_TEST_SHARDS"
-trap '/bin/rm -f "$PRIMARY_TEST_LOG" "$PRIMARY_TEST_LIST" "$PRIMARY_TEST_SHARDS"' \
-  EXIT HUP INT TERM
 
 if [[ "$RUN_ISOLATED_GATES" == true ]]; then
   # Build once, then derive exact non-overlapping Platform/App shards from the
   # executable test inventory. The planner fails closed for unknown targets,
   # missing isolated gates, omissions, and duplicate matches.
-  "$REPO_DIR/scripts/run-with-deadline.sh" \
-    "$KINLOGUE_PRIMARY_TEST_TIMEOUT_SECONDS" \
-    swift test "${SWIFT_TEST_ARGUMENTS[@]}" \
-      -j "$KINLOGUE_BUILD_JOBS" \
-      list > "$PRIMARY_TEST_LIST"
   /usr/bin/ruby "$REPO_DIR/scripts/primary-test-shards.rb" \
     "$PRIMARY_TEST_LIST" \
     "$PRIMARY_PARTITION_INDEX" \
@@ -253,9 +266,12 @@ if [[ "$RUN_ISOLATED_GATES" == true ]]; then
   if [[ "$PRIMARY_PARTITION_COUNT" -eq 1 ]]; then
     KINLOGUE_REQUIRE_TEST_EVIDENCE=1 \
       KINLOGUE_TEST_RESULT_FILE="$PRIMARY_TEST_LOG" \
+      KINLOGUE_TEST_INVENTORY_FILE="$PRIMARY_TEST_INVENTORY" \
       "$REPO_DIR/scripts/verify-docs.sh"
   else
-    "$REPO_DIR/scripts/verify-docs.sh"
+    KINLOGUE_REQUIRE_TEST_EVIDENCE=1 \
+      KINLOGUE_TEST_INVENTORY_FILE="$PRIMARY_TEST_INVENTORY" \
+      "$REPO_DIR/scripts/verify-docs.sh"
   fi
 fi
 

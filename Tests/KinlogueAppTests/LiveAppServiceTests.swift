@@ -204,7 +204,11 @@ struct LiveAppServiceTests {
                 receiverStart: { receiver, _ in
                     await gate.wait()
                     return try await receiver.start(
-                        at: .init(interfaceName: "lo0", host: "127.0.0.1"),
+                        at: .init(
+                            interfaceName: "lo0",
+                            host: "127.0.0.1",
+                            networkPrefixLength: 8
+                        ),
                         port: 0,
                         allowLoopbackForTesting: true,
                         pipelineInstaller: { channel, _, _, _ in
@@ -218,7 +222,8 @@ struct LiveAppServiceTests {
         let start = Task {
             try await service.startReceiving(at: .init(
                 interfaceName: "en0",
-                host: "192.168.1.2"
+                host: "192.168.1.2",
+                networkPrefixLength: 24
             ))
         }
         guard await gate.waitUntilStarted() else {

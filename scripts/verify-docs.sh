@@ -43,8 +43,26 @@ OVERALL_STATUS="${${FACT_MARKER##* overall=}%% -->}"
 REQUIRE_TEST_EVIDENCE="${KINLOGUE_REQUIRE_TEST_EVIDENCE:-0}"
 [[ "$REQUIRE_TEST_EVIDENCE" == 0 || "$REQUIRE_TEST_EVIDENCE" == 1 ]] \
   || fail "KINLOGUE_REQUIRE_TEST_EVIDENCE must be 0 or 1"
-if [[ "$REQUIRE_TEST_EVIDENCE" == 1 && -z "${KINLOGUE_TEST_RESULT_FILE:-}" ]]; then
+if [[ "$REQUIRE_TEST_EVIDENCE" == 1 \
+      && -z "${KINLOGUE_TEST_RESULT_FILE:-}" \
+      && -z "${KINLOGUE_TEST_INVENTORY_FILE:-}" ]]; then
   fail "test-evidence mode requires an observed full test result"
+fi
+
+if [[ -n "${KINLOGUE_TEST_INVENTORY_FILE:-}" ]]; then
+  TEST_INVENTORY_FILE="$KINLOGUE_TEST_INVENTORY_FILE"
+  [[ -f "$TEST_INVENTORY_FILE" && ! -L "$TEST_INVENTORY_FILE" ]] \
+    || fail "the planned test inventory file is missing or linked"
+  INVENTORY_MARKERS=("${(@f)$(/usr/bin/grep -E -- \
+    '^KLT_PRIMARY_TEST_INVENTORY tests=[0-9]+ suites=[0-9]+$' \
+    "$TEST_INVENTORY_FILE" || true)}")
+  [[ "${#INVENTORY_MARKERS[@]}" -eq 1 && -n "$INVENTORY_MARKERS[1]" ]] \
+    || fail "the planned test inventory must contain exactly one bounded summary"
+  PLANNED_TEST_COUNT="${${INVENTORY_MARKERS[1]##* tests=}%% suites=*}"
+  PLANNED_SUITE_COUNT="${INVENTORY_MARKERS[1]##* suites=}"
+  [[ "$TEST_COUNT" == "$PLANNED_TEST_COUNT" \
+      && "$SUITE_COUNT" == "$PLANNED_SUITE_COUNT" ]] \
+    || fail "release facts do not match planned test inventory: $PLANNED_TEST_COUNT tests / $PLANNED_SUITE_COUNT suites"
 fi
 
 if [[ -n "${KINLOGUE_TEST_RESULT_FILE:-}" ]]; then

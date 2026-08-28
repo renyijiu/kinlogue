@@ -76,6 +76,8 @@ struct GitHubActionsWorkflowTests {
         #expect(workflow.contains("permissions:\n  contents: read"))
         #expect(workflow.contains("scripts/lint.sh"))
         #expect(workflow.contains("scripts/privacy-guard.sh"))
+        #expect(workflow.contains("fetch-depth: 0"))
+        #expect(workflow.contains("scripts/privacy-history-guard.sh --ref HEAD"))
         #expect(workflow.contains("scripts/test.sh"))
         #expect(workflow.components(separatedBy: "run: scripts/test.sh").count - 1 == 3)
         #expect(workflow.contains("scripts/verify-app.sh"))
@@ -287,6 +289,19 @@ struct GitHubActionsWorkflowTests {
         #expect(releaseInputValidation.contains(
             #"[[ "$tag_revision" == "$source_revision" ]]"#
         ))
+        #expect(releaseInputValidation.contains(
+            #"canonical_repository="https://github.com/${GITHUB_REPOSITORY}.git""#
+        ))
+        #expect(releaseInputValidation.contains("-c credential.helper="))
+        #expect(releaseInputValidation.contains("--no-tags"))
+        #expect(releaseInputValidation.contains("--no-write-fetch-head"))
+        #expect(releaseInputValidation.contains(
+            #"+refs/heads/main:refs/remotes/origin/main"#
+        ))
+        #expect(releaseInputValidation.contains(
+            #"git merge-base --is-ancestor "$source_revision" "$canonical_main_revision""#
+        ))
+        #expect(!releaseInputValidation.contains("git remote"))
 
         for expectedName in [
             #"$artifact_name"#,
@@ -430,6 +445,7 @@ struct GitHubActionsWorkflowTests {
         #expect(script.contains("unreachable documentation page"))
         #expect(script.contains("CFBundleShortVersionString"))
         #expect(script.contains("KINLOGUE_TEST_RESULT_FILE"))
+        #expect(script.contains("KINLOGUE_TEST_INVENTORY_FILE"))
         #expect(script.contains("release facts do not match observed test result"))
         #expect(script.contains("@unchecked Sendable"))
         #expect(script.contains("nonisolated(unsafe)"))
@@ -481,6 +497,26 @@ struct GitHubActionsWorkflowTests {
             passedWithShardedEvidence.status == 0,
             Comment(rawValue: passedWithShardedEvidence.output)
         )
+
+        let passedWithInventoryEvidence = try runDocumentationVerifier(
+            repositoryRoot: passedFixture.root,
+            observedTestInventory: "KLT_PRIMARY_TEST_INVENTORY tests=863 suites=80\n",
+            requiresTestEvidence: true
+        )
+        #expect(
+            passedWithInventoryEvidence.status == 0,
+            Comment(rawValue: passedWithInventoryEvidence.output)
+        )
+
+        let wrongInventoryEvidence = try runDocumentationVerifier(
+            repositoryRoot: passedFixture.root,
+            observedTestInventory: "KLT_PRIMARY_TEST_INVENTORY tests=864 suites=80\n",
+            requiresTestEvidence: true
+        )
+        #expect(wrongInventoryEvidence.status != 0)
+        #expect(wrongInventoryEvidence.output.contains(
+            "release facts do not match planned test inventory: 864 tests / 80 suites"
+        ))
 
         let wrongObservedCount = try runDocumentationVerifier(
             repositoryRoot: passedFixture.root,
@@ -779,6 +815,7 @@ struct GitHubActionsWorkflowTests {
     private func runDocumentationVerifier(
         repositoryRoot: URL,
         observedTestResult: String? = nil,
+        observedTestInventory: String? = nil,
         requiresTestEvidence: Bool = false
     ) throws
         -> DocumentationVerifierResult {
@@ -794,6 +831,17 @@ struct GitHubActionsWorkflowTests {
             environment["KINLOGUE_TEST_RESULT_FILE"] = resultURL.path
         } else {
             environment.removeValue(forKey: "KINLOGUE_TEST_RESULT_FILE")
+        }
+        if let observedTestInventory {
+            let inventoryURL = repositoryRoot.appendingPathComponent("observed-test-inventory.log")
+            try observedTestInventory.write(
+                to: inventoryURL,
+                atomically: true,
+                encoding: .utf8
+            )
+            environment["KINLOGUE_TEST_INVENTORY_FILE"] = inventoryURL.path
+        } else {
+            environment.removeValue(forKey: "KINLOGUE_TEST_INVENTORY_FILE")
         }
         process.environment = environment
         process.standardOutput = pipe

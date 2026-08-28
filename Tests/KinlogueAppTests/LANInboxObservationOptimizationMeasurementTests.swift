@@ -60,7 +60,11 @@ private actor LANObservationMeasurementService: LANInboxServicing {
     }
 
     func resolveAddresses() async throws -> LANNetworkInterfaceResolution {
-        .automatic(LANNetworkAddress(interfaceName: "en0", host: "192.0.2.1"))
+        .automatic(LANNetworkAddress(
+            interfaceName: "en0",
+            host: "192.0.2.1",
+            networkPrefixLength: 24
+        ))
     }
 
     func startReceiving(at address: LANNetworkAddress) async throws -> LANReceiverDetails {
