@@ -24,9 +24,9 @@
 | 隐私 | 活动 Vault 为 App Sandbox 内明文；外部恢复点认证加密；公开历史门禁覆盖已删除附件、凭据路径与恢复码；无账号、内置云同步、遥测或第三方崩溃 SDK | [`../PRIVACY.md`](../PRIVACY.md)、[`privacy-and-security.md`](privacy-and-security.md) |
 | 备份 | 用户选择目录、metadata-only 状态加载与自动关闭、自动开关、离线有界退避及已覆盖状态收敛、2–30 份本地保留、generation/keep 围栏的单扫描批量清理、app-private 跨进程 lease 与 witness 高水位线性发布、pending 设置恢复/确认放弃、LAN derived 完整恢复与 transient partial 排除、生产恢复事务逐 phase SIGKILL 收敛与 activation 后损坏回滚、手动备份、Finder 中显示恢复点和整库替换恢复；网盘远端状态未知 | [`backup-and-restore.md`](backup-and-restore.md) |
 | 报告 | 本机 OCR 只生成有来源候选；用户确认后才进入时间线、搜索和比较 | [`import-and-ocr.md`](import-and-ocr.md) |
-| LAN | 用户显式开启的临时普通 HTTP 会话，只适用于可信任私人网络；成功配对推进浏览器 session generation，手机轮询再以 mutation epoch、revision 与取消 tombstone 防止陈旧状态回退 | [`lan-upload.md`](lan-upload.md) |
+| LAN | 用户显式开启的临时普通 HTTP 会话，绑定所选 Mac 接口并在 HTTP 前拒绝非同 IPv4/IPv6 网络前缀对端，仍只适用于可信任私人网络；成功配对推进浏览器 session generation，手机轮询再以 mutation epoch、revision 与取消 tombstone 防止陈旧状态回退 | [`lan-upload.md`](lan-upload.md) |
 | DICOM | 受限的辅助能力；支持边界窄、非诊断，不代表产品转向通用影像工作站 | [`dicom.md`](dicom.md) |
-| 发布 | 项目尚未公开发布；Core 与至多两个完整容器的 Platform/App 短生命周期串行主门禁以启动身份约束后代清理，GitHub CI 用三个互斥的全新 runner 保持完整账本，其中一个只让 SwiftPM 构建 test bundle、再以 `xcrun xctest` 为 derived-artifact 的 13 个固定 case 分别启动有界进程；验收扫描所需 `ripgrep` 由固定版本与 SHA-256 的 CI 引导提供，内部扫描回归使用私有合成仓库根且显式覆盖 `.build` 泄漏，生产扫描仍覆盖真实构建树；跨进程 storage、DICOM 导入集成、验收扫描与两项真实 LAN 独立门禁、候选身份和人工门禁分开记录 | [`testing-and-release.md`](testing-and-release.md)、[`acceptance/current-release.md`](acceptance/current-release.md) |
+| 发布 | 源码仓库已公开，但尚未正式发布可下载产品；GitHub CI 用三个互斥 runner 覆盖同一全局主测试账本，derived-artifact case 从已构建 XCTest inventory 动态发现并逐项有界执行，强制终止不得冒充成功；验收扫描所需 `ripgrep` 由固定版本与 SHA-256 的 CI 引导提供；版本 tag 还必须可从 canonical `main` 到达才能进入构建 | [`testing-and-release.md`](testing-and-release.md)、[`acceptance/current-release.md`](acceptance/current-release.md) |
 
 当前 Swift package 只发布 `Kinlogue` App product；Core、Platform 与测试辅助程序保持为内部 target。持续集成以 GitHub Actions 为唯一当前入口，已经完成使命的 Codemagic 试验配置和 LAN feasibility host 只保留历史文档证据，不再进入构建图。
 

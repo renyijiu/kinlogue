@@ -386,8 +386,12 @@ public actor LANReceiver {
         at address: LANNetworkAddress,
         port: Int = 0
     ) async throws -> LANReceiverPresentation {
-        try await startProductionHTTP(
-            at: address,
+        let exactAddress = try LANNetworkInterfaceResolver.requireExactAddress(
+            address,
+            from: LANNetworkInterfaceResolver.currentSnapshots()
+        )
+        return try await startProductionHTTP(
+            at: exactAddress,
             port: port,
             allowLoopbackForTesting: false
         )
@@ -423,7 +427,11 @@ public actor LANReceiver {
         port: Int = 0
     ) async throws -> LANReceiverPresentation {
         try await startProductionHTTP(
-            at: .init(interfaceName: "lo0", host: "127.0.0.1"),
+            at: .init(
+                interfaceName: "lo0",
+                host: "127.0.0.1",
+                networkPrefixLength: 8
+            ),
             port: port,
             allowLoopbackForTesting: true
         )
@@ -493,7 +501,7 @@ public actor LANReceiver {
         var monitor: LANNetworkMonitor?
 
         do {
-            let endpoint = try await transport.start(host: address.host, port: port)
+            let endpoint = try await transport.start(at: address, port: port)
             guard isStarting(token) else { throw LANReceiverError.sessionEnded }
             await postBindHook(endpoint, authority)
             guard isStarting(token) else { throw LANReceiverError.sessionEnded }

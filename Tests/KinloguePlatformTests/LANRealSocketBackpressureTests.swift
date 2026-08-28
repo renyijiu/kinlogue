@@ -35,7 +35,11 @@ struct LANRealSocketBackpressureTests {
 
         do {
             let presentation = try await receiver.start(
-                at: .init(interfaceName: "lo0", host: "127.0.0.1"),
+                at: .init(
+                    interfaceName: "lo0",
+                    host: "127.0.0.1",
+                    networkPrefixLength: 8
+                ),
                 port: 0,
                 allowLoopbackForTesting: true,
                 pipelineInstaller: { channel, peer, authority, application in

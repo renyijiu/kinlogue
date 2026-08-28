@@ -12,7 +12,7 @@
 - 用户在 Mac 单选或多选原件，设置报告页序、家庭成员和报告日期，再组成一份 .needsReview 报告；
 - 只有成功归档的所选项会从队列移除；未选项和失败项继续保留。
 
-监听只绑定用户选择的合格本机地址，不绑定通配地址。传输使用普通 HTTP，不提供 TLS；只能在可信任的私人 Wi-Fi 或有线局域网中开启。手机只看到当前会话的文件和进度，不能浏览 Mac 上的成员、历史报告、OCR、时间线或原件。
+监听只绑定用户选择的合格本机地址，不绑定通配地址。地址枚举同时读取并验证该接口连续且非零的 netmask；每个新 socket 只有在对端地址与所选接口属于同一 IPv4/IPv6 网络前缀时，才会进入 HTTP pipeline，缺失、不可解析、跨地址族、IPv4-mapped IPv6 或越界的对端都会直接关闭。IPv6 global unicast 保持可选，但仍受同前缀约束；当前 URL/zone 模型不支持 IPv6 link-local scoped literal，因此 link-local 地址仍不参与候选。传输使用普通 HTTP，不提供 TLS；只能在可信任的私人 Wi-Fi 或有线局域网中开启。手机只看到当前会话的文件和进度，不能浏览 Mac 上的成员、历史报告、OCR、时间线或原件。
 
 ## 从选择到人工确认
 
@@ -66,7 +66,7 @@ flowchart TD
 - GET /api/files/<remoteFileID>：读取当前会话可见状态；
 - POST /api/files/<remoteFileID>/cancel：显式取消尚未保存的文件。
 
-不存在创建、完成、排序或撤回报告分组的 HTTP 接口。LANHTTPHandler 在解码 body、查找远端文件 ID 或打开写入 sink 前，先完成 authority、origin、framing、session、CSRF 和速率 admission。上传 body 使用有界 streaming backpressure，不整体缓存在内存。
+不存在创建、完成、排序或撤回报告分组的 HTTP 接口。传输层先用 socket 提供的真实对端地址执行同前缀 admission，拒绝项不会安装 HTTP pipeline；通过后，LANHTTPHandler 才会在解码 body、查找远端文件 ID 或打开写入 sink 前完成 authority、origin、framing、session、CSRF 和速率 admission。上传 body 使用有界 streaming backpressure，不整体缓存在内存。
 
 同一传输身份的 publish、内容合并和终态重放对手机返回同形的通用成功结果；内部 item/blob ID、digest、duplicate destination 和 Vault 失败原因不会越过 HTTP 边界。
 
@@ -164,7 +164,7 @@ LAN inbox 位于 [storage.md](storage.md) 描述的 lan-inbox/ 明文子树。�
 
 ## 生命周期
 
-用户手动停止、锁屏/屏保、系统睡眠、用户 session resign、network path change、关闭最后一个主窗口、退出 App 或 idle timeout 都会停止接收，撤销旧地址和 proof，并取消仍在进行的上传。已经完整发布到 Mac 待确认队列的 item 保留。
+用户手动停止、锁屏/屏保、系统睡眠、用户 session resign、network path change、关闭最后一个主窗口、退出 App 或 idle timeout 都会停止接收，撤销旧地址和 proof，并取消仍在进行的上传。网络监控把接口名、绑定地址和已验证前缀视为同一身份；任一变化或无法重新验证都会失败关闭。已经完整发布到 Mac 待确认队列的 item 保留。
 
 普通焦点丢失、临时 sheet、系统唤醒或重新打开 App 不会自动创建或恢复接收会话。应用重启后必须由用户明确重新开始，手机旧 cookie/CSRF 不能恢复新会话。
 

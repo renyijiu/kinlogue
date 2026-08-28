@@ -355,7 +355,11 @@ struct LANInboxModelTests {
         let service = try LANPendingQueueServiceSpy(items: [])
         await service.configureReceiver(
             resolution: .automatic(
-                LANNetworkAddress(interfaceName: "en0", host: "192.0.2.1")
+                LANNetworkAddress(
+                    interfaceName: "en0",
+                    host: "192.0.2.1",
+                    networkPrefixLength: 24
+                )
             ),
             replacementOnStop: nil
         )
@@ -383,7 +387,11 @@ struct LANInboxModelTests {
         let service = try LANPendingQueueServiceSpy(items: [])
         await service.configureReceiver(
             resolution: .automatic(
-                LANNetworkAddress(interfaceName: "en0", host: "192.0.2.1")
+                LANNetworkAddress(
+                    interfaceName: "en0",
+                    host: "192.0.2.1",
+                    networkPrefixLength: 24
+                )
             ),
             replacementOnStop: nil
         )
@@ -504,7 +512,11 @@ struct LANInboxModelTests {
         let service = try LANPendingQueueServiceSpy(items: [])
         await service.configureReceiver(
             resolution: .automatic(
-                LANNetworkAddress(interfaceName: "en0", host: "192.0.2.1")
+                LANNetworkAddress(
+                    interfaceName: "en0",
+                    host: "192.0.2.1",
+                    networkPrefixLength: 24
+                )
             ),
             replacementOnStop: ([completed.item], [completed.blob])
         )

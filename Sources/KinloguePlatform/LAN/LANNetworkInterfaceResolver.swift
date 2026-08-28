@@ -4,12 +4,20 @@ import Foundation
 public struct LANNetworkInterfaceSnapshot: Equatable, Sendable {
     public let name: String
     public let address: String
+    public let networkPrefixLength: Int?
     public let isUp: Bool
     public let isRunning: Bool
 
-    public init(name: String, address: String, isUp: Bool, isRunning: Bool) {
+    public init(
+        name: String,
+        address: String,
+        networkPrefixLength: Int?,
+        isUp: Bool,
+        isRunning: Bool
+    ) {
         self.name = name
         self.address = address
+        self.networkPrefixLength = networkPrefixLength
         self.isUp = isUp
         self.isRunning = isRunning
     }
@@ -18,10 +26,12 @@ public struct LANNetworkInterfaceSnapshot: Equatable, Sendable {
 public struct LANNetworkAddress: Equatable, Hashable, Sendable {
     public let interfaceName: String
     public let host: String
+    public let networkPrefixLength: Int
 
-    public init(interfaceName: String, host: String) {
+    public init(interfaceName: String, host: String, networkPrefixLength: Int) {
         self.interfaceName = interfaceName
         self.host = host
+        self.networkPrefixLength = networkPrefixLength
     }
 }
 
@@ -58,24 +68,20 @@ public enum LANNetworkInterfaceResolver {
                 continue
             }
 
-            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            let result = getnameinfo(
-                socketAddress,
-                socklen_t(socketAddress.pointee.sa_len),
-                &host,
-                socklen_t(host.count),
-                nil,
-                0,
-                NI_NUMERICHOST
-            )
-            guard result == 0 else { continue }
+            guard let host = numericHost(for: socketAddress) else { continue }
+            let networkPrefixLength: Int? = interface.ifa_netmask.flatMap { netmask in
+                guard netmask.pointee.sa_family == socketAddress.pointee.sa_family,
+                      let netmaskHost = numericHost(for: netmask),
+                      let netmaskAddress = LANIPAddress.parseCanonical(netmaskHost) else {
+                    return nil
+                }
+                return netmaskAddress.contiguousNetworkPrefixLength
+            }
             let flags = Int32(interface.ifa_flags)
             snapshots.append(.init(
                 name: String(cString: interface.ifa_name),
-                address: String(
-                    decoding: host.prefix { $0 != 0 }.map(UInt8.init(bitPattern:)),
-                    as: UTF8.self
-                ),
+                address: host,
+                networkPrefixLength: networkPrefixLength,
                 isUp: flags & IFF_UP != 0,
                 isRunning: flags & IFF_RUNNING != 0
             ))
@@ -108,22 +114,54 @@ public enum LANNetworkInterfaceResolver {
         return match
     }
 
+    public static func requireExactAddress(
+        _ selectedAddress: LANNetworkAddress,
+        from snapshots: [LANNetworkInterfaceSnapshot]
+    ) throws -> LANNetworkAddress {
+        guard eligibleAddresses(from: snapshots).contains(selectedAddress) else {
+            throw LANNetworkInterfaceResolverError
+                .invalidOrUnavailableSelection(selectedAddress.host)
+        }
+        return selectedAddress
+    }
+
     static func eligibleAddresses(
         from snapshots: [LANNetworkInterfaceSnapshot]
     ) -> [LANNetworkAddress] {
         Array(Set(snapshots.compactMap { snapshot in
             guard snapshot.isUp,
                   snapshot.isRunning,
-                  LANIPAddress.parseUsableCanonical(snapshot.address) != nil else {
+                  let address = LANIPAddress.parseUsableCanonical(snapshot.address),
+                  let networkPrefixLength = snapshot.networkPrefixLength,
+                  address.isValidNetworkPrefixLength(networkPrefixLength) else {
                 return nil
             }
             return LANNetworkAddress(
                 interfaceName: snapshot.name,
-                host: snapshot.address
+                host: snapshot.address,
+                networkPrefixLength: networkPrefixLength
             )
         })).sorted {
-            ($0.interfaceName, $0.host) < ($1.interfaceName, $1.host)
+            ($0.interfaceName, $0.host, $0.networkPrefixLength)
+                < ($1.interfaceName, $1.host, $1.networkPrefixLength)
         }
+    }
+
+    private static func numericHost(
+        for socketAddress: UnsafePointer<sockaddr>
+    ) -> String? {
+        var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+        let result = getnameinfo(
+            socketAddress,
+            socklen_t(socketAddress.pointee.sa_len),
+            &host,
+            socklen_t(host.count),
+            nil,
+            0,
+            NI_NUMERICHOST
+        )
+        guard result == 0 else { return nil }
+        return LANIPAddress.decodeCString(host)
     }
 }
 
@@ -185,6 +223,48 @@ enum LANIPAddress: Equatable, Sendable {
         return false
     }
 
+    var contiguousNetworkPrefixLength: Int? {
+        let bytes = addressBytes
+        var length = 0
+        var encounteredZero = false
+        for byte in bytes {
+            for shift in stride(from: 7, through: 0, by: -1) {
+                let bitIsSet = byte & (1 << shift) != 0
+                if bitIsSet {
+                    guard !encounteredZero else { return nil }
+                    length += 1
+                } else {
+                    encounteredZero = true
+                }
+            }
+        }
+        return length > 0 ? length : nil
+    }
+
+    func isValidNetworkPrefixLength(_ length: Int) -> Bool {
+        (1...addressBytes.count * 8).contains(length)
+    }
+
+    func sharesNetworkPrefix(with peer: Self, length: Int) -> Bool {
+        let localBytes = addressBytes
+        let peerBytes = peer.addressBytes
+        guard localBytes.count == peerBytes.count,
+              isValidNetworkPrefixLength(length) else {
+            return false
+        }
+
+        let completeBytes = length / 8
+        let remainingBits = length % 8
+        guard localBytes.prefix(completeBytes).elementsEqual(
+            peerBytes.prefix(completeBytes)
+        ) else {
+            return false
+        }
+        guard remainingBits > 0 else { return true }
+        let mask = UInt8.max << (8 - remainingBits)
+        return localBytes[completeBytes] & mask == peerBytes[completeBytes] & mask
+    }
+
     func isUsable(allowingLoopback: Bool) -> Bool {
         switch self {
         case let .v4(address):
@@ -198,8 +278,8 @@ enum LANIPAddress: Equatable, Sendable {
                 && (allowingLoopback || !isLoopback)
                 && first < 224
                 && !(first == 169 && second == 254)
-        case var .v6(address):
-            let bytes = withUnsafeBytes(of: &address) { Array($0) }
+        case .v6:
+            let bytes = addressBytes
             let isUnspecified = bytes.allSatisfy { $0 == 0 }
             let isLoopback = bytes.dropLast().allSatisfy { $0 == 0 }
                 && bytes.last == 1
@@ -237,10 +317,19 @@ enum LANIPAddress: Equatable, Sendable {
         }
     }
 
-    private static func decodeCString(_ buffer: [CChar]) -> String {
+    fileprivate static func decodeCString(_ buffer: [CChar]) -> String {
         String(
             decoding: buffer.prefix { $0 != 0 }.map(UInt8.init(bitPattern:)),
             as: UTF8.self
         )
+    }
+
+    private var addressBytes: [UInt8] {
+        switch self {
+        case var .v4(address):
+            return withUnsafeBytes(of: &address) { Array($0) }
+        case var .v6(address):
+            return withUnsafeBytes(of: &address) { Array($0) }
+        }
     }
 }

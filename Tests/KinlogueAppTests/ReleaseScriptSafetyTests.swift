@@ -347,6 +347,144 @@ struct ReleaseScriptSafetyTests {
     }
 
     @Test
+    func privacyHistoryGuardRejectsUnapprovedMediaAtAllowedPathAfterRestore() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("kinlogue-privacy-history-media-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: root) }
+
+        try makeMinimalPrivacyHistoryRepository(at: root)
+        let packaging = root.appendingPathComponent("packaging")
+        try fileManager.createDirectory(at: packaging, withIntermediateDirectories: true)
+        let icon = packaging.appendingPathComponent("AppIcon.png")
+        let approvedIcon = repositoryURL.appendingPathComponent("packaging/AppIcon.png")
+        try fileManager.copyItem(at: approvedIcon, to: icon)
+        #expect(try git(["add", "packaging/AppIcon.png"], in: root).status == 0)
+        #expect(try git(["commit", "-m", "Add approved application icon"], in: root).status == 0)
+
+        let script = root.appendingPathComponent("scripts/privacy-history-guard.sh")
+        let clean = try run(script, ["--ref", "HEAD"])
+        #expect(clean.status == 0)
+        #expect(clean.output.contains("Privacy history guard passed"))
+
+        let differentPNG = try #require(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        ))
+        try differentPNG.write(to: icon, options: .atomic)
+        #expect(try git(["add", "packaging/AppIcon.png"], in: root).status == 0)
+        #expect(try git(["commit", "-m", "Replace icon with unapproved media"], in: root).status == 0)
+        try Data(contentsOf: approvedIcon).write(to: icon, options: .atomic)
+        #expect(try git(["add", "packaging/AppIcon.png"], in: root).status == 0)
+        #expect(try git(["commit", "-m", "Restore approved application icon"], in: root).status == 0)
+
+        let historical = try run(script, ["--ref", "HEAD"])
+        #expect(historical.status != 0)
+        #expect(historical.output.contains("unapproved repository media"))
+        #expect(!historical.output.contains("AppIcon.png"))
+    }
+
+    @Test
+    func privacyHistoryGuardRejectsUnapprovedMediaAtIconsetPath() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("kinlogue-privacy-history-iconset-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: root) }
+
+        try makeMinimalPrivacyHistoryRepository(at: root)
+        let iconset = root.appendingPathComponent("packaging/Kinlogue.iconset")
+        try fileManager.createDirectory(at: iconset, withIntermediateDirectories: true)
+        let differentPNG = try #require(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        ))
+        try differentPNG.write(
+            to: iconset.appendingPathComponent("icon_16x16.png"),
+            options: .atomic
+        )
+        #expect(try git(["add", "packaging/Kinlogue.iconset/icon_16x16.png"], in: root).status == 0)
+        #expect(try git(["commit", "-m", "Add unapproved iconset media"], in: root).status == 0)
+
+        let result = try run(
+            root.appendingPathComponent("scripts/privacy-history-guard.sh"),
+            ["--ref", "HEAD"]
+        )
+        #expect(result.status != 0)
+        #expect(result.output.contains("unapproved repository media"))
+        #expect(!result.output.contains("icon_16x16.png"))
+    }
+
+    @Test
+    func privacyHistoryGuardFailsClosedForInvalidApprovedMediaDigestManifest() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("kinlogue-privacy-history-media-manifest-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: root) }
+
+        try makeMinimalPrivacyHistoryRepository(at: root)
+        try "not-a-digest  packaging/AppIcon.png\n".write(
+            to: root.appendingPathComponent("scripts/privacy-history-media-digests.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let result = try run(
+            root.appendingPathComponent("scripts/privacy-history-guard.sh"),
+            ["--ref", "HEAD"]
+        )
+        #expect(result.status != 0)
+        #expect(result.output.contains("approved media digest manifest"))
+
+        try fileManager.removeItem(
+            at: root.appendingPathComponent("scripts/privacy-history-media-digests.txt")
+        )
+        let missing = try run(
+            root.appendingPathComponent("scripts/privacy-history-guard.sh"),
+            ["--ref", "HEAD"]
+        )
+        #expect(missing.status != 0)
+        #expect(missing.output.contains("approved media digest manifest"))
+
+        let manifest = try contents("scripts/privacy-history-media-digests.txt")
+        let manifestURL = root.appendingPathComponent(
+            "scripts/privacy-history-media-digests.txt"
+        )
+        let firstLine = try #require(manifest.split(separator: "\n").first)
+        try (manifest + String(firstLine) + "\n").write(
+            to: manifestURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        let duplicate = try run(
+            root.appendingPathComponent("scripts/privacy-history-guard.sh"),
+            ["--ref", "HEAD"]
+        )
+        #expect(duplicate.status != 0)
+        #expect(duplicate.output.contains("duplicate path"))
+
+        try (manifest + String(repeating: "0", count: 64)
+            + "  packaging/Unexpected.png\n").write(
+            to: manifestURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        let unexpected = try run(
+            root.appendingPathComponent("scripts/privacy-history-guard.sh"),
+            ["--ref", "HEAD"]
+        )
+        #expect(unexpected.status != 0)
+        #expect(unexpected.output.contains("unexpected path"))
+
+        let incomplete = manifest.split(separator: "\n").dropLast().joined(separator: "\n")
+            + "\n"
+        try incomplete.write(to: manifestURL, atomically: true, encoding: .utf8)
+        let incompleteResult = try run(
+            root.appendingPathComponent("scripts/privacy-history-guard.sh"),
+            ["--ref", "HEAD"]
+        )
+        #expect(incompleteResult.status != 0)
+        #expect(incompleteResult.output.contains("manifest is incomplete"))
+    }
+
+    @Test
     func privacyHistoryGuardRejectsDeletedMedicalFilesAndCommonCredentials() throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory
@@ -508,13 +646,22 @@ struct ReleaseScriptSafetyTests {
             at: repositoryURL.appendingPathComponent("scripts/privacy-history-guard.sh"),
             to: scripts.appendingPathComponent("privacy-history-guard.sh")
         )
+        try fileManager.copyItem(
+            at: repositoryURL.appendingPathComponent("scripts/privacy-history-media-digests.txt"),
+            to: scripts.appendingPathComponent("privacy-history-media-digests.txt")
+        )
         try "Synthetic clean repository.\n".write(
             to: root.appendingPathComponent("README.md"),
             atomically: true,
             encoding: .utf8
         )
         #expect(try git(["init", "-b", "main"], in: root).status == 0)
-        #expect(try git(["add", "README.md", "scripts/privacy-history-guard.sh"], in: root).status == 0)
+        #expect(try git([
+            "add",
+            "README.md",
+            "scripts/privacy-history-guard.sh",
+            "scripts/privacy-history-media-digests.txt",
+        ], in: root).status == 0)
         #expect(try git(["commit", "-m", "Create synthetic repository"], in: root).status == 0)
     }
 

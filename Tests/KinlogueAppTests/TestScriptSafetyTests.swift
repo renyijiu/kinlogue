@@ -23,13 +23,14 @@ struct TestScriptSafetyTests {
         #expect(script.contains("list > \"$PRIMARY_TEST_LIST\""))
         let dedicatedBundleBuild = try #require(script.range(of: "--build-tests"))
         #expect(script.contains("/usr/bin/xcrun xctest"))
+        #expect(script.contains("discover-derived-xctest-cases.rb"))
         let dedicatedDerivedGate = try #require(script.range(of:
             "-XCTest \"$derived_xctest_case\""
         ))
-        #expect(script.contains(
+        #expect(!script.contains(
             "LANDerivedArtifactSinkTests/testProductionAdmissionUsesTheDocumentedStoreAndOwnerBounds"
         ))
-        #expect(script.contains(
+        #expect(!script.contains(
             "LANDerivedArtifactSinkTests/testRejectsNonPrivateOrHardLinkedDescriptorsAtOwnershipTransfer"
         ))
         #expect(script.contains(
@@ -42,8 +43,8 @@ struct TestScriptSafetyTests {
         #expect(script.contains("--show-bin-path"))
         #expect(script.contains("KinloguePackageTests.xctest"))
         let inventoryBuild = try #require(script.range(of: "list > \"$PRIMARY_TEST_LIST\""))
+        #expect(inventoryBuild.lowerBound < dedicatedBundleBuild.lowerBound)
         #expect(dedicatedBundleBuild.lowerBound < dedicatedDerivedGate.lowerBound)
-        #expect(dedicatedDerivedGate.lowerBound < inventoryBuild.lowerBound)
         #expect(script.contains(
             "PRIMARY_PARTITION_INDEX\" -eq $((PRIMARY_PARTITION_COUNT - 1))"
         ))
@@ -77,10 +78,12 @@ struct TestScriptSafetyTests {
         #expect(script.contains("KINLOGUE_PRIMARY_TEST_TIMEOUT_SECONDS"))
         #expect(script.contains("KINLOGUE_ISOLATED_TEST_TIMEOUT_SECONDS"))
         #expect(script.contains("SHARD_SUPERVISOR_TIMEOUT_SECONDS"))
+        #expect(script.contains("KINLOGUE_TEST_INVENTORY_FILE"))
+        #expect(script.contains("--inventory-summary"))
         #expect(script.contains(
             "KINLOGUE_TEST_SUMMARY_MAX_SECONDS=\"$SHARD_SUPERVISOR_TIMEOUT_SECONDS\""
         ))
-        #expect(script.components(separatedBy: "scripts/run-with-deadline.sh").count == 14)
+        #expect(script.components(separatedBy: "scripts/run-with-deadline.sh").count == 15)
     }
 
     @Test
@@ -177,22 +180,134 @@ struct TestScriptSafetyTests {
             let runtimeID = runtimeIdentifier(for: specifier)
             #expect(patterns.allSatisfy { !matches($0, runtimeID) })
         }
+
+        let inventory = try runPrimaryShardPlannerInventory(fixture: fixture)
+        #expect(inventory.status == 0, Comment(rawValue: inventory.output))
+        #expect(inventory.output == "KLT_PRIMARY_TEST_INVENTORY tests=11 suites=5\n")
+    }
+
+    @Test
+    func dedicatedXCTestSelectorDiscoveryUsesTheCompleteBuiltInventory() throws {
+        let fixture = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "kinlogue-derived-selectors-\(UUID().uuidString)"
+        )
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        try """
+        KinlogueCoreTests.coreRule()
+        KinloguePlatformTests.LANDerivedArtifactSinkTests/testSecond
+        KinloguePlatformTests.LANDeliveryPrerequisiteTests/other
+        KinloguePlatformTests.LANDerivedArtifactSinkTests/testFirst
+        """.write(to: fixture, atomically: true, encoding: .utf8)
+
+        let result = try runProcess(
+            executable: URL(fileURLWithPath: "/usr/bin/ruby"),
+            arguments: [derivedSelectorDiscoveryURL.path, fixture.path],
+            environment: [:]
+        )
+        #expect(result.status == 0, Comment(rawValue: result.output))
+        #expect(result.output == """
+        KinloguePlatformTests.LANDerivedArtifactSinkTests/testFirst
+        KinloguePlatformTests.LANDerivedArtifactSinkTests/testSecond
+
+        """)
+
+        for invalid in [
+            "KinloguePlatformTests.LANDeliveryPrerequisiteTests/other\n",
+            "KinloguePlatformTests.LANDerivedArtifactSinkTests/testFirst\n"
+                + "KinloguePlatformTests.LANDerivedArtifactSinkTests/testFirst\n",
+            "KinloguePlatformTests.LANDerivedArtifactSinkTests/notATest\n",
+        ] {
+            try invalid.write(to: fixture, atomically: true, encoding: .utf8)
+            let rejected = try runProcess(
+                executable: URL(fileURLWithPath: "/usr/bin/ruby"),
+                arguments: [derivedSelectorDiscoveryURL.path, fixture.path],
+                environment: [:]
+            )
+            #expect(rejected.status != 0, Comment(rawValue: rejected.output))
+        }
+    }
+
+    @Test
+    func ciRipgrepInstallerFailsClosedAcrossDownloadDigestLayoutAndExistingVersionFaults() throws {
+        let fixture = try makeCIRipgrepInstallerFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let success = try runProcess(
+            executable: fixture.script,
+            arguments: [],
+            environment: [:]
+        )
+        #expect(success.status == 0, Comment(rawValue: success.output))
+        #expect(success.output.contains("Installed ripgrep 14.1.1 with verified SHA-256"))
+        #expect(FileManager.default.isExecutableFile(atPath: fixture.installedBinary.path))
+
+        try FileManager.default.removeItem(at: fixture.installedBinary)
+        let downloadFailure = try runProcess(
+            executable: fixture.script,
+            arguments: [],
+            environment: ["KLT_FAKE_CURL_MODE": "fail"]
+        )
+        #expect(downloadFailure.status != 0)
+        #expect(downloadFailure.output.contains("could not be downloaded"))
+        #expect(!downloadFailure.output.contains("KLT_PRIVATE_DOWNLOAD_DETAIL"))
+
+        let digestFailure = try runProcess(
+            executable: fixture.script,
+            arguments: [],
+            environment: ["KLT_FAKE_SHASUM_MODE": "mismatch"]
+        )
+        #expect(digestFailure.status != 0)
+        #expect(digestFailure.output.contains("digest did not match"))
+        #expect(!digestFailure.output.contains("KLT_PRIVATE_DIGEST_DETAIL"))
+
+        let layoutFailure = try runProcess(
+            executable: fixture.script,
+            arguments: [],
+            environment: ["KLT_FAKE_TAR_MODE": "unexpected"]
+        )
+        #expect(layoutFailure.status != 0)
+        #expect(layoutFailure.output.contains("executable was missing or linked"))
+        #expect(!layoutFailure.output.contains("KLT_PRIVATE_ARCHIVE_DETAIL"))
+
+        try FileManager.default.createDirectory(
+            at: fixture.installedBinary.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try """
+        #!/bin/zsh
+        print -u2 'KLT_PRIVATE_EXISTING_TOOL_DETAIL'
+        print 'ripgrep 99.0.0 (rev abcdef1234)'
+        """.write(
+            to: fixture.installedBinary,
+            atomically: true,
+            encoding: .utf8
+        )
+        try makeExecutable(fixture.installedBinary)
+        try? FileManager.default.removeItem(at: fixture.downloadMarker)
+        let existingWrongVersion = try runProcess(
+            executable: fixture.script,
+            arguments: [],
+            environment: [:]
+        )
+        #expect(existingWrongVersion.status != 0)
+        #expect(existingWrongVersion.output.contains("existing ripgrep version did not match"))
+        #expect(!existingWrongVersion.output.contains("KLT_PRIVATE_EXISTING_TOOL_DETAIL"))
+        #expect(!FileManager.default.fileExists(atPath: fixture.downloadMarker.path))
     }
 
     @Test
     func shardSummarySupervisorCleansTheOwnedSessionWithoutMaskingFailures() throws {
-        let successful = try runShardSupervisor(
+        let stillRunningAfterSummary = try runShardSupervisor(
             expectedTests: 1,
             expectedSuites: 0,
             rubyProgram: """
-            Process.spawn("/bin/sleep", "60", pgroup: true)
             puts "✔ Test run with 1 test in 0 suites passed after 0.001 seconds."
             STDOUT.flush
             sleep 60
             """
         )
-        #expect(successful.status == 0, Comment(rawValue: successful.output))
-        #expect(successful.output.contains("KLT_TEST_SUMMARY_TEARDOWN tests=1 suites=0"))
+        #expect(stillRunningAfterSummary.status != 0, Comment(rawValue: stillRunningAfterSummary.output))
+        #expect(stillRunningAfterSummary.output.contains("test process remained alive"))
 
         let decoratedSummary = try runShardSupervisor(
             expectedTests: 1,
@@ -200,7 +315,6 @@ struct TestScriptSafetyTests {
             rubyProgram: """
             puts "\u{001B}[32m✔ Test run with\u{001B}[0m \u{001B}[1m1\u{001B}[0m test in 0 suites passed after 0.001 seconds."
             STDOUT.flush
-            sleep 60
             """
         )
         #expect(decoratedSummary.status == 0, Comment(rawValue: decoratedSummary.output))
@@ -276,8 +390,8 @@ struct TestScriptSafetyTests {
         }
         childPID = parsedChildPID
 
-        #expect(result.status == 0, Comment(rawValue: result.output))
-        #expect(result.output.contains("KLT_TEST_SUMMARY_TEARDOWN tests=1 suites=0"))
+        #expect(result.status != 0, Comment(rawValue: result.output))
+        #expect(result.output.contains("test process remained alive"))
         let deadline = Date().addingTimeInterval(2)
         while processExists(parsedChildPID), Date() < deadline {
             Thread.sleep(forTimeInterval: 0.05)
@@ -598,6 +712,117 @@ struct TestScriptSafetyTests {
         }
     }
 
+    private func makeCIRipgrepInstallerFixture() throws -> CIRipgrepInstallerFixture {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "kinlogue-ripgrep-installer-\(UUID().uuidString)"
+        )
+        let scripts = root.appendingPathComponent("scripts")
+        let fakeBin = root.appendingPathComponent("fake-bin")
+        try fileManager.createDirectory(at: scripts, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: fakeBin, withIntermediateDirectories: true)
+
+        let source = scriptURL.deletingLastPathComponent()
+            .appendingPathComponent("install-ci-ripgrep.sh")
+        let script = scripts.appendingPathComponent("install-ci-ripgrep.sh")
+        var content = try String(contentsOf: source, encoding: .utf8)
+        let commandReplacements = [
+            "/usr/bin/uname": fakeBin.appendingPathComponent("uname").path,
+            "/usr/bin/curl": fakeBin.appendingPathComponent("curl").path,
+            "/usr/bin/shasum": fakeBin.appendingPathComponent("shasum").path,
+            "/usr/bin/tar": fakeBin.appendingPathComponent("tar").path,
+        ]
+        for (original, replacement) in commandReplacements {
+            content = content.replacingOccurrences(of: original, with: replacement)
+        }
+        try content.write(to: script, atomically: true, encoding: .utf8)
+        try makeExecutable(script)
+
+        try "#!/bin/zsh\nprint arm64\n".write(
+            to: fakeBin.appendingPathComponent("uname"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let downloadMarker = root.appendingPathComponent("downloaded")
+        try """
+        #!/bin/zsh
+        print -r -- downloaded > "\(downloadMarker.path)"
+        if [[ "${KLT_FAKE_CURL_MODE:-ok}" == fail ]]; then
+          print -u2 'KLT_PRIVATE_DOWNLOAD_DETAIL'
+          exit 22
+        fi
+        output=''
+        while [[ $# -gt 0 ]]; do
+          if [[ "$1" == --output ]]; then
+            output="$2"
+            shift 2
+          else
+            shift
+          fi
+        done
+        print -n archive > "$output"
+        """.write(
+            to: fakeBin.appendingPathComponent("curl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        #!/bin/zsh
+        if [[ "${KLT_FAKE_SHASUM_MODE:-ok}" == mismatch ]]; then
+          print -u2 'KLT_PRIVATE_DIGEST_DETAIL'
+          print '0000000000000000000000000000000000000000000000000000000000000000  fixture'
+        else
+          print '24ad76777745fbff131c8fbc466742b011f925bfa4fffa2ded6def23b5b937be  fixture'
+        fi
+        """.write(
+            to: fakeBin.appendingPathComponent("shasum"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        #!/bin/zsh
+        destination=''
+        while [[ $# -gt 0 ]]; do
+          if [[ "$1" == -C ]]; then
+            destination="$2"
+            shift 2
+          else
+            shift
+          fi
+        done
+        if [[ "${KLT_FAKE_TAR_MODE:-ok}" == unexpected ]]; then
+          print -u2 'KLT_PRIVATE_ARCHIVE_DETAIL'
+          /bin/mkdir -p "$destination/unexpected"
+          exit 0
+        fi
+        rg_dir="$destination/ripgrep-14.1.1-aarch64-apple-darwin"
+        /bin/mkdir -p "$rg_dir"
+        print '#!/bin/zsh' > "$rg_dir/rg"
+        print "print 'ripgrep 14.1.1 (rev abcdef1234)'" >> "$rg_dir/rg"
+        /bin/chmod 700 "$rg_dir/rg"
+        """.write(
+            to: fakeBin.appendingPathComponent("tar"),
+            atomically: true,
+            encoding: .utf8
+        )
+        for name in ["uname", "curl", "shasum", "tar"] {
+            try makeExecutable(fakeBin.appendingPathComponent(name))
+        }
+        return .init(
+            root: root,
+            script: script,
+            installedBinary: root.appendingPathComponent(".build/ci-tools/bin/rg"),
+            downloadMarker: downloadMarker
+        )
+    }
+
+    private func makeExecutable(_ url: URL) throws {
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: url.path
+        )
+    }
+
     private func signal(_ name: String, pid: Int32) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/kill")
@@ -657,6 +882,16 @@ struct TestScriptSafetyTests {
         )
     }
 
+    private func runPrimaryShardPlannerInventory(
+        fixture: URL
+    ) throws -> (status: Int32, output: String) {
+        try runProcess(
+            executable: URL(fileURLWithPath: "/usr/bin/ruby"),
+            arguments: [primaryShardPlannerURL.path, "--inventory-summary", fixture.path],
+            environment: [:]
+        )
+    }
+
     private func shardPatterns(in text: String) -> [String] {
         text.split(separator: "\n").compactMap { line -> String? in
             let fields = line.split(separator: "\t", maxSplits: 2).map(String.init)
@@ -702,5 +937,17 @@ struct TestScriptSafetyTests {
 
     private var shardSupervisorURL: URL {
         scriptURL.deletingLastPathComponent().appendingPathComponent("run-test-shard.rb")
+    }
+
+    private var derivedSelectorDiscoveryURL: URL {
+        scriptURL.deletingLastPathComponent()
+            .appendingPathComponent("discover-derived-xctest-cases.rb")
+    }
+
+    private struct CIRipgrepInstallerFixture {
+        let root: URL
+        let script: URL
+        let installedBinary: URL
+        let downloadMarker: URL
     }
 }

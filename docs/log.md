@@ -2,6 +2,14 @@
 
 本文件是项目知识库的追加式日志。每个条目记录一次可复核的 ingest、query、lint 或重大文档维护；不要改写历史条目来伪造当前状态。最新状态以专题页和代码/测试为准。
 
+## [2026-08-28] security/lan | 将接收准入绑定到接口网络前缀
+
+- **行为与边界**：生产 receiver 启动前重新确认所选接口、地址和连续非零 netmask 的精确身份；transport 在安装 child initializer 与 HTTP pipeline 前，按该 IPv4/IPv6 前缀拒绝缺失、不可解析、跨地址族、IPv4-mapped IPv6 或越界的真实对端。接口前缀变化也会让网络监控失败关闭。传输仍是普通 HTTP，只适用于可信任私人网络；当前契约见 [`lan-upload.md`](lan-upload.md) 和 [`privacy-and-security.md`](privacy-and-security.md)。
+- **开源门禁收口**：历史隐私门禁为 11 个正式 AppIcon 路径绑定已审查 SHA-256，并逐个检查所有可达历史对象；PR 的主质量 job 使用完整 checkout 后同时运行当前树与 `HEAD` 历史门禁。release workflow 重新从无凭据 canonical HTTPS remote 获取 `main` 并拒绝不在其祖先链上的标签。主测试分片以 977 tests / 89 suites 的确定性全局 inventory 核对账本，derived-artifact XCTest 从真实 bundle 动态发现并逐 case 运行，进程监管不再把测试或后代仍存活的状态转换成成功。
+- **结构整理**：`LANDerivedArtifactSinkTests.swift` 的共用 fixture/helper 已移入专用 support 文件，原测试类与 13 个 selector 保持不变；GitHub Actions 的发布来源图测试移入同一 `GitHubActionsWorkflowTests` 的独立 extension 文件，原主文件降至 1000 行以下且不改变 suite 身份。
+- **回归证据**：[`LANDeliveryPrerequisiteTests.swift`](../Tests/KinloguePlatformTests/LANDeliveryPrerequisiteTests.swift) 覆盖 netmask 连续性、前缀边界、无效配置及 HTTP 前拒绝，[`LANNetworkMonitorTests.swift`](../Tests/KinloguePlatformTests/LANNetworkMonitorTests.swift) 覆盖同接口、同地址但前缀改变时停止接收。
+- **验证与未执行**：正常 macOS 进程权限下完整 `scripts/test.sh` 通过主清单 977 tests / 89 suites、动态 derived XCTest 13/13、验收扫描 14/1、storage process 33/1、DICOM 导入集成 17/1、安装 LAN 生产 HTTP 1/1 及真实双流 LAN RSS/背压 1/1；文档、当前树隐私、`HEAD` 历史隐私与 diff 门禁通过。当前修复仍是未提交工作树，不能据此把 clean-source App/XPC 或安装验收登记为公开候选已通过；macOS 14/15 独立机器、真实 iOS/Android 浏览器、防火墙/网络隔离及其他人工矩阵仍未执行，候选状态保持 [`not-verified` / `pendingManual`](acceptance/current-release.md)。
+
 ## [2026-08-24] repository/governance | 统一公开仓库名称
 
 - **仓库身份**：公开仓库现在统一使用 `renyijiu/kinlogue`；Issue 模板中的私密漏洞报告入口已同步到新的 Security Advisory 地址，并由治理回归锁定。生产代码与兼容性文件名中的 `publication` 表示恢复点发布协议，不是仓库名称，因此保持不变。

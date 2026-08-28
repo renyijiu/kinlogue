@@ -8,6 +8,7 @@ export LANG=C
 
 SCRIPT_DIR=${0:A:h}
 REPO_DIR=${SCRIPT_DIR:h}
+APPROVED_MEDIA_MANIFEST="$SCRIPT_DIR/privacy-history-media-digests.txt"
 TEMP_DIR=""
 
 fail() {
@@ -83,28 +84,67 @@ TEMP_DIR="$(/usr/bin/mktemp -d /private/tmp/kinlogue-privacy-history.XXXXXX)" \
   || fail "the history-scan workspace is not private"
 
 PATH_LIST="$TEMP_DIR/paths"
+COMMIT_LIST="$TEMP_DIR/commits"
+MEDIA_ENTRY_LIST="$TEMP_DIR/media-entries"
 OBJECT_LIST="$TEMP_DIR/objects"
 OBJECT_STREAM="$TEMP_DIR/object-stream"
 
-/usr/bin/git log --format= --name-only -z "${PUBLIC_REFS[@]}" -- >"$PATH_LIST" \
-  || fail "reachable path enumeration failed"
+typeset -a APPROVED_MEDIA_PATHS=(
+  packaging/AppIcon.png
+  packaging/Kinlogue.iconset/icon_16x16.png
+  packaging/Kinlogue.iconset/icon_16x16@2x.png
+  packaging/Kinlogue.iconset/icon_32x32.png
+  packaging/Kinlogue.iconset/icon_32x32@2x.png
+  packaging/Kinlogue.iconset/icon_128x128.png
+  packaging/Kinlogue.iconset/icon_128x128@2x.png
+  packaging/Kinlogue.iconset/icon_256x256.png
+  packaging/Kinlogue.iconset/icon_256x256@2x.png
+  packaging/Kinlogue.iconset/icon_512x512.png
+  packaging/Kinlogue.iconset/icon_512x512@2x.png
+)
+
+is_reviewable_repository_media_asset() {
+  local candidate="$1"
+  local approved_path
+  for approved_path in "${APPROVED_MEDIA_PATHS[@]}"; do
+    [[ "$candidate" == "$approved_path" ]] && return 0
+  done
+  return 1
+}
+
+[[ -f "$APPROVED_MEDIA_MANIFEST" && ! -L "$APPROVED_MEDIA_MANIFEST" ]] \
+  || fail "the approved media digest manifest is missing or is not a regular file"
+
+typeset -A APPROVED_MEDIA_DIGESTS
+APPROVED_MEDIA_COUNT=0
+while IFS= read -r manifest_line || [[ -n "$manifest_line" ]]; do
+  if [[ "$manifest_line" =~ '^([0-9a-f]{64})  ([^[:cntrl:]]+)$' ]]; then
+    approved_digest="${match[1]}"
+    approved_path="${match[2]}"
+  else
+    fail "the approved media digest manifest contains an invalid entry"
+  fi
+  is_reviewable_repository_media_asset "$approved_path" \
+    || fail "the approved media digest manifest contains an unexpected path"
+  [[ -z "${APPROVED_MEDIA_DIGESTS[$approved_path]:-}" ]] \
+    || fail "the approved media digest manifest contains a duplicate path"
+  APPROVED_MEDIA_DIGESTS[$approved_path]="$approved_digest"
+  (( APPROVED_MEDIA_COUNT += 1 ))
+done <"$APPROVED_MEDIA_MANIFEST"
+
+[[ "$APPROVED_MEDIA_COUNT" -eq "${#APPROVED_MEDIA_PATHS[@]}" ]] \
+  || fail "the approved media digest manifest is incomplete"
+for approved_path in "${APPROVED_MEDIA_PATHS[@]}"; do
+  [[ -n "${APPROVED_MEDIA_DIGESTS[$approved_path]:-}" ]] \
+    || fail "the approved media digest manifest is incomplete"
+done
 
 is_allowed_repository_media_asset() {
-  case "$1" in
-    packaging/AppIcon.png \
-      |packaging/Kinlogue.iconset/icon_16x16.png \
-      |packaging/Kinlogue.iconset/icon_16x16@2x.png \
-      |packaging/Kinlogue.iconset/icon_32x32.png \
-      |packaging/Kinlogue.iconset/icon_32x32@2x.png \
-      |packaging/Kinlogue.iconset/icon_128x128.png \
-      |packaging/Kinlogue.iconset/icon_128x128@2x.png \
-      |packaging/Kinlogue.iconset/icon_256x256.png \
-      |packaging/Kinlogue.iconset/icon_256x256@2x.png \
-      |packaging/Kinlogue.iconset/icon_512x512.png \
-      |packaging/Kinlogue.iconset/icon_512x512@2x.png) return 0 ;;
-    *) return 1 ;;
-  esac
+  [[ -n "${APPROVED_MEDIA_DIGESTS[$1]:-}" ]]
 }
+
+/usr/bin/git log --format= --name-only -z "${PUBLIC_REFS[@]}" -- >"$PATH_LIST" \
+  || fail "reachable path enumeration failed"
 
 is_allowed_historical_secret_template() {
   [[ "${1:t}" == .env.example ]]
@@ -131,6 +171,47 @@ while IFS= read -r -d '' historical_path; do
     fail "a prohibited medical, report-like, backup, credential, or signing artifact path exists in reachable history"
   fi
 done <"$PATH_LIST"
+
+/usr/bin/git log --full-history --format=%H "${PUBLIC_REFS[@]}" \
+  -- "${APPROVED_MEDIA_PATHS[@]}" \
+  | /usr/bin/sort -u >"$COMMIT_LIST" \
+  || fail "reachable repository media commit enumeration failed"
+: >"$MEDIA_ENTRY_LIST"
+while IFS= read -r historical_commit; do
+  [[ -n "$historical_commit" ]] || continue
+  /usr/bin/git ls-tree -r -z --full-tree "$historical_commit" \
+    -- "${APPROVED_MEDIA_PATHS[@]}" >>"$MEDIA_ENTRY_LIST" \
+    || fail "reachable repository media enumeration failed"
+done <"$COMMIT_LIST"
+
+typeset -A MEDIA_DIGEST_CACHE
+while IFS= read -r -d '' media_entry; do
+  [[ "$media_entry" == *$'\t'* ]] \
+    || fail "reachable repository media metadata is invalid"
+  media_metadata="${media_entry%%$'\t'*}"
+  media_path="${media_entry#*$'\t'}"
+  media_fields=(${=media_metadata})
+  [[ "${#media_fields[@]}" -eq 3 \
+      && "${media_fields[1]}" == 100644 \
+      && "${media_fields[2]}" == blob \
+      && "${media_fields[3]}" =~ '^[0-9a-f]{40,64}$' \
+      && -n "${APPROVED_MEDIA_DIGESTS[$media_path]:-}" ]] \
+    || fail "reachable repository media metadata is invalid"
+  media_object="${media_fields[3]}"
+  media_digest="${MEDIA_DIGEST_CACHE[$media_object]:-}"
+  if [[ -z "$media_digest" ]]; then
+    media_digest="$(
+      /usr/bin/git cat-file blob "$media_object" \
+        | /usr/bin/shasum -a 256 \
+        | /usr/bin/awk '{print $1}'
+    )" || fail "reachable repository media could not be hashed"
+    [[ "$media_digest" =~ '^[0-9a-f]{64}$' ]] \
+      || fail "reachable repository media returned an invalid digest"
+    MEDIA_DIGEST_CACHE[$media_object]="$media_digest"
+  fi
+  [[ "$media_digest" == "${APPROVED_MEDIA_DIGESTS[$media_path]}" ]] \
+    || fail "unapproved repository media exists in reachable history"
+done <"$MEDIA_ENTRY_LIST"
 
 /usr/bin/git rev-list --objects --no-object-names "${PUBLIC_REFS[@]}" -- \
   | /usr/bin/sort -u >"$OBJECT_LIST" \

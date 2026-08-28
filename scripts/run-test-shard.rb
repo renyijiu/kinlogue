@@ -208,6 +208,6 @@ loop do
     warn("Test shard supervision failed: owned processes did not terminate")
     exit(70)
   end
-  puts("KLT_TEST_SUMMARY_TEARDOWN tests=#{expected_tests} suites=#{expected_suites}")
-  exit(0)
+  warn("Test shard supervision failed: test process remained alive after its passing summary")
+  exit(70)
 end

@@ -10,7 +10,7 @@
 | 备份 | 用户选择目录中的自包含 checkpoint 使用 HPKE + AES-GCM 认证加密、设备签名和完整正式文件回读 | 活动 Vault 已加密、网盘已经上传、远端保留 N 份、全局最新性 |
 | 密钥 | 不使用 Keychain；恢复 seed/私钥不持久化，本机只保存不能解密 checkpoint 的设备签名 seed 与恢复根公钥 | 服务端找回恢复码、设备身份能解密、同登录会话恶意软件防护 |
 | 完整性 | SHA-256 检测意外截断、缺失和错误引用，并参与本机精确去重；catalog/object metadata 交叉校验 | 密码学认证、签名、防篡改或攻击者重写防护 |
-| 网络 | 用户主动开启的临时 LAN listener；普通 HTTP；pairing + cookie + CSRF + session generation | TLS、公共网络安全、远程访问或云同步 |
+| 网络 | 用户主动开启的临时 LAN listener；只绑定所选本机地址并在 HTTP 前限制为其已验证 IPv4/IPv6 前缀；普通 HTTP；pairing + cookie + CSRF + session generation | TLS、公共网络安全、跨前缀远程访问或云同步 |
 | OCR | macOS Vision/PDFKit 本机处理 | 云端 OCR、医学诊断或治疗建议 |
 | 供应链 | SwiftPM exact versions + resolved commit；SwiftNIO/ZIPFoundation 锁定版本高于本次复核的公开修复线；GitHub Actions 固定完整 SHA | 未启用远端扫描时的“零漏洞”、DICOM 解码器或备份密码学已独立审计 |
 | 原始文件导出 | 用户明确选择目标后生成一个未加密 ZIP；只含已确认原始附件，发布后由用户保管 | 加密容器、备份/恢复格式、导出副本仍受 App 删除控制 |
@@ -48,6 +48,7 @@
 - `AtomicFileStore`、`VaultRootBinding`、`VaultProcessLock`：`O_NOFOLLOW`、descriptor identity、父/root inode 检查、共享 root mutation coordination。
 - `PlaintextVaultInitializationTransaction` / `PlaintextVaultDeletionTransaction`：初始化和删除 receipt、quarantine、同步和崩溃恢复。
 - `ImportedFileValidator`、`PDFTextExtractor`、`VisionTextRecognizer`：输入类型、页/像素/输出预算、单页处理和取消检查。
+- `LANNetworkInterfaceResolver` / `LANServerTransport`：从连续且非零的 netmask 固化所选接口前缀；未知、不可解析、IPv4-mapped IPv6、跨地址族或越界 socket 对端在安装 HTTP pipeline 前失败关闭。IPv6 global unicast 可用但只接收同前缀对端；当前拒绝需要 zone identifier 的 IPv6 link-local。
 - `LANSession`：一次性 pairing、session generation、idle timeout、constant-time comparison、peer/global rate limits。
 - `LANHTTPHandler`：authority/origin/framing、header/body deadlines、认证先于 body/remote ID、粗粒度 phone error mapping。
 - `LANInboxPartialContext` / `PlaintextLANInboxStore`：partial descriptor、inode identity、blob/derived 原子发布、manifest 后提交和失败清理。

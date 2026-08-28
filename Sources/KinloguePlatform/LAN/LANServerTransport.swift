@@ -35,6 +35,7 @@ public enum LANServerTransportError: Error, Equatable, Sendable {
     case alreadyStarted
     case stopped
     case invalidHost(String)
+    case invalidNetworkPrefix(Int)
     case invalidPort(Int)
     case boundAddressMismatch
 }
@@ -142,7 +143,10 @@ public actor LANServerTransport {
         self.startHook = startHook
     }
 
-    public func start(host: String, port: Int = 0) async throws -> LANServerEndpoint {
+    public func start(
+        at address: LANNetworkAddress,
+        port: Int = 0
+    ) async throws -> LANServerEndpoint {
         switch phase {
         case .idle:
             break
@@ -154,11 +158,14 @@ public actor LANServerTransport {
         guard (0...65_535).contains(port) else {
             throw LANServerTransportError.invalidPort(port)
         }
-        guard LANIPAddress.parseUsableCanonical(
-            host,
+        guard let localAddress = LANIPAddress.parseUsableCanonical(
+            address.host,
             allowingLoopback: addressPolicy.allowsLoopback
-        ) != nil else {
-            throw LANServerTransportError.invalidHost(host)
+        ) else {
+            throw LANServerTransportError.invalidHost(address.host)
+        }
+        guard localAddress.isValidNetworkPrefixLength(address.networkPrefixLength) else {
+            throw LANServerTransportError.invalidNetworkPrefix(address.networkPrefixLength)
         }
 
         let generation = UUID()
@@ -171,6 +178,7 @@ public actor LANServerTransport {
 
         let registry = channels
         let initializer = childChannelInitializer
+        let allowsLoopback = addressPolicy.allowsLoopback
         let channel: any Channel
         do {
             channel = try await ServerBootstrap(group: group)
@@ -182,19 +190,16 @@ public actor LANServerTransport {
                     value: FixedSizeRecvByteBufferAllocator(capacity: 16 * 1_024)
                 )
                 .childChannelInitializer { channel in
-                    let peer = Self.socketPeer(for: channel)
-                    guard registry.insertIfAccepting(channel, peerHost: peer.host) else {
-                        return channel.close()
-                    }
-                    channel.closeFuture.whenComplete { _ in
-                        registry.remove(channel)
-                    }
-                    return initializer(channel, peer).flatMapError { error in
-                        registry.remove(channel)
-                        return channel.eventLoop.makeFailedFuture(error)
-                    }
+                    Self.initializeAcceptedChannel(
+                        channel,
+                        peer: Self.socketPeer(for: channel),
+                        listeningAddress: address,
+                        registry: registry,
+                        childChannelInitializer: initializer,
+                        allowingLoopback: allowsLoopback
+                    )
                 }
-                .bind(to: try SocketAddress(ipAddress: host, port: port))
+                .bind(to: try SocketAddress(ipAddress: address.host, port: port))
                 .get()
         } catch {
             if phase == .starting(generation) {
@@ -212,7 +217,7 @@ public actor LANServerTransport {
         }
 
         guard let local = channel.localAddress,
-              Self.isExactBoundAddress(local, requestedHost: host),
+              Self.isExactBoundAddress(local, requestedHost: address.host),
               let actualPort = local.port,
               actualPort > 0 else {
             try? await channel.close().get()
@@ -221,7 +226,7 @@ public actor LANServerTransport {
         }
         listener = channel
         phase = .running
-        return .init(host: host, port: actualPort)
+        return .init(host: address.host, port: actualPort)
     }
 
     public func stop() async {
@@ -271,9 +276,59 @@ public actor LANServerTransport {
         }
     }
 
-    private static func socketPeer(for channel: any Channel) -> LANTransportPeer {
-        let address = channel.remoteAddress
-        return .init(host: address?.ipAddress ?? "unknown", port: address?.port)
+    private static func socketPeer(for channel: any Channel) -> LANTransportPeer? {
+        guard let address = channel.remoteAddress,
+              let host = address.ipAddress else {
+            return nil
+        }
+        return .init(host: host, port: address.port)
+    }
+
+    static func isPeerHost(
+        _ peerHost: String,
+        on listeningAddress: LANNetworkAddress,
+        allowingLoopback: Bool = false
+    ) -> Bool {
+        guard let local = LANIPAddress.parseUsableCanonical(
+            listeningAddress.host,
+            allowingLoopback: allowingLoopback
+        ),
+        let peer = LANIPAddress.parseUsableCanonical(
+            peerHost,
+            allowingLoopback: allowingLoopback
+        ) else {
+            return false
+        }
+        return local.sharesNetworkPrefix(
+            with: peer,
+            length: listeningAddress.networkPrefixLength
+        )
+    }
+
+    static func initializeAcceptedChannel(
+        _ channel: any Channel,
+        peer: LANTransportPeer?,
+        listeningAddress: LANNetworkAddress,
+        registry: LANChannelRegistry,
+        childChannelInitializer: @escaping ChildChannelInitializer,
+        allowingLoopback: Bool
+    ) -> EventLoopFuture<Void> {
+        guard let peer,
+              isPeerHost(
+                  peer.host,
+                  on: listeningAddress,
+                  allowingLoopback: allowingLoopback
+              ),
+              registry.insertIfAccepting(channel, peerHost: peer.host) else {
+            return channel.close()
+        }
+        channel.closeFuture.whenComplete { _ in
+            registry.remove(channel)
+        }
+        return childChannelInitializer(channel, peer).flatMapError { error in
+            registry.remove(channel)
+            return channel.eventLoop.makeFailedFuture(error)
+        }
     }
 
     static func isExactBoundAddress(

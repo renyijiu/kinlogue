@@ -5,7 +5,8 @@ import Testing
 struct LANNetworkMonitorTests {
     private let advertised = LANNetworkAddress(
         interfaceName: "en0",
-        host: "192.168.1.23"
+        host: "192.168.1.23",
+        networkPrefixLength: 24
     )
 
     @Test
@@ -22,7 +23,13 @@ struct LANNetworkMonitorTests {
 
         snapshots.replace([
             eligibleAdvertisedSnapshot,
-            .init(name: "en5", address: "10.0.0.8", isUp: true, isRunning: true),
+            .init(
+                name: "en5",
+                address: "10.0.0.8",
+                networkPrefixLength: 8,
+                isUp: true,
+                isRunning: true
+            ),
         ])
         updates.emitInitial()
         await waitUntilBaselineReceived(monitor)
@@ -48,7 +55,13 @@ struct LANNetworkMonitorTests {
         await waitUntilBaselineReceived(monitor)
 
         snapshots.replace([
-            .init(name: "en5", address: "10.0.0.8", isUp: true, isRunning: true),
+            .init(
+                name: "en5",
+                address: "10.0.0.8",
+                networkPrefixLength: 8,
+                isUp: true,
+                isRunning: true
+            ),
         ])
         updates.emitChange()
         await waitUntilInvalidated(monitor)
@@ -77,6 +90,7 @@ struct LANNetworkMonitorTests {
             .init(
                 name: "en5",
                 address: advertised.host,
+                networkPrefixLength: advertised.networkPrefixLength,
                 isUp: true,
                 isRunning: true
             ),
@@ -100,6 +114,31 @@ struct LANNetworkMonitorTests {
         try await monitor.start()
 
         snapshots.failReads()
+        updates.emitInitial()
+        await waitUntilInvalidated(monitor)
+
+        #expect(await hooks.snapshot() == .init(stops: 1, invalidations: 1))
+    }
+
+    @Test
+    func changedPrefixForTheSameInterfaceAndAddressFailsClosed() async throws {
+        let snapshots = LockedNetworkSnapshots([eligibleAdvertisedSnapshot])
+        let updates = FakeNetworkPathUpdateSource()
+        let hooks = NetworkMonitorHooksSpy()
+        let monitor = makeMonitor(
+            snapshots: snapshots,
+            updates: updates,
+            hooks: hooks
+        )
+        try await monitor.start()
+
+        snapshots.replace([.init(
+            name: advertised.interfaceName,
+            address: advertised.host,
+            networkPrefixLength: 25,
+            isUp: true,
+            isRunning: true
+        )])
         updates.emitInitial()
         await waitUntilInvalidated(monitor)
 
@@ -216,6 +255,7 @@ struct LANNetworkMonitorTests {
         .init(
             name: advertised.interfaceName,
             address: advertised.host,
+            networkPrefixLength: advertised.networkPrefixLength,
             isUp: true,
             isRunning: true
         )

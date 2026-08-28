@@ -12,7 +12,10 @@ def fail_closed(message)
   exit(1)
 end
 
+inventory_summary = ARGV.first == "--inventory-summary"
+ARGV.shift if inventory_summary
 fail_closed("expected a test-list file and optional partition") unless [1, 3].include?(ARGV.length)
+fail_closed("inventory summary does not accept a partition") if inventory_summary && ARGV.length != 1
 path = ARGV.fetch(0)
 begin
   partition_index = ARGV.length == 3 ? Integer(ARGV.fetch(1), 10) : 0
@@ -150,6 +153,23 @@ end
   if compiled.any? { |pattern| pattern.match?(identifier) }
     fail_closed("an excluded test entered a primary shard")
   end
+end
+
+if inventory_summary
+  core_specifiers = specifiers.select { |specifier| specifier.start_with?("KinlogueCoreTests.") }
+  primary_shards = shards.reject { |_, _, dedicated| dedicated }
+  test_count = core_specifiers.length + primary_shards.sum { |_, values, _| values.length }
+  suite_count = core_specifiers.map do |specifier|
+    specifier.split("/", 2).first if specifier.include?("/")
+  end.compact.uniq.length
+  suite_count += primary_shards.sum do |_, values, _|
+    values.map do |specifier|
+      specifier.split("/", 2).first if specifier.include?("/")
+    end.compact.uniq.length
+  end
+  fail_closed("primary inventory is empty") unless test_count.positive?
+  puts("KLT_PRIMARY_TEST_INVENTORY tests=#{test_count} suites=#{suite_count}")
+  exit(0)
 end
 
 selected_shards = if partition_count == 1
