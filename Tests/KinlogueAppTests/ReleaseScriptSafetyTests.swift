@@ -301,6 +301,29 @@ struct ReleaseScriptSafetyTests {
             try fileManager.removeItem(at: fixture)
         }
 
+        let documentationAssets = root.appendingPathComponent("docs/assets")
+        try fileManager.createDirectory(
+            at: documentationAssets,
+            withIntermediateDirectories: true
+        )
+        let reviewedScreenshot = documentationAssets
+            .appendingPathComponent("kinlogue-overview.jpg")
+        try fileManager.copyItem(
+            at: repositoryURL.appendingPathComponent(
+                "docs/assets/kinlogue-overview.jpg"
+            ),
+            to: reviewedScreenshot
+        )
+        let reviewed = try run(script, [], environment: environment)
+        #expect(reviewed.status == 0)
+        #expect(reviewed.output.contains("Privacy guard passed"))
+
+        try Data("tampered screenshot".utf8).write(to: reviewedScreenshot)
+        let tampered = try run(script, [], environment: environment)
+        #expect(tampered.status != 0)
+        #expect(tampered.output.contains("checked-in report-like PDF or image"))
+        try fileManager.removeItem(at: reviewedScreenshot)
+
         let packaging = root.appendingPathComponent("packaging")
         try fileManager.createDirectory(at: packaging, withIntermediateDirectories: true)
         try Data("synthetic application icon".utf8).write(

@@ -13,6 +13,14 @@
   macOS 14+ · Swift 6 · Local-first · GPL-3.0
 </p>
 
+<p align="center">
+  <img src="docs/assets/kinlogue-overview.jpg" width="1180" alt="续页应用界面：使用合成示例家庭成员展示健康记录时间线、已确认信息与原件预览">
+</p>
+
+<p align="center">
+  <sub>产品界面预览 · 仅使用合成示例数据，不包含真实健康资料</sub>
+</p>
+
 续页（英文名 **Kinlogue**，读作 **KIN-log**）是一款 Mac 优先、隐私优先的家庭健康记录应用。它把散落在 PDF 与图片里的检查报告、化验单和门诊记录，按家人与时间串联起来，让历史资料在下一次复诊时随手可查。
 
 *Kinlogue turns your family’s medical reports into one continuous history, ready for every follow-up.*
