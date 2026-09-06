@@ -110,6 +110,7 @@ private actor RestoreModelService: BackupRestoreServicing {
     private(set) var cancelCount = 0
     private(set) var hasPreparedRestore = false
     private var preparePaused = false
+    private var preparationGeneration = 0
     private var prepareContinuation: CheckedContinuation<Void, Never>?
     private var prepareEntered = false
     private var prepareWaiters: [CheckedContinuation<Void, Never>] = []
@@ -121,6 +122,7 @@ private actor RestoreModelService: BackupRestoreServicing {
     func reconcileBeforeStartingServices() async throws {}
 
     func prepare(checkpointURL: URL, recoveryCode: String) async throws -> BackupRestoreSummary {
+        let generation = preparationGeneration
         _ = checkpointURL
         prepareCodes.append(recoveryCode)
         prepareEntered = true
@@ -129,11 +131,13 @@ private actor RestoreModelService: BackupRestoreServicing {
         if preparePaused {
             await withCheckedContinuation { prepareContinuation = $0 }
         }
+        guard generation == preparationGeneration else { throw CancellationError() }
         hasPreparedRestore = true
         return restoreModelSummary()
     }
 
     func cancelPreparedRestore() async throws {
+        preparationGeneration += 1
         cancelCount += 1
         hasPreparedRestore = false
     }

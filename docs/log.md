@@ -2,6 +2,14 @@
 
 本文件是项目知识库的追加式日志。每个条目记录一次可复核的 ingest、query、lint 或重大文档维护；不要改写历史条目来伪造当前状态。最新状态以专题页和代码/测试为准。
 
+## [2026-09-06] fix/review | 修复公开 main 的上传队列与备份恢复交互
+
+- **基线**：以公开 `main` 的 `b33383d025556d662e371a50252102e00a6f70f6` 为起点；本次不包含旧私有分支历史。
+- **手机上传**：同 attempt 的 reservation 轮询保留本地 queued 状态，避免并发槽释放后文件被跳过；终态仍由 Mac 结果覆盖。
+- **恢复与备份状态**：恢复权限回调重验 generation，迟到 UI 结果不再调用全局 staging cancel；手动备份有独立 in-flight 状态，激活/刷新不会恢复按钮或允许重复提交。
+- **目录授权**：已启用备份可以重新选择原父目录；只在父目录和 repository 身份均匹配时 CAS 更新 bookmark，错误目录和替换 inode 不创建文件或改写配置。中英文案与运行时资源同步。
+- **验证**：当前 Mac 上定向回归 53 tests / 7 suites 与完整 `scripts/test.sh` 通过，主测试清单经脚本核对为 981 tests / 90 suites；独立 derived XCTest 13/13、验收扫描 14/1、storage process 33/1、DICOM 导入 17/1、LAN 生产 HTTP 1/1 与真实双流 LAN RSS/背压 1/1 均通过。`scripts/lint.sh`（warnings-as-errors 构建、依赖图和文档）、当前树 `scripts/privacy-guard.sh`、本地化资源核对与 `git diff --check` 通过。以上为未提交工作树的本机证据，尚未绑定不可变候选；真实手机、Powerbox 人工授权、VoiceOver、独立 macOS 版本、完整安装包与正式分发门禁尚未执行。
+
 ## [2026-08-28] security/lan | 将接收准入绑定到接口网络前缀
 
 - **行为与边界**：生产 receiver 启动前重新确认所选接口、地址和连续非零 netmask 的精确身份；transport 在安装 child initializer 与 HTTP pipeline 前，按该 IPv4/IPv6 前缀拒绝缺失、不可解析、跨地址族、IPv4-mapped IPv6 或越界的真实对端。接口前缀变化也会让网络监控失败关闭。传输仍是普通 HTTP，只适用于可信任私人网络；当前契约见 [`lan-upload.md`](lan-upload.md) 和 [`privacy-and-security.md`](privacy-and-security.md)。

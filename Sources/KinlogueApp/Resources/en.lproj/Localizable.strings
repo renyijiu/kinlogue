@@ -1120,6 +1120,8 @@
 	<string>Some originals are damaged or changed, so the export did not finish.</string>
 	<key>采样日期</key>
 	<string>Collection Date</string>
+	<key>重新授权原备份目录…</key>
+	<string>Reauthorize Original Backup Folder…</string>
 	<key>重新识别失败，当前内容已保留</key>
 	<string>Recognition failed. Current fields were kept.</string>
 	<key>重新识别并覆盖</key>
