@@ -219,6 +219,9 @@ private actor UnavailableVaultDestroyService: VaultDestroyServicing {
 }
 
 private actor UnavailableBackupService: BackupServicing {
+    func reauthorizeDestination(selectedParent: URL) async throws {
+        throw BackupSemanticError.notConfigured
+    }
     func loadStatus() async throws -> AppBackupStatus { .notConfigured }
     func beginSetup(selectedParent: URL) async throws -> String {
         _ = selectedParent

@@ -1,6 +1,6 @@
 # 当前候选证据
 
-<!-- release-facts: short=0.5.0 build=5 minimum-macos=14.0 tests=977 suites=89 automated-gates=not-verified overall=pendingManual -->
+<!-- release-facts: short=0.5.0 build=5 minimum-macos=14.0 tests=981 suites=90 automated-gates=not-verified overall=pendingManual -->
 
 本页是当前版本、测试清单、候选身份和发布状态的唯一权威账本。其他页面只链接本页，不复制这些易漂移数字。
 
@@ -8,14 +8,14 @@
 
 | 维度 | 当前状态 | 说明 |
 | --- | --- | --- |
-| 源码自动化 | `not-verified` | 当前未提交工作树的确定性主测试清单为 977 tests / 89 suites；全量 `scripts/test.sh` 结果尚未绑定到不可变 source ref，因此不把定向回归写成当前候选已通过 |
+| 源码自动化 | `not-verified` | 当前未提交工作树的确定性主测试清单为 981 tests / 90 suites；本机完整 `scripts/test.sh`、lint 与当前树隐私门禁已通过，结果尚未绑定到不可变 source ref，因此不登记为当前候选已通过 |
 | clean-source bundle / XPC | `notExecuted` | 当前修复仍是未提交工作树，不满足 `scripts/verify-app.sh --require-clean-source` 的证据前提；历史 ad-hoc bundle 结果不得冒充当前 source ref |
 | Git 历史隐私 | `verified-baseline` | 审查起点 `f9cc99b8adcfbfeba35bddc8575a8a464d25eaa2` 是已公开的净化历史后续提交，已对该 ref 运行 history guard；当前工作树新增了媒体摘要白名单回归，但须在提交并推送后对全部公开 refs 再验证 |
 | 公开托管 | `external` | CI、CodeQL、Dependabot 与治理文件已入库；GitHub 安全设置、branch rules 和 workflow 运行属于可变远端状态，必须在托管平台实时核对，不把它们固化成 commit 内的永久结论 |
 | 公共分发 | `notExecuted` | 没有 Developer ID、notarization 或正式公众下载渠道证明 |
 | 整体状态 | `pendingManual` | 自动化即使通过，也不能覆盖真实设备、真实样本、Powerbox 和可访问性人工门禁 |
 
-`automated-gates` 只描述当前 source ref 是否完成整套自动化；`overall` 描述包含人工门禁的候选整体状态。当前确定性主测试清单为 977 tests / 89 suites；derived-artifact XCTest 由已构建 bundle 的完整 inventory 动态发现并逐 case 启动有界进程，不再维护手写 selector 名单。仅在大小写不敏感卷启用的别名锁测试，以及 storage process、DICOM 导入集成、验收扫描、安装 LAN 生产 HTTP 探针和真实双流 LAN RSS/背压用例另按脚本要求分别串行隔离。条件式测试在不适用卷上明确跳过，不进入固定主账。源码自动化通过不替代下列安装、真机与人工门禁。
+`automated-gates` 只描述当前 source ref 是否完成整套自动化；`overall` 描述包含人工门禁的候选整体状态。当前确定性主测试清单为 981 tests / 90 suites；derived-artifact XCTest 由已构建 bundle 的完整 inventory 动态发现并逐 case 启动有界进程，不再维护手写 selector 名单。仅在大小写不敏感卷启用的别名锁测试，以及 storage process、DICOM 导入集成、验收扫描、安装 LAN 生产 HTTP 探针和真实双流 LAN RSS/背压用例另按脚本要求分别串行隔离。条件式测试在不适用卷上明确跳过，不进入固定主账。源码自动化通过不替代下列安装、真机与人工门禁。
 
 ## 开源 baseline 身份
 
@@ -23,7 +23,7 @@
 | --- | --- |
 | Short version / build | `0.5.0` / `5` |
 | 最低系统 | macOS `14.0` |
-| 审查起点 | 公开 `main` 的 `f9cc99b8adcfbfeba35bddc8575a8a464d25eaa2`；当前修复是以它为基础的未提交工作树，尚无可作为发布证据的新 commit 或 tag |
+| 审查起点 | 公开 `main` 的 `b33383d025556d662e371a50252102e00a6f70f6`；当前修复是以它为基础的未提交工作树，尚无可作为发布证据的新 commit 或 tag |
 | Git 历史 | 公开历史由净化 root commit 及其公开后续提交组成；不迁移旧私有 branches、tags、PR refs、releases 或原 commit metadata |
 | 工件 | 尚未为当前修复生成或发布可绑定的 App ZIP |
 | 签名与渠道 | Developer ID / notarization `notExecuted`；不得把历史 ad-hoc 结果冒充当前公共候选 |

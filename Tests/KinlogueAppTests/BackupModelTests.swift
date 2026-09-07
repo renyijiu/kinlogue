@@ -266,6 +266,7 @@ struct BackupModelTests {
 }
 
 private actor BackupModelService: BackupServicing {
+    func reauthorizeDestination(selectedParent: URL) async throws {}
     private var status: AppBackupStatus
     private(set) var completedReentry: String?
     private(set) var completedIndependentSave: Bool?

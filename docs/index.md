@@ -34,6 +34,8 @@
 
 整库恢复确认后，共享 lifecycle 会取消并等待已经进入的报告 import/retry/OCR、LAN、DICOM 与导出任务；并发恢复 preparation 以 generation 隔离，activation 失败只允许退出重启。事实与回归入口见 [`backup-and-restore.md`](backup-and-restore.md)、[`architecture.md`](architecture.md) 和 [`import-and-ocr.md`](import-and-ocr.md)。
 
+当前设置页支持对原备份目录重新授权，并保持手动备份忙碌状态；恢复 ViewModel 的迟到权限回调不会清理新恢复点。手机批量上传的本地排队状态也不会被 reservation 轮询覆盖。实现与回归入口分别见 [`backup-and-restore.md`](backup-and-restore.md) 和 [`lan-upload.md`](lan-upload.md)。
+
 ## 当前专题
 
 ### 产品与架构

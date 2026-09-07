@@ -3896,6 +3896,7 @@
     "选择": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose"}}}},
     "选择一个已下载到本机的 .kinloguebackup 恢复点。恢复会先完整验证，不会在确认前修改当前资料库。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose a .kinloguebackup restore point downloaded to this Mac. Kinlogue verifies it fully and will not change the current library before confirmation."}}}},
     "选择备份目录…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose Backup Folder…"}}}},
+    "重新授权原备份目录…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Reauthorize Original Backup Folder…"}}}},
     "选择恢复点…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose Restore Point…"}}}},
     "选择数据备份目录": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose Data Backup Folder"}}}},
     "继续未完成的备份设置": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Continue Incomplete Backup Setup"}}}},
