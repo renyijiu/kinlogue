@@ -461,7 +461,7 @@
       if (entry.state === "failed" && !["saved", "cancelled"].includes(remote.state)) {
         return;
       }
-      if (entry.state === "uploading" && remote.state === "reserved") {
+      if (["queued", "uploading"].includes(entry.state) && remote.state === "reserved") {
         return;
       }
     }

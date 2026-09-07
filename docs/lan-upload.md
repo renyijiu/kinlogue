@@ -43,6 +43,8 @@ flowchart TD
 
 手机页面没有拖动排序、分组完成或报告归属操作。用户可以多次打开文件选择器继续追加文件，也可以取消尚未保存的项目。
 
+本地排队状态与 Mac 的 reservation 状态分开处理：同 attempt 的 `reserved` 轮询不会将 `queued` 或 `uploading` 回退。前两个上传占满并发槽时，后续已预约文件仍留在可调度队列；权威 `saved` / `cancelled` 终态继续生效。对应回归见 [`LANPhoneAssetSafetyTests`](../Tests/KinloguePlatformTests/LANPhoneAssetSafetyTests.swift)。
+
 浏览器只在文件名、大小、最后修改时间和媒体类型都相同时，把项目列为本地比较候选；随后按 1 MiB 块逐字节比较。比较受以下总预算限制：
 
 | 项目 | 上限 |

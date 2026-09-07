@@ -26,6 +26,7 @@ final class BackupModel: ObservableObject {
     private var scheduledTask: Task<Void, Never>?
 
     @Published private(set) var phase: BackupModelPhase = .loading
+    @Published private(set) var isManualBackupInFlight = false
     @Published private(set) var status: AppBackupStatus = .notConfigured
     @Published private(set) var recoveryCode: String?
     @Published var recoveryCodeReentry = ""
@@ -72,6 +73,7 @@ final class BackupModel: ObservableObject {
     }
 
     func refresh() async {
+        guard !isManualBackupInFlight else { return }
         let generation = beginOperation()
         do {
             let status = try await service.loadStatus()
@@ -85,6 +87,11 @@ final class BackupModel: ObservableObject {
     }
 
     func beginSetup(selectedParent: URL) async {
+        guard !isManualBackupInFlight else { return }
+        if status.enrollment == .ready {
+            await reauthorizeDestination(selectedParent: selectedParent)
+            return
+        }
         let generation = beginOperation()
         phase = .enrollmentPending
         failure = nil
@@ -217,6 +224,7 @@ final class BackupModel: ObservableObject {
     }
 
     func setAutomaticBackupEnabled(_ enabled: Bool) async {
+        guard !isManualBackupInFlight else { return }
         let generation = beginOperation()
         do {
             let outcome = try await service.setAutomaticBackupEnabled(enabled)
@@ -236,6 +244,7 @@ final class BackupModel: ObservableObject {
     }
 
     func setRetentionCount(_ count: Int) async {
+        guard !isManualBackupInFlight else { return }
         guard BackupRetentionCount.allowedRange.contains(count) else { return }
         let generation = beginOperation()
         do {
@@ -250,6 +259,9 @@ final class BackupModel: ObservableObject {
     }
 
     func backUpNow() async {
+        guard !isManualBackupInFlight else { return }
+        isManualBackupInFlight = true
+        defer { isManualBackupInFlight = false }
         let generation = beginOperation()
         phase = .backingUp
         failure = nil
@@ -257,6 +269,7 @@ final class BackupModel: ObservableObject {
             let cleanup = try await service.backUpNow()
             guard generation == operationGeneration else { return }
             status = try await service.loadStatus()
+            guard generation == operationGeneration else { return }
             if case .deferred(let semantic) = cleanup {
                 failure = .semantic(semantic)
             }
@@ -293,7 +306,22 @@ final class BackupModel: ObservableObject {
             return
         } catch {
             failure = Self.map(error)
-            phase = status.enrollment == .ready ? .ready : .failed
+            if !isManualBackupInFlight {
+                phase = status.enrollment == .ready ? .ready : .failed
+            }
+        }
+    }
+
+    private func reauthorizeDestination(selectedParent: URL) async {
+        let generation = beginOperation()
+        do {
+            try await service.reauthorizeDestination(selectedParent: selectedParent)
+            let refreshed = try await service.loadStatus()
+            guard generation == operationGeneration else { return }
+            apply(refreshed)
+        } catch {
+            guard generation == operationGeneration else { return }
+            failure = Self.map(error)
         }
     }
 
@@ -344,6 +372,7 @@ final class BackupModel: ObservableObject {
 
     private func apply(_ status: AppBackupStatus) {
         self.status = status
+        guard !isManualBackupInFlight else { return }
         failure = status.lastFailure.map(BackupModelFailure.semantic)
         if status.enrollment != .pending {
             clearPendingEnrollmentRecoveryInput()

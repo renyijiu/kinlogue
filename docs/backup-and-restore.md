@@ -14,6 +14,8 @@
 
 专用 repository 的名称以 `.` 开头，Finder 默认不会在父目录列表中显示它。设置页提供“在访达中显示”，直接打开实际保存 `.kinloguebackup` 文件的 repository；手动备份运行期间显示明确的创建中状态，完成后才刷新“最近本地验证”。
 
+已配置目录的授权失效时，可在设置页选择“重新授权原备份目录…”，重新选择原父目录。该操作核对父目录与 repository 的原设备/inode 身份，只更新持久 bookmark，不创建目录、不生成恢复码、不更换 writer，也不修改既有恢复点；选错目录或原 repository 已被替换时拒绝授权。手动备份运行期间，设置控件保持禁用；激活事件和状态刷新不会提前结束创建中状态或允许重复提交。
+
 恢复码及其恢复私钥不会写入 Keychain、UserDefaults、配置文件或 repository。本机只保存不能解密恢复点的加密公钥和设备签名身份；遗失恢复码时续页无法找回或解密既有恢复点。
 
 如果首次设置已经持久化本机备份身份、但在 repository 发布完成前中断，设置页会在重启后显示“未完成”状态。用户可以输入自己独立保存的原恢复码继续同一 enrollment；这条路径复用原有恢复根、设备签名身份和 writer epoch，不生成新的恢复码或 signer。也可以通过二次确认显式放弃本机 pending identity 后重新配置；放弃失败会保持 pending 状态并显示错误，不会静默清除。恢复码输入只保留在当前恢复操作的内存状态中，成功、失败、取消或放弃后立即清空。
@@ -42,6 +44,8 @@
 5. 成功后必须退出并重新打开 App。本机备份配置会移除，外部恢复点保持不变，也不会被自动采用为新的备份目标。
 
 确认替换后，`LibraryLifecycleCoordinator` 会取消并等待已经进入的普通报告导入、重试和重新 OCR，以及 LAN、DICOM 与原件导出操作；这些任务到达终态后才允许 whole-root 切换。并发选择恢复点使用 operation generation 隔离，较旧的迟到 preparation 只能清理自己的 staging，不能覆盖或取消较新的已验证恢复点。
+
+恢复 ViewModel 在文件授权返回后再次检查 generation，并冻结本次恢复码。释放授权后的迟到结果只丢弃自身 UI 发布；staging 清理由 `LiveRestoreService` 按 preparation generation 负责，不能在 ViewModel 中用全局 cancel 清理另一次恢复。对应组合回归见 [`BackupConcurrencyRegressionTests`](../Tests/KinlogueAppTests/BackupConcurrencyRegressionTests.swift)，目录授权持久化与身份拒绝见 [`LiveBackupServiceTests`](../Tests/KinlogueAppTests/LiveBackupServiceTests.swift)。
 
 验证失败、错误恢复码、空间不足、截断/篡改、未知格式或对象图不完整都不会替换当前资料库。确认前的失败仍可取消并重新选择；确认后的 activation 失败已经进入 destructive convergence，界面只允许退出并重新打开 App，不再声称当前资料库没有变化。解密 staging 的 receipt 在首个明文字节前持久化；启动时先清理或收敛遗留恢复事务，再开放普通存储服务。
 

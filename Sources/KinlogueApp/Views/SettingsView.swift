@@ -209,6 +209,9 @@ struct SettingsView: View {
 
     private var configuredBackupControls: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Button(AppLocalization.string("重新授权原备份目录…"), action: onChooseBackupDirectory)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .accessibilityIdentifier("backup-reauthorize-directory")
             LabeledContent(AppLocalization.string("所选目录")) {
                 Text(backupModel.status.destinationDisplayName ?? AppLocalization.string("目录当前不可用"))
             }
@@ -293,6 +296,7 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
             .disabled(backupModel.phase == .backingUp)
         }
+        .disabled(backupModel.isManualBackupInFlight)
     }
 
     private func byteCount(_ value: UInt64) -> String {

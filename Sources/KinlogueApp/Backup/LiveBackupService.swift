@@ -42,6 +42,7 @@ struct AppBackupStatus: Equatable, Sendable {
 protocol BackupServicing: Sendable {
     func loadStatus() async throws -> AppBackupStatus
     func beginSetup(selectedParent: URL) async throws -> String
+    func reauthorizeDestination(selectedParent: URL) async throws
     func completeSetup(recoveryCodeReentry: String, independentlySaved: Bool) async throws
     func cancelSetup() async
     func resumePending(recoveryCode: String) async throws
@@ -245,6 +246,32 @@ actor LiveBackupService: BackupServicing {
             independentlySaved: independentlySaved
         )
         self.setupSession = nil
+    }
+
+    func reauthorizeDestination(selectedParent: URL) async throws {
+        guard let configuration = try await configurationStore.load(),
+              configuration.phase == .enabled else {
+            throw BackupSemanticError.notConfigured
+        }
+        if requiresSelectedDirectoryScope {
+            guard selectedDirectoryScope.startAccessing(selectedParent) else {
+                throw BackupDestinationAuthorityError.securityScopeUnavailable
+            }
+        }
+        defer {
+            if requiresSelectedDirectoryScope {
+                selectedDirectoryScope.stopAccessing(selectedParent)
+            }
+        }
+        let bookmark = try destinationAuthority.reauthorizeSelectedParent(
+            selectedParent,
+            activeVaultURL: activeVaultURL,
+            configuration: configuration
+        )
+        _ = try await configurationStore.refreshEnabledBookmark(
+            bookmark,
+            expectedRevision: configuration.revision
+        )
     }
 
     func cancelSetup() async {

@@ -5,6 +5,54 @@ import Testing
 
 struct LANPhoneAssetSafetyTests {
     @Test
+    func pollingReservedFilesPreservesTheLocalUploadQueue() throws {
+        let app = repository.appendingPathComponent("Sources/KinloguePlatform/Resources/LANUpload/app.js")
+        let program = #"""
+        const source = require("node:fs").readFileSync(process.argv[1], "utf8");
+        const vm = require("node:vm");
+        const assert = require("node:assert/strict");
+        function section(start, end) {
+          const from = source.indexOf(start), to = source.indexOf(end, from);
+          assert(from >= 0 && to > from);
+          return source.slice(from, to);
+        }
+        const queued = { remoteFileID: "queued", state: "queued", attemptRevision: 0 };
+        const started = [];
+        const context = vm.createContext({
+          MAX_PARALLEL_UPLOADS: 2,
+          state: { activeUploads: 2, pendingUploads: [queued], mutationEpoch: 0,
+                   cancelledRemoteFileIDs: new Set() },
+          renderFiles() {}, beginUpload(entry) { started.push(entry.remoteFileID); },
+        });
+        vm.runInContext([
+          section("  function applyRemoteStatus(", "\n\n  function fileStateLabel("),
+          section("  function pumpUploads(", "\n\n  function beginUpload("),
+        ].join("\n"), context);
+        context.applyRemoteStatus(queued, {
+          remoteFileID: "queued", attemptRevision: 0, state: "reserved",
+          displayName: "synthetic", declaredByteCount: 10, receivedByteCount: 0,
+        });
+        context.state.activeUploads = 1;
+        context.pumpUploads();
+        assert.deepEqual(started, ["queued"]);
+        assert.equal(queued.state, "uploading");
+        context.applyRemoteStatus(queued, {
+          remoteFileID: "queued", attemptRevision: 0, state: "saved",
+          displayName: "synthetic", declaredByteCount: 10, receivedByteCount: 10,
+        });
+        assert.equal(queued.state, "saved");
+        """#
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["node", "-e", program, app.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+    }
+
+    @Test
     func loaderServesOnlyTheFixedEmbeddedRoutes() throws {
         #expect(LANPhoneAsset(rawValue: "/") == .page)
         #expect(LANPhoneAsset(rawValue: "/app.js") == .script)
