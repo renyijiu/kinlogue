@@ -20,13 +20,15 @@ App 不解释像素、不生成测量或医学结论。DICOM 自由文本和像�
 
 `DICOMFolderScanner` 使用 descriptor-relative、`O_NOFOLLOW` 的有界遍历，把候选复制到同卷 opaque staging。扫描、索引和发布共用 Vault mutation lease；ownership receipt 在第一份 staged bytes 前持久化。对象与 index 先发布，`library.json` 最后原子替换。
 
+源文件以 `O_NONBLOCK` 打开后再次校验 regular-file 类型与 inode/大小/时间戳，避免扫描期间被替换成 FIFO 后阻塞打开、取消和资料库 mutation lease。
+
 取消必须等待真实事务终态。manifest commit 之前可以返回取消；之后只有在 catalog 中证明相同 study ID、fingerprint、index 和附件图已提交时才返回成功。无法证明提交时，cleanup 或 commit 错误保持失败，不能把可能已提交的检查误报为取消。
 
 每次 reopen 都实读并验证 index 版本、study ID、Series/instance 顺序、attachment 集合、fingerprint 和 UID digest 冲突。缺失、digest/length 不符、图不闭合或未知版本都 fail closed，不暴露部分检查。更完整的布局和恢复规则见 [`storage.md`](storage.md)。
 
 ## XPC 解码边界
 
-主 App、Core 和 Platform 不链接 `DicomCore`。主进程先有界校验 Part 10 envelope，只向独立签名的 sandbox XPC Helper 传只读 descriptor 和小型请求。Helper 没有网络、用户文件或 Vault-root entitlement；它复制到私有临时文件后解码，只返回有界的单帧 raw sample 与几何 DTO。
+主 App、Core 和 Platform 不链接 `DicomCore`。主进程先有界校验 Part 10 envelope，只向独立签名的 sandbox XPC Helper 传只读 descriptor 和小型请求。Helper 没有网络、用户文件或 Vault-root entitlement；它先验证 descriptor 为只读 regular file、长度与有界请求一致，再以最多 1 MiB 的块复制到 `mkstemp` 创建后立即 `unlink` 的匿名文件，并验证源文件 EOF。空文件必须先移除目录项，才允许写入任何原件字节。锁定版本 decoder 通过 Darwin `/dev/fd` 别名读取这份有界快照，只返回有界的单帧 raw sample 与几何 DTO；crash 或硬 watchdog 退出时，内核回收匿名文件，不会遗留具名明文原件，也不需要扫描清理其他目录。
 
 同步解析受硬 watchdog 约束。crash、hang、连接中断和无效/超大 reply 都映射为固定失败；生产路径没有 in-process decoder fallback。构建和签名证据见 [XPC 构建记录](sources/2026-08-07-dicom-xpc-xcode-build-evidence.md)。
 
@@ -39,6 +41,8 @@ Viewer 的 metadata、decode 和 canvas publish 都带 generation/session/render
 ## 当前支持范围
 
 当前受支持的可查看对象是 classic single-frame、Explicit VR Little Endian、灰度 MR，包含仓库矩阵明确覆盖的 stored sample、rescale、MONOCHROME1/2、窗宽窗位和 geometry/Instance Number/content fallback 排序。
+
+8-bit 图像的奇数个 sample 按 DICOM Pixel Data 的偶数字节 Value Length 校验；padding 必须存在且不进入返回像素。真实 XPC probe 使用 1×1、3×3 合成对象，并拒绝缺少 padding、奇数 Value Length 和超长 Value Length。
 
 以下能力不支持：
 

@@ -41,6 +41,7 @@ struct KinlogueDICOMXPCProbe {
             switch mode {
             case .roundTrip:
                 try await verifyRoundTrips(in: directory)
+                try await verifyOdd8BitPixelLengths(in: directory)
                 try await verifyWarmHelperAcrossIdleGap(in: directory)
                 try await verifyUnsupportedVOIFunctionFailsClosed(in: directory)
                 try await verifyMalformedObjectsFailClosed(in: directory)
@@ -134,6 +135,58 @@ struct KinlogueDICOMXPCProbe {
         _ = try await decode(fixture, in: directory)
         guard start.duration(to: .now) < .seconds(2) else {
             throw ProbeFailure.helperRelaunchWasThrottled
+        }
+    }
+
+    private static func verifyOdd8BitPixelLengths(in directory: URL) async throws {
+        for side in [UInt16(1), 3] {
+            let pixels = Array(UInt16(1)...(side * side))
+            let expectedSamples = Data(pixels.map { UInt8($0) })
+            let fixture = GeneratedDICOMFixture.explicitVRLittleEndianMR(
+                rows: side,
+                columns: side,
+                bitsAllocated: 8,
+                bitsStored: 8,
+                highBit: 7,
+                pixels: pixels
+            )
+            let frame = try await decode(fixture, in: directory)
+            guard frame.rows == Int(side), frame.columns == Int(side),
+                  frame.highBit == 7, frame.pixelRepresentation == 0,
+                  frame.photometricInterpretation == "MONOCHROME2",
+                  frame.sampleBytes == expectedSamples else {
+                throw ProbeFailure.unexpectedFrame
+            }
+
+            let pixelTag = Data([0xe0, 0x7f, 0x10, 0x00, 0x4f, 0x42, 0x00, 0x00])
+            guard let tagRange = fixture.range(of: pixelTag),
+                  tagRange.upperBound <= fixture.count - 4 else {
+                throw ProbeFailure.fixtureMutationFailed
+            }
+            let lengthRange = tagRange.upperBound..<(tagRange.upperBound + 4)
+            var missingPadding = fixture
+            missingPadding.removeLast()
+            var oddPixelLength = missingPadding
+            oddPixelLength.replaceSubrange(
+                lengthRange,
+                with: [UInt8(expectedSamples.count), 0, 0, 0]
+            )
+            var oversizedPixelLength = fixture
+            oversizedPixelLength.append(contentsOf: [0, 0])
+            oversizedPixelLength.replaceSubrange(
+                lengthRange,
+                with: [UInt8(expectedSamples.count + 3), 0, 0, 0]
+            )
+            for malformed in [missingPadding, oddPixelLength, oversizedPixelLength] {
+                do {
+                    _ = try await decode(malformed, in: directory)
+                    throw ProbeFailure.malformedObjectAccepted
+                } catch let error as DICOMDecoderAdapterError {
+                    guard error == .decoderFailed || error == .unsupportedObject else {
+                        throw ProbeFailure.unexpectedFailureCode
+                    }
+                }
+            }
         }
     }
 
