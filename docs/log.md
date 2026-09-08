@@ -1111,3 +1111,14 @@
 - **设置布局**：语言、备份目录、原始文件导出和删除继续使用 220pt 操作列，但由列内左对齐改为右对齐；立即备份、在访达中显示、重新选择目录和恢复入口沿卡片右内边距排列，按钮仍按文案使用 intrinsic 宽度。
 - **回归证据**：布局源码契约先证明旧实现的控制列与备份/恢复动作仍偏左，随后验证四个固定操作列和两个动作区域均使用 trailing alignment；设置/本地化回归 28/28、warnings-as-errors build、文档、本地化、隐私和 diff 门禁通过。完整并行源码运行通过 992/993，唯一失败为安装式 LAN 探针的一次 `.dependencyFailure`，该项隔离复跑 1/1 通过；本条不把两次运行合并宣称为一次完整全绿，clean-source bundle 与实际界面证据单列如下。
 - **本机安装验收**：clean revision `8c7f381` 的 Release App、DICOM XPC Helper、ad-hoc 签名、bundle、entitlement、依赖与隐私验证通过，安装 executable SHA-256 为 `8c6169e0006ec8e66e5b2aecbbbed8960dd26b428b46ad2674b8d9d208b48414`。实际打开当前用户安装包进入设置页，语言、保留数量、立即备份/访达、恢复、导出和删除控件的右边缘一致；私密界面截图不进入仓库。Developer ID、notarization、macOS 14/15 与键盘/VoiceOver 人工矩阵仍未执行。
+
+## [2026-09-08] fix/architecture | 全项目审查与状态交接修复
+
+- **范围与基线**：以公开 `main@9b4f2194a3c0b80b5926b79c45bc417eeaeceaa5` 为基线分域审查 Core、Vault/OCR、备份恢复、LAN/手机页面、App、DICOM/XPC 和发布脚本。上游已解决的问题不重复计入；14 项核实缺陷及外部一手实践见 [架构审查](architecture-review-2026-09-08.md) 与[来源笔记](sources/architecture-review-practices-2026-09-08.md)。保留现有分层、不可变对象和独立 XPC，不新增依赖或持久化格式。
+- **数据与生命周期**：归档最终清理前复核目标原件与 OCR，损坏副本不授权移除完好 inbox；整库恢复复用 App/LAN/Viewer 撤销并等待实际 preparation 取消；备份以 writer 回读验证完成时间评估保留和成功状态，暂停后的时钟检查不使用过期事件时间。
+- **资源与交互**：重新识别逐来源快照，继续检查草稿 revision；并发 LAN admission 包含在途预留；手机去重在异步比较后重验候选；刷新同步选中详情，OCR/确认时禁用核对表单。
+- **DICOM 与发布**：非阻塞 descriptor 打开拒绝 FIFO 替换；接受合法奇数像素 padding；Helper 的有界独立副本写入前 unlink，异常退出由内核回收。正式分发脚本按内到外重签和验证嵌套代码，打包器不再自行宣称全 workflow 门禁通过。同步修正具名临时副本、仓库 private 和发布证据字段的过时文档。
+- **已验证**：聚焦回归 191 tests / 22 suites 通过；真实 `scripts/verify-dicom-xpc.sh` 通过当前未提交工作树的 Release 构建、ad-hoc 签名、像素 fixture、外部 SIGKILL、hang watchdog、日志 canary 与零 runtime socket。新归档、大文件 OCR 和预留上限回归已核对旧实现红灯、修复后绿灯。
+- **完整门禁**：macOS 26.6.2 / arm64、Xcode 26.6 / Swift 6.3.3 上 `scripts/test.sh` 退出码 0，主清单 994 tests / 91 suites 与账本匹配；13 项独立 XCTest、验收扫描、33 项跨进程存储、大小写别名锁、18 项 DICOM 导入、安装式 LAN HTTP 探针与真实双流 RSS/背压隔离门禁均通过。`scripts/lint.sh`（warnings-as-errors 和 package graph）、`scripts/privacy-guard.sh`、`scripts/verify-docs.sh`、本地化检查与 `git diff --check` 通过。
+- **证据边界**：上述验证在提交、push 和创建 PR 前完成；本机工作树的通过不升级为 clean-source 发布候选。`verify-app` 的 clean-source 绑定、安装验收、真实手机与私有样本、macOS 14/15 独立机器、Powerbox/网盘/外置卷、键盘/VoiceOver、独立密码学审计以及真实 Developer ID/notarization 在本次审查中未执行。
+- **交付整理**：按用户要求将修复整理为数据与异步状态、DICOM、发布校验与审查记录三个提交组；收紧 staging 清理措辞，移除索引中残留的 private 候选包描述。提交不自动改变候选验收状态。

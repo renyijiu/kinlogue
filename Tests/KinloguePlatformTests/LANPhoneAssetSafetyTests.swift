@@ -326,6 +326,28 @@ struct LANPhoneAssetSafetyTests {
             cancelledLocally = error && error.constructor.name === "UserComparisonCancellation";
           }
           if (!cancelledLocally) process.exit(6);
+
+          for (const removeFromList of [false, true]) {
+            const candidate = entry([1, 2]);
+            const replacement = entry([1, 2]);
+            let releaseRead;
+            const readGate = new Promise((resolve) => { releaseRead = resolve; });
+            candidate.file.slice = () => ({ arrayBuffer: async () => {
+              await readGate;
+              return Uint8Array.from([1, 2]).buffer;
+            }});
+            context.state.entries = [candidate, replacement];
+            const comparing = context.isConfirmedDuplicate(
+              replacement, { startedAt: 0, readBytes: 0 }
+            );
+            if (removeFromList) {
+              context.state.entries = [replacement];
+            } else {
+              candidate.removed = true;
+            }
+            releaseRead();
+            if (await comparing) process.exit(9);
+          }
         })().catch(() => process.exit(7));
         """#
 

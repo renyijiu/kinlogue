@@ -239,7 +239,7 @@ METADATA_PLIST="$TEMP_DIRECTORY/release-metadata.plist"
 /usr/bin/plutil -insert trust.appleMalwareReviewPerformed -bool false \
   "$METADATA_PLIST"
 /usr/bin/plutil -insert compatibility -dictionary "$METADATA_PLIST"
-/usr/bin/plutil -insert compatibility.workflowReleaseGates -string passed \
+/usr/bin/plutil -insert compatibility.workflowReleaseGates -string notExecuted \
   "$METADATA_PLIST"
 /usr/bin/plutil -insert compatibility.installedAcceptance -string \
   PENDING_FORMAL_RELEASE_GATE "$METADATA_PLIST"

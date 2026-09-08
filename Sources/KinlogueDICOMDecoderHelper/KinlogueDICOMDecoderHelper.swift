@@ -31,50 +31,45 @@ private final class DICOMDecoderService: NSObject, KinlogueDICOMDecoderXPCProtoc
         guard let request = try? KinlogueDICOMIPCCodec.decodeRequest(requestData) else {
             return .failure(.invalidRequest)
         }
-        guard fcntl(descriptor.fileDescriptor, F_GETFL) & O_ACCMODE == O_RDONLY else {
+        var metadata = stat()
+        guard fcntl(descriptor.fileDescriptor, F_GETFL) & O_ACCMODE == O_RDONLY,
+              fstat(descriptor.fileDescriptor, &metadata) == 0,
+              (metadata.st_mode & S_IFMT) == S_IFREG,
+              metadata.st_size == request.declaredByteCount else {
             return .failure(.invalidDescriptor)
         }
 
-        let fileManager = FileManager.default
-        let directory = fileManager.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let file = directory.appendingPathComponent(UUID().uuidString, isDirectory: false)
+        var temporaryPath = Array(FileManager.default.temporaryDirectory
+            .appendingPathComponent("kinlogue-dicom-XXXXXX").path.utf8CString)
+        let temporaryDescriptor = mkstemp(&temporaryPath)
+        guard temporaryDescriptor >= 0 else { return .failure(.helperUnavailable) }
+        let output = FileHandle(fileDescriptor: temporaryDescriptor, closeOnDealloc: true)
+        defer { try? output.close() }
+        // Unlink the empty file before copying any original bytes. The kernel
+        // reclaims its anonymous inode even if the parser crashes or times out.
+        guard Darwin.unlink(&temporaryPath) == 0,
+              fcntl(temporaryDescriptor, F_SETFD, FD_CLOEXEC) == 0 else {
+            return .failure(.helperUnavailable)
+        }
+        let file = URL(fileURLWithPath: "/dev/fd/\(temporaryDescriptor)")
         do {
-            try fileManager.createDirectory(
-                at: directory,
-                withIntermediateDirectories: false,
-                attributes: [.posixPermissions: 0o700]
-            )
-            defer { try? fileManager.removeItem(at: directory) }
-            guard fileManager.createFile(
-                atPath: file.path,
-                contents: nil,
-                attributes: [.posixPermissions: 0o600]
-            ) else {
-                return .failure(.helperUnavailable)
-            }
-            do {
-                let output = try FileHandle(forWritingTo: file)
-                defer { try? output.close() }
-                try descriptor.seek(toOffset: 0)
-                var copied = 0
-                while copied < request.declaredByteCount {
-                    let remaining = request.declaredByteCount - copied
-                    let chunk = try descriptor.read(
-                        upToCount: min(remaining, 1_024 * 1_024)
-                    ) ?? Data()
-                    guard !chunk.isEmpty else { return .failure(.invalidDescriptor) }
-                    copied += chunk.count
-                    guard copied <= request.declaredByteCount else {
-                        return .failure(.invalidDescriptor)
-                    }
-                    try output.write(contentsOf: chunk)
-                }
-                guard (try descriptor.read(upToCount: 1) ?? Data()).isEmpty else {
+            try descriptor.seek(toOffset: 0)
+            var copied = 0
+            while copied < request.declaredByteCount {
+                let chunk = try descriptor.read(
+                    upToCount: min(request.declaredByteCount - copied, 1_024 * 1_024)
+                ) ?? Data()
+                guard !chunk.isEmpty else { return .failure(.invalidDescriptor) }
+                copied += chunk.count
+                guard copied <= request.declaredByteCount else {
                     return .failure(.invalidDescriptor)
                 }
+                try output.write(contentsOf: chunk)
             }
-
+            guard (try descriptor.read(upToCount: 1) ?? Data()).isEmpty else {
+                return .failure(.invalidDescriptor)
+            }
+            try output.seek(toOffset: 0)
             let decoder = try DCMDecoder(contentsOf: file)
             let transferSyntaxUID = decoder.info(for: .transferSyntaxUID)
             let sopClassUID = decoder.info(for: .sopClassUID)
@@ -120,7 +115,8 @@ private final class DICOMDecoderService: NSObject, KinlogueDICOMDecoderXPCProtoc
             // MONOCHROME1 images. Kinlogue owns those transforms, so preserve
             // the native Explicit-VR-LE frame bytes instead.
             guard validateNativePixelElement(
-                      in: file,
+                      descriptor: output,
+                      declaredByteCount: request.declaredByteCount,
                       valueOffset: decoder.offset,
                       expectedByteCount: expectedBytes.partialValue,
                       bitsAllocated: bitsAllocated
@@ -186,17 +182,18 @@ private final class DICOMDecoderService: NSObject, KinlogueDICOMDecoderXPCProtoc
     }
 
     private func validateNativePixelElement(
-        in file: URL,
+        descriptor: FileHandle,
+        declaredByteCount: Int,
         valueOffset: Int,
         expectedByteCount: Int,
         bitsAllocated: Int
     ) -> Bool {
-        guard valueOffset >= 12 else { return false }
+        let paddedByteCount = expectedByteCount + expectedByteCount % 2
+        guard valueOffset >= 12,
+              valueOffset <= declaredByteCount - paddedByteCount else { return false }
         do {
-            let input = try FileHandle(forReadingFrom: file)
-            defer { try? input.close() }
-            try input.seek(toOffset: UInt64(valueOffset - 12))
-            let header = try input.read(upToCount: 12) ?? Data()
+            try descriptor.seek(toOffset: UInt64(valueOffset - 12))
+            let header = try descriptor.read(upToCount: 12) ?? Data()
             guard header.count == 12,
                   header[0..<4].elementsEqual([0xe0, 0x7f, 0x10, 0x00]),
                   header[6] == 0, header[7] == 0,
@@ -209,7 +206,7 @@ private final class DICOMDecoderService: NSObject, KinlogueDICOMDecoderXPCProtoc
                 | UInt32(header[9]) << 8
                 | UInt32(header[10]) << 16
                 | UInt32(header[11]) << 24
-            return declaredLength == UInt32(expectedByteCount)
+            return declaredLength == UInt32(paddedByteCount)
         } catch {
             return false
         }

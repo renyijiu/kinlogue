@@ -8,6 +8,7 @@ public enum GeneratedDICOMFixture {
         rows: UInt16 = 2,
         columns: UInt16 = 2,
         photometricInterpretation: String = "MONOCHROME2",
+        bitsAllocated: UInt16 = 16,
         bitsStored: UInt16 = 12,
         highBit: UInt16 = 11,
         pixelRepresentation: UInt16 = 0,
@@ -30,7 +31,8 @@ public enum GeneratedDICOMFixture {
             photometricInterpretation == "MONOCHROME1"
                 || photometricInterpretation == "MONOCHROME2"
         )
-        precondition(bitsStored > 0 && highBit >= bitsStored - 1 && highBit < 16)
+        precondition(bitsAllocated == 8 || bitsAllocated == 16)
+        precondition(bitsStored > 0 && highBit >= bitsStored - 1 && highBit < bitsAllocated)
         let sopClass = sopClassUID
         let transferSyntax = KinlogueDICOMSupportedObject.explicitVRLittleEndian
         let implementation = uid([2, 25, 8_821])
@@ -83,7 +85,7 @@ public enum GeneratedDICOMFixture {
         output.append(element(0x0028, 0x0008, "IS", text(String(numberOfFrames))))
         output.append(element(0x0028, 0x0010, "US", littleEndian(rows)))
         output.append(element(0x0028, 0x0011, "US", littleEndian(columns)))
-        output.append(element(0x0028, 0x0100, "US", littleEndian(UInt16(16))))
+        output.append(element(0x0028, 0x0100, "US", littleEndian(bitsAllocated)))
         output.append(element(0x0028, 0x0101, "US", littleEndian(bitsStored)))
         output.append(element(0x0028, 0x0102, "US", littleEndian(highBit)))
         output.append(element(0x0028, 0x0103, "US", littleEndian(pixelRepresentation)))
@@ -94,13 +96,16 @@ public enum GeneratedDICOMFixture {
         if let voiLUTFunction {
             output.append(element(0x0028, 0x1056, "CS", text(voiLUTFunction)))
         }
+        var pixelData = Data(pixels.flatMap { pixel -> [UInt8] in
+            let stored = pixel << (highBit - (bitsStored - 1))
+            return bitsAllocated == 8 ? [UInt8(stored)] : Array(littleEndian(stored))
+        })
+        if !pixelData.count.isMultiple(of: 2) { pixelData.append(0) }
         output.append(element(
             0x7fe0,
             0x0010,
-            "OW",
-            Data(pixels.flatMap {
-                Array(littleEndian($0 << (highBit - (bitsStored - 1))))
-            })
+            bitsAllocated == 8 ? "OB" : "OW",
+            pixelData
         ))
         return output
     }

@@ -827,9 +827,24 @@ final class AppModel: ObservableObject {
         }
         rebuildTimeline()
         rebuildSearch()
-        if let selectedRecordID,
-           !allRecords.contains(where: { $0.id == selectedRecordID && $0.importState == .confirmed }) {
-            clearSelection()
+        if let selectedRecordID {
+            if let currentRecord = allRecords.first(where: {
+                $0.id == selectedRecordID && $0.importState == .confirmed
+            }) {
+                if case .loaded(_, let sourceID, let original) = recordDetailState {
+                    if currentRecord.sources.elements.contains(where: { $0.id == sourceID }) {
+                        recordDetailState = .loaded(
+                            record: currentRecord,
+                            sourceID: sourceID,
+                            original: original
+                        )
+                    } else {
+                        clearSelection()
+                    }
+                }
+            } else {
+                clearSelection()
+            }
         }
         if previousGeneration != 0, snapshot.generation > previousGeneration {
             onDurableStateChanged()

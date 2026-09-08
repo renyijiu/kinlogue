@@ -177,6 +177,7 @@ struct DICOMFolderScannerTests {
                 ownership: fixture.ownership
             )
         }
+        #expect(await control.finishWithoutBlockedOpen())
         #expect(try fixture.staging.list(ownership: fixture.ownership).isEmpty)
     }
 
@@ -272,14 +273,16 @@ struct DICOMFolderScannerTests {
 }
 
 enum SourceMutation: String, CaseIterable, Sendable {
-    case rename, delete, growth, truncation, replacement
+    case rename, delete, growth, truncation, replacement, fifoReplacement
 }
 
-private actor SourceMutationControl: DICOMFolderScannerControl {
+actor SourceMutationControl: DICOMFolderScannerControl {
     private let mutation: SourceMutation
     private var source: URL?
     private var replacement = Data()
     private var didMutate = false
+    private var fifoUnblockTask: Task<Void, Never>?
+    private var didBlockOpen = false
 
     init(mutation: SourceMutation) { self.mutation = mutation }
 
@@ -311,7 +314,22 @@ private actor SourceMutationControl: DICOMFolderScannerControl {
         case .replacement:
             try FileManager.default.removeItem(at: source)
             try replacement.write(to: source)
+        case .fifoReplacement:
+            try FileManager.default.removeItem(at: source)
+            guard mkfifo(source.path, 0o600) == 0 else { throw POSIXError(.EIO) }
+            // Release a regressed blocking reader so the test fails instead of hanging.
+            fifoUnblockTask = Task {
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                didBlockOpen = true
+                let writer = open(source.path, O_WRONLY | O_NONBLOCK | O_CLOEXEC)
+                if writer >= 0 { Darwin.close(writer) }
+            }
         }
+    }
+
+    func finishWithoutBlockedOpen() -> Bool {
+        fifoUnblockTask?.cancel()
+        return !didBlockOpen
     }
 
     func workerStarted() async throws {}

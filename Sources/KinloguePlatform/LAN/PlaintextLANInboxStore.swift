@@ -767,6 +767,7 @@ public actor PlaintextLANInboxStore: LANInboxRepository {
             guard observedRevision == vaultRevision else {
                 throw LANInboxError.staleRevision
             }
+            let destination: (sources: ReportSources, documentID: UUID?)
             switch outcome {
             case let .accepted(draftID):
                 guard draftID == intent.draftID,
@@ -781,6 +782,7 @@ public actor PlaintextLANInboxStore: LANInboxRepository {
                       )) == intent.fingerprint else {
                     throw LANInboxError.invalidReference
                 }
+                destination = (draft.sources, draft.documentObjectID)
             case let .duplicateSkipped(candidate):
                 guard let duplicate = DuplicateDetector.find(
                     fingerprint: intent.fingerprint,
@@ -797,7 +799,63 @@ public actor PlaintextLANInboxStore: LANInboxRepository {
                 guard candidate == observed else {
                     throw LANInboxError.invalidReference
                 }
+                switch duplicate {
+                case let .record(id):
+                    guard let record = authoritative.catalog.records.first(where: { $0.id == id }) else {
+                        throw LANInboxError.invalidReference
+                    }
+                    destination = (record.sources, record.ocrDocumentObjectID)
+                case let .draft(id):
+                    guard let draft = authoritative.catalog.importDrafts.first(where: { $0.id == id }) else {
+                        throw LANInboxError.invalidReference
+                    }
+                    destination = (draft.sources, draft.documentObjectID)
+                }
             }
+
+            // Deleting the inbox copy requires verified destination bytes;
+            // matching catalog metadata alone does not prove a usable copy.
+            var references = Set(destination.sources.attachmentIDs).map {
+                VaultObjectReference(id: $0, kind: .attachment)
+            }
+            if let documentID = destination.documentID {
+                references.append(VaultObjectReference(id: documentID, kind: .ocr))
+            }
+            let vaultLayout = try PlaintextVaultLayout(rootURL: layout.rootURL)
+            let contentReferences = try references.map { reference in
+                guard let metadata = authoritative.manifest.objects.first(where: {
+                    $0.reference == reference
+                }) else { throw VaultError.objectMissing }
+                return LANInboxContentReference(
+                    relativePath: vaultLayout.objectPath(reference),
+                    sha256Digest: metadata.sha256Digest,
+                    byteCount: metadata.byteCount
+                )
+            }
+            let opened = try openContentReferences(contentReferences, expectedRoot: root)
+            defer { closeOpenedContent(opened) }
+            let documentPath = destination.documentID.map {
+                vaultLayout.objectPath(VaultObjectReference(id: $0, kind: .ocr))
+            }
+            for content in opened {
+                try verifyContent(
+                    descriptor: content.descriptor,
+                    expectedByteCount: content.reference.byteCount,
+                    expectedSHA256: content.reference.sha256Digest
+                )
+                if content.reference.relativePath == documentPath {
+                    let data = try BoundedRegularFileReader.read(
+                        descriptor: content.descriptor,
+                        maximumByteCount: content.reference.byteCount,
+                        oversizeError: VaultError.resourceLimitExceeded
+                    )
+                    do {
+                        _ = try CanonicalVaultJSON.decode(ImportDraftDocument.self, from: data)
+                            .attributedAndValidated(for: destination.sources)
+                    } catch { throw VaultError.integrityCheckFailed }
+                }
+            }
+            try validateOpenedContentStillNamed(opened, expectedRoot: root)
 
             let resolvedItemIDs = Set(intent.orderedSources.map(\.itemID))
             let resolvedIdentities = Set(intent.orderedSources.map(\.contentIdentity))

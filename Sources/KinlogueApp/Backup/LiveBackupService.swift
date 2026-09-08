@@ -156,12 +156,14 @@ actor LiveBackupService: BackupServicing {
         let coordinator = BackupOperationCoordinator(
             configurationStore: configurationStore,
             checkpointCreator: checkpointCreator,
-            retentionExecutor: retention
+            retentionExecutor: retention,
+            clock: clock
         )
         operationCoordinator = coordinator
         scheduler = BackupScheduler(
             configurationStore: configurationStore,
-            automaticRunner: coordinator
+            automaticRunner: coordinator,
+            clock: clock
         )
     }
 
@@ -343,19 +345,18 @@ actor LiveBackupService: BackupServicing {
         guard let configuration = try await configurationStore.load(),
               configuration.phase == .enabled else { return .disabled }
         guard configuration.automation.isAutomaticBackupEnabled else { return .disabled }
-        let eventDate = clock()
         do {
             try await refreshDestinationBookmarkIfNeeded()
         } catch let error as BackupDestinationAuthorityError
             where error == .repositoryOffline {
-            return try await scheduler.recordDestinationOffline(at: eventDate)
+            return try await scheduler.recordDestinationOffline(at: clock())
         }
         let pair = try await prepareSource().revisionPair
         do {
             let outcome = try await scheduler.handle(
                 event,
                 currentPair: pair,
-                at: eventDate
+                at: clock()
             )
             try await persistObservedBookmarkRefresh()
             return outcome

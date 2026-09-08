@@ -88,7 +88,7 @@ App 启动使用 `loadValidatedCatalog()` 在一次解析中同时完成 `inspec
 
 未知非空目录、部分初始化收据、符号链接替换、缺失对象、长度变化、digest 不匹配和 malformed manifest 都必须 fail closed，不能返回部分 catalog。
 
-需要同时消费 catalog 与一个或多个对象的读取链路使用 `VaultStore.readSnapshot`。`PlaintextVault` 在一次 root-scoped mutation lease 中只解析一次 manifest，先让调用方同步选择当前 catalog 中的对象 reference，再按同一代 metadata 读取并校验对象；单次最多选择 32 个对象、累计保留最多 128 MiB。返回快照前 lease 已释放，因此后续 OCR、DICOM index 投影或 UI 解码不会长期阻塞提交。导入草稿/去重、报告原件、多来源重新识别和 DICOM study index 都使用这条一致性读取路径；其中待确认页通过 `ImportDraftStore.loadReviewSnapshot` 同时取得 draft、OCR、成员和首个原件，不再跨两次 generation 拼接页面内容。接口没有逐次 `loadCatalog + readObject` 的兼容回退实现。
+需要同时消费 catalog 与一个或多个对象的读取链路使用 `VaultStore.readSnapshot`。`PlaintextVault` 在一次 root-scoped mutation lease 中只解析一次 manifest，先让调用方同步选择当前 catalog 中的对象 reference，再按同一代 metadata 读取并校验对象；单次最多选择 32 个对象、累计保留最多 128 MiB。返回快照前 lease 已释放，因此后续 OCR、DICOM index 投影或 UI 解码不会长期阻塞提交。导入草稿/去重、报告原件、多来源重新识别和 DICOM study index 都使用这条一致性读取路径；其中待确认页通过 `ImportDraftStore.loadReviewSnapshot` 同时取得 draft、OCR、成员和首个原件，不再跨两次 generation 拼接页面内容。多来源重新识别按有序 source 逐份取得快照，每次核对同一 draft revision 与来源集合，最后由 `saveReview(expectedRevision:)` 拒绝陈旧保存；因此合法的多原件报告即使累计超过 128 MiB，也无需同时保留全部原件。接口没有逐次 `loadCatalog + readObject` 的兼容回退实现。
 
 ## 文件系统安全与删除
 
@@ -145,7 +145,7 @@ Vault/
 
 inbox manifest 同样校验 generation、vault ID、item/receipt/terminal 引用、对象路径、字节数和 digest，并通过 `VaultRootBinding` 绑定当前 Vault 的 root/parent identity。用户删除或报告归档会先写同一 generation 的 content terminal，防止已经 admission 的晚到 body 重新生成 item；物理 blob/derived 只在最后一个逻辑引用消失后清理。
 
-报告归档先通过 `VaultReportSelectionStaging` 暂存已验证原件，再由 `PlaintextVault.commitStagedReportSelection` 原子发布一份 `.needsReview` draft 或确认 exact duplicate。只有 Vault 结果持久化后，inbox 才移除本次所选 item并记录 durable terminal；terminal 只在对应 staging 清理成功后按 intent/receipt identity 精确 acknowledgement。清理失败会保留 terminal 供下次启动继续恢复，成功路径不会让 lifetime terminal 无界累积。
+报告归档先通过 `VaultReportSelectionStaging` 暂存已验证原件，再由 `PlaintextVault.commitStagedReportSelection` 原子发布一份 `.needsReview` draft 或确认 exact duplicate。只有 Vault 结果持久化后，inbox 才移除本次所选 item并记录 durable terminal；移除前，`recordArchiveOutcome` 在同一 mutation lease 内逐份流式核对目的报告原件的长度和 SHA-256，并验证 OCR document 的摘要和来源引用。正常归档、重复跳过和提交结果恢复共用此门禁；同长度损坏也会保留 inbox 中的完好副本。terminal 只在对应 staging 清理成功后按 intent/receipt identity 精确 acknowledgement。清理失败会保留 terminal 供下次启动继续恢复，成功路径不会让 lifetime terminal 无界累积。
 
 ## 已确认原始文件导出
 

@@ -19,6 +19,7 @@ enum BackupCleanupOutcome: Equatable, Sendable {
 
 struct BackupOperationResult: Sendable {
     let revisionPair: BackupRevisionPair
+    let verifiedAt: Date
     let cleanup: BackupCleanupOutcome
 }
 
@@ -54,17 +55,20 @@ actor BackupOperationCoordinator: BackupAutomaticRunning {
     private let configurationStore: BackupLocalConfigurationStore
     private let checkpointCreator: any BackupCheckpointCreating
     private let retentionExecutor: any BackupRetentionExecuting
+    private let clock: @Sendable () -> Date
     private var activeOperation: ActiveOperation?
     private var destructiveFenceHeld = false
 
     init(
         configurationStore: BackupLocalConfigurationStore,
         checkpointCreator: any BackupCheckpointCreating,
-        retentionExecutor: any BackupRetentionExecuting
+        retentionExecutor: any BackupRetentionExecuting,
+        clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.configurationStore = configurationStore
         self.checkpointCreator = checkpointCreator
         self.retentionExecutor = retentionExecutor
+        self.clock = clock
     }
 
     func backUpNow(at now: Date = Date()) async throws -> BackupOperationResult {
@@ -113,6 +117,7 @@ actor BackupOperationCoordinator: BackupAutomaticRunning {
         let configurationStore = self.configurationStore
         let checkpointCreator = self.checkpointCreator
         let retentionExecutor = self.retentionExecutor
+        let clock = self.clock
         let task = Task<BackupOperationResult, Error> {
             try Task.checkCancellation()
             guard let configuration = try await configurationStore.load(),
@@ -149,6 +154,10 @@ actor BackupOperationCoordinator: BackupAutomaticRunning {
             if let expectedPair, creation.revisionPair != expectedPair {
                 throw BackupOperationCoordinatorError.semantic(.sourceChanged)
             }
+            // Match the durable witness precision before comparing its time.
+            let verifiedAt = Date(
+                timeIntervalSince1970: (clock().timeIntervalSince1970 * 1_000).rounded() / 1_000
+            )
 
             var latest = try await configurationStore.load()
             guard let loaded = latest, loaded.phase == .enabled else {
@@ -157,7 +166,7 @@ actor BackupOperationCoordinator: BackupAutomaticRunning {
             if recordsCoverage {
                 latest = try await configurationStore.markBackupSuccess(
                     creation.revisionPair,
-                    verifiedAt: now,
+                    verifiedAt: verifiedAt,
                     expectedRevision: loaded.revision
                 )
             }
@@ -166,10 +175,11 @@ actor BackupOperationCoordinator: BackupAutomaticRunning {
             }
             let cleanup = await retentionExecutor.applyRetention(
                 configuration: retentionConfiguration,
-                now: now
+                now: verifiedAt
             )
             return BackupOperationResult(
                 revisionPair: creation.revisionPair,
+                verifiedAt: verifiedAt,
                 cleanup: cleanup
             )
         }

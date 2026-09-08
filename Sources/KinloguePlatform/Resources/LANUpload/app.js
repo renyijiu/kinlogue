@@ -195,7 +195,8 @@
     ));
     const bounded = candidates.slice(0, MAX_COMPARISON_CANDIDATES);
     for (const candidate of bounded) {
-      if (await filesAreExactlyEqual(candidate, entry, budget)) {
+      if (await filesAreExactlyEqual(candidate, entry, budget)
+          && !entry.removed && !candidate.removed && state.entries.includes(candidate)) {
         return true;
       }
     }

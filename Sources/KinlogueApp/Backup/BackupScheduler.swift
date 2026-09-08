@@ -28,13 +28,16 @@ actor BackupScheduler {
 
     private let configurationStore: BackupLocalConfigurationStore
     private let automaticRunner: any BackupAutomaticRunning
+    private let clock: @Sendable () -> Date
 
     init(
         configurationStore: BackupLocalConfigurationStore,
-        automaticRunner: any BackupAutomaticRunning
+        automaticRunner: any BackupAutomaticRunning,
+        clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.configurationStore = configurationStore
         self.automaticRunner = automaticRunner
+        self.clock = clock
     }
 
     func setAutomaticBackupEnabled(
@@ -91,7 +94,7 @@ actor BackupScheduler {
            let dueAt = current.scheduler.dueAt {
             return .scheduled(current.scheduler.retryDueAt ?? dueAt)
         }
-        guard clockIsContinuous(configuration: current, now: now) else {
+        guard clockIsContinuous(configuration: current) else {
             _ = try await configurationStore.markBackupFailure(
                 .verificationFailed,
                 retryAttempt: 0,
@@ -137,7 +140,7 @@ actor BackupScheduler {
             _ = try await observe(currentPair, at: now)
             current = try await requireConfiguration()
         }
-        guard clockIsContinuous(configuration: current, now: now) else {
+        guard clockIsContinuous(configuration: current) else {
             current = try await configurationStore.markBackupFailure(
                 .verificationFailed,
                 retryAttempt: 0,
@@ -172,7 +175,7 @@ actor BackupScheduler {
             let latest = try await requireConfiguration()
             _ = try await configurationStore.markBackupSuccess(
                 result.revisionPair,
-                verifiedAt: now,
+                verifiedAt: result.verifiedAt,
                 expectedRevision: latest.revision
             )
             return .completed
@@ -213,7 +216,7 @@ actor BackupScheduler {
     ) async throws -> BackupSchedulerOutcome {
         let current = try await requireConfiguration()
         guard current.automation.isAutomaticBackupEnabled else { return .disabled }
-        guard clockIsContinuous(configuration: current, now: now) else {
+        guard clockIsContinuous(configuration: current) else {
             _ = try await configurationStore.markBackupFailure(
                 .verificationFailed,
                 retryAttempt: 0,
@@ -290,9 +293,13 @@ actor BackupScheduler {
     }
 
     private func clockIsContinuous(
-        configuration: BackupLocalConfiguration,
-        now: Date
+        configuration: BackupLocalConfiguration
     ) -> Bool {
+        // Configuration reads can suspend while another backup completes.
+        // Compare that durable state with the current clock, not event arrival.
+        let now = Date(
+            timeIntervalSince1970: (clock().timeIntervalSince1970 * 1_000).rounded() / 1_000
+        )
         guard now.timeIntervalSinceReferenceDate.isFinite else { return false }
         let scheduler = configuration.scheduler
         return scheduler.firstObservedAt.map { $0 <= now } ?? true

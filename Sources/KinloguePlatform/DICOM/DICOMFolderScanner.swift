@@ -285,7 +285,7 @@ public struct DICOMFolderScanner: Sendable {
             throw DICOMImportError.resourceLimit
         }
         let source = name.withCString {
-            openat(parentDescriptor, $0, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            openat(parentDescriptor, $0, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
         }
         guard source >= 0 else { throw DICOMImportError.sourceChanged }
         await metrics?.recordSourceDescriptorOpened()
@@ -411,7 +411,7 @@ public struct DICOMFolderScanner: Sendable {
             throw DICOMImportError.cancelled
         }
         let source = admission.name.withCString {
-            openat(parentDescriptor, $0, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            openat(parentDescriptor, $0, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
         }
         guard source >= 0 else {
             await metrics?.recordWorkerFinished()

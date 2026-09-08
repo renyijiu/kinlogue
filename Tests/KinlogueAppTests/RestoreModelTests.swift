@@ -7,6 +7,71 @@ import Testing
 @Suite("Restore model")
 @MainActor
 struct RestoreModelTests {
+    @Test(arguments: [false, true], [false, true])
+    func compositionRevokesUIAndDrainsViewersBeforeActivation(
+        unavailable: Bool,
+        activationFails: Bool
+    ) async throws {
+        let member = try FamilyMember(displayName: "Synthetic restore member")
+        let record = try HealthRecord(
+            memberID: member.id,
+            attachmentID: UUID(),
+            importState: .confirmed
+        )
+        let snapshot = AppSnapshot(members: [member], records: [record], drafts: [])
+        let dataService: any AppDataServicing = unavailable
+            ? UnavailableAppService()
+            : AppServiceSpy(snapshot: snapshot, originals: [record.id: OriginalDocumentPayload(
+                data: Data("synthetic-original".utf8),
+                contentTypeIdentifier: "public.png"
+            )])
+        let registry = DICOMViewerRegistry()
+        let app = AppModel(service: dataService, dicomViewerRegistry: registry)
+        let inbox = LANInboxModel(service: UnavailableLANInboxService())
+        await app.start()
+        await app.selectRecord(record.id)
+        let viewer = app.makeDICOMStudyViewerModel(studyID: UUID())
+        viewer.activateWindow {}
+        inbox.isReceiverSheetPresented = true
+        let gate = AsyncOperationGate()
+        _ = registry.register(studyID: UUID(), invalidate: {}, finishRevocation: {
+            await gate.wait()
+        })
+        let service = RestoreModelService(
+            activationError: activationFails ? .activationConflict : nil
+        )
+        let model = AppComposition.makeRestoreModel(
+            service: service,
+            appModel: app,
+            lanInboxModel: inbox,
+            securityScope: RestoreScope()
+        )
+        model.present()
+        model.recoveryCode = "synthetic-code"
+        await model.prepare(URL(fileURLWithPath: "/selected.kinloguebackup"))
+
+        let replacement = Task { await model.confirmReplacement() }
+        let revocationStarted = await gate.waitUntilStarted()
+        #expect(revocationStarted)
+        #expect(app.phase == .changingVault)
+        #expect(app.members.isEmpty)
+        #expect(app.originalDocument == nil)
+        #expect(!inbox.isReceiverSheetPresented)
+        #expect(viewer.phase == .closed)
+        #expect(await service.activationCount == 0)
+        await gate.open()
+        await replacement.value
+
+        #expect(await service.activationCount == 1)
+        #expect(app.phase == .restartRequired)
+        #expect(model.isDismissDisabled)
+        await app.refresh()
+        await inbox.prepareReceiving()
+        #expect(app.phase == .restartRequired)
+        #expect(app.members.isEmpty)
+        #expect(!inbox.isReceiverSheetPresented)
+    }
+
     @Test
     func selectedCheckpointIsScopedOnlyForPreparationAndSummaryNeedsConfirmation() async throws {
         let service = RestoreModelService()
@@ -98,6 +163,8 @@ struct RestoreModelTests {
         #expect(model.isDismissDisabled)
         #expect(model.recoveryCode.isEmpty)
         await model.cancel()
+        #expect(model.phase == .failed(.activation))
+        model.present()
         #expect(model.phase == .failed(.activation))
         #expect(await service.cancelCount == 0)
     }

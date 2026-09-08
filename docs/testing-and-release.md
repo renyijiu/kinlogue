@@ -76,6 +76,10 @@ planner 将清单标识规范化为 SwiftPM 实际过滤标识，以完整 targe
 
 ad-hoc 签名适用于本机开发和知情测试者手动安装，但没有 Developer ID、notarization 或 Apple 检查链。未来启用公共分发时必须重新建立凭据、hardened runtime、notary、staple、Gatekeeper 和发布渠道门禁，不能把今天的 ad-hoc 包原地改称正式发布。
 
+`package-distribution.sh` 在正式凭据可用时按 Helper 的资源 bundle、Helper XPC、主 App 的顺序分别签名；Helper 保持独立的 sandbox-only entitlement，两个可执行目标都启用 hardened runtime 和 secure timestamp。上传公证前与最终 ZIP 解压后都逐层核对 Developer ID、Team、时间戳，以及两个可执行目标的 identifier、runtime 和精确 entitlement。合成命令回归只证明签名编排和拒绝路径，真实 Developer ID、公证与安装仍须独立执行。
+
+两个打包器只消费绑定当前源码的 bundle 验证报告，并复验签名与 ZIP；它们不观察完整 workflow，生成的 `compatibility.workflowReleaseGates` 因而保持 `notExecuted`。完整 lint、测试、历史隐私与 XPC 门禁的通过证据以实际执行这些命令的 workflow run 为准，不能由打包成功推断。
+
 ## Current-only 开发格式
 
 项目尚未公开发布，当前实现只支持 catalog v3 和 DICOM ordering policy v2。旧 reader/migrator、predecessor/successor/rollback 生产入口和对应操作脚本已经删除；发布验证只检查当前 bundle，不再把开发期格式往返当作候选门禁。
