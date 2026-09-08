@@ -44,6 +44,7 @@ verify_distribution_signature() {
   local signature_metadata="$NOTARY_TEMP_DIRECTORY/$label-signature-metadata.txt"
   local signed_entitlements="$NOTARY_TEMP_DIRECTORY/$label-signed-entitlements.plist"
   local remaining_entitlements="$NOTARY_TEMP_DIRECTORY/$label-remaining-entitlements.plist"
+  local helper="$app/Contents/XPCServices/KinlogueDICOMDecoderHelper.xpc"
 
   [[ -d "$app" && ! -L "$app" \
       && -f "$executable" && ! -L "$executable" && -x "$executable" \
@@ -51,36 +52,55 @@ verify_distribution_signature() {
     || fail "$label app structure or executable permissions are invalid"
   /usr/bin/codesign --verify --deep --strict --verbose=2 "$app" \
     || fail "$label app signature verification failed"
-  /usr/bin/codesign -d --verbose=4 "$app" \
-    >/dev/null 2>"$signature_metadata"
-  /usr/bin/grep -Fq "Authority=$KINLOGUE_CODESIGN_IDENTITY" \
-    "$signature_metadata" \
-    || fail "$label app does not contain the requested Developer ID authority"
-  /usr/bin/grep -Fq "Identifier=com.kinlogue.mac" "$signature_metadata" \
-    || fail "$label app identifier drifted"
-  /usr/bin/grep -Fq "TeamIdentifier=$KINLOGUE_DEVELOPER_TEAM_ID" \
-    "$signature_metadata" \
-    || fail "$label app Team ID drifted"
-
-  /usr/bin/codesign -d --entitlements :- "$app" \
-    >"$signed_entitlements" 2>/dev/null
-  /usr/bin/plutil -lint "$signed_entitlements" >/dev/null \
-    || fail "$label Developer ID signed entitlements are invalid"
-  /bin/cp -- "$signed_entitlements" "$remaining_entitlements"
-  for entitlement in \
-    com.apple.security.app-sandbox \
-    com.apple.security.files.user-selected.read-write \
-    com.apple.security.files.bookmarks.app-scope \
-    com.apple.security.network.server; do
-    [[ "$(/usr/libexec/PlistBuddy -c "Print :$entitlement" \
-      "$remaining_entitlements" 2>/dev/null)" == true ]] \
-      || fail "$label signed entitlements do not match the exact production allow-list"
-    /usr/libexec/PlistBuddy -c "Delete :$entitlement" \
-      "$remaining_entitlements" >/dev/null \
-      || fail "$label signed entitlements could not be normalized"
+  local signed_bundle identifier entitlement
+  local -a expected_entitlements
+  for signed_bundle in \
+      "$helper/Contents/Resources/DICOMDecoder_DicomCore.bundle" \
+      "$helper/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle" \
+      "$helper" "$app"; do
+    [[ -d "$signed_bundle" && ! -L "$signed_bundle" ]] \
+      || fail "$label signed bundle is missing or linked"
+    /usr/bin/codesign --verify --strict --verbose=2 "$signed_bundle" \
+      || fail "$label nested signature verification failed"
+    /usr/bin/codesign -d --verbose=4 "$signed_bundle" \
+      >/dev/null 2>"$signature_metadata"
+    /usr/bin/grep -Fqx "Authority=$KINLOGUE_CODESIGN_IDENTITY" "$signature_metadata" \
+      || fail "$label bundle does not contain the requested Developer ID authority"
+    /usr/bin/grep -Fqx "TeamIdentifier=$KINLOGUE_DEVELOPER_TEAM_ID" "$signature_metadata" \
+      || fail "$label bundle Team ID drifted"
+    /usr/bin/grep -Eq '^Timestamp=.+' "$signature_metadata" \
+      || fail "$label bundle has no secure timestamp"
+    [[ "$signed_bundle" == "$helper" || "$signed_bundle" == "$app" ]] || continue
+    /usr/bin/grep -Eq '^CodeDirectory .*flags=.*\(.*runtime.*\)' "$signature_metadata" \
+      || fail "$label executable does not enable hardened runtime"
+    expected_entitlements=(com.apple.security.app-sandbox)
+    identifier=com.kinlogue.mac.dicom-decoder
+    if [[ "$signed_bundle" == "$app" ]]; then
+      identifier=com.kinlogue.mac
+      expected_entitlements+=(
+        com.apple.security.files.user-selected.read-write
+        com.apple.security.files.bookmarks.app-scope
+        com.apple.security.network.server
+      )
+    fi
+    /usr/bin/grep -Fqx "Identifier=$identifier" "$signature_metadata" \
+      || fail "$label executable identifier drifted"
+    /usr/bin/codesign -d --entitlements :- "$signed_bundle" \
+      >"$signed_entitlements" 2>/dev/null
+    /usr/bin/plutil -lint "$signed_entitlements" >/dev/null \
+      || fail "$label Developer ID signed entitlements are invalid"
+    /bin/cp -- "$signed_entitlements" "$remaining_entitlements"
+    for entitlement in "${expected_entitlements[@]}"; do
+      [[ "$(/usr/libexec/PlistBuddy -c "Print :$entitlement" \
+        "$remaining_entitlements" 2>/dev/null)" == true ]] \
+        || fail "$label signed entitlements do not match the exact production allow-list"
+      /usr/libexec/PlistBuddy -c "Delete :$entitlement" \
+        "$remaining_entitlements" >/dev/null \
+        || fail "$label signed entitlements could not be normalized"
+    done
+    [[ "$(/usr/bin/plutil -convert json -o - "$remaining_entitlements")" == '{}' ]] \
+      || fail "$label signed entitlements contain values outside the exact production allow-list"
   done
-  [[ "$(/usr/bin/plutil -convert json -o - "$remaining_entitlements")" == '{}' ]] \
-    || fail "$label signed entitlements contain values outside the exact production allow-list"
 }
 
 cleanup() {
@@ -197,6 +217,21 @@ ACTUAL_BUNDLE_HASH="$(bundle_hash "$APP_BUNDLE" "$PRE_SIGNING_MANIFEST")"
 PRE_REPORT_NAME="pre-distribution-verification-report.json"
 /bin/cp -- "$PRE_DISTRIBUTION_REPORT" "$STAGE_DIRECTORY/$PRE_REPORT_NAME"
 
+DICOM_HELPER_BUNDLE="$APP_BUNDLE/Contents/XPCServices/KinlogueDICOMDecoderHelper.xpc"
+for helper_resource_bundle in \
+    "$DICOM_HELPER_BUNDLE/Contents/Resources/DICOMDecoder_DicomCore.bundle" \
+    "$DICOM_HELPER_BUNDLE/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle"; do
+  /usr/bin/codesign --force --sign "$KINLOGUE_CODESIGN_IDENTITY" \
+    --keychain "$KINLOGUE_SIGNING_KEYCHAIN_PATH" \
+    --timestamp \
+    "$helper_resource_bundle"
+done
+/usr/bin/codesign --force --sign "$KINLOGUE_CODESIGN_IDENTITY" \
+  --keychain "$KINLOGUE_SIGNING_KEYCHAIN_PATH" \
+  --options runtime \
+  --timestamp \
+  --entitlements "$REPO_DIR/packaging/KinlogueDICOMDecoderHelper.entitlements" \
+  "$DICOM_HELPER_BUNDLE"
 /usr/bin/codesign --force --sign "$KINLOGUE_CODESIGN_IDENTITY" \
   --keychain "$KINLOGUE_SIGNING_KEYCHAIN_PATH" \
   --options runtime \
@@ -275,7 +310,7 @@ METADATA_PLIST="$NOTARY_TEMP_DIRECTORY/release-metadata.plist"
 /usr/bin/plutil -insert notarization.submissionID -string \
   "$NOTARY_SUBMISSION_ID" "$METADATA_PLIST"
 /usr/bin/plutil -insert compatibility -dictionary "$METADATA_PLIST"
-/usr/bin/plutil -insert compatibility.workflowReleaseGates -string passed \
+/usr/bin/plutil -insert compatibility.workflowReleaseGates -string notExecuted \
   "$METADATA_PLIST"
 /usr/bin/plutil -insert compatibility.installedAcceptance -string \
   PENDING_FORMAL_RELEASE_GATE "$METADATA_PLIST"

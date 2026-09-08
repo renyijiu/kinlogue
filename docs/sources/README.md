@@ -37,6 +37,7 @@ kind: pattern-reference | product-decision | external-spec
 - [`dependency-security-review-2026-08-23.md`](dependency-security-review-2026-08-23.md)：SwiftPM 已知公告、CodeQL/Dependabot 能力与独立审计缺口的点时复核。
 - [`apple-localization-guidance-2026-08-05.md`](apple-localization-guidance-2026-08-05.md)：Apple 本地化资料。
 - [`swift-macos-engineering-guidance-2026-08-19.md`](swift-macos-engineering-guidance-2026-08-19.md)：Swift API、并发、SwiftUI 状态、性能与 App Sandbox 官方实践复核。
+- [`architecture-review-practices-2026-09-08.md`](architecture-review-practices-2026-09-08.md)：actor 重入、协作取消、流式 I/O、嵌套签名与 DICOM padding 的一手依据。
 - [`2026-08-05-github-readme-patterns.md`](2026-08-05-github-readme-patterns.md)：README 信息结构调研。
 
 ### DICOM 调研与阶段契约

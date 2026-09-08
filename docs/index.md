@@ -42,6 +42,7 @@
 
 - [`project-overview.md`](project-overview.md)：唯一当前产品契约、用户流程、边界和产品验收定义。
 - [`architecture.md`](architecture.md)：target 图、运行时组装、跨层调用和并发边界。
+- [`architecture-review-2026-09-08.md`](architecture-review-2026-09-08.md)：公开 main 的完整设计/架构审查、已核实问题、最小改进与外部实践依据。
 - [`domain-and-data-model.md`](domain-and-data-model.md)：领域对象、状态机、来源和去重语义。
 - [`decisions.md`](decisions.md)：当前决策、已取代决策和开放门禁。
 
@@ -61,7 +62,7 @@
 
 - [`testing-and-release.md`](testing-and-release.md)：验证命令、证据规则、签名和发布流程。
 - [`acceptance/README.md`](acceptance/README.md)：当前候选矩阵与历史验收入口。
-- [`adhoc-candidate-install.md`](adhoc-candidate-install.md)：private ad-hoc 候选包的下载和信任边界。
+- [`adhoc-candidate-install.md`](adhoc-candidate-install.md)：ad-hoc 候选包的下载和信任边界。
 
 ### 历史与原始证据
 

@@ -1,6 +1,6 @@
 # Kinlogue ad-hoc 候选包安装说明
 
-这是供具备仓库读取权限的自愿测试者手动下载的 **arm64 候选包**，不是经过 Apple Developer ID 签名和 notarization 的正式发布版本。当前仓库是 private，没有仓库权限的公众用户无法访问 GitHub Release；若未来需要公开下载，必须先公开仓库或使用独立的公开下载位置。候选包只适用于 Apple Silicon Mac，最低系统版本为 macOS 14。
+本页说明自愿测试者手动下载 **arm64 候选包** 时的安装步骤，不表示当前已有可下载候选。可用下载以项目 GitHub Release 为准；ad-hoc 候选不是经过 Apple Developer ID 签名和 notarization 的正式发布版本，只适用于 Apple Silicon Mac，最低系统版本为 macOS 14。
 
 ## 下载前请确认
 
@@ -19,7 +19,7 @@
 
 ## 当前候选边界
 
-- 只有该下载所附 `release-metadata.json` 将 `compatibility.workflowReleaseGates` 记录为 `passed` 时，才能确认该次构建完成仓库 lint、隐私门禁、自动测试、正式 bundle 验证、ad-hoc 签名复验和 ZIP 解包复验。验收矩阵的[自动与本机验收](acceptance/lan-upload-matrix.md#自动与本机验收)记录的是既有本机候选证据，不能据此推断当前下载已经执行相同行。
+- 打包脚本只证明自身执行的 bundle、ad-hoc 签名和 ZIP 解包检查，`release-metadata.json` 中的 `compatibility.workflowReleaseGates` 保持 `notExecuted`。确认完整 lint、隐私和自动测试门禁时，须核对与该工件 `sourceRevision` 绑定的实际 GitHub Actions run 及逐项结果。验收矩阵的[自动与本机验收](acceptance/lan-upload-matrix.md#自动与本机验收)记录的是既有本机候选证据，不能据此推断当前下载已经执行相同行。
 - Developer ID、Apple notarization、macOS 14/15 独立机器、真实手机矩阵、真实样本 OCR 和可访问性人工门禁对本次 GitHub 候选仍是 `notExecuted`，整体状态保持 `pendingManual`；若后续门禁明确失败，应记录为 `blocked`，不能写成 `passed`。逐项范围见验收矩阵的[正式发布门禁](acceptance/lan-upload-matrix.md#正式发布门禁)。
 - Kinlogue 的资料库仍是 App Sandbox 内的明文资料库；完整隐私边界见 [`PRIVACY.md`](../PRIVACY.md)。
 
