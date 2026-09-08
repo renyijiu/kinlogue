@@ -40,6 +40,8 @@ struct SystemRestoreFileSecurityScope: RestoreFileSecurityScope {
 final class RestoreModel: ObservableObject {
     private let service: any BackupRestoreServicing
     private let securityScope: any RestoreFileSecurityScope
+    private let onReplacementBegan: @MainActor () async -> Void
+    private let onReplacementEnded: @MainActor () -> Void
     private var operationGeneration: UInt64 = 0
 
     @Published private(set) var phase: RestoreModelPhase = .idle
@@ -48,10 +50,14 @@ final class RestoreModel: ObservableObject {
 
     init(
         service: any BackupRestoreServicing,
-        securityScope: any RestoreFileSecurityScope = SystemRestoreFileSecurityScope()
+        securityScope: any RestoreFileSecurityScope = SystemRestoreFileSecurityScope(),
+        onReplacementBegan: @escaping @MainActor () async -> Void = {},
+        onReplacementEnded: @escaping @MainActor () -> Void = {}
     ) {
         self.service = service
         self.securityScope = securityScope
+        self.onReplacementBegan = onReplacementBegan
+        self.onReplacementEnded = onReplacementEnded
     }
 
     var isPresented: Bool { phase != .idle }
@@ -84,6 +90,7 @@ final class RestoreModel: ObservableObject {
     }
 
     func present() {
+        guard !isDismissDisabled else { return }
         _ = beginOperation()
         recoveryCode = ""
         phase = .enteringRecoveryCode
@@ -144,6 +151,8 @@ final class RestoreModel: ObservableObject {
         guard case .awaitingReplaceConfirmation = phase else { return }
         let generation = beginOperation()
         phase = .activating
+        await onReplacementBegan()
+        defer { onReplacementEnded() }
         do {
             let result = try await service.activatePreparedRestore()
             guard generation == operationGeneration else { return }

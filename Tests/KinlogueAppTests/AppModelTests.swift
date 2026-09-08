@@ -702,6 +702,44 @@ struct AppModelTests {
     }
 
     @Test
+    func refreshUpdatesTheSelectedRecordWithoutReloadingItsImmutableOriginal() async throws {
+        let fixture = try AppFixture()
+        let latest = try HealthRecord(
+            id: fixture.confirmed.id,
+            memberID: fixture.member.id,
+            sources: fixture.confirmed.sources,
+            importState: .confirmed,
+            revision: fixture.confirmed.revision + 1,
+            title: try SourceField(originalTranscription: "Latest external title")
+        )
+        let original = OriginalDocumentPayload(
+            data: Data("synthetic-original".utf8),
+            contentTypeIdentifier: "public.png"
+        )
+        let service = AppServiceSpy(
+            snapshot: fixture.snapshot,
+            refreshedSnapshot: AppSnapshot(
+                generation: fixture.snapshot.generation + 1,
+                members: fixture.snapshot.members,
+                records: [latest],
+                drafts: fixture.snapshot.drafts
+            ),
+            originals: [fixture.confirmed.id: original]
+        )
+        let model = AppModel(service: service)
+        await model.start()
+        await model.selectRecord(fixture.confirmed.id)
+
+        await model.refresh()
+
+        #expect(model.selectedRecord == latest)
+        #expect(model.selectedOriginalSourceID == latest.sources.first.id)
+        #expect(model.originalDocument == original)
+        model.presentRecordEditor()
+        #expect(model.editingRecord == latest)
+    }
+
+    @Test
     func recordUpdateReportsARevisionConflictWithoutClosingTheEditor() async throws {
         let fixture = try AppFixture()
         let latest = try HealthRecord(
@@ -748,6 +786,7 @@ struct AppModelTests {
         #expect(await model.updateRecord(command) == .recordChanged(latest: latest))
         #expect(model.editingRecord?.id == fixture.confirmed.id)
         #expect(model.timelineSections.flatMap(\.records).first { $0.id == latest.id } == latest)
+        #expect(model.selectedRecord == latest)
         #expect(await service.updatedCommands == [command])
     }
 

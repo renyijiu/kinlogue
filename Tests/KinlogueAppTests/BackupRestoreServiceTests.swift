@@ -74,11 +74,16 @@ struct BackupRestoreServiceTests {
         }
         await controller.waitUntilFirstPreparationEntered()
 
-        let secondSummary = try await service.prepare(
-            checkpointURL: URL(fileURLWithPath: "/second.kinloguebackup"),
-            recoveryCode: "second"
-        )
+        let second = Task {
+            try await service.prepare(
+                checkpointURL: URL(fileURLWithPath: "/second.kinloguebackup"),
+                recoveryCode: "second"
+            )
+        }
+        await controller.waitUntilFirstPreparationCancelled()
+        #expect(await controller.secondEntered == false)
         await controller.resumeFirstPreparation()
+        let secondSummary = try await second.value
 
         await #expect(throws: CancellationError.self) {
             _ = try await first.value
@@ -90,6 +95,29 @@ struct BackupRestoreServiceTests {
         #expect(controller.cancelledSequences == [1])
         #expect(controller.activatedSequences == [2])
     }
+
+    @Test
+    func cancelJoinsPreparationAndCleansItsLateStagingBeforeReturning() async throws {
+        let controller = RestorePreparationController()
+        let service = LiveRestoreService(service: BackupRestoreService(operations: controller.operations))
+        let preparation = Task {
+            try await service.prepare(
+                checkpointURL: URL(fileURLWithPath: "/first.kinloguebackup"),
+                recoveryCode: "first"
+            )
+        }
+        await controller.waitUntilFirstPreparationEntered()
+        let cancellation = Task { try await service.cancelPreparedRestore() }
+        await controller.waitUntilFirstPreparationCancelled()
+        await controller.resumeFirstPreparation()
+        try await cancellation.value
+
+        #expect(controller.cancelledSequences == [1])
+        await #expect(throws: CancellationError.self) { _ = try await preparation.value }
+        await #expect(throws: BackupRestoreError.receiptInvalid) {
+            _ = try await service.activatePreparedRestore()
+        }
+    }
 }
 
 private actor RestorePreparationController {
@@ -98,6 +126,9 @@ private actor RestorePreparationController {
     private var firstEntered = false
     private var firstWaiters: [CheckedContinuation<Void, Never>] = []
     private var firstContinuation: CheckedContinuation<Void, Never>?
+    private var firstCancelled = false
+    private var cancellationWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var secondEntered = false
     private nonisolated let sequenceRecorder = RestoreSequenceRecorder()
 
     init() {
@@ -136,14 +167,30 @@ private actor RestorePreparationController {
         firstContinuation = nil
     }
 
+    func waitUntilFirstPreparationCancelled() async {
+        if firstCancelled { return }
+        await withCheckedContinuation { cancellationWaiters.append($0) }
+    }
+
+    private func recordFirstCancellation() {
+        firstCancelled = true
+        cancellationWaiters.forEach { $0.resume() }
+        cancellationWaiters.removeAll()
+    }
+
     private func prepare(recoveryCode: String) async throws -> BackupPreparedRestore {
         if recoveryCode == "first" {
             firstEntered = true
             firstWaiters.forEach { $0.resume() }
             firstWaiters.removeAll()
-            await withCheckedContinuation { firstContinuation = $0 }
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { firstContinuation = $0 }
+            } onCancel: {
+                Task { await self.recordFirstCancellation() }
+            }
             return first
         }
+        secondEntered = true
         return second
     }
 

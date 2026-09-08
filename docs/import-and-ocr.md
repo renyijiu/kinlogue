@@ -87,7 +87,7 @@ OCR 输出预算：最多 4,096 blocks；单 block UTF-8 最多 64 KiB；总文�
 
 打开 extraction version 较旧且仍保存 OCR blocks 的待确认 draft 时，App 会用当前规则重新抽取，只填充原先为空的候选字段；已保存的候选、用户修正和 review state 保持不变。该刷新不重新执行 Vision OCR，也不把自动候选直接确认为健康记录。
 
-待确认页的“重新识别并覆盖”是另一条仅由用户明确触发的路径：App 从 Vault 中重新读取这份 draft 的全部有序原件，逐份运行 PDF text layer / Vision OCR，再用新 blocks 重建候选、来源引用和 review state。该动作会用新候选替换标题、机构、科室、报告类型、检查结果、检查结论、异常标记和日期候选；新 OCR 没有候选的字段也会被清空。成员、手工日期和用户备注保留；已选择的识别日期只有在新候选中找到相同日期、类型和来源转录时才继续选中，否则回到 unknown。识别失败时不保存新 document，当前表单保持不变。
+待确认页的“重新识别并覆盖”是另一条仅由用户明确触发的路径：App 从 Vault 中按 source 顺序逐份取得原件快照并运行 PDF text layer / Vision OCR，再用新 blocks 重建候选、来源引用和 review state。每份快照只保留当前原件，并重新核对 draft revision 与来源集合；因此多份合法原件累计超过 128 MiB 时仍可处理，处理中草稿发生变化则停止并拒绝覆盖。该动作会用新候选替换标题、机构、科室、报告类型、检查结果、检查结论、异常标记和日期候选；新 OCR 没有候选的字段也会被清空。成员、手工日期和用户备注保留；已选择的识别日期只有在新候选中找到相同日期、类型和来源转录时才继续选中，否则回到 unknown。识别失败时不保存新 document，当前表单保持不变。
 
 每个 `SourceField` 保存：
 
@@ -123,6 +123,7 @@ App 层把 Finder 报告导入、失败草稿重试和“重新识别并覆盖�
 - `ImportedFileValidatorTests`：类型、锁定 PDF、页/像素/大小边界、坏内容和多帧图片。
 - `TextExtractionTests`：PDF text layer、Vision 路径、页顺序、orientation、预算和 provenance。
 - `ReportCandidateExtractorTests`、`ImportDraftTests`、`ImportWorkflowIntegrationTests`：候选、叙述段落边界、提取版本刷新、状态转移、lease、重试、确认和落盘。
+- `LiveAppServiceRecognitionIntegrationTests`、`LANReportArchiveTests`：真实 Vault 的多原件总量超过快照预算、识别中草稿变化，以及目的原件/OCR 损坏时保留完好的 inbox 副本。
 - `DICOMFolderScannerTests`、`DICOMStudyIndexerTests`、`DICOMImportWorkflowIntegrationTests` 与 `CatalogProcessCoordinationTests`：有界目录 intake、staged-byte authority、atomic publication、journal recovery、取消、并发、强制终止和 Vault destroy 竞争。
 - `DICOMSeriesGeometryTests`、`DICOMDisplayTransformTests`、`DICOMSliceServiceTests` 与 `DICOMSliceVaultIntegrationTests`：policy-v2 顺序、stored sample 到 grayscale、进程级预算/cache/scheduler、取消/失效和 verified descriptor/destroy fence。
 - `DICOMImportModelTests`、`DICOMStudyReviewModelTests`、`DICOMAppModelTests`、`DICOMViewSafetyTests` 与 `LiveDICOMAppServiceIntegrationTests`：文件夹入口、晚到结果 fence、明确确认/删除、独立导航域、报告查询隔离和生成式真实 Vault 链路。

@@ -89,6 +89,9 @@ SwiftUI 独立次要操作可使用 `.buttonStyle(.kinlogueSecondary)`。取消�
 14. 已确认记录编辑页的“检查结果”“检查结论”和“我的备注”使用同一原生多行文本组件。文本容器四周至少保留 8pt 内容边距，并使用 Card + Outline 明确输入范围；不能只增加外层留白或最小高度，因为那不会把首行字形移出 `NSTextView` 的裁切边界。
 15. “导出全部原始文件”与删除使用两个独立设置 Card；导出是普通 Primary 操作，不使用 destructive 红色。导出 sheet 必须先显示明文、非备份和外部副本保留范围，再允许打开系统保存面板。写入和验证阶段显示线性进度、文件数与字节数并提供取消；最终提交阶段移除取消入口并禁止交互式关闭。成功态提供“在访达中显示”和“完成”，失败、空内容和取消均有明确文本/SF Symbol，不能只靠颜色区分。完整键盘、保存面板和 VoiceOver 公告仍需人工验收。
 16. DICOM 待确认 review 在初始加载、保存、删除以及仍为 `needsReview` 的稳定状态下都禁止交互式关闭，根视图 Escape 与 sheet dismissal 使用同一 policy；初始加载失败或已确认检查的稳定 review 保留明确关闭路径。删除检查或整库时，相关 Viewer 窗口先清空像素并等待底层 close，再由系统 dismiss；不能只关闭当前发起操作的一个窗口。
+17. 报告复核在重新识别、确认、稍后处理或删除进行中禁用整个编辑表单，避免请求已经捕获字段后仍接受无法保存的新输入；失败结束后恢复编辑。原件仍可供核对。实现与门禁见 [`ImportReviewView`](../Sources/KinlogueApp/Views/ImportReviewView.swift) 和 [`ImportReviewViewSafetyTests`](../Tests/KinlogueAppTests/ImportReviewViewSafetyTests.swift)。
+18. 报告详情随已接受的 catalog 快照更新到当前记录 revision，同时保留仍有效的原件选择与不可变原件；已打开编辑页仍保留自己的 revision，冲突后由用户明确重新载入。见 [`AppModelTests`](../Tests/KinlogueAppTests/AppModelTests.swift)。
+19. 确认整库恢复后，正常和资料库不可用的启动路径都先清空报告、手机收件箱与所有独立 Viewer 状态，等待 Viewer 关闭后才激活恢复；成功或激活失败均禁止普通资料访问，直到重新启动。恢复前验证失败仍不进入这条破坏性边界。组装与跨模型检查见 [`AppComposition`](../Sources/KinlogueApp/App/AppComposition.swift) 和 [`RestoreModelTests`](../Tests/KinlogueAppTests/RestoreModelTests.swift)。
 
 ## 组件映射
 

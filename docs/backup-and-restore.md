@@ -30,6 +30,7 @@
 - 同一进程中的手动、自动、保留清理、恢复和整库删除经过同一个串行 operation fence。跨进程 writer 还必须取得 app-private 备份身份目录本身的 owner-only、no-follow publication lease；该目录 inode 与当前 configuration root、repository、backup set、authorization 和 writer epoch 绑定，不依赖同步 repository 中可被替换的命名 lock 文件。权威扫描、sequence 分配、排他发布、正式文件完整回读和 durable witness 写入在同一 lease 内完成，并保持 `repository → app-private configuration` 锁顺序。sequence 同时取当前可见最大值、当前 writer 的 durable witness 高水位和 authorization floor 的保守后继，因此最新叶暂时消失后重启也不会复用已见序号。
 - 默认保留 5 份，允许 2–30。手动和自动恢复点使用同一个池。
 - 只有新的恢复点在正式文件上完整回读验证并写入 durable witness 后，旧恢复点才进入清理候选；还要连续观察至少 24 小时。损坏、未知、分叉、身份不匹配或缺少 witness 时不会删除任何恢复点。
+- 最近本地验证和保留清理采用恢复点验证完成后的时间；备份耗时不会被误判为 witness 来自未来，真实时钟回退仍暂停清理。
 - 一次保留清理在固定 publication lease 内只做一次权威全目录扫描并形成删除批次；扫描前后固定 repository 目录 generation。批次中的每个目标仍在 `beforeDelete` 窗口后按固定叶名重开，逐项复核 regular/single-link 文件身份、认证 checkpoint 内容和 repository identity digest，并精确重验计划保留的全部叶；目录发生未由本批删除产生的增删/替换，或任一保留叶缺失/换 inode，都会在 unlink 前保守推迟。配置 revision、writer identity、保留策略或 witness 在删除前改变也会推迟，成功删除后才推进本批 generation 与下一项，因此成本仍是一次 O(repository) 权威扫描加每个删除叶/有限保留集合的精确验证，而不是为 28 个删除目标重复 28 次全目录读取。
 - 删除失败不会推翻新的成功备份，只会显示清理延后。保留数量是本地目录的最终目标，不是网盘远端保留数量承诺。
 
@@ -43,7 +44,7 @@
 4. 用户再次确认后，恢复会替换而不是合并当前资料库；durable receipt 保护 whole-root 切换、回滚和下次启动收敛。
 5. 成功后必须退出并重新打开 App。本机备份配置会移除，外部恢复点保持不变，也不会被自动采用为新的备份目标。
 
-确认替换后，`LibraryLifecycleCoordinator` 会取消并等待已经进入的普通报告导入、重试和重新 OCR，以及 LAN、DICOM 与原件导出操作；这些任务到达终态后才允许 whole-root 切换。并发选择恢复点使用 operation generation 隔离，较旧的迟到 preparation 只能清理自己的 staging，不能覆盖或取消较新的已验证恢复点。
+确认替换后，`LibraryLifecycleCoordinator` 会取消并等待已经进入的普通报告导入、重试和重新 OCR，以及 LAN、DICOM 与原件导出操作；这些任务到达终态后才允许 whole-root 切换。取消验证或重新选择恢复点会取消当前 preparation，并等待任务退出、完成本次 staging 清理尝试后再完成取消或开始下一次准备。operation generation 继续隔离迟到结果，较旧的 preparation 不能覆盖或取消较新的已验证恢复点。
 
 恢复 ViewModel 在文件授权返回后再次检查 generation，并冻结本次恢复码。释放授权后的迟到结果只丢弃自身 UI 发布；staging 清理由 `LiveRestoreService` 按 preparation generation 负责，不能在 ViewModel 中用全局 cancel 清理另一次恢复。对应组合回归见 [`BackupConcurrencyRegressionTests`](../Tests/KinlogueAppTests/BackupConcurrencyRegressionTests.swift)，目录授权持久化与身份拒绝见 [`LiveBackupServiceTests`](../Tests/KinlogueAppTests/LiveBackupServiceTests.swift)。
 

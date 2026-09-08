@@ -12,8 +12,7 @@ struct LANReceiverFileLifecycleTests {
         defer { fixture.destroy() }
         let receiver = LANReceiver(rootURL: fixture.rootURL, session: LANSession())
         defer { Task { await receiver.stop() } }
-        let (presentation, authorization) = try await startAndAuthorize(receiver)
-        _ = presentation
+        let (_, authorization) = try await startAndAuthorize(receiver)
         let bytes = Data("synthetic receiver lifecycle".utf8)
         let remoteFileID = UUID()
 
@@ -141,9 +140,61 @@ struct LANReceiverFileLifecycleTests {
         }
     }
 
+    @Test
+    func concurrentReservationsCountPendingAdmissionsTowardTheSessionLimit() async throws {
+        let fixture = try await LANInboxStoreTestFixture.make()
+        defer { fixture.destroy() }
+        let receiver = LANReceiver(rootURL: fixture.rootURL, session: LANSession())
+        defer { Task { await receiver.stop() } }
+        let (credentials, authorization) = try await startAndAuthorize(receiver)
+        let bytes = Data([0])
+        for _ in 0..<(LANFileSessionResponse.maximumFileCount - 1) {
+            _ = try await receiver.reserveFile(
+                request(remoteFileID: UUID(), bytes: bytes, revision: 0),
+                authorizedBy: authorization
+            )
+        }
+
+        let coordinator = VaultMutationCoordinator.shared(for: fixture.rootURL)
+        let lease = try await coordinator.acquire()
+        defer { lease.release() }
+        let lastRequest = try request(remoteFileID: UUID(), bytes: bytes, revision: 0)
+        let last = Task {
+            try await receiver.reserveFile(lastRequest, authorizedBy: authorization)
+        }
+        defer { last.cancel() }
+        for _ in 0..<10_000 where coordinator.waitingCountForTesting == 0 {
+            await Task.yield()
+        }
+        #expect(coordinator.waitingCountForTesting == 1)
+
+        let excessRequest = try request(remoteFileID: UUID(), bytes: bytes, revision: 0)
+        let excess = Task {
+            try await receiver.reserveFile(excessRequest, authorizedBy: authorization)
+        }
+        defer { excess.cancel() }
+        // The held real storage lease exposes actor reentrancy without adding
+        // a receiver hook. A correct rejection never joins the storage queue.
+        for _ in 0..<10_000 where coordinator.waitingCountForTesting < 2 {
+            await Task.yield()
+        }
+        lease.release()
+
+        #expect(try await last.value.file.remoteFileID == lastRequest.remoteFileID)
+        await #expect(throws: LANReceiverError.retryLater) {
+            _ = try await excess.value
+        }
+        let snapshot = try await receiver.fileSessionResponse(
+            restoredCredentials: credentials
+        )
+        #expect(snapshot.files.count == LANFileSessionResponse.maximumFileCount)
+        #expect(!(try LANHTTPJSONCodec.encode(snapshot)).isEmpty)
+        await receiver.stop()
+    }
+
     private func startAndAuthorize(
         _ receiver: LANReceiver
-    ) async throws -> (LANReceiverPresentation, LANAuthorizedSession) {
+    ) async throws -> (LANBrowserCredentials, LANAuthorizedSession) {
         let presentation = try await receiver.start(
             at: .init(
                 interfaceName: "lo0",
@@ -170,7 +221,7 @@ struct LANReceiverFileLifecycleTests {
         ) else {
             throw LANReceiverError.sessionEnded
         }
-        return (presentation, authorization)
+        return (credentials, authorization)
     }
 
     private func request(

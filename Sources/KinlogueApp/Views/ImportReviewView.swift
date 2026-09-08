@@ -190,6 +190,7 @@ struct ImportReviewView: View {
                         .padding(22)
                     }
                     .frame(minWidth: 390)
+                    .disabled(model.isLoading || model.isTerminalActionInFlight || model.isRecognitionInFlight)
                     .background(KinlogueTheme.surface)
                 }
             }

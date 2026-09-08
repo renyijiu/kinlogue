@@ -101,6 +101,8 @@ func loadingBackupStatusNeverPreparesOrEnumeratesTheLibrarySource() async throws
     #expect(await service.sourcePreparationCountForTesting() == 1)
     _ = try await service.setAutomaticBackupEnabled(false)
     #expect(await service.sourcePreparationCountForTesting() == 1)
+    // Exercise the actual writer witness and retention clock together.
+    #expect(try await service.backUpNow() == .complete)
 }
 
 @Test
