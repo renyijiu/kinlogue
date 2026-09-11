@@ -1112,6 +1112,12 @@
 - **回归证据**：布局源码契约先证明旧实现的控制列与备份/恢复动作仍偏左，随后验证四个固定操作列和两个动作区域均使用 trailing alignment；设置/本地化回归 28/28、warnings-as-errors build、文档、本地化、隐私和 diff 门禁通过。完整并行源码运行通过 992/993，唯一失败为安装式 LAN 探针的一次 `.dependencyFailure`，该项隔离复跑 1/1 通过；本条不把两次运行合并宣称为一次完整全绿，clean-source bundle 与实际界面证据单列如下。
 - **本机安装验收**：clean revision `8c7f381` 的 Release App、DICOM XPC Helper、ad-hoc 签名、bundle、entitlement、依赖与隐私验证通过，安装 executable SHA-256 为 `8c6169e0006ec8e66e5b2aecbbbed8960dd26b428b46ad2674b8d9d208b48414`。实际打开当前用户安装包进入设置页，语言、保留数量、立即备份/访达、恢复、导出和删除控件的右边缘一致；私密界面截图不进入仓库。Developer ID、notarization、macOS 14/15 与键盘/VoiceOver 人工矩阵仍未执行。
 
+## [2026-08-29] docs/readme | 在项目首页加入合成数据产品预览
+
+- **首页预览**：README 标题区新增一张中文产品截图，直接展示家庭成员、健康记录时间线、已确认字段和原件预览，并以图注和替代文本明确说明内容全部为合成示例。
+- **隐私边界**：截图来自随机隔离的 acceptance bundle；可见成员、记录字段和所选 PDF 原件均替换为无身份、无医学事实的示例内容，没有读取或复制正式资料库、真实病历、私有路径或凭据。隐私门禁仅按精确路径与固定 SHA-256 放行这一个已复核图片，替换同名文件仍会失败关闭。
+- **验证范围**：基础源码的 Release App、DICOM XPC Helper、ad-hoc 签名与 bundle verification 在截图前通过；隔离资料库成功加载 4 个合成成员与 96 条合成记录。README 改动不改变产品行为；精确媒体白名单的定向回归 1/1、文档、隐私与 diff 门禁通过。完整源码套件未因本次文档改动重跑，真实设备、真实样本、键盘和 VoiceOver 人工矩阵未执行。
+
 ## [2026-09-08] fix/architecture | 全项目审查与状态交接修复
 
 - **范围与基线**：以公开 `main@9b4f2194a3c0b80b5926b79c45bc417eeaeceaa5` 为基线分域审查 Core、Vault/OCR、备份恢复、LAN/手机页面、App、DICOM/XPC 和发布脚本。上游已解决的问题不重复计入；14 项核实缺陷及外部一手实践见 [架构审查](architecture-review-2026-09-08.md) 与[来源笔记](sources/architecture-review-practices-2026-09-08.md)。保留现有分层、不可变对象和独立 XPC，不新增依赖或持久化格式。
@@ -1122,3 +1128,9 @@
 - **完整门禁**：macOS 26.6.2 / arm64、Xcode 26.6 / Swift 6.3.3 上 `scripts/test.sh` 退出码 0，主清单 994 tests / 91 suites 与账本匹配；13 项独立 XCTest、验收扫描、33 项跨进程存储、大小写别名锁、18 项 DICOM 导入、安装式 LAN HTTP 探针与真实双流 RSS/背压隔离门禁均通过。`scripts/lint.sh`（warnings-as-errors 和 package graph）、`scripts/privacy-guard.sh`、`scripts/verify-docs.sh`、本地化检查与 `git diff --check` 通过。
 - **证据边界**：上述验证在提交、push 和创建 PR 前完成；本机工作树的通过不升级为 clean-source 发布候选。`verify-app` 的 clean-source 绑定、安装验收、真实手机与私有样本、macOS 14/15 独立机器、Powerbox/网盘/外置卷、键盘/VoiceOver、独立密码学审计以及真实 Developer ID/notarization 在本次审查中未执行。
 - **交付整理**：按用户要求将修复整理为数据与异步状态、DICOM、发布校验与审查记录三个提交组；收紧 staging 清理措辞，移除索引中残留的 private 候选包描述。提交不自动改变候选验收状态。
+
+## [2026-09-11] fix/readme | 同步公开 main 并补齐截图历史校验
+
+- **合并**：产品预览分支合并公开 `main@5a5e32d`，保留双方追加日志与上游实现；不更新 private 仓库。
+- **历史门禁**：将已审查的合成截图精确路径与 SHA-256 加入历史媒体清单，修复仅当前树放行、reachable history 仍拒绝的问题；复用现有回归覆盖截图被替换后恢复仍拒绝，不扩大目录白名单。
+- **验证**：当前 Mac 编译与定向脚本安全回归 8/8 通过；当前树和两侧公开历史隐私、文档、shell 语法与 diff 检查通过。完整 CI 待推送后执行；完整本机套件、发布 bundle 和人工设备矩阵未重跑。
