@@ -73,13 +73,18 @@ struct AppComposition {
                 await backupModel?.handleAppEvent(.mutation)
             }
         )
+        let restoreModel = makeRestoreModel(
+            service: backup.restoreService,
+            appModel: appModel,
+            lanInboxModel: lanInboxModel
+        )
         let destroyService = BackupCoordinatedVaultDestroyService(
             operationCoordinator: backup.liveBackup.operationCoordinator,
             configurationStore: backup.liveBackup.configurationStore,
             underlying: services.destroyService
         )
         let startup = AppStartupCoordinator(
-            reconcileRestore: { [weak restoreModel = backup.restoreModel] in
+            reconcileRestore: { [weak restoreModel] in
                 await restoreModel?.reconcileBeforeStartingServices() ?? false
             },
             startStorage: { [weak appModel, weak lanInboxModel] in
@@ -103,7 +108,7 @@ struct AppComposition {
             ),
             lanInboxModel: lanInboxModel,
             backupModel: backup.backupModel,
-            restoreModel: backup.restoreModel,
+            restoreModel: restoreModel,
             startupCoordinator: startup
         )
     }
@@ -120,7 +125,13 @@ struct AppComposition {
         )
         let lanInboxModel = LANInboxModel(service: UnavailableLANInboxService())
         let backupModel = backup?.backupModel ?? BackupModel(service: UnavailableBackupService())
-        let restoreModel = backup?.restoreModel ?? RestoreModel(service: UnavailableRestoreService())
+        let restoreService: any BackupRestoreServicing = backup?.restoreService
+            ?? UnavailableRestoreService()
+        let restoreModel = makeRestoreModel(
+            service: restoreService,
+            appModel: appModel,
+            lanInboxModel: lanInboxModel
+        )
         let destroy: any VaultDestroyServicing
         if let backup {
             destroy = BackupCoordinatedVaultDestroyService(
@@ -173,6 +184,25 @@ struct AppComposition {
         )
     }
 
+    static func makeRestoreModel(
+        service: any BackupRestoreServicing,
+        appModel: AppModel,
+        lanInboxModel: LANInboxModel,
+        securityScope: any RestoreFileSecurityScope = SystemRestoreFileSecurityScope()
+    ) -> RestoreModel {
+        RestoreModel(
+            service: service,
+            securityScope: securityScope,
+            onReplacementBegan: { [weak appModel, weak lanInboxModel] in
+                lanInboxModel?.beginDestructiveVaultLifecycle()
+                await appModel?.beginDestructiveVaultLifecycle()
+            },
+            onReplacementEnded: { [weak appModel] in
+                appModel?.requireRestartAfterVaultLifecycle()
+            }
+        )
+    }
+
     private static func makeBackupRuntime(
         identity: AppRuntimeIdentity,
         vault: PlaintextVault,
@@ -201,7 +231,7 @@ struct AppComposition {
         return .init(
             liveBackup: liveBackup,
             backupModel: BackupModel(service: liveBackup),
-            restoreModel: RestoreModel(service: liveRestore)
+            restoreService: liveRestore
         )
     }
 }
@@ -209,7 +239,7 @@ struct AppComposition {
 private struct BackupRuntime {
     let liveBackup: LiveBackupService
     let backupModel: BackupModel
-    let restoreModel: RestoreModel
+    let restoreService: any BackupRestoreServicing
 }
 
 private enum UnavailableVaultLifecycleError: Error { case unavailable }
@@ -219,6 +249,9 @@ private actor UnavailableVaultDestroyService: VaultDestroyServicing {
 }
 
 private actor UnavailableBackupService: BackupServicing {
+    func reauthorizeDestination(selectedParent: URL) async throws {
+        throw BackupSemanticError.notConfigured
+    }
     func loadStatus() async throws -> AppBackupStatus { .notConfigured }
     func beginSetup(selectedParent: URL) async throws -> String {
         _ = selectedParent

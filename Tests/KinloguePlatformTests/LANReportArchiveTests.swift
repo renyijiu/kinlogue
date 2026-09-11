@@ -221,6 +221,69 @@ struct LANReportArchiveTests {
     }
 
     @Test
+    func damagedDuplicateDestinationKeepsTheGoodInboxCopy() async throws {
+        for kind in [VaultObjectKind.attachment, .ocr] {
+            let fixture = try await LANInboxStoreTestFixture.make()
+            defer { fixture.destroy() }
+            let vault = try PlaintextVault(rootURL: fixture.rootURL)
+            let member = try await addMember("成员甲", to: vault)
+            let coordinator = try LANReportArchiveCoordinator(
+                rootURL: fixture.rootURL,
+                inbox: fixture.store,
+                vault: vault,
+                preprocessor: LANItemPreprocessor(
+                    inbox: fixture.store,
+                    textExtractor: ItemCountingTextExtractor()
+                )
+            )
+            let bytes = try image(red: 70, green: 90, blue: 110)
+            try await upload(bytes, name: "original.png", sessionID: UUID(), store: fixture.store)
+            let originalID = try #require(try await fixture.store.loadSnapshot().items.first?.id)
+            _ = try await coordinator.archive(
+                itemIDs: [originalID],
+                memberID: member.id,
+                canonicalReportDate: Date(timeIntervalSinceReferenceDate: 100)
+            )
+            let draft = try #require(try await vault.loadCatalog().importDrafts.first)
+            let reference = VaultObjectReference(
+                id: try #require(kind == .attachment ? draft.sources.first.attachmentID
+                    : draft.documentObjectID),
+                kind: kind
+            )
+            let path = try PlaintextVaultLayout(rootURL: fixture.rootURL).objectPath(reference)
+            let original = try await vault.readObject(reference)
+            try AtomicFileStore(rootURL: fixture.rootURL).replaceAtomically(
+                Data(repeating: 0x7F, count: original.count),
+                relativePath: path
+            )
+            try await upload(bytes, name: "good-copy.png", sessionID: UUID(), store: fixture.store)
+            let itemID = try #require(try await fixture.store.loadSnapshot().items.first?.id)
+
+            await #expect(throws: LANInboxError.integrityCheckFailed) {
+                try await coordinator.archive(
+                    itemIDs: [itemID],
+                    memberID: member.id,
+                    canonicalReportDate: Date(timeIntervalSinceReferenceDate: 100)
+                )
+            }
+
+            let retained = try await fixture.store.loadSnapshot()
+            #expect(retained.items.map(\.id) == [itemID])
+            #expect(retained.archiveTerminals.isEmpty)
+            let goodBytes = try await fixture.store.withVerifiedItemSourceContent(
+                itemID: itemID
+            ) { descriptor in
+                try BoundedRegularFileReader.read(
+                    descriptor: descriptor,
+                    maximumByteCount: bytes.count,
+                    oversizeError: LANInboxError.resourceLimitExceeded
+                )
+            }
+            #expect(goodBytes == bytes)
+        }
+    }
+
+    @Test
     func preprocessingPersistsUnsupportedAndOCRFailureStatesThenRetriesIndependently() async throws {
         let fixture = try await LANInboxStoreTestFixture.make()
         defer { fixture.destroy() }

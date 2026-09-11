@@ -2,6 +2,14 @@
 
 本文件是项目知识库的追加式日志。每个条目记录一次可复核的 ingest、query、lint 或重大文档维护；不要改写历史条目来伪造当前状态。最新状态以专题页和代码/测试为准。
 
+## [2026-09-06] fix/review | 修复公开 main 的上传队列与备份恢复交互
+
+- **基线**：以公开 `main` 的 `b33383d025556d662e371a50252102e00a6f70f6` 为起点；本次不包含旧私有分支历史。
+- **手机上传**：同 attempt 的 reservation 轮询保留本地 queued 状态，避免并发槽释放后文件被跳过；终态仍由 Mac 结果覆盖。
+- **恢复与备份状态**：恢复权限回调重验 generation，迟到 UI 结果不再调用全局 staging cancel；手动备份有独立 in-flight 状态，激活/刷新不会恢复按钮或允许重复提交。
+- **目录授权**：已启用备份可以重新选择原父目录；只在父目录和 repository 身份均匹配时 CAS 更新 bookmark，错误目录和替换 inode 不创建文件或改写配置。中英文案与运行时资源同步。
+- **验证**：当前 Mac 上定向回归 53 tests / 7 suites 与完整 `scripts/test.sh` 通过，主测试清单经脚本核对为 981 tests / 90 suites；独立 derived XCTest 13/13、验收扫描 14/1、storage process 33/1、DICOM 导入 17/1、LAN 生产 HTTP 1/1 与真实双流 LAN RSS/背压 1/1 均通过。`scripts/lint.sh`（warnings-as-errors 构建、依赖图和文档）、当前树 `scripts/privacy-guard.sh`、本地化资源核对与 `git diff --check` 通过。以上为未提交工作树的本机证据，尚未绑定不可变候选；真实手机、Powerbox 人工授权、VoiceOver、独立 macOS 版本、完整安装包与正式分发门禁尚未执行。
+
 ## [2026-08-28] security/lan | 将接收准入绑定到接口网络前缀
 
 - **行为与边界**：生产 receiver 启动前重新确认所选接口、地址和连续非零 netmask 的精确身份；transport 在安装 child initializer 与 HTTP pipeline 前，按该 IPv4/IPv6 前缀拒绝缺失、不可解析、跨地址族、IPv4-mapped IPv6 或越界的真实对端。接口前缀变化也会让网络监控失败关闭。传输仍是普通 HTTP，只适用于可信任私人网络；当前契约见 [`lan-upload.md`](lan-upload.md) 和 [`privacy-and-security.md`](privacy-and-security.md)。
@@ -1109,3 +1117,20 @@
 - **首页预览**：README 标题区新增一张中文产品截图，直接展示家庭成员、健康记录时间线、已确认字段和原件预览，并以图注和替代文本明确说明内容全部为合成示例。
 - **隐私边界**：截图来自随机隔离的 acceptance bundle；可见成员、记录字段和所选 PDF 原件均替换为无身份、无医学事实的示例内容，没有读取或复制正式资料库、真实病历、私有路径或凭据。隐私门禁仅按精确路径与固定 SHA-256 放行这一个已复核图片，替换同名文件仍会失败关闭。
 - **验证范围**：基础源码的 Release App、DICOM XPC Helper、ad-hoc 签名与 bundle verification 在截图前通过；隔离资料库成功加载 4 个合成成员与 96 条合成记录。README 改动不改变产品行为；精确媒体白名单的定向回归 1/1、文档、隐私与 diff 门禁通过。完整源码套件未因本次文档改动重跑，真实设备、真实样本、键盘和 VoiceOver 人工矩阵未执行。
+
+## [2026-09-08] fix/architecture | 全项目审查与状态交接修复
+
+- **范围与基线**：以公开 `main@9b4f2194a3c0b80b5926b79c45bc417eeaeceaa5` 为基线分域审查 Core、Vault/OCR、备份恢复、LAN/手机页面、App、DICOM/XPC 和发布脚本。上游已解决的问题不重复计入；14 项核实缺陷及外部一手实践见 [架构审查](architecture-review-2026-09-08.md) 与[来源笔记](sources/architecture-review-practices-2026-09-08.md)。保留现有分层、不可变对象和独立 XPC，不新增依赖或持久化格式。
+- **数据与生命周期**：归档最终清理前复核目标原件与 OCR，损坏副本不授权移除完好 inbox；整库恢复复用 App/LAN/Viewer 撤销并等待实际 preparation 取消；备份以 writer 回读验证完成时间评估保留和成功状态，暂停后的时钟检查不使用过期事件时间。
+- **资源与交互**：重新识别逐来源快照，继续检查草稿 revision；并发 LAN admission 包含在途预留；手机去重在异步比较后重验候选；刷新同步选中详情，OCR/确认时禁用核对表单。
+- **DICOM 与发布**：非阻塞 descriptor 打开拒绝 FIFO 替换；接受合法奇数像素 padding；Helper 的有界独立副本写入前 unlink，异常退出由内核回收。正式分发脚本按内到外重签和验证嵌套代码，打包器不再自行宣称全 workflow 门禁通过。同步修正具名临时副本、仓库 private 和发布证据字段的过时文档。
+- **已验证**：聚焦回归 191 tests / 22 suites 通过；真实 `scripts/verify-dicom-xpc.sh` 通过当前未提交工作树的 Release 构建、ad-hoc 签名、像素 fixture、外部 SIGKILL、hang watchdog、日志 canary 与零 runtime socket。新归档、大文件 OCR 和预留上限回归已核对旧实现红灯、修复后绿灯。
+- **完整门禁**：macOS 26.6.2 / arm64、Xcode 26.6 / Swift 6.3.3 上 `scripts/test.sh` 退出码 0，主清单 994 tests / 91 suites 与账本匹配；13 项独立 XCTest、验收扫描、33 项跨进程存储、大小写别名锁、18 项 DICOM 导入、安装式 LAN HTTP 探针与真实双流 RSS/背压隔离门禁均通过。`scripts/lint.sh`（warnings-as-errors 和 package graph）、`scripts/privacy-guard.sh`、`scripts/verify-docs.sh`、本地化检查与 `git diff --check` 通过。
+- **证据边界**：上述验证在提交、push 和创建 PR 前完成；本机工作树的通过不升级为 clean-source 发布候选。`verify-app` 的 clean-source 绑定、安装验收、真实手机与私有样本、macOS 14/15 独立机器、Powerbox/网盘/外置卷、键盘/VoiceOver、独立密码学审计以及真实 Developer ID/notarization 在本次审查中未执行。
+- **交付整理**：按用户要求将修复整理为数据与异步状态、DICOM、发布校验与审查记录三个提交组；收紧 staging 清理措辞，移除索引中残留的 private 候选包描述。提交不自动改变候选验收状态。
+
+## [2026-09-11] fix/readme | 同步公开 main 并补齐截图历史校验
+
+- **合并**：产品预览分支合并公开 `main@5a5e32d`，保留双方追加日志与上游实现；不更新 private 仓库。
+- **历史门禁**：将已审查的合成截图精确路径与 SHA-256 加入历史媒体清单，修复仅当前树放行、reachable history 仍拒绝的问题；复用现有回归覆盖截图被替换后恢复仍拒绝，不扩大目录白名单。
+- **验证**：当前 Mac 编译与定向脚本安全回归 8/8 通过；当前树和两侧公开历史隐私、文档、shell 语法与 diff 检查通过。完整 CI 待推送后执行；完整本机套件、发布 bundle 和人工设备矩阵未重跑。

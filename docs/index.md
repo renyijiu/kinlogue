@@ -34,12 +34,15 @@
 
 整库恢复确认后，共享 lifecycle 会取消并等待已经进入的报告 import/retry/OCR、LAN、DICOM 与导出任务；并发恢复 preparation 以 generation 隔离，activation 失败只允许退出重启。事实与回归入口见 [`backup-and-restore.md`](backup-and-restore.md)、[`architecture.md`](architecture.md) 和 [`import-and-ocr.md`](import-and-ocr.md)。
 
+当前设置页支持对原备份目录重新授权，并保持手动备份忙碌状态；恢复 ViewModel 的迟到权限回调不会清理新恢复点。手机批量上传的本地排队状态也不会被 reservation 轮询覆盖。实现与回归入口分别见 [`backup-and-restore.md`](backup-and-restore.md) 和 [`lan-upload.md`](lan-upload.md)。
+
 ## 当前专题
 
 ### 产品与架构
 
 - [`project-overview.md`](project-overview.md)：唯一当前产品契约、用户流程、边界和产品验收定义。
 - [`architecture.md`](architecture.md)：target 图、运行时组装、跨层调用和并发边界。
+- [`architecture-review-2026-09-08.md`](architecture-review-2026-09-08.md)：公开 main 的完整设计/架构审查、已核实问题、最小改进与外部实践依据。
 - [`domain-and-data-model.md`](domain-and-data-model.md)：领域对象、状态机、来源和去重语义。
 - [`decisions.md`](decisions.md)：当前决策、已取代决策和开放门禁。
 
@@ -59,7 +62,7 @@
 
 - [`testing-and-release.md`](testing-and-release.md)：验证命令、证据规则、签名和发布流程。
 - [`acceptance/README.md`](acceptance/README.md)：当前候选矩阵与历史验收入口。
-- [`adhoc-candidate-install.md`](adhoc-candidate-install.md)：private ad-hoc 候选包的下载和信任边界。
+- [`adhoc-candidate-install.md`](adhoc-candidate-install.md)：ad-hoc 候选包的下载和信任边界。
 
 ### 历史与原始证据
 
@@ -69,6 +72,8 @@
 - [`log.md`](log.md)：按时间追加的实现与验证记录。
 
 ## 维护规则
+
+README 合成预览的当前树与历史媒体校验边界见 [`privacy-and-security.md`](privacy-and-security.md)。
 
 1. 先修改拥有该事实的专题页，再更新本索引的链接或一句话摘要。
 2. 发布版本、测试数量、候选 revision 和门禁状态只写入 [`acceptance/current-release.md`](acceptance/current-release.md)；其他页面只链接，不复制。

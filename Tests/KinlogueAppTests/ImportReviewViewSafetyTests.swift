@@ -3,6 +3,21 @@ import Testing
 
 struct ImportReviewViewSafetyTests {
     @Test
+    func reviewFormCannotAcceptEditsWhileRecognitionOrSavingOwnsItsValues() throws {
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let formStart = try #require(source.range(of: "ScrollView {"))
+        let formEnd = try #require(source.range(
+            of: ".background(KinlogueTheme.surface)",
+            range: formStart.lowerBound..<source.endIndex
+        ))
+        let form = source[formStart.lowerBound..<formEnd.upperBound]
+
+        #expect(form.contains(
+            ".disabled(model.isLoading || model.isTerminalActionInFlight || model.isRecognitionInFlight)"
+        ))
+    }
+
+    @Test
     func reviewCannotDismissWithoutChoosingAPersistenceAction() throws {
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
 

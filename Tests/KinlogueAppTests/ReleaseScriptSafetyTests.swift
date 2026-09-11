@@ -3,6 +3,131 @@ import Testing
 
 struct ReleaseScriptSafetyTests {
     @Test
+    func distributionSigningCoversNestedCodeAndRejectsInvalidHelperSignatures() throws {
+        let script = try contents("scripts/package-distribution.sh")
+        let verifierStart = try #require(script.range(of: "verify_distribution_signature() {"))
+        let verifierEnd = try #require(script.range(of: "\ncleanup() {"))
+        let signingStart = try #require(script.range(of: #"DICOM_HELPER_BUNDLE="$APP_BUNDLE/Contents/XPCServices/"#))
+        let signingEnd = try #require(script.range(of: "\nNOTARY_ARCHIVE="))
+        let production = String(script[verifierStart.lowerBound..<verifierEnd.lowerBound])
+            + "\n" + String(script[signingStart.lowerBound..<signingEnd.lowerBound])
+
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("kinlogue-signing-fixture-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: root) }
+        let app = root.appendingPathComponent("Kinlogue.app")
+        let helper = app.appendingPathComponent("Contents/XPCServices/KinlogueDICOMDecoderHelper.xpc")
+        for (bundle, executable) in [(app, "Kinlogue"), (helper, "KinlogueDICOMDecoderHelper")] {
+            let executableURL = bundle.appendingPathComponent("Contents/MacOS/\(executable)")
+            try fileManager.createDirectory(
+                at: executableURL.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try Data("synthetic".utf8).write(to: executableURL)
+            try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executableURL.path)
+            try Data("synthetic".utf8).write(to: bundle.appendingPathComponent("Contents/Info.plist"))
+        }
+        for resource in ["DICOMDecoder_DicomCore.bundle", "ZIPFoundation_ZIPFoundation.bundle"] {
+            try fileManager.createDirectory(
+                at: helper.appendingPathComponent("Contents/Resources/\(resource)"),
+                withIntermediateDirectories: true
+            )
+        }
+        let fixture = #"""
+        set -euo pipefail
+        fail() { print -u2 -- "$1"; exit 1; }
+        fixture_codesign() {
+          local target="${@[-1]}"
+          local fault=""
+          [[ "$target" == *.xpc ]] && fault="$SIGNATURE_FAULT"
+          if [[ "$target" == *.bundle && "$SIGNATURE_FAULT" == resource-* ]]; then
+            fault="${SIGNATURE_FAULT#resource-}"
+          fi
+          if [[ "$1" == --force ]]; then
+            [[ " $* " != *' --deep '* && " $* " == *' --timestamp '* ]]
+            if [[ "$target" == *.xpc ]]; then
+              [[ " $* " == *' --options runtime '* && " $* " == *'/KinlogueDICOMDecoderHelper.entitlements '* ]]
+            elif [[ "$target" == *.app ]]; then
+              [[ " $* " == *' --options runtime '* && " $* " == *'/Kinlogue.entitlements '* ]]
+            else
+              [[ " $* " != *' --entitlements '* ]]
+            fi
+            print -r -- "SIGNED:${target:t}"
+          elif [[ "$1" == --verify ]]; then
+            [[ "$fault" != invalid ]] || return 1
+          elif [[ " $* " == *' --entitlements '* ]]; then
+            if [[ "$target" == *.xpc && "$fault" != entitlements ]]; then
+              /bin/cat "$REPO_DIR/packaging/KinlogueDICOMDecoderHelper.entitlements"
+            else
+              /bin/cat "$REPO_DIR/packaging/Kinlogue.entitlements"
+            fi
+          else
+            [[ "$fault" == adhoc ]] || print -u2 -- "Authority=$KINLOGUE_CODESIGN_IDENTITY"
+            if [[ "$fault" == team ]]; then
+              print -u2 'TeamIdentifier=DIFFERENT0'
+            else
+              print -u2 -- "TeamIdentifier=$KINLOGUE_DEVELOPER_TEAM_ID"
+            fi
+            [[ "$fault" == timestamp ]] || print -u2 'Timestamp=Synthetic timestamp'
+            [[ "$fault" == runtime ]] || print -u2 'CodeDirectory v=20500 size=1 flags=0x10000(runtime)'
+            if [[ "$fault" == identifier ]]; then
+              print -u2 'Identifier=unexpected.helper'
+            elif [[ "$target" == *.xpc ]]; then
+              print -u2 'Identifier=com.kinlogue.mac.dicom-decoder'
+            else
+              print -u2 'Identifier=com.kinlogue.mac'
+            fi
+          fi
+          return 0
+        }
+        """# + "\n" + production.replacingOccurrences(of: "/usr/bin/codesign", with: "fixture_codesign")
+        var environment = ProcessInfo.processInfo.environment
+        environment["APP_BUNDLE"] = app.path
+        environment["REPO_DIR"] = repositoryURL.path
+        environment["NOTARY_TEMP_DIRECTORY"] = root.path
+        environment["KINLOGUE_CODESIGN_IDENTITY"] = "Developer ID Application: Synthetic Fixture"
+        environment["KINLOGUE_DEVELOPER_TEAM_ID"] = "SYNTHETIC0"
+        environment["KINLOGUE_SIGNING_KEYCHAIN_PATH"] = root.appendingPathComponent("unused.keychain").path
+        for fault in [
+            "", "invalid", "adhoc", "team", "timestamp", "runtime", "identifier", "entitlements",
+            "resource-adhoc", "resource-team", "resource-timestamp",
+        ] {
+            environment["SIGNATURE_FAULT"] = fault
+            let result = try run(URL(fileURLWithPath: "/bin/zsh"), ["-c", fixture], environment: environment)
+            if fault.isEmpty {
+                #expect(result.status == 0, Comment(rawValue: result.output))
+                #expect(result.output.split(separator: "\n").filter { $0.hasPrefix("SIGNED:") } == [
+                    "SIGNED:DICOMDecoder_DicomCore.bundle", "SIGNED:ZIPFoundation_ZIPFoundation.bundle",
+                    "SIGNED:KinlogueDICOMDecoderHelper.xpc", "SIGNED:Kinlogue.app",
+                ])
+            } else {
+                #expect(result.status != 0, "accepted invalid nested signature: \(fault)")
+            }
+        }
+    }
+
+    @Test
+    func packagingMetadataDoesNotClaimUnobservedWorkflowGates() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kinlogue-metadata-fixture-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for path in ["scripts/package-adhoc-candidate.sh", "scripts/package-distribution.sh"] {
+            let script = try contents(path)
+            let start = try #require(script.range(of: "/usr/bin/plutil -insert compatibility -dictionary"))
+            let end = try #require(script.range(of: "/usr/bin/plutil -insert compatibility.installedAcceptance"))
+            let fragment = "set -euo pipefail\n/usr/bin/plutil -create xml1 \"$METADATA_PLIST\"\n"
+                + String(script[start.lowerBound..<end.lowerBound])
+                + "\n/usr/bin/plutil -extract compatibility.workflowReleaseGates raw \"$METADATA_PLIST\""
+            var environment = ProcessInfo.processInfo.environment
+            environment["METADATA_PLIST"] = root.appendingPathComponent("metadata.plist").path
+            let result = try run(URL(fileURLWithPath: "/bin/zsh"), ["-c", fragment], environment: environment)
+            #expect(result.status == 0, Comment(rawValue: result.output))
+            #expect(result.output.trimmingCharacters(in: .whitespacesAndNewlines) == "notExecuted")
+        }
+    }
+
+    @Test
     func zipSafetyGateBehaviorallyAcceptsOnlyRegularCaseUniqueAppEntries() throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory
@@ -371,18 +496,24 @@ struct ReleaseScriptSafetyTests {
 
     @Test
     func privacyHistoryGuardRejectsUnapprovedMediaAtAllowedPathAfterRestore() throws {
+        for mediaPath in ["packaging/AppIcon.png", "docs/assets/kinlogue-overview.jpg"] {
+            try assertPrivacyHistoryRejectsRestoredMedia(at: mediaPath)
+        }
+    }
+
+    private func assertPrivacyHistoryRejectsRestoredMedia(at mediaPath: String) throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory
             .appendingPathComponent("kinlogue-privacy-history-media-\(UUID().uuidString)")
         defer { try? fileManager.removeItem(at: root) }
 
         try makeMinimalPrivacyHistoryRepository(at: root)
-        let packaging = root.appendingPathComponent("packaging")
+        let packaging = root.appendingPathComponent(mediaPath).deletingLastPathComponent()
         try fileManager.createDirectory(at: packaging, withIntermediateDirectories: true)
-        let icon = packaging.appendingPathComponent("AppIcon.png")
-        let approvedIcon = repositoryURL.appendingPathComponent("packaging/AppIcon.png")
+        let icon = root.appendingPathComponent(mediaPath)
+        let approvedIcon = repositoryURL.appendingPathComponent(mediaPath)
         try fileManager.copyItem(at: approvedIcon, to: icon)
-        #expect(try git(["add", "packaging/AppIcon.png"], in: root).status == 0)
+        #expect(try git(["add", mediaPath], in: root).status == 0)
         #expect(try git(["commit", "-m", "Add approved application icon"], in: root).status == 0)
 
         let script = root.appendingPathComponent("scripts/privacy-history-guard.sh")
@@ -394,16 +525,16 @@ struct ReleaseScriptSafetyTests {
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
         ))
         try differentPNG.write(to: icon, options: .atomic)
-        #expect(try git(["add", "packaging/AppIcon.png"], in: root).status == 0)
+        #expect(try git(["add", mediaPath], in: root).status == 0)
         #expect(try git(["commit", "-m", "Replace icon with unapproved media"], in: root).status == 0)
         try Data(contentsOf: approvedIcon).write(to: icon, options: .atomic)
-        #expect(try git(["add", "packaging/AppIcon.png"], in: root).status == 0)
+        #expect(try git(["add", mediaPath], in: root).status == 0)
         #expect(try git(["commit", "-m", "Restore approved application icon"], in: root).status == 0)
 
         let historical = try run(script, ["--ref", "HEAD"])
         #expect(historical.status != 0)
         #expect(historical.output.contains("unapproved repository media"))
-        #expect(!historical.output.contains("AppIcon.png"))
+        #expect(!historical.output.contains(mediaPath))
     }
 
     @Test

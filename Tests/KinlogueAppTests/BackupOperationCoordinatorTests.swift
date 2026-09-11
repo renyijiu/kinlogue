@@ -6,6 +6,33 @@ import Testing
 
 @Suite("Backup operation coordinator", .serialized)
 struct BackupOperationCoordinatorTests {
+    @Test(arguments: [false, true])
+    func verificationAndRetentionUseCompletionTime(automatic: Bool) async throws {
+        try await withCoordinatorFixture { fixture in
+            let gate = CoordinatorGate()
+            await fixture.creator.setGate(gate)
+            let finishedAt = fixture.now.addingTimeInterval(60)
+            let backup = Task {
+                if automatic {
+                    return try await fixture.coordinator.runAutomaticBackup(
+                        expectedPair: fixture.pair, at: fixture.now
+                    )
+                }
+                return try await fixture.coordinator.backUpNow(at: fixture.now)
+            }
+            await gate.waitUntilEntered()
+            fixture.clock.set(finishedAt)
+            await gate.release()
+            let result = try await backup.value
+
+            #expect(result.verifiedAt == finishedAt)
+            #expect(await fixture.retention.evaluationDates == [finishedAt])
+            if !automatic {
+                #expect(try await fixture.store.load()?.scheduler.lastLocalVerificationAt == finishedAt)
+            }
+        }
+    }
+
     @Test
     func duplicateManualClicksNeverRunParallelAndAcceptedClicksAlwaysCreateNewPoints() async throws {
         try await withCoordinatorFixture { fixture in
@@ -67,6 +94,8 @@ private struct CoordinatorFixture {
     let pair: BackupRevisionPair
     let now: Date
     let creator: CoordinatorCreator
+    let retention: CoordinatorRetention
+    let clock: CoordinatorClock
     let coordinator: BackupOperationCoordinator
 }
 
@@ -86,16 +115,20 @@ private func withCoordinatorFixture(
     let pair = try coordinatorPair(2)
     let creator = CoordinatorCreator(pair: pair)
     let retention = CoordinatorRetention(outcome: cleanup)
+    let clock = CoordinatorClock(Date(timeIntervalSince1970: 50_000))
     let coordinator = BackupOperationCoordinator(
         configurationStore: store,
         checkpointCreator: creator,
-        retentionExecutor: retention
+        retentionExecutor: retention,
+        clock: { clock.now() }
     )
     try await body(.init(
         store: store,
         pair: pair,
         now: Date(timeIntervalSince1970: 50_000),
         creator: creator,
+        retention: retention,
+        clock: clock,
         coordinator: coordinator
     ))
     _ = configuration
@@ -126,12 +159,29 @@ private actor CoordinatorCreator: BackupCheckpointCreating {
     }
 }
 
-private struct CoordinatorRetention: BackupRetentionExecuting {
+private actor CoordinatorRetention: BackupRetentionExecuting {
     let outcome: BackupCleanupOutcome
+    private(set) var evaluationDates: [Date] = []
+
+    init(outcome: BackupCleanupOutcome) { self.outcome = outcome }
+
     func applyRetention(
         configuration: BackupLocalConfiguration,
         now: Date
-    ) async -> BackupCleanupOutcome { outcome }
+    ) async -> BackupCleanupOutcome {
+        evaluationDates.append(now)
+        return outcome
+    }
+}
+
+// SAFETY: All access to the mutable clock value is protected by lock.
+private final class CoordinatorClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Date
+
+    init(_ value: Date) { self.value = value }
+    func now() -> Date { lock.withLock { value } }
+    func set(_ value: Date) { lock.withLock { self.value = value } }
 }
 
 private actor CoordinatorGate {

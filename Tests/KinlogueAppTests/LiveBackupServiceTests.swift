@@ -1,8 +1,67 @@
 import Foundation
 import KinlogueCore
-import KinloguePlatform
+@testable import KinloguePlatform
 import Testing
 @testable import KinlogueApp
+
+@Test
+@MainActor
+func reauthorizingTheOriginalFolderPreservesWriterAndRejectsOtherDirectories() async throws {
+    let base = FileManager.default.temporaryDirectory
+        .appendingPathComponent("KinlogueReauthorization-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    let selected = base.appendingPathComponent("selected", isDirectory: true)
+    let other = base.appendingPathComponent("other", isDirectory: true)
+    let vaultURL = base.appendingPathComponent("support/Vault", isDirectory: true)
+    for url in [selected, other, vaultURL] {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+    let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
+    let store = BackupLocalConfigurationStore(rootURL: base.appendingPathComponent("support/BackupIdentity"))
+    let service = try LiveBackupService(
+        activeVaultURL: vaultURL, configurationStore: store,
+        vault: PlaintextVault(rootURL: vaultURL),
+        requiresSelectedDirectoryScope: true,
+        destinationAuthority: BackupDestinationAuthority(bookmarks: bookmarks),
+        selectedDirectoryScope: bookmarks
+    )
+    let code = try await service.beginSetup(selectedParent: selected)
+    try await service.completeSetup(recoveryCodeReentry: code, independentlySaved: true)
+    let original = try #require(await store.load())
+    bookmarks.invalidBookmark = original.bookmarkData
+    bookmarks.createdBookmark = Data("reauthorized-bookmark".utf8)
+    #expect(try await service.loadStatus().lastFailure == .bookmarkNeedsReselection)
+
+    await #expect(throws: BackupDestinationAuthorityError.repositoryIdentityConflict) {
+        try await service.reauthorizeDestination(selectedParent: other)
+    }
+    #expect(try await store.load() == original)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: other.path).isEmpty)
+
+    let model = BackupModel(service: service)
+    await model.refresh()
+    await model.beginSetup(selectedParent: selected)
+    let updated = try #require(await store.load())
+    #expect(updated.writerIdentity == original.writerIdentity)
+    #expect(updated.scheduler == original.scheduler)
+    #expect(updated.automation == original.automation)
+    #expect(updated.verificationWitnesses == original.verificationWitnesses)
+    #expect(updated.bookmarkData == bookmarks.createdBookmark)
+    #expect(model.phase == .ready)
+    #expect(model.failure == nil)
+    #expect(model.recoveryCode == nil)
+    #expect(try await BackupLocalConfigurationStore(rootURL: store.rootURL).load() == updated)
+
+    let repository = selected.appendingPathComponent(BackupDestinationAuthority.repositoryDirectoryName)
+    try FileManager.default.moveItem(at: repository, to: selected.appendingPathComponent("parked"))
+    try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: false,
+                                          attributes: [.posixPermissions: 0o700])
+    await #expect(throws: BackupDestinationAuthorityError.repositoryIdentityConflict) {
+        try await service.reauthorizeDestination(selectedParent: selected)
+    }
+    #expect(try await store.load() == updated)
+    #expect(bookmarks.startCount == bookmarks.stopCount)
+}
 
 @Test
 func loadingBackupStatusNeverPreparesOrEnumeratesTheLibrarySource() async throws {
@@ -42,6 +101,8 @@ func loadingBackupStatusNeverPreparesOrEnumeratesTheLibrarySource() async throws
     #expect(await service.sourcePreparationCountForTesting() == 1)
     _ = try await service.setAutomaticBackupEnabled(false)
     #expect(await service.sourcePreparationCountForTesting() == 1)
+    // Exercise the actual writer witness and retention clock together.
+    #expect(try await service.backUpNow() == .complete)
 }
 
 @Test
@@ -299,9 +360,12 @@ func relaunchedModelResumesPersistedPendingEnrollmentWithTheOriginalRecoveryCode
     #expect(model.pendingEnrollmentRecoveryCode.isEmpty)
 }
 
-private final class LiveBackupMutableBookmarks: BackupBookmarkAccessing, @unchecked Sendable {
+private final class LiveBackupMutableBookmarks: BackupBookmarkAccessing,
+    BackupSelectedDirectorySecurityScope, @unchecked Sendable {
     let resolvedURL: URL
     var stale = false
+    var invalidBookmark: Data?
+    var createdBookmark = Data("bookmark".utf8)
     private(set) var startCount = 0
     private(set) var stopCount = 0
 
@@ -311,11 +375,11 @@ private final class LiveBackupMutableBookmarks: BackupBookmarkAccessing, @unchec
 
     func createBookmark(for url: URL) throws -> Data {
         _ = url
-        return Data("bookmark".utf8)
+        return createdBookmark
     }
 
     func resolveBookmark(_ data: Data) throws -> BackupResolvedBookmark {
-        _ = data
+        if data == invalidBookmark { throw BackupDestinationAuthorityError.bookmarkInvalid }
         return .init(url: resolvedURL, isStale: stale)
     }
 

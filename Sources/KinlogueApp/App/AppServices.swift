@@ -978,23 +978,16 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
     private func recognizeDocument(
         for draft: ImportDraft
     ) async throws -> ImportDraftDocument {
-        let snapshot = try await vault.readSnapshot { catalog in
-            guard catalog.importDrafts.contains(draft) else {
-                throw AppServiceError.invalidReview
-            }
-            let attachmentIDs = Set(draft.sources.attachmentIDs)
-            guard attachmentIDs.allSatisfy({ id in
-                catalog.attachments.contains(where: { $0.id == id })
-            }) else { throw AppServiceError.invalidReview }
-            return attachmentIDs.map {
-                VaultObjectReference(id: $0, kind: .attachment)
-            }
-        }
-        let catalog = snapshot.catalog
         var attributedBlocks: [OCRBlock] = []
         for source in draft.sources.elements {
             try Task.checkCancellation()
-            guard let attachment = catalog.attachments.first(where: {
+            let snapshot = try await vault.readSnapshot { catalog in
+                guard catalog.importDrafts.contains(draft) else {
+                    throw AppServiceError.invalidReview
+                }
+                return [VaultObjectReference(id: source.attachmentID, kind: .attachment)]
+            }
+            guard let attachment = snapshot.catalog.attachments.first(where: {
                 $0.id == source.attachmentID
             }), let contentType = UTType(attachment.contentTypeIdentifier) else {
                 throw AppServiceError.invalidReview

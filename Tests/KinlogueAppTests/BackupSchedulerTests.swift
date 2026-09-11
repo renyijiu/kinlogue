@@ -6,6 +6,53 @@ import Testing
 
 @Suite("Backup scheduler", .serialized)
 struct BackupSchedulerTests {
+    @Test(arguments: [false, true])
+    func delayedEventDoesNotMistakeALaterVerificationForClockRollback(offline: Bool) async throws {
+        try await withSchedulerFixture { fixture in
+            _ = try await fixture.scheduler.setAutomaticBackupEnabled(
+                true, currentPair: fixture.pair1, at: fixture.start
+            )
+            let completedAt = fixture.start.addingTimeInterval(60)
+            let current = try #require(await fixture.store.load())
+            _ = try await fixture.store.markBackupSuccess(
+                fixture.pair1, verifiedAt: completedAt, expectedRevision: current.revision
+            )
+            let scheduler = BackupScheduler(
+                configurationStore: fixture.store,
+                automaticRunner: fixture.runner,
+                clock: { completedAt.addingTimeInterval(1) }
+            )
+
+            if offline {
+                #expect(try await scheduler.recordDestinationOffline(at: fixture.start)
+                    == .retryScheduled(fixture.start.addingTimeInterval(60)))
+            } else {
+                #expect(try await scheduler.handle(
+                    .activation, currentPair: fixture.pair2, at: fixture.start
+                ) == .scheduled(completedAt.addingTimeInterval(24 * 60 * 60)))
+            }
+            #expect(try await fixture.store.load()?.scheduler.lastFailure != .verificationFailed)
+            #expect(await fixture.runner.callCount == 0)
+        }
+    }
+
+    @Test
+    func automaticSuccessRecordsTheWritersCompletionTime() async throws {
+        try await withSchedulerFixture { fixture in
+            _ = try await fixture.scheduler.setAutomaticBackupEnabled(
+                true, currentPair: fixture.pair1, at: fixture.start
+            )
+            let dueAt = fixture.start.addingTimeInterval(300)
+            let completedAt = dueAt.addingTimeInterval(60)
+            await fixture.runner.setCompletionTime(completedAt)
+
+            #expect(try await fixture.scheduler.handle(
+                .wake, currentPair: fixture.pair1, at: dueAt
+            ) == .completed)
+            #expect(try await fixture.store.load()?.scheduler.lastLocalVerificationAt == completedAt)
+        }
+    }
+
     @Test
     func automaticBackupDefaultsOffAndDisableClearsDurableDueState() async throws {
         try await withSchedulerFixture { fixture in
@@ -422,7 +469,12 @@ struct BackupSchedulerTests {
                 currentPair: fixture.pair1,
                 at: fixture.start
             )
-            #expect(try await fixture.scheduler.handle(
+            let rolledBack = BackupScheduler(
+                configurationStore: fixture.store,
+                automaticRunner: fixture.runner,
+                clock: { fixture.start.addingTimeInterval(-1) }
+            )
+            #expect(try await rolledBack.handle(
                 .startup,
                 currentPair: fixture.pair1,
                 at: fixture.start.addingTimeInterval(-1)
@@ -468,8 +520,11 @@ private func withSchedulerFixture(
 
 private actor SchedulerRunner: BackupAutomaticRunning {
     private var failures: [BackupSemanticError]
+    private var completionTime: Date?
     private(set) var callCount = 0
     init(failures: [BackupSemanticError]) { self.failures = failures }
+
+    func setCompletionTime(_ value: Date) { completionTime = value }
 
     func runAutomaticBackup(
         expectedPair: BackupRevisionPair,
@@ -479,6 +534,6 @@ private actor SchedulerRunner: BackupAutomaticRunning {
         if !failures.isEmpty {
             throw BackupOperationCoordinatorError.semantic(failures.removeFirst())
         }
-        return .init(revisionPair: expectedPair, cleanup: .complete)
+        return .init(revisionPair: expectedPair, verifiedAt: completionTime ?? at, cleanup: .complete)
     }
 }

@@ -40,6 +40,8 @@ struct SystemRestoreFileSecurityScope: RestoreFileSecurityScope {
 final class RestoreModel: ObservableObject {
     private let service: any BackupRestoreServicing
     private let securityScope: any RestoreFileSecurityScope
+    private let onReplacementBegan: @MainActor () async -> Void
+    private let onReplacementEnded: @MainActor () -> Void
     private var operationGeneration: UInt64 = 0
 
     @Published private(set) var phase: RestoreModelPhase = .idle
@@ -48,10 +50,14 @@ final class RestoreModel: ObservableObject {
 
     init(
         service: any BackupRestoreServicing,
-        securityScope: any RestoreFileSecurityScope = SystemRestoreFileSecurityScope()
+        securityScope: any RestoreFileSecurityScope = SystemRestoreFileSecurityScope(),
+        onReplacementBegan: @escaping @MainActor () async -> Void = {},
+        onReplacementEnded: @escaping @MainActor () -> Void = {}
     ) {
         self.service = service
         self.securityScope = securityScope
+        self.onReplacementBegan = onReplacementBegan
+        self.onReplacementEnded = onReplacementEnded
     }
 
     var isPresented: Bool { phase != .idle }
@@ -84,6 +90,7 @@ final class RestoreModel: ObservableObject {
     }
 
     func present() {
+        guard !isDismissDisabled else { return }
         _ = beginOperation()
         recoveryCode = ""
         phase = .enteringRecoveryCode
@@ -110,20 +117,26 @@ final class RestoreModel: ObservableObject {
     func prepare(_ checkpointURL: URL) async {
         isFileImporterPresented = false
         let generation = beginOperation()
+        let code = recoveryCode
         phase = .authenticating
         guard await securityScope.startAccessing(checkpointURL) else {
             guard generation == operationGeneration else { return }
             phase = .failed(.fileAccess)
             return
         }
+        guard generation == operationGeneration else {
+            await securityScope.stopAccessing(checkpointURL)
+            return
+        }
         do {
             let summary = try await service.prepare(
                 checkpointURL: checkpointURL,
-                recoveryCode: recoveryCode
+                recoveryCode: code
             )
             await securityScope.stopAccessing(checkpointURL)
             guard generation == operationGeneration else {
-                try? await service.cancelPreparedRestore()
+                // The service owns obsolete preparation cleanup. A global
+                // cancel here could revoke a newer result across the await.
                 return
             }
             phase = .awaitingReplaceConfirmation(summary)
@@ -138,6 +151,8 @@ final class RestoreModel: ObservableObject {
         guard case .awaitingReplaceConfirmation = phase else { return }
         let generation = beginOperation()
         phase = .activating
+        await onReplacementBegan()
+        defer { onReplacementEnded() }
         do {
             let result = try await service.activatePreparedRestore()
             guard generation == operationGeneration else { return }
@@ -152,8 +167,9 @@ final class RestoreModel: ObservableObject {
 
     func cancel() async {
         guard !isDismissDisabled else { return }
-        _ = beginOperation()
+        let generation = beginOperation()
         try? await service.cancelPreparedRestore()
+        guard generation == operationGeneration else { return }
         recoveryCode = ""
         isFileImporterPresented = false
         phase = .idle

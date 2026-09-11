@@ -185,6 +185,32 @@ final class BackupDestinationAuthority: BackupEnrollmentPublishing, @unchecked S
         )
     }
 
+    func reauthorizeSelectedParent(
+        _ selectedParent: URL,
+        activeVaultURL: URL,
+        configuration: BackupLocalConfiguration
+    ) throws -> Data {
+        let selected = selectedParent.standardizedFileURL
+        try validateSelectedParent(selected, activeVaultURL: activeVaultURL)
+        let repository = selected.appendingPathComponent(Self.repositoryDirectoryName, isDirectory: true)
+        func validateIdentity() throws {
+            guard try directoryIdentity(selected, expectedMode: nil) == configuration.selectedDirectoryIdentity,
+                  try directoryIdentity(repository, expectedMode: 0o700) == configuration.repositoryDirectoryIdentity else {
+                throw BackupDestinationAuthorityError.repositoryIdentityConflict
+            }
+        }
+        // Reauthorization never creates a directory or replaces a writer.
+        try validateIdentity()
+        let bookmark: Data
+        do { bookmark = try bookmarks.createBookmark(for: selected) }
+        catch { throw BackupDestinationAuthorityError.bookmarkInvalid }
+        guard !bookmark.isEmpty, bookmark.count <= BackupPendingEnrollment.maximumBookmarkByteCount else {
+            throw BackupDestinationAuthorityError.bookmarkInvalid
+        }
+        try validateIdentity()
+        return bookmark
+    }
+
     func withResolvedDestination<Value>(
         _ selection: BackupDestinationSelection,
         _ body: (URL) throws -> Value

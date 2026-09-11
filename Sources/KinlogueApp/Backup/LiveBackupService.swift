@@ -42,6 +42,7 @@ struct AppBackupStatus: Equatable, Sendable {
 protocol BackupServicing: Sendable {
     func loadStatus() async throws -> AppBackupStatus
     func beginSetup(selectedParent: URL) async throws -> String
+    func reauthorizeDestination(selectedParent: URL) async throws
     func completeSetup(recoveryCodeReentry: String, independentlySaved: Bool) async throws
     func cancelSetup() async
     func resumePending(recoveryCode: String) async throws
@@ -155,12 +156,14 @@ actor LiveBackupService: BackupServicing {
         let coordinator = BackupOperationCoordinator(
             configurationStore: configurationStore,
             checkpointCreator: checkpointCreator,
-            retentionExecutor: retention
+            retentionExecutor: retention,
+            clock: clock
         )
         operationCoordinator = coordinator
         scheduler = BackupScheduler(
             configurationStore: configurationStore,
-            automaticRunner: coordinator
+            automaticRunner: coordinator,
+            clock: clock
         )
     }
 
@@ -247,6 +250,32 @@ actor LiveBackupService: BackupServicing {
         self.setupSession = nil
     }
 
+    func reauthorizeDestination(selectedParent: URL) async throws {
+        guard let configuration = try await configurationStore.load(),
+              configuration.phase == .enabled else {
+            throw BackupSemanticError.notConfigured
+        }
+        if requiresSelectedDirectoryScope {
+            guard selectedDirectoryScope.startAccessing(selectedParent) else {
+                throw BackupDestinationAuthorityError.securityScopeUnavailable
+            }
+        }
+        defer {
+            if requiresSelectedDirectoryScope {
+                selectedDirectoryScope.stopAccessing(selectedParent)
+            }
+        }
+        let bookmark = try destinationAuthority.reauthorizeSelectedParent(
+            selectedParent,
+            activeVaultURL: activeVaultURL,
+            configuration: configuration
+        )
+        _ = try await configurationStore.refreshEnabledBookmark(
+            bookmark,
+            expectedRevision: configuration.revision
+        )
+    }
+
     func cancelSetup() async {
         setupSession = nil
     }
@@ -316,19 +345,18 @@ actor LiveBackupService: BackupServicing {
         guard let configuration = try await configurationStore.load(),
               configuration.phase == .enabled else { return .disabled }
         guard configuration.automation.isAutomaticBackupEnabled else { return .disabled }
-        let eventDate = clock()
         do {
             try await refreshDestinationBookmarkIfNeeded()
         } catch let error as BackupDestinationAuthorityError
             where error == .repositoryOffline {
-            return try await scheduler.recordDestinationOffline(at: eventDate)
+            return try await scheduler.recordDestinationOffline(at: clock())
         }
         let pair = try await prepareSource().revisionPair
         do {
             let outcome = try await scheduler.handle(
                 event,
                 currentPair: pair,
-                at: eventDate
+                at: clock()
             )
             try await persistObservedBookmarkRefresh()
             return outcome

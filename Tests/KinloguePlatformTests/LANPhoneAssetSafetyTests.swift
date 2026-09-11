@@ -5,6 +5,54 @@ import Testing
 
 struct LANPhoneAssetSafetyTests {
     @Test
+    func pollingReservedFilesPreservesTheLocalUploadQueue() throws {
+        let app = repository.appendingPathComponent("Sources/KinloguePlatform/Resources/LANUpload/app.js")
+        let program = #"""
+        const source = require("node:fs").readFileSync(process.argv[1], "utf8");
+        const vm = require("node:vm");
+        const assert = require("node:assert/strict");
+        function section(start, end) {
+          const from = source.indexOf(start), to = source.indexOf(end, from);
+          assert(from >= 0 && to > from);
+          return source.slice(from, to);
+        }
+        const queued = { remoteFileID: "queued", state: "queued", attemptRevision: 0 };
+        const started = [];
+        const context = vm.createContext({
+          MAX_PARALLEL_UPLOADS: 2,
+          state: { activeUploads: 2, pendingUploads: [queued], mutationEpoch: 0,
+                   cancelledRemoteFileIDs: new Set() },
+          renderFiles() {}, beginUpload(entry) { started.push(entry.remoteFileID); },
+        });
+        vm.runInContext([
+          section("  function applyRemoteStatus(", "\n\n  function fileStateLabel("),
+          section("  function pumpUploads(", "\n\n  function beginUpload("),
+        ].join("\n"), context);
+        context.applyRemoteStatus(queued, {
+          remoteFileID: "queued", attemptRevision: 0, state: "reserved",
+          displayName: "synthetic", declaredByteCount: 10, receivedByteCount: 0,
+        });
+        context.state.activeUploads = 1;
+        context.pumpUploads();
+        assert.deepEqual(started, ["queued"]);
+        assert.equal(queued.state, "uploading");
+        context.applyRemoteStatus(queued, {
+          remoteFileID: "queued", attemptRevision: 0, state: "saved",
+          displayName: "synthetic", declaredByteCount: 10, receivedByteCount: 10,
+        });
+        assert.equal(queued.state, "saved");
+        """#
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["node", "-e", program, app.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+    }
+
+    @Test
     func loaderServesOnlyTheFixedEmbeddedRoutes() throws {
         #expect(LANPhoneAsset(rawValue: "/") == .page)
         #expect(LANPhoneAsset(rawValue: "/app.js") == .script)
@@ -278,6 +326,28 @@ struct LANPhoneAssetSafetyTests {
             cancelledLocally = error && error.constructor.name === "UserComparisonCancellation";
           }
           if (!cancelledLocally) process.exit(6);
+
+          for (const removeFromList of [false, true]) {
+            const candidate = entry([1, 2]);
+            const replacement = entry([1, 2]);
+            let releaseRead;
+            const readGate = new Promise((resolve) => { releaseRead = resolve; });
+            candidate.file.slice = () => ({ arrayBuffer: async () => {
+              await readGate;
+              return Uint8Array.from([1, 2]).buffer;
+            }});
+            context.state.entries = [candidate, replacement];
+            const comparing = context.isConfirmedDuplicate(
+              replacement, { startedAt: 0, readBytes: 0 }
+            );
+            if (removeFromList) {
+              context.state.entries = [replacement];
+            } else {
+              candidate.removed = true;
+            }
+            releaseRead();
+            if (await comparing) process.exit(9);
+          }
         })().catch(() => process.exit(7));
         """#
 

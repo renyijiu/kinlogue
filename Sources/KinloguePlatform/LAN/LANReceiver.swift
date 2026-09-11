@@ -740,7 +740,8 @@ public actor LANReceiver {
             }
             return LANReserveFileResponse(file: try phoneFile(existing))
         }
-        guard runtime.files.count < LANFileSessionResponse.maximumFileCount,
+        guard runtime.files.count + runtime.reservingFiles.count
+                < LANFileSessionResponse.maximumFileCount,
               runtime.reservingFiles.insert(request.remoteFileID).inserted else {
             throw LANReceiverError.retryLater
         }

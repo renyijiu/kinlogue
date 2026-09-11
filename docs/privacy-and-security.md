@@ -60,7 +60,7 @@
 - `BackupRestoreVerifier` / `BackupRestoreTransaction`：首个 staging 明文字节前先持久化 preflight receipt；只在 app-private 同卷 staging 解密并 strict reopen，确认后以 root-bound typed receipt 执行 replace/rollback，启动时先收敛遗留事务。本机配置删除位于 destructive fence 内，外部 checkpoint 不受影响。
 - `DICOMPart10Envelope` / `KinlogueDICOMIPC`：主进程只做有界 Part 10 envelope 与 typed DTO 校验；跨进程只传一个只读 descriptor 和受大小限制的 `Data`，不传 URL、路径或 Vault authority。
 - `DICOMFolderScanner` / `VaultDICOMStudyStaging` / `VaultDICOMImportJournal`：security-scoped source 只通过 no-follow descriptor traversal 读取；staging 使用同卷、opaque UUID、私有权限和只读文件。receipt 在首个 staged byte 前持久化并绑定目录 identity；重启清理先咨询当前 catalog reachability，拒绝 symlink/replacement，失败时保留 opaque receipt 重试。
-- `KinlogueDICOMDecoderHelper.xpc`：exact DICOM-Swift 1.3.3 只链接进独立 App Sandbox Helper。Helper entitlement 只有 App Sandbox，无 network client/server、inherit、用户文件或 Vault-root 权限；输入先复制到 opaque 私有临时文件，固定错误映射后清理，解析由硬 watchdog 有界终止。VOI LUT Function 只按单 tag 惰性读取，非 `LINEAR` 函数拒绝，不通过 `getAllTags()` 展开无关自由文本。主 App 没有 `DicomCore` 或 DICOM 网络实现，也没有解码失败时的进程内 fallback；真实进程门禁用合成自由文本/URL canary 验证 unified log 不泄漏且 Helper 运行时无 network socket。
+- `KinlogueDICOMDecoderHelper.xpc`：exact DICOM-Swift 1.3.3 只链接进独立 App Sandbox Helper。Helper entitlement 只有 App Sandbox，无 network client/server、inherit、用户文件或 Vault-root 权限；创建私有临时文件后、写入前立即 unlink，通过仍打开的 descriptor 保存有界独立副本，并以 `/dev/fd` 交给 decoder。最后一个 descriptor 关闭或进程退出后由内核回收，crash/watchdog 不依赖 defer 删除具名原件；解析由硬 watchdog 有界终止。VOI LUT Function 只按单 tag 惰性读取，非 `LINEAR` 函数拒绝，不通过 `getAllTags()` 展开无关自由文本。主 App 没有 `DicomCore` 或 DICOM 网络实现，也没有解码失败时的进程内 fallback；真实进程门禁用合成自由文本/URL canary 验证 unified log 不泄漏且 Helper 运行时无 network socket。
 - `DICOMSliceService`：只接受 `PlaintextVault` 产生的 opaque revision/instance descriptor；managed object 在 decode 前后复核 digest、identity 和长度，raw frame 仍只经 XPC adapter。cache key 不含路径、UID 或 W/L history，错误只暴露固定 Kinlogue case。canonical/current-render 像素只在有界内存中存在；RAII lease 保证 service 释放不遗留预算，switch/close/lifecycle failure 只清对应 session token，pressure 才全局清 cache 并使旧 image handle 失效。这不承诺安全擦除调用方主动复制的 bytes、原始明文附件或系统备份。
 - `DICOMImportModel` / `DICOMStudyReviewModel` / `DICOMLibraryModel` / `DICOMStudyViewerModel`：用户界面只显示检查状态、用户确认的成员/日期、modality、尺寸、切片/Series 与 inert-object 聚合状态，不展示或记录文件名、路径、原始 UID 或 DICOM 自由文本。确认后的检查只把日期、成员和对象数量等检查级摘要投影到成员时间线；DICOM 原件、自由文本和像素仍不进入报告 OCR、搜索或比较。Viewer canvas 为当前帧保留一份有界的拥有式内存快照，不写预览/截图；App registry 在单 study 删除、外部删除刷新或 whole-Vault revoke 时先让所有目标窗口同步清空像素/失效请求，再等待 slice service close 并关闭窗口。普通关闭、Series 切换或 memory pressure 同样会使对应旧结果/handle 失效。
 
@@ -93,12 +93,14 @@
 
 - 真实病历只能在仓库外做私密人工验收，且不得复制、截图、日志化或放入测试结果。
 - DICOM 自动化只能在运行时生成不含 Patient Name/ID/Birth Date 等身份 tag 的 synthetic fixture；仓库和 bundle 门禁拒绝 checked-in `.dcm`、`.dicom`、`.nii` 和 `.nii.gz` fixture。当前 Mac 的 U7 安装验收只使用该生成器；此外，一份经用户明确授权、始终位于仓库外的私有 MRI 样本已完成隔离完整导入并通过，未保留样本、路径、身份 tag、UID、像素或截图。这个结果只覆盖当前 Mac 上的一份样本，更广的厂商、检查类型与独立系统矩阵仍未执行。
-- `scripts/privacy-guard.sh` 默认拒绝仓库内 PDF、JPEG、PNG、HEIC 和 TIFF 等受支持报告原件扩展，只精确放行已审查的 AppIcon 文件路径；新增品牌图片也必须逐路径评审，不能通过目录级通配放行。该扩展名门禁不声称能语义识别任意 PHI；已知敏感值仍通过 `KINLOGUE_FORBIDDEN_VALUES` 扫描，代码、文档和其他扩展中的身份信息继续受仓库禁区约束。
+- `scripts/privacy-guard.sh` 默认拒绝仓库内 PDF、JPEG、PNG、HEIC 和 TIFF 等受支持报告原件扩展，只精确放行已审查的 AppIcon 文件路径与摘要锁定的合成产品预览；新增图片也必须逐路径评审，不能通过目录级通配放行。该扩展名门禁不声称能语义识别任意 PHI；已知敏感值仍通过 `KINLOGUE_FORBIDDEN_VALUES` 扫描，代码、文档和其他扩展中的身份信息继续受仓库禁区约束。
 - `scripts/privacy-history-guard.sh` 通过 Git object database 扫描准备公开的 reachable refs，覆盖曾提交后删除的医疗/报告类附件、备份或签名容器、`.env`/私钥路径、完整格式的恢复码、常见凭据模式、精确私密资料库存证据和调用方提供的 forbidden values；`.env.example` 是唯一环境文件名例外。门禁只报告规则类别，不回显命中路径或内容；它不能替代公开托管平台上的 PR、Issue、Actions log、release asset 和 fork 审计。
 - 不要使用真实文件名来验证去重、展示名、OCR 或 LAN；使用生成 fixture 和 run-scoped canary。
 - 不要因为调试方便打开内容日志、保存 cookie/验证码、把 App Sandbox 路径写进报告或把整页 PDF 输出到终端。
 - 不要在未确认可信网络前启动 LAN listener；不要把 `network.server` entitlement、可行性 marker 或 test-only client entitlement 扩大到不该有的 bundle。
 - 修改 `README.md`、`PRIVACY.md`、`packaging/Info.plist`、entitlements、验证脚本或网络行为时，必须一起检查本页和对应验收文档。
+
+README 的合成产品预览 `docs/assets/kinlogue-overview.jpg` 也经过逐文件审查；当前树门禁与历史门禁均按精确路径和固定 SHA-256 放行。历史中曾替换成未批准内容，即使后来恢复原图，历史门禁仍拒绝。
 
 ## 未来安全升级边界
 

@@ -586,6 +586,32 @@ struct DICOMImportWorkflowIntegrationTests {
         #expect(await workflow.state == .cancelled)
         #expect((try await fixture.vault.loadCatalog()).dicomStudies.isEmpty)
     }
+    @Test
+    func fifoReplacementFailsWithoutBlockingTheVaultLease() async throws {
+        let fixture = try await WorkflowFixture()
+        defer { fixture.cleanup() }
+        let source = fixture.source.appendingPathComponent("generated.bin")
+        try GeneratedDICOMFixture.explicitVRLittleEndianMR().write(to: source)
+        let control = SourceMutationControl(mutation: .fifoReplacement)
+        await control.configure(source: source, replacement: Data())
+        let workflow = try DICOMImportWorkflow(
+            rootURL: fixture.vaultRoot,
+            vault: fixture.vault,
+            decoder: EchoingFrameDecoder(),
+            metrics: nil,
+            scannerControl: control
+        )
+
+        await #expect(throws: DICOMImportError.sourceChanged) {
+            _ = try await workflow.importDirectory(
+                fixture.source,
+                securityScope: .notRequiredForTesting
+            )
+        }
+        #expect(await control.finishWithoutBlockedOpen())
+        #expect(await workflow.state == .failed)
+        #expect((try await fixture.vault.loadCatalog()).dicomStudies.isEmpty)
+    }
 }
 
 private func abandonImportAfterStaging(fixture: WorkflowFixture) async throws -> String {
