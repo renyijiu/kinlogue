@@ -93,12 +93,14 @@
 
 - 真实病历只能在仓库外做私密人工验收，且不得复制、截图、日志化或放入测试结果。
 - DICOM 自动化只能在运行时生成不含 Patient Name/ID/Birth Date 等身份 tag 的 synthetic fixture；仓库和 bundle 门禁拒绝 checked-in `.dcm`、`.dicom`、`.nii` 和 `.nii.gz` fixture。当前 Mac 的 U7 安装验收只使用该生成器；此外，一份经用户明确授权、始终位于仓库外的私有 MRI 样本已完成隔离完整导入并通过，未保留样本、路径、身份 tag、UID、像素或截图。这个结果只覆盖当前 Mac 上的一份样本，更广的厂商、检查类型与独立系统矩阵仍未执行。
-- `scripts/privacy-guard.sh` 默认拒绝仓库内 PDF、JPEG、PNG、HEIC 和 TIFF 等受支持报告原件扩展，只精确放行已审查的 AppIcon 文件路径；新增品牌图片也必须逐路径评审，不能通过目录级通配放行。该扩展名门禁不声称能语义识别任意 PHI；已知敏感值仍通过 `KINLOGUE_FORBIDDEN_VALUES` 扫描，代码、文档和其他扩展中的身份信息继续受仓库禁区约束。
+- `scripts/privacy-guard.sh` 默认拒绝仓库内 PDF、JPEG、PNG、HEIC 和 TIFF 等受支持报告原件扩展，只精确放行已审查的 AppIcon 文件路径与摘要锁定的合成产品预览；新增图片也必须逐路径评审，不能通过目录级通配放行。该扩展名门禁不声称能语义识别任意 PHI；已知敏感值仍通过 `KINLOGUE_FORBIDDEN_VALUES` 扫描，代码、文档和其他扩展中的身份信息继续受仓库禁区约束。
 - `scripts/privacy-history-guard.sh` 通过 Git object database 扫描准备公开的 reachable refs，覆盖曾提交后删除的医疗/报告类附件、备份或签名容器、`.env`/私钥路径、完整格式的恢复码、常见凭据模式、精确私密资料库存证据和调用方提供的 forbidden values；`.env.example` 是唯一环境文件名例外。门禁只报告规则类别，不回显命中路径或内容；它不能替代公开托管平台上的 PR、Issue、Actions log、release asset 和 fork 审计。
 - 不要使用真实文件名来验证去重、展示名、OCR 或 LAN；使用生成 fixture 和 run-scoped canary。
 - 不要因为调试方便打开内容日志、保存 cookie/验证码、把 App Sandbox 路径写进报告或把整页 PDF 输出到终端。
 - 不要在未确认可信网络前启动 LAN listener；不要把 `network.server` entitlement、可行性 marker 或 test-only client entitlement 扩大到不该有的 bundle。
 - 修改 `README.md`、`PRIVACY.md`、`packaging/Info.plist`、entitlements、验证脚本或网络行为时，必须一起检查本页和对应验收文档。
+
+README 的合成产品预览 `docs/assets/kinlogue-overview.jpg` 也经过逐文件审查；当前树门禁与历史门禁均按精确路径和固定 SHA-256 放行。历史中曾替换成未批准内容，即使后来恢复原图，历史门禁仍拒绝。
 
 ## 未来安全升级边界
 

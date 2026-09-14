@@ -73,6 +73,8 @@
 
 ## 维护规则
 
+README 合成预览的当前树与历史媒体校验边界见 [`privacy-and-security.md`](privacy-and-security.md)。
+
 1. 先修改拥有该事实的专题页，再更新本索引的链接或一句话摘要。
 2. 发布版本、测试数量、候选 revision 和门禁状态只写入 [`acceptance/current-release.md`](acceptance/current-release.md)；其他页面只链接，不复制。
 3. 历史计划、来源和日志不因精简而删除；通过局部目录区分 current、archive 和 superseded。
