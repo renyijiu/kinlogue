@@ -56,8 +56,26 @@ struct GitHubActionsWorkflowTests {
 
         #expect(workflow.contains("pull_request:"))
         #expect(workflow.contains("push:"))
-        #expect(workflow.contains("runs-on: macos-26"))
-        #expect(workflow.components(separatedBy: "runs-on: macos-26").count - 1 == 3)
+        let jobNames = ["quality", "complementary-tests", "dedicated-lan-derived-tests"]
+        let checkNames = ["Lint, test, and verify bundle", "Complementary test partition",
+                          "Dedicated LAN derived-artifact tests"]
+        for (jobName, checkName) in zip(jobNames, checkNames) {
+            let start = try #require(workflow.range(of: "  \(jobName):\n"))
+            let remaining = workflow[start.upperBound...]
+            // Read to the next job (two-space indentation), not its nested steps.
+            let nextJob = remaining.range(of: #"\n  [a-z][a-z-]*:\n"#, options: .regularExpression)
+            let job = remaining[..<(nextJob?.lowerBound ?? remaining.endIndex)]
+            #expect(job.contains(
+                "name: ${{ matrix.runner == 'macos-26' && '\(checkName)' || '\(checkName) (xcode-27)' }}"
+            ))
+            #expect(job.contains("runner: [macos-26, xcode-27]"))
+            #expect(job.contains("runs-on: ${{ matrix.runner }}"))
+            #expect(job.contains("continue-on-error: ${{ matrix.runner == 'xcode-27' }}"))
+            #expect(job.contains("fail-fast: false"))
+            #expect(job.contains("xcodebuild -downloadComponent MetalToolchain"))
+            #expect(job.contains("xcrun --kill-cache"))
+            #expect(job.contains("xcrun --sdk macosx metal --version"))
+        }
         #expect(!workflow.contains("runs-on: macos-15"))
         #expect(workflow.contains("timeout-minutes: 30"))
         #expect(!workflow.contains("timeout-minutes: 90"))
@@ -68,8 +86,6 @@ struct GitHubActionsWorkflowTests {
         #expect(workflow.contains("KINLOGUE_PRIMARY_TEST_PARTITION: \"0/3\""))
         #expect(workflow.contains("KINLOGUE_PRIMARY_TEST_PARTITION: \"1/3\""))
         #expect(workflow.contains("KINLOGUE_PRIMARY_TEST_PARTITION: \"2/3\""))
-        #expect(workflow.contains("name: Complementary test partition"))
-        #expect(workflow.contains("name: Dedicated LAN derived-artifact tests"))
         #expect(workflow.contains("scripts/install-ci-ripgrep.sh"))
         #expect(workflow.contains("$GITHUB_WORKSPACE/.build/ci-tools/bin"))
         #expect(workflow.contains(">> \"$GITHUB_PATH\""))

@@ -4,10 +4,13 @@
 
 ## 环境前提
 
-- macOS 14 或更高版本；`Package.swift` 使用 Swift 6 language mode。
+- macOS 26 或更高版本；`Package.swift` 声明最低 Swift tools 6.2，与 DICOM-Swift 及其 codec 依赖一致。主 package 的 `.v6` 和 Helper 的 `SWIFT_VERSION = 6.0` 均表示 Swift 6 language mode，不是编译器的小版本。
+- 当前本机 Xcode 27 使用 Apple Swift 6.4 编译；最低工具链声明不限制使用更新编译器，也不将最低运行系统提高到 macOS 27。Swift 6.2 工具链及 macOS 26 独立机器仍需单独验证。
 - `swift build` / `swift test` 可使用 SwiftPM 和 Command Line Tools。
 - 完整 App bundle、签名、XPC 和安装验收要求 `/Applications/Xcode.app/Contents/Developer`。
-- 当前 CI 工具链和锁定依赖不证明最低 macOS 14/15 的独立机器兼容性。
+- Xcode 27 使用默认 Swift Build 引擎；DICOM 资源需要可调用的 Metal Toolchain。缺失时运行 `xcodebuild -downloadComponent MetalToolchain`，并用 `xcrun --sdk macosx metal --version` 验证；组件安装后定位缓存陈旧时可执行 `xcrun --kill-cache`。`build-app.sh` 在构建前检查组件，不自动下载或安装。 打包脚本接受旧引擎平铺资源与 Swift Build 的 `Contents/Resources` 两种布局，拒绝符号链接，并统一整理为现有最终包布局；Platform metadata、手机页面、ZIPFoundation 隐私清单和 App 本地化继续受原有精确资源白名单约束。
+- CI 在工具链准备阶段探测 Metal；缺失时显式下载官方 Metal Toolchain、清理 xcrun 定位缓存并再次验证。下载或复验失败会终止该 job，本机 `build-app.sh` 仍只检查组件。
+- 当前 CI 工具链和锁定依赖不证明 macOS 26/27 的独立机器兼容性。
 - `Package.resolved`、SwiftNIO、ZIPFoundation 和 DICOM-Swift 的精确版本由 package graph 与 bundle 门禁验证。
 - `scan-acceptance.sh` 要求 `ripgrep`；GitHub Actions 的质量与发布 package job 使用仓库脚本下载固定的 14.1.1 Apple Silicon archive，核对 SHA-256 后才把私有工具目录加入后续步骤的 `PATH`，不使用可漂移的 Homebrew 安装。引导脚本对下载失败、摘要不符、意外归档布局和已有错误版本失败关闭，并抑制底层工具的非必要错误输出；对应行为由合成命令夹具覆盖。
 
@@ -35,9 +38,9 @@
 
 `scripts/test.sh` 把各主 target 的 Swift Testing 成功 summary 保存为权限 `0600` 的同一临时日志；同时从完整 `swift test list` 生成唯一的全局 primary tests/suites inventory。`KINLOGUE_REQUIRE_TEST_EVIDENCE=1` 下，`scripts/verify-docs.sh` 要求实际全量 summary 或这份确定性全局 inventory，且任一证据与当前候选主账不一致都会失败。三分片 CI 的每个 runner 都复验同一全局 inventory，因此专用分片不能仅凭本分片成功而放过陈旧账本；本机 `0/1` 还必须用全部实际 summary 再核对一次。独立的 XCTest、条件式和真实进程门禁由各自非零退出状态失败关闭，不重复计入该 Swift Testing 主账。
 
-定向 `--filter` 只证明受影响路径，不更新全量测试清单。全量运行先以 `swift build --build-tests --disable-swift-testing --enable-xctest` 构建 test bundle，再从该构建对应的完整 `swift test list` 中发现 `LANDerivedArtifactSinkTests` 的全部 XCTest selector。发现器要求集合非空、无重复、只含目标 suite 的 `test…` 方法；随后 `xcrun xctest -XCTest` 为每个发现到的 case 分别启动有界进程，并逐项核对精确 1/0 通过摘要。新增 case 因而自动进入专用门禁，清单异常则失败关闭。Core 使用一个 `--no-parallel` helper，Platform/App 每个短生命周期 helper 最多包含两个完整多项测试容器，其余单项容器每批最多 16 项。容器不会跨 helper 拆分，本机主账路径共 49 个 Platform/App helper。
+定向 `--filter` 只证明受影响路径，不更新全量测试清单。全量运行先以 `swift build --build-tests --disable-swift-testing --enable-xctest` 构建 test bundle，再从该构建对应的完整 `swift test list` 中发现 `LANDerivedArtifactSinkTests` 的全部 XCTest selector。发现器要求集合非空、无重复、只含目标 suite 的 `test…` 方法；随后 `xcrun xctest -XCTest` 为每个发现到的 case 分别启动有界进程，并逐项核对精确 1/0 通过摘要。新增 case 因而自动进入专用门禁，清单异常则失败关闭。Core 使用一个 `--no-parallel` helper，Platform/App 每个短生命周期 helper 最多包含两个完整多项测试容器，其余单项容器每批最多 16 项。完整多项容器不会跨 helper 拆分；每个 helper 只包含一个 target，避免 Xcode 27 按 target 启动进程后输出多份 summary。helper 数量由实际 inventory 决定，精确 tests/suites 汇总监督保持不变。
 
-macOS 26 远端已连续证明 derived-artifact 的 fresh runner 先后可能停在 SwiftPM 测试运行握手和具体 XCTest case。禁用 Swift Testing 后由 SwiftPM 启动 XCTest 的路径完成 189.40 秒 cold build，但 `swift-package` 与 `xctest` 又共同存活 18 分 43 秒且没有测试事件；改为直接 `xcrun xctest` 后，230.68 秒 cold build 和前 6 个 case 均成功，随后 `testProductionStoreBudgetIsReservedBeforeAnyDerivedActorHop` 启动但在 180 秒 deadline 内不返回。该测试原先从 cooperative executor 启动四个任务，再让每项同步阻塞在 actor hop 前的故障注入闸门；小型 runner 可因此耗尽负责恢复测试方法的 executor。现在只有这段刻意同步阻塞的测试调用由独立 OS 线程发起，生产 sink、内存上限和断言不变。专用命令仍只让 SwiftPM build test bundle，再从构建后的完整 inventory 发现目标 suite 并逐 case 启动 `xcrun xctest`；任何 selector 发现异常或 case 缺少精确 1/0 摘要均失败。GitHub CI 仍使用三个全新 runner：`0/3` 与 `1/3` 以确定性模数运行普通 primary helper，`2/3` 运行动态发现的 derived-artifact XCTest；三者都用同一 planner 口径复验全局主账。本机默认 `0/1` 先执行同一专用门禁，再运行完整主账。
+macOS 26 远端已连续证明 derived-artifact 的 fresh runner 先后可能停在 SwiftPM 测试运行握手和具体 XCTest case。禁用 Swift Testing 后由 SwiftPM 启动 XCTest 的路径完成 189.40 秒 cold build，但 `swift-package` 与 `xctest` 又共同存活 18 分 43 秒且没有测试事件；改为直接 `xcrun xctest` 后，230.68 秒 cold build 和前 6 个 case 均成功，随后 `testProductionStoreBudgetIsReservedBeforeAnyDerivedActorHop` 启动但在 180 秒 deadline 内不返回。该测试原先从 cooperative executor 启动四个任务，再让每项同步阻塞在 actor hop 前的故障注入闸门；小型 runner 可因此耗尽负责恢复测试方法的 executor。现在只有这段刻意同步阻塞的测试调用由独立 OS 线程发起，生产 sink、内存上限和断言不变。专用命令仍只让 SwiftPM build test bundle；Xcode 27 的按 target 布局使用 `KinloguePlatformTests.xctest`，旧引擎使用 `KinloguePackageTests.xctest`，再从构建后的完整 inventory 发现目标 suite 并逐 case 启动 `xcrun xctest`；任何 selector 发现异常或 case 缺少精确 1/0 摘要均失败。GitHub CI 对每个系统使用三个全新 runner：`0/3` 与 `1/3` 以确定性模数运行普通 primary helper，`2/3` 运行动态发现的 derived-artifact XCTest；三者都用同一 planner 口径复验全局主账。本机默认 `0/1` 先执行同一专用门禁，再运行完整主账。
 
 planner 将清单标识规范化为 SwiftPM 实际过滤标识，以完整 target 前缀和词边界避免前缀误匹配，并对未知 target、运行标识冲突、缺失隔离门禁、缺失专用容器、重复或遗漏匹配失败关闭；每个 shard 同时冻结预期 tests/suites，并独立输出排除专用与隔离门禁后的全局 primary inventory。分片监督器先从有界输出尾部去除 ANSI 控制序列、统一空白，再匹配精确成功 summary；匹配后才启动 5 秒退出宽限期并输出不含测试内容的期望/已观察计数标记。监督器在 helper 存活期间持续记录自己的后代 PID 与进程启动身份；即使测试进程另建 process group 或在前台命令退出后被重新托管，也只会向仍匹配该身份的本分片后代发信号。成功 summary 之后命令或任何已跟踪后代仍不收敛时，监督器会清理该分片进程并返回非零，而不会把被强制终止的测试记为成功；命令非零、错配/缺失 summary、清理不完整或超时同样失败关闭。各 shard 使用同一已构建 test bundle；本机完整路径的所有成功 summary（兼容单数 `suite` 与复数 `suites`）汇总后仍必须精确匹配候选主账。CI 只把 SwiftPM build jobs 限为两个。该边界避免真实进程、锁、网络和文件同步测试在近千条用例共用的长生命周期 helper 中累积进程级状态，同时不减少测试或放宽断言。仅在大小写不敏感卷启用的别名锁测试不进入固定主账，而是单独串行运行；跨进程 storage target、带真实 I/O/取消时限的 DICOM 导入集成、验收扫描、安装 LAN 生产 HTTP 探针和真实 Socket/RSS 压力 case 也继续分离，分别以 `--no-parallel`、`-j 1` 运行并拥有独立 deadline；扫描 suite 自身保留 serialized trait，RSS case 仍要求显式环境变量。跨进程 storage fixture 通过 `Process.terminationHandler` 驱动的多等待者观察器收敛退出状态，不在后台 GCD worker 上调用可能失去唤醒的 `waitUntilExit()`。
 
@@ -56,13 +59,13 @@ planner 将清单标识规范化为 SwiftPM 实际过滤标识，以完整 targe
 | `KinlogueAppTests` | App service、ViewModel、backup scheduler/retention/restore UI、runtime identity、脚本/bundle 约束和真实 Vault 组合 |
 | `KinlogueStorageProcessTests` | 真正跨进程的 Vault/inbox/catalog 锁、提交、恢复和清理 |
 
-整库恢复的跨进程证据直接绑定生产 `BackupRestoreVerifier` 与 `BackupRestoreTransaction`，fixture 只生成合成 checkpoint、在 test-only SPI fault phase 发送 `SIGKILL`、重启后调用 production `reconcile()`，再用真实 Vault 与 durable LAN inbox strict reader 验证终态。矩阵覆盖 existing root 的六个 durable phase，以及 absent root 适用的五个 phase；源码门禁禁止 fixture 重新声明 activation receipt/phase 或复制 rollback/cleanup 算法。源码 process tests 与安装 probe 使用同一逐 phase 终态表，安装 runner 还对每项分别要求 transaction/preflight receipt、staging 与 rollback 全部清理。Platform integration 另在有效 preparation 后破坏 committed staging object，证明 production `activate` 的 activation 后 strict validation 返回 `graphInvalid`，并恢复精确旧树或无根状态且清理全部 restore artifacts。该证据属于当前 Mac 上的源码/真实进程自动化；只有实际执行安装 probe 才能形成已安装工件证据，两者都不代表 macOS 14/15 独立机器、真实 Powerbox/File Provider 目录或人工恢复已经通过。
+整库恢复的跨进程证据直接绑定生产 `BackupRestoreVerifier` 与 `BackupRestoreTransaction`，fixture 只生成合成 checkpoint、在 test-only SPI fault phase 发送 `SIGKILL`、重启后调用 production `reconcile()`，再用真实 Vault 与 durable LAN inbox strict reader 验证终态。矩阵覆盖 existing root 的六个 durable phase，以及 absent root 适用的五个 phase；源码门禁禁止 fixture 重新声明 activation receipt/phase 或复制 rollback/cleanup 算法。源码 process tests 与安装 probe 使用同一逐 phase 终态表，安装 runner 还对每项分别要求 transaction/preflight receipt、staging 与 rollback 全部清理。Platform integration 另在有效 preparation 后破坏 committed staging object，证明 production `activate` 的 activation 后 strict validation 返回 `graphInvalid`，并恢复精确旧树或无根状态且清理全部 restore artifacts。该证据属于当前 Mac 上的源码/真实进程自动化；只有实际执行安装 probe 才能形成已安装工件证据，两者都不代表 macOS 26/27 独立机器、真实 Powerbox/File Provider 目录或人工恢复已经通过。
 
 ## CI
 
 ### GitHub Actions
 
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) 在 main pull request、main push 和手工触发时依次运行 lint、隐私、全量测试、clean-source bundle 验证和同一 bundle 的 DICOM XPC 门禁。质量 job 在这些门禁前运行 [`install-ci-ripgrep.sh`](../scripts/install-ci-ripgrep.sh)，只接受固定版本、固定 archive 名与固定 SHA-256 的 Apple Silicon 二进制；release package job 使用同一入口。workflow 使用最小 token 权限、固定 action SHA、30 分钟 job 上限，以及主测试/隔离门禁各自的 deadline。`pull_request_target` 被禁止。
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) 在 main pull request、main push 和手工触发时依次运行 lint、隐私、全量测试、clean-source bundle 验证和同一 bundle 的 DICOM XPC 门禁。每个分区分别在 `macos-26` 和 `xcode-27` 上运行；macOS 26 是阻塞基线，Xcode 27 public-preview runner 的 job 使用 `continue-on-error`，失败仍显示但暂不阻塞基线。macOS 26 job 保留仓库规则要求的原有检查名，Xcode 27 job 显式增加后缀，避免矩阵自动命名让必需检查永久缺失。两个系统独立核对相同全局账本，不能把一个系统的分区算到另一个系统。镜像状态依据 [GitHub 官方镜像说明](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md)，远端运行结果须实际核对。质量 job 在这些门禁前运行 [`install-ci-ripgrep.sh`](../scripts/install-ci-ripgrep.sh)，只接受固定版本、固定 archive 名与固定 SHA-256 的 Apple Silicon 二进制；release package job 使用同一入口。workflow 使用最小 token 权限、固定 action SHA、30 分钟 job 上限，以及主测试/隔离门禁各自的 deadline。`pull_request_target` 被禁止。
 
 [`codeql.yml`](../.github/workflows/codeql.yml) 在独立 macOS runner 上以 manual build 分析 Swift，只有分析 job 取得 `security-events: write`；checkout 与 CodeQL action 均固定完整 SHA。Dependabot 同时维护 SwiftPM git 依赖和 GitHub Actions pin，更新仍必须经过相同 CI、隐私与人工 review，不能自动扩大依赖或权限边界。
 
@@ -94,7 +97,7 @@ ad-hoc 签名适用于本机开发和知情测试者手动安装，但没有 Dev
 
 - 真实私有样本 OCR；
 - 键盘、VoiceOver、动态语言和 AppKit canvas；
-- macOS 14/15 独立机器；
+- macOS 26/27 独立机器；
 - iOS Safari/Android Chrome 真机、网络隔离、防火墙和锁屏/睡眠/网络变化；
 - 真实 `NSSavePanel`、外置卷、覆盖保存和打印；
 - 真实 Powerbox 备份目录、外置盘/NAS，以及阿里云盘/百度网盘等客户端的上传、占位文件、冲突副本与删除传播；

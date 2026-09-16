@@ -130,3 +130,7 @@ App 层把 Finder 报告导入、失败草稿重试和“重新识别并覆盖�
 - `LiveAppServiceTests`、`RecordDetailViewLayoutTests`、`ComparisonModelTests`：真实 App service 链路、原件展示和 verbatim comparison。
 
 Vision 输出可能随 macOS 版本变化；测试应优先断言 anchor、顺序、方法和来源引用，不使用对整段 OCR 字节的脆弱快照。真实样本 OCR 抽检必须在仓库外完成。
+
+## 系统写作工具边界
+
+报告复核中的逐字转录编辑器通过 SwiftUI `writingToolsBehavior(.disabled)` 禁用系统写作工具；已确认记录的原生多行编辑器（结果、结论与个人备注）设置 `NSTextView.writingToolsBehavior = .none`。用户仍可手动编辑和撤销，原件及确认门不变。这只限制这些编辑器的系统写作入口，不承诺阻止用户复制、截图或在其他应用处理内容。实现见 [`ImportReviewView`](../Sources/KinlogueApp/Views/ImportReviewView.swift)、[`RecordEditView`](../Sources/KinlogueApp/Views/RecordEditView.swift)，回归见 [`ImportReviewViewSafetyTests`](../Tests/KinlogueAppTests/ImportReviewViewSafetyTests.swift)、[`RecordEditViewLayoutTests`](../Tests/KinlogueAppTests/RecordEditViewLayoutTests.swift)。

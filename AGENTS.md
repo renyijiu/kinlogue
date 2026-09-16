@@ -94,7 +94,7 @@ Kinlogue 借鉴 LLM Wiki 的“原始资料 → 编译后的 Wiki → schema”�
 
 ## 6. 常用验证命令
 
-在 macOS 14+、Swift 6 / Xcode 或 Command Line Tools 环境中，按改动范围选择：
+在 macOS 26+、Swift 6 / Xcode 或 Command Line Tools 环境中，按改动范围选择：
 
 ```sh
 swift build --disable-sandbox

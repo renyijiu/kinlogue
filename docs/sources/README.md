@@ -32,6 +32,8 @@ kind: pattern-reference | product-decision | external-spec
 
 ### 知识库、发布与产品文档
 
+- [`dicom-swift-1.5.0-dependency-review-2026-09-16.md`](dicom-swift-1.5.0-dependency-review-2026-09-16.md)：DICOM 依赖闭包、固定许可证与 JLSwift 授权来源。
+
 - [`karpathy-llm-wiki.md`](karpathy-llm-wiki.md)：知识库组织方式。
 - [`github-actions-macos-ci-cd-2026-08-05.md`](github-actions-macos-ci-cd-2026-08-05.md)：macOS CI/CD 与 Apple 分发边界。
 - [`dependency-security-review-2026-08-23.md`](dependency-security-review-2026-08-23.md)：SwiftPM 已知公告、CodeQL/Dependabot 能力与独立审计缺口的点时复核。

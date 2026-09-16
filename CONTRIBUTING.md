@@ -16,7 +16,7 @@ Use generated or synthetic data only. Never add real medical records, names, ide
 
 ## Development workflow
 
-Kinlogue requires macOS 14+ and Swift 6 from Xcode or Command Line Tools. Add or strengthen a proof-first test for behavior changes, then run the checks appropriate to your change:
+Kinlogue requires macOS 26+ and Swift 6.2 or newer from Xcode or Command Line Tools. Add or strengthen a proof-first test for behavior changes, then run the checks appropriate to your change:
 
 ```sh
 swift build --disable-sandbox

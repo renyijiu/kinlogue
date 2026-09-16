@@ -140,3 +140,7 @@ SwiftUI 独立次要操作可使用 `.buttonStyle(.kinlogueSecondary)`。取消�
 - 竖版图片和 PDF 默认占满原件预览宽度；图片旋转后按新的横竖方向重新计算适配尺寸，左右旋转、缩放、双向滚动和“查看原图”入口互不遮挡；PDF 保持原始页面方向。
 - PDF 预览打开时不遍历全部页面，只按当前 `(sessionID, pageIndex)` 读取并缓存有限页 metadata；当前页栅格化最长边不超过 4,000 px、页缩放不超过 5 倍。`PDFDocument`、`PDFPage` 和 PDFKit 生成的 `NSImage` 不进入 SwiftUI/MainActor 状态，切页或连续缩放的旧任务即使完成也不能覆盖当前页，无效页显示既有 unavailable 状态。
 - 手机上传页在窄屏和桌面浏览器下均无横向滚动。
+
+## macOS 27 控件验收
+
+编辑器布局回归保留现有 SwiftUI key-view proxy 观测方式，检查所有观测控件的非空 frame 和完整可见性；最低数量覆盖取消、保存和手动日期操作，不再假定系统内部控件总数固定。该实现细节观测不替代真实键盘和 VoiceOver 验收。逐字转录编辑器的系统写作工具限制见 [`import-and-ocr.md`](import-and-ocr.md)。系统 Picker、菜单、工具栏的外观沿用原生行为；本轮不重做色板或 Liquid Glass。macOS 26/27 上的键盘、VoiceOver、提高对比度和窄窗口实际交互仍属于人工矩阵。

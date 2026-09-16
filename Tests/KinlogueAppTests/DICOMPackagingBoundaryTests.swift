@@ -7,7 +7,7 @@ struct DICOMPackagingBoundaryTests {
         let manifest = try text("Package.swift")
 
         #expect(manifest.contains("https://github.com/ThalesMMS/DICOM-Swift.git"))
-        #expect(manifest.contains("exact: \"1.3.3\""))
+        #expect(manifest.contains("exact: \"1.5.0\""))
         #expect(manifest.contains("name: \"KinlogueDICOMIPC\""))
         #expect(manifest.contains("name: \"KinlogueDICOMDecoderHelper\""))
         #expect(manifest.contains("name: \"KinlogueDICOMTestSupport\""))
@@ -103,11 +103,11 @@ struct DICOMPackagingBoundaryTests {
                 + "project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
         )
         #expect(project.contains("com.apple.product-type.xpc-service"))
-        #expect(project.contains("kind = exactVersion; version = 1.3.3"))
+        #expect(project.contains("kind = exactVersion; version = 1.5.0"))
         #expect(project.contains("DICOMIPC.swift in Sources"))
         #expect(project.contains("KinlogueDICOMDecoderHelper.swift in Sources"))
         #expect(project.contains("DicomCore in Frameworks"))
-        #expect(projectResolved.contains("9ae0851e134af274651b646519b8a7aaeee05f05"))
+        #expect(projectResolved.contains("8f3605a33ed070160b4e023eacd87f32eae8e913"))
         #expect(projectResolved.contains("6a52f3251125d74daf04fcbd5e6f08a75d074382"))
         #expect(projectResolved.contains("22787ffb59de99e5dc1fbfe80b19c97a904ad48d"))
 
@@ -117,6 +117,7 @@ struct DICOMPackagingBoundaryTests {
         #expect(builder.contains("-onlyUsePackageVersionsFromResolvedFile"))
         #expect(!builder.contains("DICOM_CORE_RESOURCE_BUNDLE_NAME"))
         #expect(builder.contains("ZIP_FOUNDATION_RESOURCE_BUNDLE_NAME"))
+        try verifyReviewedDependencyPinsRejectDrift()
     }
 
     @Test
@@ -229,6 +230,57 @@ struct DICOMPackagingBoundaryTests {
         #expect(fixture.contains("voiLUTFunction: String? = nil"))
         #expect(probe.contains("voiLUTFunction: \"SIGMOID\""))
         #expect(probe.contains("error == .unsupportedObject"))
+    }
+
+    private func verifyReviewedDependencyPinsRejectDrift() throws {
+        let script = try text("scripts/verify-app.sh")
+        let start = try #require(script.range(of: "  local expected_pins=("))
+        let end = try #require(script.range(of: "  /usr/bin/grep -Fq 'productType", range: start.upperBound..<script.endIndex))
+        let constants = script.split(separator: "\n").filter {
+            $0.hasPrefix("EXPECTED_DICOM_SWIFT_") || $0.hasPrefix("EXPECTED_ARGUMENT_PARSER_") ||
+                $0.hasPrefix("EXPECTED_ZIPFOUNDATION_")
+        }.joined(separator: "\n")
+        let fixture = "set -euo pipefail\nfail() { exit 1; }\n" + constants +
+            "\nverify() {\nlocal resolution=\"$1\" helper_resolution=\"$2\"\n" +
+            String(script[start.lowerBound..<end.lowerBound]) + "\n}\nverify \"$1\" \"$2\"\n"
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let helperURL = root.appendingPathComponent("helper.json")
+        let rootURL = root.appendingPathComponent("root.json")
+        let original = try Data(contentsOf: repository.appendingPathComponent(
+            "packaging/KinlogueDICOMDecoderHelper.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+        ))
+        let object = try #require(JSONSerialization.jsonObject(with: original) as? [String: Any])
+        let pins = try #require(object["pins"] as? [[String: Any]])
+        #expect(pins.count == 7)
+        for fault in ["", "revision", "missing", "duplicate", "unexpected", "malformed", "rootDrift", "url"] {
+            var changed = object
+            var changedPins = pins
+            if fault == "revision" || fault == "rootDrift" {
+                changedPins[0]["state"] = ["version": "1.0.1", "revision": String(repeating: "0", count: 40)]
+            } else if fault == "url" {
+                changedPins[0]["location"] = "https://example.invalid/unapproved"
+            } else if fault == "missing" {
+                changedPins.removeFirst()
+            } else if fault == "duplicate" {
+                changedPins[0] = changedPins[1]
+            } else if fault == "malformed" {
+                changedPins.append([:])
+            } else if fault == "unexpected" {
+                changedPins.append(["identity": "unexpected"])
+            }
+            changed["pins"] = changedPins
+            let altered = try JSONSerialization.data(withJSONObject: changed)
+            try (fault == "rootDrift" ? altered : original).write(to: rootURL)
+            try (fault == "rootDrift" ? original : altered).write(to: helperURL)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.arguments = ["-c", fixture, "pin-fixture", rootURL.path, helperURL.path]
+            try process.run()
+            process.waitUntilExit()
+            #expect((process.terminationStatus == 0) == fault.isEmpty, Comment(rawValue: fault))
+        }
     }
 
     private func text(_ relativePath: String) throws -> String {

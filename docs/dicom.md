@@ -32,6 +32,14 @@ App 不解释像素、不生成测量或医学结论。DICOM 自由文本和像�
 
 同步解析受硬 watchdog 约束。crash、hang、连接中断和无效/超大 reply 都映射为固定失败；生产路径没有 in-process decoder fallback。构建和签名证据见 [XPC 构建记录](sources/2026-08-07-dicom-xpc-xcode-build-evidence.md)。
 
+## DICOM-Swift 1.5.0 依赖边界
+
+Root SwiftPM 与独立 Helper Xcode project 同时固定 DICOM-Swift 1.5.0。新增 codec 依赖只随 DicomCore 进入 Helper，主 App 的链接门禁显式拒绝这些模块。发布前置门禁对 Helper 的七个锁定依赖逐项校验来源、版本、revision 和根锁文件一致性；缺失、重复、额外包或漂移均失败。
+
+Helper 的嵌套资源明确限定为 `DICOMSwift_DicomCore.bundle`、`J2KSwift_J2KMetal.bundle`、`ZIPFoundation_ZIPFoundation.bundle` 与第三方声明；三个资源 bundle 逐个签名、验证，再签 Helper 和 App。许可证与固定来源见[依赖核对](sources/dicom-swift-1.5.0-dependency-review-2026-09-16.md)。上游新增能力不自动改变下述支持范围。
+
+本机 macOS 27 / Xcode 27、arm64 Release ad-hoc 包的磁盘占用（`du -sk`，非下载 ZIP 大小）从 33,208 KiB 增至 43,884 KiB；Helper 从 6,216 KiB 增至 16,892 KiB，增量均为 10,676 KiB，约 10.4 MiB。新增 codec 的首次优化编译成本也高于旧版本；没有在相同冷热缓存下作计时对照，不据此声称运行更快或给出编译耗时倍数。
+
 ## Slice service 与 Viewer 生命周期
 
 `DICOMSliceService` 只能从 Vault 验证过的 opaque session descriptor 按需读取一个 instance。进程级内存预算、canonical LRU 和串行 foreground scheduler 限制同时存活的 raw/canonical/render bytes；像素不写入 Vault、日志、持久预览或截图。

@@ -16,8 +16,14 @@ concurrency:
 
 jobs:
   quality:
-    name: Lint, test, and verify bundle
-    runs-on: macos-26
+    name: ${{ matrix.runner == 'macos-26' && 'Lint, test, and verify bundle' || 'Lint, test, and verify bundle (xcode-27)' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    # The Xcode 27 runner is a public preview; keep macOS 26 as the required baseline.
+    continue-on-error: ${{ matrix.runner == 'xcode-27' }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
       KINLOGUE_BUILD_JOBS: "2"
@@ -31,11 +37,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Show toolchain
+      - name: Prepare toolchain
         run: |
           sw_vers
           xcodebuild -version
           swift --version
+          if ! xcrun --sdk macosx metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+            xcrun --kill-cache
+          fi
+          xcrun --sdk macosx metal --version
 
       - name: Install pinned ripgrep for acceptance scans
         run: |
@@ -60,8 +71,14 @@ jobs:
         run: scripts/verify-dicom-xpc.sh --use-verified-app
 
   complementary-tests:
-    name: Complementary test partition
-    runs-on: macos-26
+    name: ${{ matrix.runner == 'macos-26' && 'Complementary test partition' || 'Complementary test partition (xcode-27)' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    # The Xcode 27 runner is a public preview; keep macOS 26 as the required baseline.
+    continue-on-error: ${{ matrix.runner == 'xcode-27' }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
       KINLOGUE_BUILD_JOBS: "2"
@@ -73,18 +90,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Show toolchain
+      - name: Prepare toolchain
         run: |
           sw_vers
           xcodebuild -version
           swift --version
+          if ! xcrun --sdk macosx metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+            xcrun --kill-cache
+          fi
+          xcrun --sdk macosx metal --version
 
       - name: Run the complementary test partition
         run: scripts/test.sh
 
   dedicated-lan-derived-tests:
-    name: Dedicated LAN derived-artifact tests
-    runs-on: macos-26
+    name: ${{ matrix.runner == 'macos-26' && 'Dedicated LAN derived-artifact tests' || 'Dedicated LAN derived-artifact tests (xcode-27)' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    # The Xcode 27 runner is a public preview; keep macOS 26 as the required baseline.
+    continue-on-error: ${{ matrix.runner == 'xcode-27' }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
       KINLOGUE_BUILD_JOBS: "2"
@@ -96,11 +124,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Show toolchain
+      - name: Prepare toolchain
         run: |
           sw_vers
           xcodebuild -version
           swift --version
+          if ! xcrun --sdk macosx metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+            xcrun --kill-cache
+          fi
+          xcrun --sdk macosx metal --version
 
       - name: Run the dedicated LAN derived-artifact tests
         run: scripts/test.sh

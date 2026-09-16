@@ -293,6 +293,7 @@ private struct ReviewTextEditor: View {
         VStack(alignment: .leading, spacing: 7) {
             Text(label).font(.headline)
             TextEditor(text: $text)
+                .writingToolsBehavior(.disabled)
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: minimumHeight)
                 .padding(8)

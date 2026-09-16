@@ -55,7 +55,8 @@ verify_distribution_signature() {
   local signed_bundle identifier entitlement
   local -a expected_entitlements
   for signed_bundle in \
-      "$helper/Contents/Resources/DICOMDecoder_DicomCore.bundle" \
+      "$helper/Contents/Resources/DICOMSwift_DicomCore.bundle" \
+      "$helper/Contents/Resources/J2KSwift_J2KMetal.bundle" \
       "$helper/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle" \
       "$helper" "$app"; do
     [[ -d "$signed_bundle" && ! -L "$signed_bundle" ]] \
@@ -219,7 +220,8 @@ PRE_REPORT_NAME="pre-distribution-verification-report.json"
 
 DICOM_HELPER_BUNDLE="$APP_BUNDLE/Contents/XPCServices/KinlogueDICOMDecoderHelper.xpc"
 for helper_resource_bundle in \
-    "$DICOM_HELPER_BUNDLE/Contents/Resources/DICOMDecoder_DicomCore.bundle" \
+    "$DICOM_HELPER_BUNDLE/Contents/Resources/DICOMSwift_DicomCore.bundle" \
+    "$DICOM_HELPER_BUNDLE/Contents/Resources/J2KSwift_J2KMetal.bundle" \
     "$DICOM_HELPER_BUNDLE/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle"; do
   /usr/bin/codesign --force --sign "$KINLOGUE_CODESIGN_IDENTITY" \
     --keychain "$KINLOGUE_SIGNING_KEYCHAIN_PATH" \
@@ -314,9 +316,9 @@ METADATA_PLIST="$NOTARY_TEMP_DIRECTORY/release-metadata.plist"
   "$METADATA_PLIST"
 /usr/bin/plutil -insert compatibility.installedAcceptance -string \
   PENDING_FORMAL_RELEASE_GATE "$METADATA_PLIST"
-/usr/bin/plutil -insert compatibility.macOS14 -string \
+/usr/bin/plutil -insert compatibility.macOS26 -string \
   PENDING_FORMAL_RELEASE_GATE "$METADATA_PLIST"
-/usr/bin/plutil -insert compatibility.macOS15 -string \
+/usr/bin/plutil -insert compatibility.macOS27 -string \
   PENDING_FORMAL_RELEASE_GATE "$METADATA_PLIST"
 /usr/bin/plutil -insert compatibility.realPhoneMatrix -string \
   PENDING_FORMAL_RELEASE_GATE "$METADATA_PLIST"

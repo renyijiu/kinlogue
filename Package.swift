@@ -1,4 +1,4 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 6.2
 
 import PackageDescription
 
@@ -6,7 +6,7 @@ let package = Package(
     name: "Kinlogue",
     defaultLocalization: "zh-Hans",
     platforms: [
-        .macOS(.v14)
+        .macOS("26.0")
     ],
     products: [
         .executable(name: "Kinlogue", targets: ["KinlogueApp"]),
@@ -14,7 +14,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/ThalesMMS/DICOM-Swift.git",
-            exact: "1.3.3"
+            exact: "1.5.0"
         ),
         .package(
             url: "https://github.com/apple/swift-nio.git",

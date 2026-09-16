@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  macOS 14+ · Swift 6 · Local-first · GPL-3.0
+  macOS 26+ · Swift 6 · Local-first · GPL-3.0
 </p>
 
 <p align="center">
@@ -102,7 +102,7 @@ Mac App 界面当前支持简体中文和英文。默认跟随 macOS 的 App 语
 
 ## 本机构建
 
-要求 macOS 14 或更高版本，以及包含 Swift 6 的 Xcode 或 Command Line Tools。
+要求 macOS 26 或更高版本，以及包含 Swift 6.2 或更新版本的 Xcode 或 Command Line Tools。
 
 ```sh
 scripts/lint.sh
@@ -111,7 +111,7 @@ scripts/compile-localizations.sh --check
 scripts/test.sh
 ```
 
-完整 Xcode 环境还可以构建并验证本机测试 App：
+完整 Xcode 环境还可以构建并验证本机测试 App（DICOM 构建需安装 Metal Toolchain，见[环境说明](docs/testing-and-release.md)）：
 
 ```sh
 scripts/verify-app.sh
@@ -132,7 +132,7 @@ scripts/run-acceptance.sh
 
 ## CI/CD 与候选分发
 
-仓库内的 GitHub CI 会在 pull request 和 `main` push 上执行 lint、隐私门禁、全量测试与正式 bundle/XPC 验证，并以 30 分钟为异常硬上限；独立 CodeQL workflow 在 macOS runner 上分析 Swift。Dependabot 检查 SwiftPM 与 GitHub Actions 更新。推送与 `Info.plist` 版本一致的 tag 后，distribution workflow 不需要 Apple 开发者账号或 Secrets，会生成经过复验的 Apple Silicon ad-hoc ZIP，并发布为 GitHub Pre-release。
+仓库内的 GitHub CI 会在 pull request 和 `main` push 上执行 lint、隐私门禁、全量测试与正式 bundle/XPC 验证，并以 30 分钟为异常硬上限；macOS 26 为基线，Xcode 27 预览镜像执行同样的兼容性矩阵，其失败暂不阻塞基线。独立 CodeQL workflow 在 macOS runner 上分析 Swift。Dependabot 检查 SwiftPM 与 GitHub Actions 更新。推送与 `Info.plist` 版本一致的 tag 后，distribution workflow 不需要 Apple 开发者账号或 Secrets，会生成经过复验的 Apple Silicon ad-hoc ZIP，并发布为 GitHub Pre-release。
 
 公开仓库中的 Pre-release 对任何人可见，但仍只是知情测试候选。校验 SHA-256、解压并拖入当前用户的“应用程序”文件夹后，首次打开需要在 macOS“系统设置 → 隐私与安全性”中明确选择“仍要打开”。不要关闭 Gatekeeper，也不要递归删除 quarantine 属性。
 

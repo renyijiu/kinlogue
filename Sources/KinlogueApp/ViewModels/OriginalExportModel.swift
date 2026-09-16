@@ -117,7 +117,7 @@ final class OriginalExportModel: ObservableObject {
         progress = nil
         phase = .exporting
         let progressRelay = OriginalExportProgressRelay()
-        let task = Task { [service] in
+        let task = Task { [weak self, service] in
             try await service.export(
                 to: destinationURL,
                 undatedToken: undatedToken

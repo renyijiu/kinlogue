@@ -27,7 +27,7 @@ struct ReleaseScriptSafetyTests {
             try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executableURL.path)
             try Data("synthetic".utf8).write(to: bundle.appendingPathComponent("Contents/Info.plist"))
         }
-        for resource in ["DICOMDecoder_DicomCore.bundle", "ZIPFoundation_ZIPFoundation.bundle"] {
+        for resource in ["DICOMSwift_DicomCore.bundle", "J2KSwift_J2KMetal.bundle", "ZIPFoundation_ZIPFoundation.bundle"] {
             try fileManager.createDirectory(
                 at: helper.appendingPathComponent("Contents/Resources/\(resource)"),
                 withIntermediateDirectories: true
@@ -97,7 +97,8 @@ struct ReleaseScriptSafetyTests {
             if fault.isEmpty {
                 #expect(result.status == 0, Comment(rawValue: result.output))
                 #expect(result.output.split(separator: "\n").filter { $0.hasPrefix("SIGNED:") } == [
-                    "SIGNED:DICOMDecoder_DicomCore.bundle", "SIGNED:ZIPFoundation_ZIPFoundation.bundle",
+                    "SIGNED:DICOMSwift_DicomCore.bundle", "SIGNED:J2KSwift_J2KMetal.bundle",
+                    "SIGNED:ZIPFoundation_ZIPFoundation.bundle",
                     "SIGNED:KinlogueDICOMDecoderHelper.xpc", "SIGNED:Kinlogue.app",
                 ])
             } else {
@@ -201,6 +202,32 @@ struct ReleaseScriptSafetyTests {
         ] {
             #expect(build.contains(required))
         }
+        let resourceFunctionStart = try #require(build.range(of: "swiftpm_resource_directory() {"))
+        let resourceFunctionEnd = try #require(build.range(
+            of: "\n}\n", range: resourceFunctionStart.lowerBound..<build.endIndex
+        ))
+        let resourceFunction = String(build[resourceFunctionStart.lowerBound..<resourceFunctionEnd.upperBound])
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let flat = root.appendingPathComponent("Flat.bundle")
+        let nested = root.appendingPathComponent("Nested.bundle")
+        let nestedResources = nested.appendingPathComponent("Contents/Resources")
+        try FileManager.default.createDirectory(at: flat, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: nestedResources, withIntermediateDirectories: true)
+        let probe = root.appendingPathComponent("probe.sh")
+        try ("#!/bin/zsh\nset -euo pipefail\nfail() { exit 1; }\n" + resourceFunction +
+            "\nswiftpm_resource_directory \"$1\"\n").write(to: probe, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: probe.path)
+        for (bundle, resources) in [(flat, flat), (nested, nestedResources)] {
+            let result = try run(probe, [bundle.path])
+            #expect(result.status == 0)
+            #expect(result.output.trimmingCharacters(in: .whitespacesAndNewlines) == resources.path)
+        }
+        try FileManager.default.createSymbolicLink(
+            at: nestedResources.appendingPathComponent("linked"), withDestinationURL: flat
+        )
+        #expect(try run(probe, [nested.path]).status != 0)
+        #expect(try run(probe, [root.appendingPathComponent("missing.bundle").path]).status != 0)
         #expect(verify.contains("verify_swiftnio_checkout"))
         #expect(verify.contains("0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b"))
         #expect(verify.contains("export DEVELOPER_DIR"))
