@@ -112,6 +112,25 @@ if [[ -n "$ISOLATED_SWIFTPM_ROOT" ]]; then
   )
 fi
 
+"$XCRUN_EXECUTABLE" --sdk macosx metal --version >/dev/null 2>&1 \
+  || fail "the Metal toolchain is unavailable; run xcodebuild -downloadComponent MetalToolchain"
+
+# Resolve only the two known SwiftPM resource layouts. The final application
+# keeps its existing flat resource allow-list under either build engine.
+swiftpm_resource_directory() {
+  local bundle="$1"
+  [[ -d "$bundle" && ! -L "$bundle" \
+      && -z "$(/usr/bin/find "$bundle" -type l -print -quit)" ]] \
+    || fail "the SwiftPM resource bundle is unavailable or linked"
+  if [[ -e "$bundle/Contents" ]]; then
+    [[ -d "$bundle/Contents/Resources" ]] \
+      || fail "the SwiftPM resource bundle layout is incomplete"
+    /usr/bin/printf '%s\n' "$bundle/Contents/Resources"
+  else
+    /usr/bin/printf '%s\n' "$bundle"
+  fi
+}
+
 ensure_safe_distribution_directory() {
   if [[ -e "$DIST_DIRECTORY" || -L "$DIST_DIRECTORY" ]]; then
     [[ -d "$DIST_DIRECTORY" && ! -L "$DIST_DIRECTORY" ]] || {
@@ -200,28 +219,37 @@ fi
 PLATFORM_RESOURCE_BUNDLE="$BIN_DIR/$PLATFORM_RESOURCE_BUNDLE_NAME"
 [[ -d "$PLATFORM_RESOURCE_BUNDLE" && ! -L "$PLATFORM_RESOURCE_BUNDLE" ]] \
   || fail "the KinloguePlatform SwiftPM resource bundle is unavailable"
+PLATFORM_RESOURCE_CONTENTS="$(swiftpm_resource_directory "$PLATFORM_RESOURCE_BUNDLE")"
 /usr/bin/ditto \
-  "$PLATFORM_RESOURCE_BUNDLE" \
+  "$PLATFORM_RESOURCE_CONTENTS" \
   "$APP_BUNDLE/Contents/Resources/$PLATFORM_RESOURCE_BUNDLE_NAME"
+if [[ "$PLATFORM_RESOURCE_CONTENTS" != "$PLATFORM_RESOURCE_BUNDLE" ]]; then
+  [[ -f "$PLATFORM_RESOURCE_BUNDLE/Contents/Info.plist" ]] \
+    || fail "the KinloguePlatform resource bundle metadata is unavailable"
+  /bin/cp -- "$PLATFORM_RESOURCE_BUNDLE/Contents/Info.plist" \
+    "$APP_BUNDLE/Contents/Resources/$PLATFORM_RESOURCE_BUNDLE_NAME/Info.plist"
+fi
 ZIP_FOUNDATION_RESOURCE_BUNDLE="$BIN_DIR/$ZIP_FOUNDATION_RESOURCE_BUNDLE_NAME"
+ZIP_FOUNDATION_RESOURCE_CONTENTS="$(swiftpm_resource_directory "$ZIP_FOUNDATION_RESOURCE_BUNDLE")"
 [[ -d "$ZIP_FOUNDATION_RESOURCE_BUNDLE" \
     && ! -L "$ZIP_FOUNDATION_RESOURCE_BUNDLE" \
-    && -f "$ZIP_FOUNDATION_RESOURCE_BUNDLE/PrivacyInfo.xcprivacy" \
-    && ! -L "$ZIP_FOUNDATION_RESOURCE_BUNDLE/PrivacyInfo.xcprivacy" \
+    && -f "$ZIP_FOUNDATION_RESOURCE_CONTENTS/PrivacyInfo.xcprivacy" \
+    && ! -L "$ZIP_FOUNDATION_RESOURCE_CONTENTS/PrivacyInfo.xcprivacy" \
     && -z "$(/usr/bin/find "$ZIP_FOUNDATION_RESOURCE_BUNDLE" -type l -print -quit)" ]] \
   || fail "the ZIPFoundation SwiftPM privacy resource bundle is unavailable"
 /usr/bin/ditto \
-  "$ZIP_FOUNDATION_RESOURCE_BUNDLE" \
+  "$ZIP_FOUNDATION_RESOURCE_CONTENTS" \
   "$APP_BUNDLE/Contents/Resources/$ZIP_FOUNDATION_RESOURCE_BUNDLE_NAME"
 APP_RESOURCE_BUNDLE="$BIN_DIR/$APP_RESOURCE_BUNDLE_NAME"
 [[ -d "$APP_RESOURCE_BUNDLE" && ! -L "$APP_RESOURCE_BUNDLE" ]] \
   || fail "the KinlogueApp SwiftPM resource bundle is unavailable"
+APP_RESOURCE_CONTENTS="$(swiftpm_resource_directory "$APP_RESOURCE_BUNDLE")"
 for localization in en.lproj zh-hans.lproj; do
-  [[ -d "$APP_RESOURCE_BUNDLE/$localization" \
-      && ! -L "$APP_RESOURCE_BUNDLE/$localization" ]] \
+  [[ -d "$APP_RESOURCE_CONTENTS/$localization" \
+      && ! -L "$APP_RESOURCE_CONTENTS/$localization" ]] \
     || fail "the $localization app localization is unavailable"
   /usr/bin/ditto \
-    "$APP_RESOURCE_BUNDLE/$localization" \
+    "$APP_RESOURCE_CONTENTS/$localization" \
     "$APP_BUNDLE/Contents/Resources/$localization"
 done
 /bin/cp -- \

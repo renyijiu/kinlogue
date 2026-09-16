@@ -16,6 +16,8 @@
 - 想了解同步目录备份/恢复：读 [`backup-and-restore.md`](backup-and-restore.md)、实施计划和 [`acceptance/current-release.md`](acceptance/current-release.md)。
 - 想改界面或文案：读 [`design-system.md`](design-system.md) 和 [`localization.md`](localization.md)。
 
+当前最低系统已调整为 macOS 26，主要面向个人自用；Xcode 27 构建适配见 [`testing-and-release.md`](testing-and-release.md)，转录编辑器的系统写作工具边界见 [`import-and-ocr.md`](import-and-ocr.md)；旧系统支持决策见 [`decisions.md`](decisions.md)，macOS 26/27 验收状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
+
 ## 当前边界
 
 | 主题 | 稳定结论 | 权威页 |
@@ -26,7 +28,7 @@
 | 报告 | 本机 OCR 只生成有来源候选；用户确认后才进入时间线、搜索和比较 | [`import-and-ocr.md`](import-and-ocr.md) |
 | LAN | 用户显式开启的临时普通 HTTP 会话，绑定所选 Mac 接口并在 HTTP 前拒绝非同 IPv4/IPv6 网络前缀对端，仍只适用于可信任私人网络；成功配对推进浏览器 session generation，手机轮询再以 mutation epoch、revision 与取消 tombstone 防止陈旧状态回退 | [`lan-upload.md`](lan-upload.md) |
 | DICOM | 受限的辅助能力；支持边界窄、非诊断，不代表产品转向通用影像工作站 | [`dicom.md`](dicom.md) |
-| 发布 | 源码仓库已公开，但尚未正式发布可下载产品；GitHub CI 用三个互斥 runner 覆盖同一全局主测试账本，derived-artifact case 从已构建 XCTest inventory 动态发现并逐项有界执行，强制终止不得冒充成功；验收扫描所需 `ripgrep` 由固定版本与 SHA-256 的 CI 引导提供；版本 tag 还必须可从 canonical `main` 到达才能进入构建 | [`testing-and-release.md`](testing-and-release.md)、[`acceptance/current-release.md`](acceptance/current-release.md) |
+| 发布 | 源码仓库已公开，但尚未正式发布可下载产品；GitHub CI 在 macOS 26 基线和 Xcode 27 预览矩阵上各用三个互斥 runner 覆盖同一全局主测试账本，derived-artifact case 从已构建 XCTest inventory 动态发现并逐项有界执行，强制终止不得冒充成功；验收扫描所需 `ripgrep` 由固定版本与 SHA-256 的 CI 引导提供；版本 tag 还必须可从 canonical `main` 到达才能进入构建 | [`testing-and-release.md`](testing-and-release.md)、[`acceptance/current-release.md`](acceptance/current-release.md) |
 
 当前 Swift package 只发布 `Kinlogue` App product；Core、Platform 与测试辅助程序保持为内部 target。持续集成以 GitHub Actions 为唯一当前入口，已经完成使命的 Codemagic 试验配置和 LAN feasibility host 只保留历史文档证据，不再进入构建图。
 

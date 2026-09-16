@@ -6,7 +6,7 @@ let package = Package(
     name: "Kinlogue",
     defaultLocalization: "zh-Hans",
     platforms: [
-        .macOS(.v14)
+        .macOS("26.0")
     ],
     products: [
         .executable(name: "Kinlogue", targets: ["KinlogueApp"]),

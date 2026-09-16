@@ -17,7 +17,13 @@ concurrency:
 jobs:
   quality:
     name: Lint, test, and verify bundle
-    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    # The Xcode 27 runner is a public preview; keep macOS 26 as the required baseline.
+    continue-on-error: ${{ matrix.runner == 'xcode-27' }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
       KINLOGUE_BUILD_JOBS: "2"
@@ -36,6 +42,7 @@ jobs:
           sw_vers
           xcodebuild -version
           swift --version
+          xcrun metal --version
 
       - name: Install pinned ripgrep for acceptance scans
         run: |
@@ -61,7 +68,13 @@ jobs:
 
   complementary-tests:
     name: Complementary test partition
-    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    # The Xcode 27 runner is a public preview; keep macOS 26 as the required baseline.
+    continue-on-error: ${{ matrix.runner == 'xcode-27' }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
       KINLOGUE_BUILD_JOBS: "2"
@@ -78,13 +91,20 @@ jobs:
           sw_vers
           xcodebuild -version
           swift --version
+          xcrun metal --version
 
       - name: Run the complementary test partition
         run: scripts/test.sh
 
   dedicated-lan-derived-tests:
     name: Dedicated LAN derived-artifact tests
-    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    # The Xcode 27 runner is a public preview; keep macOS 26 as the required baseline.
+    continue-on-error: ${{ matrix.runner == 'xcode-27' }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
       KINLOGUE_BUILD_JOBS: "2"
@@ -101,6 +121,7 @@ jobs:
           sw_vers
           xcodebuild -version
           swift --version
+          xcrun metal --version
 
       - name: Run the dedicated LAN derived-artifact tests
         run: scripts/test.sh

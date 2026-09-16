@@ -132,7 +132,7 @@ PROBE_EXECUTABLE="$PROBE_ROOT/$PROBE_TARGET"
   -O \
   -D KINLOGUE_DICOM_XPC_CRASH_PROBE \
   -sdk "$SDK_PATH" \
-  -target arm64-apple-macos14.0 \
+  -target arm64-apple-macos26.0 \
   -module-name KinlogueDICOMXPCProbeHost \
   "$REPO_DIR/Sources/KinlogueDICOMIPC/DICOMIPC.swift" \
   "$REPO_DIR/Sources/KinloguePlatform/DICOM/DICOMDecoderAdapter.swift" \
@@ -164,7 +164,7 @@ create_host() {
   /usr/bin/plutil -insert CFBundleExecutable -string "$PROBE_TARGET" "$host_info"
   /usr/bin/plutil -insert CFBundleVersion -string 1 "$host_info"
   /usr/bin/plutil -insert CFBundleShortVersionString -string 1.0 "$host_info"
-  /usr/bin/plutil -insert LSMinimumSystemVersion -string 14.0 "$host_info"
+  /usr/bin/plutil -insert LSMinimumSystemVersion -string 26.0 "$host_info"
   /usr/bin/plutil -insert KLDProbeMode -string "$mode" "$host_info"
   if [[ -n "$canary" ]]; then
     /usr/bin/plutil -insert KLDProbeCanary -string "$canary" "$host_info"

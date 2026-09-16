@@ -8,7 +8,7 @@ status: navigation
 
 ## 已实施的决策记录
 
-- [`2026-08-19-1418-feat-encrypted-folder-backup-restore-plan.md`](2026-08-19-1418-feat-encrypted-folder-backup-restore-plan.md)：用户选择目录的客户端加密、版本化备份与整库恢复。Core/Platform/App、自动化、保留和 UI 已实现；真实网盘客户端、Developer ID、macOS 14/15 与完整人工恢复仍在验收账本标为未执行。
+- [`2026-08-19-1418-feat-encrypted-folder-backup-restore-plan.md`](2026-08-19-1418-feat-encrypted-folder-backup-restore-plan.md)：用户选择目录的客户端加密、版本化备份与整库恢复。Core/Platform/App、自动化、保留和 UI 已实现；真实网盘客户端、Developer ID、macOS 26/27 与完整人工恢复仍在验收账本标为未执行。
 - [`2026-08-01-002-feat-kinlogue-plaintext-mvp-plan.md`](2026-08-01-002-feat-kinlogue-plaintext-mvp-plan.md)：明文、本机优先 MVP。
 - [`2026-08-02-001-feat-lan-upload-inbox-plan.md`](2026-08-02-001-feat-lan-upload-inbox-plan.md)：临时 LAN 接收与单一待确认队列。
 - [`2026-08-06-001-feat-dicom-mri-viewer-plan.md`](2026-08-06-001-feat-dicom-mri-viewer-plan.md)：受限 DICOM 导入与二维 Viewer。

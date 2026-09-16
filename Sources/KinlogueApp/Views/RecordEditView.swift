@@ -347,6 +347,7 @@ struct InsetTextEditor: NSViewRepresentable {
             return scrollView
         }
 
+        textView.writingToolsBehavior = .none
         textView.isRichText = false
         textView.allowsUndo = true
         textView.drawsBackground = false

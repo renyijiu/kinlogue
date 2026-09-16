@@ -12,6 +12,8 @@ struct ImportReviewViewSafetyTests {
         ))
         let form = source[formStart.lowerBound..<formEnd.upperBound]
 
+        let sourceEditorStart = try #require(source.range(of: "private struct ReviewTextEditor: View"))
+        #expect(source[sourceEditorStart.lowerBound...].contains(".writingToolsBehavior(.disabled)"))
         #expect(form.contains(
             ".disabled(model.isLoading || model.isTerminalActionInFlight || model.isRecognitionInFlight)"
         ))

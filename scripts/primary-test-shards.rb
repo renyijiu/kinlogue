@@ -119,25 +119,31 @@ unless dedicated_groups.map(&:first).sort == DEDICATED_FRESH_RUNNER_CONTAINERS.s
   fail_closed("a dedicated fresh-runner container is missing")
 end
 
-multi_groups.each_slice(CONTAINERS_PER_SHARD) do |batch|
-  alternatives = batch.map { |group, _| "#{Regexp.escape(group)}/" }
-  values = batch.flat_map(&:last)
-  shards << ["^(?:#{alternatives.join('|')})", values, false]
+# Xcode 27 runs targets in separate processes. Keep each shard within one
+# target so its exact expected summary still comes from one test runner.
+multi_groups.group_by { |group, *_| group.split(".", 2).first }.each_value do |target_groups|
+  target_groups.each_slice(CONTAINERS_PER_SHARD) do |batch|
+    alternatives = batch.map { |group, _| "#{Regexp.escape(group)}/" }
+    values = batch.flat_map(&:last)
+    shards << ["^(?:#{alternatives.join('|')})", values, false]
+  end
 end
 
 dedicated_groups.each do |group, values|
   shards << ["^(?:#{Regexp.escape(group)}/)", values, true]
 end
 
-single_groups.each_slice(SINGLE_TEST_BATCH_SIZE) do |batch|
-  alternatives = batch.map do |group, identifier, exact|
-    if exact
-      "#{Regexp.escape(identifier)}\\b"
-    else
-      "#{Regexp.escape(group)}/"
+single_groups.group_by { |group, *_| group.split(".", 2).first }.each_value do |target_groups|
+  target_groups.each_slice(SINGLE_TEST_BATCH_SIZE) do |batch|
+    alternatives = batch.map do |group, identifier, exact|
+      if exact
+        "#{Regexp.escape(identifier)}\\b"
+      else
+        "#{Regexp.escape(group)}/"
+      end
     end
+    shards << ["^(?:#{alternatives.join('|')})", batch.map { |_, specifier, _| specifier }, false]
   end
-  shards << ["^(?:#{alternatives.join('|')})", batch.map { |_, specifier, _| specifier }, false]
 end
 shards.sort_by!(&:first)
 

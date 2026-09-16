@@ -968,23 +968,20 @@ if all_statuses_passed "${CURRENT_CAPABILITY_STATUSES[@]}"; then
   CURRENT_OS_CAPABILITY_STATUS="passed"
 fi
 
-MACOS14_STATUS="notExecuted"
-MACOS15_STATUS="notExecuted"
 MACOS26_STATUS="notExecuted"
+MACOS27_STATUS="notExecuted"
 OS_MAJOR="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d. -f1)"
 case "$OS_MAJOR" in
-  14) MACOS14_STATUS="$CURRENT_OS_CAPABILITY_STATUS" ;;
-  15) MACOS15_STATUS="$CURRENT_OS_CAPABILITY_STATUS" ;;
   26) MACOS26_STATUS="$CURRENT_OS_CAPABILITY_STATUS" ;;
+  27) MACOS27_STATUS="$CURRENT_OS_CAPABILITY_STATUS" ;;
 esac
 
 MANDATORY_U0_STATUSES=(
   "${CURRENT_CAPABILITY_STATUSES[@]}"
   "$PROVISIONED_SIGNING_STATUS"
   "$DEVELOPER_ID_SIGNING_STATUS"
-  "$MACOS14_STATUS"
-  "$MACOS15_STATUS"
   "$MACOS26_STATUS"
+  "$MACOS27_STATUS"
 )
 OVERALL_STATUS="blocked"
 if all_statuses_passed "${MANDATORY_U0_STATUSES[@]}"; then
@@ -1154,9 +1151,8 @@ if [[ -s "$NAMED_DATASET_OUT" ]]; then
 fi
 
 /usr/bin/plutil -insert overall -string "$OVERALL_STATUS" "$TEMP_REPORT"
-/usr/bin/plutil -insert macOS14 -string "$MACOS14_STATUS" "$TEMP_REPORT"
-/usr/bin/plutil -insert macOS15 -string "$MACOS15_STATUS" "$TEMP_REPORT"
 /usr/bin/plutil -insert macOS26 -string "$MACOS26_STATUS" "$TEMP_REPORT"
+/usr/bin/plutil -insert macOS27 -string "$MACOS27_STATUS" "$TEMP_REPORT"
 /usr/bin/plutil -lint "$TEMP_REPORT" >/dev/null
 /usr/bin/plutil -convert json "$TEMP_REPORT"
 /bin/cp -p "$TEMP_REPORT" "$FINAL_REPORT"

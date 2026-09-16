@@ -37,7 +37,7 @@ flowchart LR
 | `KinlogueStorageProcessFixture` | executable | 跨进程存储协调和安装测试 fixture；恢复测试只负责 seed/驱动/strict verify，并通过 test-only SPI 调用生产恢复事务 | `KinlogueCore`、`KinloguePlatform` |
 | `KinlogueExportWriterProbe` | non-published executable | 对 exact ZIP writer 做高 entry-count、RSS、取消、heartbeat 和清理 characterization；不进入生产 product | ZIPFoundation `0.9.20` |
 
-语言模式是 Swift 6，最低平台是 macOS 14；Swift package 只对外声明 `Kinlogue` executable product，Core 与 Platform 保持内部 target。SwiftNIO 固定为 `2.101.3`，ZIPFoundation 以 exact `0.9.20` 作为 root dependency 直接链接到 `KinloguePlatform`。DICOM-Swift 同时在 root manifest 和 Helper Xcode project 中固定为 exact `1.3.3` / revision `9ae0851e134af274651b646519b8a7aaeee05f05`，两个 `Package.resolved` 都受门禁约束。Helper 是 non-published target；主 App/Core/Platform 不 import 或链接 `DicomCore`。主 App 的 ZIP 导出是独立的 Platform 能力，并把 ZIPFoundation 的 SwiftPM `PrivacyInfo.xcprivacy` resource bundle 放入主 App；这不改变 DicomCore 仍只存在于 Helper 的隔离边界，Helper 的 Xcode-generated ZIPFoundation resource bundle 处理也保持原样。
+语言模式是 Swift 6，最低平台是 macOS 26；Swift package 只对外声明 `Kinlogue` executable product，Core 与 Platform 保持内部 target。SwiftNIO 固定为 `2.101.3`，ZIPFoundation 以 exact `0.9.20` 作为 root dependency 直接链接到 `KinloguePlatform`。DICOM-Swift 同时在 root manifest 和 Helper Xcode project 中固定为 exact `1.3.3` / revision `9ae0851e134af274651b646519b8a7aaeee05f05`，两个 `Package.resolved` 都受门禁约束。Helper 是 non-published target；主 App/Core/Platform 不 import 或链接 `DicomCore`。主 App 的 ZIP 导出是独立的 Platform 能力，并把 ZIPFoundation 的 SwiftPM `PrivacyInfo.xcprivacy` resource bundle 放入主 App；这不改变 DicomCore 仍只存在于 Helper 的隔离边界，Helper 的 Xcode-generated ZIPFoundation resource bundle 处理也保持原样。
 
 ### DICOM 解码隔离边界
 

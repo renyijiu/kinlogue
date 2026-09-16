@@ -314,9 +314,9 @@ METADATA_PLIST="$NOTARY_TEMP_DIRECTORY/release-metadata.plist"
   "$METADATA_PLIST"
 /usr/bin/plutil -insert compatibility.installedAcceptance -string \
   PENDING_FORMAL_RELEASE_GATE "$METADATA_PLIST"
-/usr/bin/plutil -insert compatibility.macOS14 -string \
+/usr/bin/plutil -insert compatibility.macOS26 -string \
   PENDING_FORMAL_RELEASE_GATE "$METADATA_PLIST"
-/usr/bin/plutil -insert compatibility.macOS15 -string \
+/usr/bin/plutil -insert compatibility.macOS27 -string \
   PENDING_FORMAL_RELEASE_GATE "$METADATA_PLIST"
 /usr/bin/plutil -insert compatibility.realPhoneMatrix -string \
   PENDING_FORMAL_RELEASE_GATE "$METADATA_PLIST"

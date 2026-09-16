@@ -56,8 +56,18 @@ struct GitHubActionsWorkflowTests {
 
         #expect(workflow.contains("pull_request:"))
         #expect(workflow.contains("push:"))
-        #expect(workflow.contains("runs-on: macos-26"))
-        #expect(workflow.components(separatedBy: "runs-on: macos-26").count - 1 == 3)
+        let jobNames = ["quality", "complementary-tests", "dedicated-lan-derived-tests"]
+        for jobName in jobNames {
+            let start = try #require(workflow.range(of: "  \(jobName):\n"))
+            let remaining = workflow[start.upperBound...]
+            // Read to the next job (two-space indentation), not its nested steps.
+            let nextJob = remaining.range(of: #"\n  [a-z][a-z-]*:\n"#, options: .regularExpression)
+            let job = remaining[..<(nextJob?.lowerBound ?? remaining.endIndex)]
+            #expect(job.contains("runner: [macos-26, xcode-27]"))
+            #expect(job.contains("runs-on: ${{ matrix.runner }}"))
+            #expect(job.contains("continue-on-error: ${{ matrix.runner == 'xcode-27' }}"))
+            #expect(job.contains("fail-fast: false"))
+        }
         #expect(!workflow.contains("runs-on: macos-15"))
         #expect(workflow.contains("timeout-minutes: 30"))
         #expect(!workflow.contains("timeout-minutes: 90"))
