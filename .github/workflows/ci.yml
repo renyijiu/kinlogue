@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Lint, test, and verify bundle
+    name: ${{ matrix.runner == 'macos-26' && 'Lint, test, and verify bundle' || 'Lint, test, and verify bundle (xcode-27)' }}
     strategy:
       fail-fast: false
       matrix:
@@ -71,7 +71,7 @@ jobs:
         run: scripts/verify-dicom-xpc.sh --use-verified-app
 
   complementary-tests:
-    name: Complementary test partition
+    name: ${{ matrix.runner == 'macos-26' && 'Complementary test partition' || 'Complementary test partition (xcode-27)' }}
     strategy:
       fail-fast: false
       matrix:
@@ -105,7 +105,7 @@ jobs:
         run: scripts/test.sh
 
   dedicated-lan-derived-tests:
-    name: Dedicated LAN derived-artifact tests
+    name: ${{ matrix.runner == 'macos-26' && 'Dedicated LAN derived-artifact tests' || 'Dedicated LAN derived-artifact tests (xcode-27)' }}
     strategy:
       fail-fast: false
       matrix:

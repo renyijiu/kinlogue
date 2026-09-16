@@ -16,7 +16,7 @@
 - 想了解同步目录备份/恢复：读 [`backup-and-restore.md`](backup-and-restore.md)、实施计划和 [`acceptance/current-release.md`](acceptance/current-release.md)。
 - 想改界面或文案：读 [`design-system.md`](design-system.md) 和 [`localization.md`](localization.md)。
 
-当前最低系统已调整为 macOS 26，主要面向个人自用；Xcode 27 构建适配与 CI Metal 组件准备见 [`testing-and-release.md`](testing-and-release.md)，转录编辑器的系统写作工具边界见 [`import-and-ocr.md`](import-and-ocr.md)；旧系统支持决策见 [`decisions.md`](decisions.md)，macOS 26/27 验收状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
+当前最低系统已调整为 macOS 26，主要面向个人自用；Xcode 27 构建适配、CI Metal 组件准备与基线检查名兼容见 [`testing-and-release.md`](testing-and-release.md)，转录编辑器的系统写作工具边界见 [`import-and-ocr.md`](import-and-ocr.md)；旧系统支持决策见 [`decisions.md`](decisions.md)，macOS 26/27 验收状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
 
 ## 当前边界
 

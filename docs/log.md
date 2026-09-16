@@ -1178,3 +1178,9 @@
 - **原因**：PR #13 的 Xcode 27 三个分区在工具链检查阶段失败，runner 日志明确报告缺少 Metal Toolchain，编译和测试尚未执行。
 - **修正**：各分区先探测 Metal，仅缺失时通过 Xcode 下载官方组件并清理定位缓存，再强制复验；保留下载失败、组件不可执行时的非零退出。补充现有 workflow 断言及环境文档。CI 修正的远端结果待新提交执行，不将本机结果当作 runner 通过。
 - **本机验证**：`scripts/test.sh --filter GitHubActionsWorkflowTests` 的 11 tests / 1 suite 通过；直接执行 workflow 的 shell 片段，以合成命令覆盖组件已存在、缺失后成功安装、下载失败、安装后仍缺失四种路径；文档、隐私与 diff 检查通过。
+
+## [2026-09-16] ci | 保持矩阵基线的必需检查名称
+
+- **证据**：PR #13 在 `ded7488` 上六个 CI 分区及 CodeQL 均已通过，但仓库 ruleset 仍要求三个无系统后缀的原有检查名，矩阵默认命名导致 GitHub 保持 BLOCKED。
+- **修正**：三个 macOS 26 job 显式保留原名，仅 Xcode 27 使用后缀；不修改远端保护规则、不降低检查范围。更新现有 workflow 回归及构建文档，远端名称匹配由后续 CI 验证。
+- **验证**：`scripts/test.sh --filter GitHubActionsWorkflowTests` 的 11 tests / 1 suite、文档与 diff 检查通过；此前 `ded7488` 的本机 clean-source bundle/真实 XPC 及远端双系统完整 CI、CodeQL 成功不冒充新提交已经通过。
