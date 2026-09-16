@@ -14,7 +14,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/ThalesMMS/DICOM-Swift.git",
-            exact: "1.3.3"
+            exact: "1.5.0"
         ),
         .package(
             url: "https://github.com/apple/swift-nio.git",
