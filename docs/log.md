@@ -1152,3 +1152,21 @@
 - **构建与产物**：`scripts/lint.sh` 的默认 Swift Build、warnings-as-errors 和 package graph 通过；`scripts/verify-dicom-xpc.sh` 在最终工作树通过 Release App/Helper、ad-hoc 签名、raw fixture、外部崩溃、hang watchdog、日志 canary 和零 runtime socket。独立核对最终资源精确白名单、`codesign --verify --deep --strict`、App/Helper plist 与 Mach-O 的最低系统 26.0，并用 Foundation 实际加载包内 LAN 页面资源。文档、本地化、当前树隐私和 diff 门禁通过。Xcode 报告本机 iOS CoreDevice/CoreSimulator 组件版本旧，但 macOS 构建与 XPC 验证成功；未额外修改模拟器组件。
 - **证据边界**：所有改动未提交、未 push，未发布或覆盖用户安装。`verify-app.sh` 按设计拒绝 dirty-source，不绕过 clean-source 门禁；候选仍为 `not-verified` / `pendingManual`。macOS 26 独立机器、26/27 安装与重启、真实手机/OCR/DICOM 私有样本、Powerbox/网盘、键盘/VoiceOver、Developer ID 和 notarization 未在本轮验证。历史日志中的旧阻塞保留为点时记录，由本条后续证据说明已解决范围。
 - **交付整理**：后续按用户要求复核本轮代码、测试、配置和文档，作为一个 macOS 26+ / Xcode 27 适配提交保存；没有新增行为修改。上述未提交状态描述验证发生时的工作树，提交本身不提升发布候选状态，也不触发 push、安装或分发。
+
+
+## [2026-09-16] dependencies | 同步升级 DICOM-Swift 1.5.0 并复验隔离边界
+
+- **范围**：在 macOS 26+ 适配提交之后，按用户授权处理 PR #9 的完整依赖链。Root manifest、Helper Xcode project 与双方锁文件同步为 exact DICOM-Swift 1.5.0 / `8f3605a33ed070160b4e023eacd87f32eae8e913`；新增 J2KSwift 11.0.2、JLSwift 0.9.0、JXLSwift 1.4.0、CompressionFamily 1.0.1，已有其他 pin 不变。最低可用编译工具链说明同步为 Swift 6.2+；主 Package language mode 仍为 Swift 6。
+- **锁定与打包**：发布前置校验把 Helper 七项依赖的 URL、version、revision、唯一性、总数和 root 一致性作为明确白名单。回归执行真实校验片段，覆盖 revision、URL、root 漂移、缺失、重复、额外和畸形条目。上游 package 更名导致资源变为 `DICOMSwift_DicomCore.bundle`，新增 `J2KSwift_J2KMetal.bundle`；构建、正式分发和 XPC 探针全部逐项签名并验证三个明确的嵌套资源，未用任意目录扫描放行新代码。主 App 链接门禁新增 codec 模块拒绝项。
+- **许可证**：MIT 的 J2KSwift/JXLSwift 与 Apache-2.0 的 CompressionFamily 均按锁定 revision 核对。JLSwift 0.9.0 缺少 LICENSE；上游随后明确采用 Apache-2.0，许可提交与标签的完整生产 Sources tree 哈希相同，按该不可变依据保留 LICENSE 条款、NOTICE 和来源说明。未把上游第三方 CharLS 测试夹具带入生产包。详情见[固定来源核对](sources/dicom-swift-1.5.0-dependency-review-2026-09-16.md)与 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)，声明哈希校验同步更新。
+- **兼容性与范围**：没有修改应用层解码算法、IPC、资料库或现有 DICOM 可接受范围；仍只允许 classic single-frame、Explicit VR Little Endian、灰度 MR。压缩、多帧、PACS/JPIP、网络查询与 daemon 没有启用。macOS 27 / Xcode 27 / arm64 上定向回归 214 tests / 26 suites 通过；最终 `scripts/test.sh` 退出码 0，994 tests / 91 suites 主账和 13 项独立 XCTest、验收扫描、33 项跨进程存储、条件式别名锁、18 项 DICOM 导入、安装式 LAN HTTP 与真实双流 RSS/背压门禁均通过。
+- **产物证据**：`scripts/lint.sh`、`scripts/verify-app.sh --lan-prerequisites-only` 和最终 `scripts/verify-dicom-xpc.sh` 通过。Release App/Helper 签名、raw 像素夹具、外部崩溃、hang watchdog、日志 canary、零运行时 socket 通过；另核对真实主 App link map 没有新增 codec、Helper 精确资源清单、两处声明副本和 `codesign --verify --deep --strict`。App 磁盘占用从 33,208 KiB 到 43,884 KiB；Helper 从 6,216 KiB 到 16,892 KiB，约增加 10.4 MiB。首次优化构建新增了 codec 编译工作，未做冷热缓存计时对照，不声称运行性能提升。最终文档、隐私、本地化和 diff 检查通过，独立静态复核无实质问题。
+- **交付边界**：本轮改动留在本地工作树，未提交、push、合并或评论 PR #9，未替换用户安装。完整 clean-source 发布验证、macOS 26 独立机器与安装/真实私有样本/键盘/VoiceOver 等人工矩阵未执行；当前候选继续 `not-verified` / `pendingManual`。前一轮 1.3.3 的验证记录保留为历史，不替代本条 1.5.0 的新证据。
+
+## [2026-09-16] build | 统一最低 Swift tools 6.2 声明
+
+- **范围**：`Package.swift` 的 tools 声明从 6.1 提高为 6.2，与已升级 DICOM 依赖的工具链要求及 README 一致；同步 `verify-app.sh` 的精确声明门禁、环境说明和知识库索引。保留 Swift 6 language mode 与 macOS 26 最低运行版本，本机继续使用 Xcode 27 / Apple Swift 6.4。
+- **验证**：纯配置调整不新增业务测试，以实际默认 Swift Build 和门禁作为替代验证。`scripts/lint.sh`（warnings-as-errors build、manifest 解析和 package graph）及 `scripts/verify-app.sh --lan-prerequisites-only` 通过；shell 语法、文档与 diff 检查通过。
+- **边界**：本轮未重跑完整业务测试或 Release/XPC；前一条完整结果属于调整前的依赖升级工作树。未独立验证 Swift 6.2 编译器、macOS 26 机器或安装/人工矩阵，不提升发布候选状态；改动保留本地，未提交或 push。
+
+- **提交整理**：按用户要求将 DICOM-Swift 1.5.0、双构建依赖锁定、许可证与资源签名、回归覆盖和最低 Swift tools 6.2 声明合并为一个逻辑提交；没有额外业务行为修改。上述未提交描述保留为验证发生时的状态，提交不提升候选验收状态。

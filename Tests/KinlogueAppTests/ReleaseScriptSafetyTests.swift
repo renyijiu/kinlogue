@@ -27,7 +27,7 @@ struct ReleaseScriptSafetyTests {
             try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executableURL.path)
             try Data("synthetic".utf8).write(to: bundle.appendingPathComponent("Contents/Info.plist"))
         }
-        for resource in ["DICOMDecoder_DicomCore.bundle", "ZIPFoundation_ZIPFoundation.bundle"] {
+        for resource in ["DICOMSwift_DicomCore.bundle", "J2KSwift_J2KMetal.bundle", "ZIPFoundation_ZIPFoundation.bundle"] {
             try fileManager.createDirectory(
                 at: helper.appendingPathComponent("Contents/Resources/\(resource)"),
                 withIntermediateDirectories: true
@@ -97,7 +97,8 @@ struct ReleaseScriptSafetyTests {
             if fault.isEmpty {
                 #expect(result.status == 0, Comment(rawValue: result.output))
                 #expect(result.output.split(separator: "\n").filter { $0.hasPrefix("SIGNED:") } == [
-                    "SIGNED:DICOMDecoder_DicomCore.bundle", "SIGNED:ZIPFoundation_ZIPFoundation.bundle",
+                    "SIGNED:DICOMSwift_DicomCore.bundle", "SIGNED:J2KSwift_J2KMetal.bundle",
+                    "SIGNED:ZIPFoundation_ZIPFoundation.bundle",
                     "SIGNED:KinlogueDICOMDecoderHelper.xpc", "SIGNED:Kinlogue.app",
                 ])
             } else {

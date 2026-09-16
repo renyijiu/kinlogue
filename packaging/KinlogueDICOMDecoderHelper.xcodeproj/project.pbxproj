@@ -215,7 +215,7 @@
 		A71000000000000000000001 /* DICOM-Swift */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/ThalesMMS/DICOM-Swift.git";
-			requirement = {kind = exactVersion; version = 1.3.3;};
+			requirement = {kind = exactVersion; version = 1.5.0;};
 		};
 /* End XCRemoteSwiftPackageReference section */
 

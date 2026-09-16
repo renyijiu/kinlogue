@@ -102,7 +102,7 @@ Mac App 界面当前支持简体中文和英文。默认跟随 macOS 的 App 语
 
 ## 本机构建
 
-要求 macOS 26 或更高版本，以及包含 Swift 6 的 Xcode 或 Command Line Tools。
+要求 macOS 26 或更高版本，以及包含 Swift 6.2 或更新版本的 Xcode 或 Command Line Tools。
 
 ```sh
 scripts/lint.sh

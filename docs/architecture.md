@@ -13,7 +13,7 @@ flowchart LR
   Apple["PDFKit / Vision / ImageIO / AppKit"]
   IPC["KinlogueDICOMIPC\nFoundation-only bounded DTO"]
   Helper["KinlogueDICOMDecoderHelper.xpc\nindependent App Sandbox"]
-  Dicom["DicomCore 1.3.3"]
+  Dicom["DicomCore 1.5.0"]
   Core --> Platform
   Core --> App
   Platform --> App
@@ -31,13 +31,13 @@ flowchart LR
 | `KinlogueCore` | internal library target | 领域模型、状态机、import/LAN 协议、DICOM study/index、catalog v3、查询、fingerprint、backup contract/retention 和平台无关验证 | Foundation |
 | `KinloguePlatform` | internal library target | `PlaintextVault`、原子文件、删除、PDF/Image OCR、LAN receiver/inbox、流式原始文件 ZIP、加密 backup container/restore transaction、内嵌手机资源 | `KinlogueCore`、ZIPFoundation `0.9.20`、SwiftNIO `NIOCore/NIOHTTP1/NIOPosix`、CryptoKit 与 Apple frameworks |
 | `KinlogueDICOMIPC` | library | Foundation-only、有界 request/response DTO、固定错误码和 descriptor-only NSXPC contract | Foundation |
-| `KinlogueDICOMDecoderHelper` | non-published executable / XPC service | 在独立 sandbox 中把只读 descriptor 有界复制到写入前已 unlink 的匿名临时文件，并只解码受支持的单帧 MR 对象 | `KinlogueDICOMIPC`、exact `DicomCore` 1.3.3 |
+| `KinlogueDICOMDecoderHelper` | non-published executable / XPC service | 在独立 sandbox 中把只读 descriptor 有界复制到写入前已 unlink 的匿名临时文件，并只解码受支持的单帧 MR 对象 | `KinlogueDICOMIPC`、exact `DicomCore` 1.5.0 |
 | `KinlogueDICOMTestSupport` / `KinlogueDICOMXPCProbe` | non-published test support | 生成无身份 Explicit VR Little Endian MR fixture，并验证真实 embedded XPC round-trip | Foundation、`KinloguePlatform`（probe） |
 | `KinlogueApp` | executable | SwiftUI/AppKit UI、App service、ViewModel、运行时身份和合成验收入口 | `KinlogueCore`、`KinloguePlatform` |
 | `KinlogueStorageProcessFixture` | executable | 跨进程存储协调和安装测试 fixture；恢复测试只负责 seed/驱动/strict verify，并通过 test-only SPI 调用生产恢复事务 | `KinlogueCore`、`KinloguePlatform` |
 | `KinlogueExportWriterProbe` | non-published executable | 对 exact ZIP writer 做高 entry-count、RSS、取消、heartbeat 和清理 characterization；不进入生产 product | ZIPFoundation `0.9.20` |
 
-语言模式是 Swift 6，最低平台是 macOS 26；Swift package 只对外声明 `Kinlogue` executable product，Core 与 Platform 保持内部 target。SwiftNIO 固定为 `2.101.3`，ZIPFoundation 以 exact `0.9.20` 作为 root dependency 直接链接到 `KinloguePlatform`。DICOM-Swift 同时在 root manifest 和 Helper Xcode project 中固定为 exact `1.3.3` / revision `9ae0851e134af274651b646519b8a7aaeee05f05`，两个 `Package.resolved` 都受门禁约束。Helper 是 non-published target；主 App/Core/Platform 不 import 或链接 `DicomCore`。主 App 的 ZIP 导出是独立的 Platform 能力，并把 ZIPFoundation 的 SwiftPM `PrivacyInfo.xcprivacy` resource bundle 放入主 App；这不改变 DicomCore 仍只存在于 Helper 的隔离边界，Helper 的 Xcode-generated ZIPFoundation resource bundle 处理也保持原样。
+语言模式是 Swift 6，最低平台是 macOS 26；Swift package 只对外声明 `Kinlogue` executable product，Core 与 Platform 保持内部 target。SwiftNIO 固定为 `2.101.3`，ZIPFoundation 以 exact `0.9.20` 作为 root dependency 直接链接到 `KinloguePlatform`。DICOM-Swift 同时在 root manifest 和 Helper Xcode project 中固定为 exact `1.5.0` / revision `8f3605a33ed070160b4e023eacd87f32eae8e913`，两个 `Package.resolved` 都受门禁约束。Helper 是 non-published target；主 App/Core/Platform 不 import 或链接 `DicomCore`。主 App 的 ZIP 导出是独立的 Platform 能力，并把 ZIPFoundation 的 SwiftPM `PrivacyInfo.xcprivacy` resource bundle 放入主 App；这不改变 DicomCore 仍只存在于 Helper 的隔离边界，Helper 的 Xcode-generated ZIPFoundation resource bundle 处理也保持原样。
 
 ### DICOM 解码隔离边界
 

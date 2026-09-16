@@ -7,14 +7,19 @@ graph:
 - Swift Atomics 1.3.1 (`0442cb5a3f98ab802acb777929fdb446bda11a34`)
 - Swift Collections 1.6.0 (`a0cb0954ecb21e4e31b0070e6ed5674e8556685a`)
 - Swift System 1.7.5 (`50688cacbd41d547e9eb9f7a213542340b7c442b`)
-- DICOM-Swift 1.3.3 (`9ae0851e134af274651b646519b8a7aaeee05f05`)
+- DICOM-Swift 1.5.0 (`8f3605a33ed070160b4e023eacd87f32eae8e913`)
 - Swift Argument Parser 1.8.2 (`6a52f3251125d74daf04fcbd5e6f08a75d074382`)
 - ZIPFoundation 0.9.20 (`22787ffb59de99e5dc1fbfe80b19c97a904ad48d`)
+- J2KSwift 11.0.2 (`b1949084eeedaafb40bff8f1745bbab19e4bc36d`)
+- JLSwift 0.9.0 (`53d902fec538e5c12f4ed9864c026be5da66b5dd`)
+- JXLSwift 1.4.0 (`760697a54dd253da8e8466c3fd09ecf2c2d89aec`)
+- CompressionFamily 1.0.1 (`36ef2c94e28a3b74ba395ce6397ba2ae7b041c5e`)
 
-SwiftNIO, Swift Atomics, Swift Collections, Swift System, DICOM-Swift, and
-Swift Argument Parser are distributed under the Apache License, Version 2.0;
-the complete license appears below. ZIPFoundation is distributed under the
-MIT License. SwiftNIO also contains or derives work from the projects
+SwiftNIO, Swift Atomics, Swift Collections, Swift System, DICOM-Swift,
+Swift Argument Parser, JLSwift, and CompressionFamily are distributed under
+the Apache License, Version 2.0; the complete license appears below.
+ZIPFoundation, J2KSwift, and JXLSwift are distributed under the MIT License.
+SwiftNIO also contains or derives work from the projects
 identified in its upstream notice, which is reproduced in full. The llhttp
 component incorporated by SwiftNIO and ZIPFoundation have applicable MIT
 notices reproduced below. DICOM-Swift includes the upstream attribution
@@ -381,3 +386,49 @@ SOFTWARE.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+
+## JLSwift license provenance
+
+The pinned 0.9.0 tag omitted a license file. Upstream commit
+`7020e28dcd4fac24cb31a13e6d2a00aa38ac6e73` explicitly licenses the project-owned
+code under Apache-2.0. Its complete `Sources` tree is byte-identical to the
+pinned tag (Git tree `375e173ad6247e732c4fa1ffde599bf8a1330426`). This attribution
+uses that immutable licensing commit, not the repository's mutable metadata.
+The third-party CharLS test fixtures are not part of Kinlogue's build or bundle.
+
+### JLSwift NOTICE
+
+JLSwift
+Copyright 2026 Raster Images Private Limited
+
+This product includes software developed by Raster Images Private Limited.
+
+### CompressionFamily NOTICE
+
+CompressionFamily
+Copyright 2026 Raster Images Private Limited
+
+## J2KSwift and JXLSwift MIT License
+
+MIT License
+
+Copyright (c) 2026 Raster-Lab
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

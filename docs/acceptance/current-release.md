@@ -34,6 +34,8 @@
 
 Core、Platform、App 与真实跨进程测试已经分别覆盖报告/OCR、LAN inbox、DICOM XPC、原件导出、加密 checkpoint、保留、离线重试、跨进程 publication 和恢复事务。各能力的具体证明与未执行项由 [LAN 矩阵](lan-upload-matrix.md)、[DICOM 矩阵](dicom-mri-viewer-matrix.md)、[备份与恢复](../backup-and-restore.md)及[测试与发布](../testing-and-release.md)维护。
 
+本轮 DICOM-Swift 1.5.0 的双锁文件、第三方许可来源、新增资源签名与主进程隔离已复核；macOS 27 上完整源码测试及 dirty-source Release/XPC 验证通过，具体环境、成本和边界见[实现日志](../log.md)及 [DICOM 专题](../dicom.md)。这些本机证据不自动绑定新的 clean-source 发布候选。
+
 这些聚焦证据在最终完整门禁登记前只能描述对应行为，不能把本页的源码自动化或公共发布状态提升为 `passed`。
 
 ## 发布前人工门禁

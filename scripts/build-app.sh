@@ -260,7 +260,8 @@ DICOM_HELPER_BUNDLE="$APP_BUNDLE/Contents/XPCServices/$DICOM_HELPER_BUNDLE_NAME"
 /usr/bin/ditto "$DICOM_HELPER_BUILD_PRODUCT" "$DICOM_HELPER_BUNDLE"
 [[ -f "$DICOM_HELPER_BUNDLE/Contents/MacOS/$DICOM_HELPER_TARGET" \
     && -x "$DICOM_HELPER_BUNDLE/Contents/MacOS/$DICOM_HELPER_TARGET" \
-    && -d "$DICOM_HELPER_BUNDLE/Contents/Resources/DICOMDecoder_DicomCore.bundle" \
+    && -d "$DICOM_HELPER_BUNDLE/Contents/Resources/DICOMSwift_DicomCore.bundle" \
+    && -d "$DICOM_HELPER_BUNDLE/Contents/Resources/J2KSwift_J2KMetal.bundle" \
     && -d "$DICOM_HELPER_BUNDLE/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle" \
     && -z "$(/usr/bin/find "$DICOM_HELPER_BUNDLE" -type l -print -quit)" ]] \
   || fail "the Xcode-built DICOM Helper layout is incomplete or unsafe"
@@ -270,7 +271,8 @@ DICOM_HELPER_BUNDLE="$APP_BUNDLE/Contents/XPCServices/$DICOM_HELPER_BUNDLE_NAME"
 "$SWIFT_EXECUTABLE" "$ICON_GENERATOR" "$ICONSET_DIRECTORY" "$APP_ICON"
 
 for helper_resource_bundle in \
-    "$DICOM_HELPER_BUNDLE/Contents/Resources/DICOMDecoder_DicomCore.bundle" \
+    "$DICOM_HELPER_BUNDLE/Contents/Resources/DICOMSwift_DicomCore.bundle" \
+    "$DICOM_HELPER_BUNDLE/Contents/Resources/J2KSwift_J2KMetal.bundle" \
     "$DICOM_HELPER_BUNDLE/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle"; do
   /usr/bin/codesign --force --sign - "$helper_resource_bundle"
   /usr/bin/codesign --verify --strict "$helper_resource_bundle"

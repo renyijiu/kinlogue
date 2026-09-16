@@ -4,7 +4,8 @@
 
 ## 环境前提
 
-- macOS 26 或更高版本；`Package.swift` 使用 Swift 6 language mode。
+- macOS 26 或更高版本；`Package.swift` 声明最低 Swift tools 6.2，与 DICOM-Swift 及其 codec 依赖一致。主 package 的 `.v6` 和 Helper 的 `SWIFT_VERSION = 6.0` 均表示 Swift 6 language mode，不是编译器的小版本。
+- 当前本机 Xcode 27 使用 Apple Swift 6.4 编译；最低工具链声明不限制使用更新编译器，也不将最低运行系统提高到 macOS 27。Swift 6.2 工具链及 macOS 26 独立机器仍需单独验证。
 - `swift build` / `swift test` 可使用 SwiftPM 和 Command Line Tools。
 - 完整 App bundle、签名、XPC 和安装验收要求 `/Applications/Xcode.app/Contents/Developer`。
 - Xcode 27 使用默认 Swift Build 引擎；DICOM 资源需要可调用的 Metal Toolchain。缺失时运行 `xcodebuild -downloadComponent MetalToolchain`，并用 `xcrun --sdk macosx metal --version` 验证；组件安装后定位缓存陈旧时可执行 `xcrun --kill-cache`。`build-app.sh` 在构建前检查组件，不自动下载或安装。 打包脚本接受旧引擎平铺资源与 Swift Build 的 `Contents/Resources` 两种布局，拒绝符号链接，并统一整理为现有最终包布局；Platform metadata、手机页面、ZIPFoundation 隐私清单和 App 本地化继续受原有精确资源白名单约束。

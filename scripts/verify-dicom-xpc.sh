@@ -175,7 +175,8 @@ create_host() {
   fi
 
   for resource_bundle in \
-      "$host_helper/Contents/Resources/DICOMDecoder_DicomCore.bundle" \
+      "$host_helper/Contents/Resources/DICOMSwift_DicomCore.bundle" \
+      "$host_helper/Contents/Resources/J2KSwift_J2KMetal.bundle" \
       "$host_helper/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle"; do
     [[ -d "$resource_bundle" && ! -L "$resource_bundle" ]] \
       || fail "the Helper is missing a standard Xcode resource bundle"
@@ -425,7 +426,8 @@ sign_helper() {
   local helper="$1"
   local resource_bundle
   for resource_bundle in \
-      "$helper/Contents/Resources/DICOMDecoder_DicomCore.bundle" \
+      "$helper/Contents/Resources/DICOMSwift_DicomCore.bundle" \
+      "$helper/Contents/Resources/J2KSwift_J2KMetal.bundle" \
       "$helper/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle"; do
     [[ -d "$resource_bundle" && ! -L "$resource_bundle" ]] \
       || fail "the watchdog Helper is missing a standard resource bundle"
