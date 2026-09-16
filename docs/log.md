@@ -1172,3 +1172,9 @@
 - **提交整理**：按用户要求将 DICOM-Swift 1.5.0、双构建依赖锁定、许可证与资源签名、回归覆盖和最低 Swift tools 6.2 声明合并为一个逻辑提交；没有额外业务行为修改。上述未提交描述保留为验证发生时的状态，提交不提升候选验收状态。
 
 - **PR 前文档复核**：修正贡献指南中遗留的 macOS 14+ / Swift 6 环境说明，统一为 macOS 26+ / Swift 6.2+；这是当前索引与构建专题已记录要求的同步，不改变运行行为。
+
+## [2026-09-16] ci | 准备 Xcode 27 runner 的 Metal Toolchain
+
+- **原因**：PR #13 的 Xcode 27 三个分区在工具链检查阶段失败，runner 日志明确报告缺少 Metal Toolchain，编译和测试尚未执行。
+- **修正**：各分区先探测 Metal，仅缺失时通过 Xcode 下载官方组件并清理定位缓存，再强制复验；保留下载失败、组件不可执行时的非零退出。补充现有 workflow 断言及环境文档。CI 修正的远端结果待新提交执行，不将本机结果当作 runner 通过。
+- **本机验证**：`scripts/test.sh --filter GitHubActionsWorkflowTests` 的 11 tests / 1 suite 通过；直接执行 workflow 的 shell 片段，以合成命令覆盖组件已存在、缺失后成功安装、下载失败、安装后仍缺失四种路径；文档、隐私与 diff 检查通过。

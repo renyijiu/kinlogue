@@ -37,12 +37,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Show toolchain
+      - name: Prepare toolchain
         run: |
           sw_vers
           xcodebuild -version
           swift --version
-          xcrun metal --version
+          if ! xcrun --sdk macosx metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+            xcrun --kill-cache
+          fi
+          xcrun --sdk macosx metal --version
 
       - name: Install pinned ripgrep for acceptance scans
         run: |
@@ -86,12 +90,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Show toolchain
+      - name: Prepare toolchain
         run: |
           sw_vers
           xcodebuild -version
           swift --version
-          xcrun metal --version
+          if ! xcrun --sdk macosx metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+            xcrun --kill-cache
+          fi
+          xcrun --sdk macosx metal --version
 
       - name: Run the complementary test partition
         run: scripts/test.sh
@@ -116,12 +124,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Show toolchain
+      - name: Prepare toolchain
         run: |
           sw_vers
           xcodebuild -version
           swift --version
-          xcrun metal --version
+          if ! xcrun --sdk macosx metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+            xcrun --kill-cache
+          fi
+          xcrun --sdk macosx metal --version
 
       - name: Run the dedicated LAN derived-artifact tests
         run: scripts/test.sh

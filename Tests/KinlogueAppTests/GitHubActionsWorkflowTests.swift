@@ -67,6 +67,9 @@ struct GitHubActionsWorkflowTests {
             #expect(job.contains("runs-on: ${{ matrix.runner }}"))
             #expect(job.contains("continue-on-error: ${{ matrix.runner == 'xcode-27' }}"))
             #expect(job.contains("fail-fast: false"))
+            #expect(job.contains("xcodebuild -downloadComponent MetalToolchain"))
+            #expect(job.contains("xcrun --kill-cache"))
+            #expect(job.contains("xcrun --sdk macosx metal --version"))
         }
         #expect(!workflow.contains("runs-on: macos-15"))
         #expect(workflow.contains("timeout-minutes: 30"))
