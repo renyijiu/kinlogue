@@ -42,6 +42,7 @@ struct TestScriptSafetyTests {
         #expect(script.contains("--disable-swift-testing --enable-xctest"))
         #expect(script.contains("--show-bin-path"))
         #expect(script.contains("KinloguePackageTests.xctest"))
+        #expect(script.contains("KinloguePlatformTests.xctest"))
         let inventoryBuild = try #require(script.range(of: "list > \"$PRIMARY_TEST_LIST\""))
         #expect(inventoryBuild.lowerBound < dedicatedBundleBuild.lowerBound)
         #expect(dedicatedBundleBuild.lowerBound < dedicatedDerivedGate.lowerBound)
@@ -155,11 +156,11 @@ struct TestScriptSafetyTests {
             specifiers[0], specifiers[4], specifiers[6], specifiers[10], specifiers[12],
             specifiers[13], specifiers[14], specifiers[17], specifiers[18],
         ]
-        #expect(patterns.count == 3)
+        #expect(patterns.count == 4)
         let firstPatterns = shardPatterns(in: firstPartition.output)
         let secondPatterns = shardPatterns(in: secondPartition.output)
         let dedicatedPatterns = shardPatterns(in: dedicatedPartition.output)
-        #expect(firstPatterns.count + secondPatterns.count == 3)
+        #expect(firstPatterns.count + secondPatterns.count == 4)
         #expect(abs(firstPatterns.count - secondPatterns.count) <= 1)
         #expect(dedicatedPatterns.count == 1)
         #expect(dedicatedPatterns[0].contains("LANDerivedArtifactSinkTests"))
@@ -167,11 +168,17 @@ struct TestScriptSafetyTests {
         #expect(Set(firstPatterns).isDisjoint(with: Set(secondPatterns)))
         #expect(Set(firstPatterns + secondPatterns).isDisjoint(with: Set(dedicatedPatterns)))
         #expect(Set(firstPatterns + secondPatterns) == Set(patterns))
-        #expect(Set(firstPatterns + secondPatterns + dedicatedPatterns).count == 4)
+        #expect(Set(firstPatterns + secondPatterns + dedicatedPatterns).count == 5)
         #expect(patterns.allSatisfy {
             !($0.contains("LANDeliveryPrerequisiteTests") &&
                 $0.contains("LANDerivedArtifactSinkTests"))
         })
+        for pattern in patterns {
+            let targets = Set(primarySpecifiers.filter {
+                matches(pattern, runtimeIdentifier(for: $0))
+            }.map { $0.split(separator: ".")[0] })
+            #expect(targets.count == 1)
+        }
         for specifier in primarySpecifiers {
             let runtimeID = runtimeIdentifier(for: specifier)
             #expect(patterns.filter { matches($0, runtimeID) }.count == 1)

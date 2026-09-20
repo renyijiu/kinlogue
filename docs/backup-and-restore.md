@@ -67,4 +67,4 @@ Core/Platform/App 自动化覆盖 canonical 格式、pending enrollment 重启�
 
 activation 的安装探针按生产事务契约逐 phase 固定终态，不再把任意旧根或新根都视为成功：existing root 在 intent、writer reset、old-root move 后必须恢复精确旧根，后续三 phase 必须保留新根；absent root 在 intent、writer reset 后必须保持无根，后续三 phase 必须保留新根，且每项都要求 transaction/preflight receipt、staging 与 rollback 全部不存在。另一个 production integration case 在 preparation 已通过后定长破坏 staging 中的 committed Vault object；`BackupRestoreTransaction.activate` 的 activation 后 strict validation 必须返回 `graphInvalid`，并立即恢复逐文件相同的旧根或原本的无根状态，同时清空上述事务工件。
 
-当前 Mac 已人工完成真实 Powerbox 目录设置和多次“立即备份”，并在 Finder 中核对专用 repository 内存在多个完整 `.kinloguebackup` 文件；该证据只覆盖本机已安装开发候选，不代替正式分发门禁。尚未执行的人工/分发门禁包括：手动恢复、真实阿里云盘/百度网盘客户端传播、外置盘/NAS、macOS 14/15 独立机器、Developer ID/notarization，以及键盘/VoiceOver 恢复流程。准确状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
+当前 Mac 已人工完成真实 Powerbox 目录设置和多次“立即备份”，并在 Finder 中核对专用 repository 内存在多个完整 `.kinloguebackup` 文件；该证据只覆盖本机已安装开发候选，不代替正式分发门禁。尚未执行的人工/分发门禁包括：手动恢复、真实阿里云盘/百度网盘客户端传播、外置盘/NAS、macOS 26/27 独立机器、Developer ID/notarization，以及键盘/VoiceOver 恢复流程。准确状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。

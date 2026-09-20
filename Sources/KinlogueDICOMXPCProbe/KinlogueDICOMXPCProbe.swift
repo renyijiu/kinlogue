@@ -272,7 +272,13 @@ struct KinlogueDICOMXPCProbe {
             }
         }
 
-        let recovered = try await decode(fixture, in: directory)
+        // launchd can throttle a crashed service's relaunch for 10 seconds.
+        // Allow startup headroom only for recovery, after proving fast containment.
+        let recovered = try await decode(
+            fixture,
+            in: directory,
+            transport: XPCDICOMDecoderTransport(timeoutNanoseconds: 30_000_000_000)
+        )
         guard recovered.rows == 2,
               recovered.columns == 2,
               recovered.sampleBytes == Data([0, 0, 64, 0, 128, 0, 255, 0]) else {

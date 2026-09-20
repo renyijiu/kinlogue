@@ -44,17 +44,16 @@ struct RecordEditViewLayoutTests {
             hostingView.window?.contentView = nil
         }
 
-        let views = viewDescendants(of: hostingView)
-        // On the supported SwiftUI/AppKit toolchain, pure SwiftUI buttons are
-        // materialized as key-view proxies. Manual-date mode adds the calendar
-        // button to the editor's fixed cancel and save actions.
-        let actionProxies = views.filter {
+        // SwiftUI materializes the actions as key-view proxies. Newer SDKs
+        // also use proxies for Picker controls, so their total is not fixed.
+        // Keep checking every observed control's visibility, including additions.
+        let controls = viewDescendants(of: hostingView).filter {
             String(describing: type(of: $0)) == "KeyViewProxy"
         }
-        #expect(actionProxies.count == (usesManualDate ? 3 : 2))
-        for button in actionProxies {
-            let frame = button.convert(button.bounds, to: hostingView)
-            #expect(hostingView.bounds.intersects(frame))
+        #expect(controls.count >= (usesManualDate ? 3 : 2))
+        for control in controls {
+            let frame = control.convert(control.bounds, to: hostingView)
+            #expect(!frame.isEmpty)
             #expect(hostingView.bounds.contains(frame))
         }
     }
@@ -173,6 +172,7 @@ struct RecordEditViewLayoutTests {
         let textView = try #require(viewDescendants(of: hostingView).compactMap { $0 as? NSTextView }.first)
         #expect(textView.accessibilityLabel() == "Bridge label")
         #expect(textView.accessibilityHelp() == "Bridge help")
+        #expect(textView.writingToolsBehavior == .none)
         #expect(textView.isEditable)
         #expect(textView.isSelectable)
 

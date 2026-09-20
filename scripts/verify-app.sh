@@ -28,18 +28,18 @@ DICOM_HELPER_PROJECT_RESOLUTION="$REPO_DIR/packaging/KinlogueDICOMDecoderHelper.
 EXPECTED_BUNDLE_IDENTIFIER="com.kinlogue.mac"
 EXPECTED_SHORT_VERSION="0.5.0"
 EXPECTED_BUILD_VERSION="5"
-EXPECTED_MINIMUM_SYSTEM_VERSION="14.0"
+EXPECTED_MINIMUM_SYSTEM_VERSION="26.0"
 EXPECTED_ICON_FILE="Kinlogue.icns"
 EXPECTED_PLATFORM_RESOURCE_BUNDLE="Kinlogue_KinloguePlatform.bundle"
 EXPECTED_ZIP_FOUNDATION_RESOURCE_BUNDLE="ZIPFoundation_ZIPFoundation.bundle"
 EXPECTED_LOCALIZATIONS='["zh-Hans","en"]'
 EXPECTED_THIRD_PARTY_NOTICE_FILE="THIRD_PARTY_NOTICES.md"
-EXPECTED_THIRD_PARTY_NOTICE_SHA256="0cb360cee49618f8e90185ba8e0c7d36ce7a7c4f6174e688584ba8417365f904"
+EXPECTED_THIRD_PARTY_NOTICE_SHA256="85441747704719ba0ccf59f4833141ce21631433db58e4273243c7601c693e1a"
 EXPECTED_LAN_PURPOSE="仅在您主动开启接收时，允许同一局域网中的设备向这台 Mac 上传资料。"
 EXPECTED_EN_LAN_PURPOSE="When you explicitly start receiving, allow devices on the same local network to upload documents to this Mac."
 EXPECTED_SWIFT_NIO_REVISION="0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b"
-EXPECTED_DICOM_SWIFT_REVISION="9ae0851e134af274651b646519b8a7aaeee05f05"
-EXPECTED_DICOM_SWIFT_VERSION="1.3.3"
+EXPECTED_DICOM_SWIFT_REVISION="8f3605a33ed070160b4e023eacd87f32eae8e913"
+EXPECTED_DICOM_SWIFT_VERSION="1.5.0"
 EXPECTED_ARGUMENT_PARSER_REVISION="6a52f3251125d74daf04fcbd5e6f08a75d074382"
 EXPECTED_ARGUMENT_PARSER_VERSION="1.8.2"
 EXPECTED_ZIPFOUNDATION_REVISION="22787ffb59de99e5dc1fbfe80b19c97a904ad48d"
@@ -203,89 +203,45 @@ verify_dicom_helper_prerequisites() {
   [[ "$(/usr/bin/plutil -extract \
       "dependencies.$dicom_manifest_index.sourceControl.0.requirement.exact.0" raw \
       -expect string "$manifest_json")" == "$EXPECTED_DICOM_SWIFT_VERSION" ]] \
-    || fail "DICOM-Swift must be pinned to exact version 1.3.3"
+    || fail "DICOM-Swift must be pinned to exact version 1.5.0"
 
-  local pin_index=0 pin_identity=""
-  local dicom_pin_index="" xcode_dicom_pin_index=""
-  while pin_identity="$(/usr/bin/plutil -extract "pins.$pin_index.identity" raw \
-      -expect string "$resolution" 2>/dev/null)"; do
-    [[ "$pin_identity" == "dicom-swift" ]] && dicom_pin_index="$pin_index"
-    pin_index=$((pin_index + 1))
-  done
-  pin_index=0
-  while pin_identity="$(/usr/bin/plutil -extract "pins.$pin_index.identity" raw \
-      -expect string "$helper_resolution" 2>/dev/null)"; do
-    [[ "$pin_identity" == "dicom-swift" ]] && xcode_dicom_pin_index="$pin_index"
-    pin_index=$((pin_index + 1))
-  done
-  [[ -n "$dicom_pin_index" && -n "$xcode_dicom_pin_index" ]] \
-    || fail "both root and Xcode resolutions must contain DICOM-Swift"
-  for resolved_path_and_index in \
-      "$resolution:$dicom_pin_index" \
-      "$helper_resolution:$xcode_dicom_pin_index"; do
-    local resolved_path="${resolved_path_and_index%:*}"
-    local resolved_index="${resolved_path_and_index##*:}"
-    [[ "$(/usr/bin/plutil -extract "pins.$resolved_index.state.revision" raw \
-        -expect string "$resolved_path")" == "$EXPECTED_DICOM_SWIFT_REVISION" \
-        && "$(/usr/bin/plutil -extract "pins.$resolved_index.state.version" raw \
-        -expect string "$resolved_path")" == "$EXPECTED_DICOM_SWIFT_VERSION" ]] \
-      || fail "a DICOM-Swift resolution drifted from exact 1.3.3"
-  done
-
-  local root_argument_parser_index="" root_zipfoundation_index=""
-  local xcode_argument_parser_index="" xcode_zipfoundation_index=""
-  local xcode_pin_count=0
-  pin_index=0
-  while pin_identity="$(/usr/bin/plutil -extract "pins.$pin_index.identity" raw \
-      -expect string "$resolution" 2>/dev/null)"; do
-    case "$pin_identity" in
-      swift-argument-parser) root_argument_parser_index="$pin_index" ;;
-      zipfoundation) root_zipfoundation_index="$pin_index" ;;
-    esac
-    pin_index=$((pin_index + 1))
-  done
-  pin_index=0
-  while pin_identity="$(/usr/bin/plutil -extract "pins.$pin_index.identity" raw \
-      -expect string "$helper_resolution" 2>/dev/null)"; do
-    case "$pin_identity" in
-      dicom-swift) ;;
-      swift-argument-parser) xcode_argument_parser_index="$pin_index" ;;
-      zipfoundation) xcode_zipfoundation_index="$pin_index" ;;
-      *) fail "the Xcode Helper resolution contains an unexpected package" ;;
-    esac
-    xcode_pin_count=$((xcode_pin_count + 1))
-    pin_index=$((pin_index + 1))
-  done
-  [[ "$xcode_pin_count" -eq 3 \
-      && -n "$root_argument_parser_index" \
-      && -n "$root_zipfoundation_index" \
-      && -n "$xcode_argument_parser_index" \
-      && -n "$xcode_zipfoundation_index" ]] \
-    || fail "the Xcode Helper transitive resolution does not match the exact allow-list"
-  for root_and_xcode_index in \
-      "$root_argument_parser_index:$xcode_argument_parser_index:$EXPECTED_ARGUMENT_PARSER_REVISION:$EXPECTED_ARGUMENT_PARSER_VERSION" \
-      "$root_zipfoundation_index:$xcode_zipfoundation_index:$EXPECTED_ZIPFOUNDATION_REVISION:$EXPECTED_ZIPFOUNDATION_VERSION"; do
-    local root_resolved_index="${root_and_xcode_index%%:*}"
-    local remaining_indices="${root_and_xcode_index#*:}"
-    local xcode_resolved_index="${remaining_indices%%:*}"
-    local expected_revision_and_version="${remaining_indices#*:}"
-    local expected_revision="${expected_revision_and_version%%:*}"
-    local expected_version="${expected_revision_and_version##*:}"
-    [[ "$(/usr/bin/plutil -extract "pins.$root_resolved_index.state" json \
-          -o - "$resolution")" \
-        == "$(/usr/bin/plutil -extract "pins.$xcode_resolved_index.state" json \
-          -o - "$helper_resolution")" \
-        && "$(/usr/bin/plutil -extract "pins.$root_resolved_index.location" raw \
-          -expect string "$resolution")" \
-        == "$(/usr/bin/plutil -extract "pins.$xcode_resolved_index.location" raw \
-          -expect string "$helper_resolution")" \
-        && "$(/usr/bin/plutil -extract \
-          "pins.$xcode_resolved_index.state.revision" raw -expect string \
-          "$helper_resolution")" == "$expected_revision" \
-        && "$(/usr/bin/plutil -extract \
-          "pins.$xcode_resolved_index.state.version" raw -expect string \
-          "$helper_resolution")" == "$expected_version" ]] \
-      || fail "an Xcode Helper transitive resolution drifted or differs from root"
+  # Both build systems must resolve exactly the reviewed Helper dependency graph.
+  local expected_pins=(
+    "compressionfamily|https://github.com/Raster-Lab/CompressionFamily.git|36ef2c94e28a3b74ba395ce6397ba2ae7b041c5e|1.0.1"
+    "dicom-swift|https://github.com/ThalesMMS/DICOM-Swift.git|$EXPECTED_DICOM_SWIFT_REVISION|$EXPECTED_DICOM_SWIFT_VERSION"
+    "j2kswift|https://github.com/Raster-Lab/J2KSwift.git|b1949084eeedaafb40bff8f1745bbab19e4bc36d|11.0.2"
+    "jlswift|https://github.com/Raster-Lab/JLSwift.git|53d902fec538e5c12f4ed9864c026be5da66b5dd|0.9.0"
+    "jxlswift|https://github.com/Raster-Lab/JXLSwift.git|760697a54dd253da8e8466c3fd09ecf2c2d89aec|1.4.0"
+    "swift-argument-parser|https://github.com/apple/swift-argument-parser|$EXPECTED_ARGUMENT_PARSER_REVISION|$EXPECTED_ARGUMENT_PARSER_VERSION"
+    "zipfoundation|https://github.com/weichsel/ZIPFoundation.git|$EXPECTED_ZIPFOUNDATION_REVISION|$EXPECTED_ZIPFOUNDATION_VERSION"
+  )
+  [[ "$(/usr/bin/plutil -extract pins raw -expect array "$helper_resolution")" -eq "${#expected_pins[@]}" ]] \
+    || fail "the Xcode Helper resolution contains an unexpected package count"
+  local expected_pin expected_identity expected_url expected_revision expected_version
+  local resolved_path pin_index pin_identity match_count
+  for expected_pin in "${expected_pins[@]}"; do
+    IFS='|' read -r expected_identity expected_url expected_revision expected_version <<< "$expected_pin"
+    for resolved_path in "$resolution" "$helper_resolution"; do
+      pin_index=0
+      match_count=0
+      while pin_identity="$(/usr/bin/plutil -extract "pins.$pin_index.identity" raw \
+          -expect string "$resolved_path" 2>/dev/null)"; do
+        if [[ "$pin_identity" == "$expected_identity" ]]; then
+          match_count=$((match_count + 1))
+          [[ "$(/usr/bin/plutil -extract "pins.$pin_index.location" raw -expect string "$resolved_path")" == "$expected_url" \
+              && "$(/usr/bin/plutil -extract "pins.$pin_index.state.revision" raw -expect string "$resolved_path")" == "$expected_revision" \
+              && "$(/usr/bin/plutil -extract "pins.$pin_index.state.version" raw -expect string "$resolved_path")" == "$expected_version" ]] \
+            || fail "a reviewed DICOM Helper dependency drifted"
+        fi
+        pin_index=$((pin_index + 1))
+      done
+      [[ "$match_count" -eq 1 ]] \
+        || fail "a reviewed DICOM Helper dependency is missing or duplicated"
+      if [[ "$resolved_path" == "$helper_resolution" ]]; then
+        [[ "$pin_index" -eq "${#expected_pins[@]}" ]] \
+          || fail "the Xcode Helper resolution contains an unexpected package"
+      fi
+    done
   done
   /usr/bin/grep -Fq 'productType = "com.apple.product-type.xpc-service"' \
     "$helper_project" \
@@ -320,8 +276,8 @@ verify_release_prerequisites() {
       || fail "a release prerequisite file is missing or linked: $file"
   done
 
-  [[ "$(/usr/bin/sed -n '1p' "$manifest")" == '// swift-tools-version: 6.1' ]] \
-    || fail "the package must use the Swift 6.1 manifest required by SwiftNIO"
+  [[ "$(/usr/bin/sed -n '1p' "$manifest")" == '// swift-tools-version: 6.2' ]] \
+    || fail "the package must declare Swift tools 6.2 to match the reviewed dependency requirements"
 
   local cache_root metadata_root manifest_json graph_json scratch_root
   local dependency_cache config_root security_root
@@ -615,7 +571,7 @@ DICOM_HELPER_LINK_MAP="$(/usr/bin/find \
     && -s "$DICOM_HELPER_LINK_MAP" ]] \
   || fail "the release link-map evidence is missing"
 if /usr/bin/grep -E -q -- \
-    '(DicomCore|DicomWeb|DIMSE|DicomStorageSCP|JPIP)' "$MAIN_LINK_MAP"; then
+    '(DicomCore|DicomWeb|DIMSE|DicomStorageSCP|JPIP|J2KCore|J2KCodec|J2KMetal|JPEGLS|JXLSwift|CompressionFamily)' "$MAIN_LINK_MAP"; then
   fail "the main executable link map contains DicomCore or DICOM network code"
 fi
 /usr/bin/grep -Fq 'DicomCore' "$DICOM_HELPER_LINK_MAP" \
@@ -647,14 +603,16 @@ XPC_SERVICE_COUNT="$(/usr/bin/find "$APP_BUNDLE/Contents/XPCServices" \
     && -d "$DICOM_HELPER_BUNDLE" && ! -L "$DICOM_HELPER_BUNDLE" \
     && -f "$DICOM_HELPER_INFO_PLIST" && ! -L "$DICOM_HELPER_INFO_PLIST" \
     && -f "$DICOM_HELPER_EXECUTABLE" && -x "$DICOM_HELPER_EXECUTABLE" \
-    && ! -e "$DICOM_HELPER_BUNDLE/DICOMDecoder_DicomCore.bundle" \
+    && ! -e "$DICOM_HELPER_BUNDLE/DICOMSwift_DicomCore.bundle" \
+    && ! -e "$DICOM_HELPER_BUNDLE/J2KSwift_J2KMetal.bundle" \
     && ! -e "$DICOM_HELPER_BUNDLE/ZIPFoundation_ZIPFoundation.bundle" ]] \
   || fail "the app must contain exactly one standard-layout DICOM XPC service"
 DICOM_HELPER_RESOURCE_ENTRIES="$(
   cd "$DICOM_HELPER_RESOURCES"
   /usr/bin/find . -mindepth 1 -maxdepth 1 -print | LC_ALL=C /usr/bin/sort
 )"
-EXPECTED_DICOM_HELPER_RESOURCE_ENTRIES="./DICOMDecoder_DicomCore.bundle
+EXPECTED_DICOM_HELPER_RESOURCE_ENTRIES="./DICOMSwift_DicomCore.bundle
+./J2KSwift_J2KMetal.bundle
 ./THIRD_PARTY_NOTICES.md
 ./ZIPFoundation_ZIPFoundation.bundle"
 [[ "$DICOM_HELPER_RESOURCE_ENTRIES" \
@@ -673,7 +631,8 @@ EXPECTED_DICOM_HELPER_RESOURCE_ENTRIES="./DICOMDecoder_DicomCore.bundle
 /usr/bin/cmp -s "$THIRD_PARTY_NOTICE_SOURCE" "$DICOM_HELPER_NOTICE" \
   || fail "the DICOM Helper third-party notice differs from its source"
 for signed_nested_bundle in \
-    "$DICOM_HELPER_RESOURCES/DICOMDecoder_DicomCore.bundle" \
+    "$DICOM_HELPER_RESOURCES/DICOMSwift_DicomCore.bundle" \
+    "$DICOM_HELPER_RESOURCES/J2KSwift_J2KMetal.bundle" \
     "$DICOM_HELPER_RESOURCES/ZIPFoundation_ZIPFoundation.bundle"; do
   /usr/bin/codesign --verify --strict "$signed_nested_bundle" \
     || fail "a DICOM Helper nested resource bundle signature is invalid"
@@ -845,7 +804,7 @@ fi
 MAIN_EXECUTABLE_SYMBOLS="$(/usr/bin/nm "$EXECUTABLE" 2>/dev/null)" \
   || fail "the main executable symbols could not be inspected"
 case "$MAIN_EXECUTABLE_SYMBOLS" in
-  *DCMDecoder*|*DicomCore*|*DicomWeb*|*DIMSE*|*DicomStorageSCP*|*JPIP*)
+  *DCMDecoder*|*DicomCore*|*DicomWeb*|*DIMSE*|*DicomStorageSCP*|*JPIP*|*J2KCore*|*J2KCodec*|*J2KMetal*|*JPEGLS*|*JXLSwift*|*CompressionFamily*)
     fail "the main executable contains a DicomCore decoder or DICOM network symbol"
     ;;
 esac

@@ -4,7 +4,7 @@ import KinlogueCore
 import Testing
 @testable import KinloguePlatform
 
-@Test(arguments: [0, 1, 256 * 1_024 - 1, 256 * 1_024, 256 * 1_024 + 1, 3 * 256 * 1_024 + 17])
+@Test(arguments: [0, 1, 256 * 1_024 - 1, 256 * 1_024, 256 * 1_024 + 1, 3 * 256 * 1_024 + 17] as [Int])
 func encryptedContainerRoundTripsBoundaries(_ payloadByteCount: Int) async throws {
     let fixture = try ContainerFixture(payloadByteCount: payloadByteCount)
     let output = LockedBytes()

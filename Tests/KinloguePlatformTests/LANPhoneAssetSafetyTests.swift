@@ -923,14 +923,20 @@ struct LANPhoneAssetSafetyTests {
             .joined()
 
         #expect(
-            digest == "0cb360cee49618f8e90185ba8e0c7d36ce7a7c4f6174e688584ba8417365f904"
+            digest == "85441747704719ba0ccf59f4833141ce21631433db58e4273243c7601c693e1a"
         )
         for requiredText in [
             "SwiftNIO 2.101.3",
             "Swift Atomics 1.3.1",
             "Swift Collections 1.6.0",
             "Swift System 1.7.5",
-            "DICOM-Swift 1.3.3",
+            "DICOM-Swift 1.5.0",
+            "J2KSwift 11.0.2",
+            "JLSwift 0.9.0",
+            "JXLSwift 1.4.0",
+            "CompressionFamily 1.0.1",
+            "7020e28dcd4fac24cb31a13e6d2a00aa38ac6e73",
+            "Copyright 2026 Raster Images Private Limited",
             "Swift Argument Parser 1.8.2",
             "ZIPFoundation 0.9.20",
             "Copyright 2025 Thales Matheus Mendonça Santos",
@@ -992,7 +998,7 @@ struct LANPhoneAssetSafetyTests {
             "EXPECTED_THIRD_PARTY_NOTICE_FILE=\"THIRD_PARTY_NOTICES.md\""
         ))
         #expect(verifier.contains(
-            "EXPECTED_THIRD_PARTY_NOTICE_SHA256=\"0cb360cee49618f8e90185ba8e0c7d36ce7a7c4f6174e688584ba8417365f904\""
+            "EXPECTED_THIRD_PARTY_NOTICE_SHA256=\"85441747704719ba0ccf59f4833141ce21631433db58e4273243c7601c693e1a\""
         ))
         #expect(verifier.contains(
             "/usr/bin/cmp -s \"$THIRD_PARTY_NOTICE_SOURCE\" \"$THIRD_PARTY_NOTICE_FILE\""

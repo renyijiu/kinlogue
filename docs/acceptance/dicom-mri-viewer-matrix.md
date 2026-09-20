@@ -10,6 +10,8 @@ macOS 14/15 independent machines, Developer ID signing and notarization remain
 `notExecuted`. Current status is owned by
 [the current release ledger](current-release.md).
 
+自 2026-09-16 起，当前支持范围调整为 macOS 26+；上面的历史候选证据保持原样，下面的待执行系统矩阵改为 26/27，不把旧工件结果转记为新构建已通过。
+
 ## Candidate and evidence identity
 
 | Field | Value |
@@ -91,8 +93,8 @@ confidentiality, authentication or rollback protection.
 
 | Environment or manual gate | Status | Required evidence |
 | --- | --- | --- |
-| macOS 14 independent machine | `notExecuted` | install, import, Viewer, restart, delete and lifecycle run |
-| macOS 15 independent machine | `notExecuted` | install, import, Viewer, restart, delete and lifecycle run |
+| macOS 26 independent machine | `notExecuted` | install, import, Viewer, restart, delete and lifecycle run |
+| macOS 27 independent machine | `notExecuted` | install, import, Viewer, restart, delete and lifecycle run |
 | Private real MRI compatibility | `passed` (one sample) | isolated full import passed with explicit user authorization; expand to additional vendors/checks without retaining private data |
 | Keyboard, VoiceOver and trackpad manual review | `notExecuted` | focus order, announcements, control reachability, gestures and failure recovery |
 | Developer ID signed/notarized distribution | `notExecuted` | signing, notarization, staple, Gatekeeper and exact distributed-artifact replay |

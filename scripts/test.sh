@@ -150,13 +150,18 @@ if [[ "$RUN_ISOLATED_GATES" == true \
         --disable-swift-testing --enable-xctest \
         --show-bin-path
   )"
-  XCTEST_BUNDLE="$XCTEST_BIN_DIR/KinloguePackageTests.xctest"
   "$REPO_DIR/scripts/run-with-deadline.sh" \
     "$KINLOGUE_PRIMARY_TEST_TIMEOUT_SECONDS" \
     swift build "${SWIFT_TEST_ARGUMENTS[@]}" \
       --build-tests \
       --disable-swift-testing --enable-xctest \
       -j "$KINLOGUE_BUILD_JOBS"
+  # Swift Build (Xcode 27) emits one bundle per test target; the older
+  # SwiftPM engine emits a package-wide bundle. Select only these known layouts.
+  XCTEST_BUNDLE="$XCTEST_BIN_DIR/KinloguePlatformTests.xctest"
+  if [[ ! -d "$XCTEST_BUNDLE" ]]; then
+    XCTEST_BUNDLE="$XCTEST_BIN_DIR/KinloguePackageTests.xctest"
+  fi
   if [[ ! -d "$XCTEST_BUNDLE" ]]; then
     print -u2 "dedicated XCTest bundle was not produced at the expected path"
     exit 70
