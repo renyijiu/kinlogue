@@ -34,6 +34,8 @@
 
 `dist/`、`.build/` 和 `.swiftpm/` 是被忽略的本机产物，不能提交或当作跨机器证据。完整命令必须记录 source revision、环境、工件身份和未执行门禁。
 
+DICOM 外部 SIGKILL 探针分别验证崩溃收敛和后续恢复：中断仍须在 2 秒内返回固定失败；恢复请求单独使用 30 秒预算，容纳 `launchd.plist(5)` 记录的默认 10 秒重启节流及启动时间。生产请求仍为 10 秒超时、Helper 仍为 9 秒硬 watchdog；探针不重试失败请求，也不把 timeout 当作恢复成功。
+
 ## 测试证据规则
 
 `scripts/test.sh` 把各主 target 的 Swift Testing 成功 summary 保存为权限 `0600` 的同一临时日志；同时从完整 `swift test list` 生成唯一的全局 primary tests/suites inventory。`KINLOGUE_REQUIRE_TEST_EVIDENCE=1` 下，`scripts/verify-docs.sh` 要求实际全量 summary 或这份确定性全局 inventory，且任一证据与当前候选主账不一致都会失败。三分片 CI 的每个 runner 都复验同一全局 inventory，因此专用分片不能仅凭本分片成功而放过陈旧账本；本机 `0/1` 还必须用全部实际 summary 再核对一次。独立的 XCTest、条件式和真实进程门禁由各自非零退出状态失败关闭，不重复计入该 Swift Testing 主账。

@@ -1184,3 +1184,9 @@
 - **证据**：PR #13 在 `ded7488` 上六个 CI 分区及 CodeQL 均已通过，但仓库 ruleset 仍要求三个无系统后缀的原有检查名，矩阵默认命名导致 GitHub 保持 BLOCKED。
 - **修正**：三个 macOS 26 job 显式保留原名，仅 Xcode 27 使用后缀；不修改远端保护规则、不降低检查范围。更新现有 workflow 回归及构建文档，远端名称匹配由后续 CI 验证。
 - **验证**：`scripts/test.sh --filter GitHubActionsWorkflowTests` 的 11 tests / 1 suite、文档与 diff 检查通过；此前 `ded7488` 的本机 clean-source bundle/真实 XPC 及远端双系统完整 CI、CodeQL 成功不冒充新提交已经通过。
+
+## [2026-09-20] ci | 为 DICOM 崩溃探针的恢复请求保留重启余量
+
+- **证据与判断**：PR #13 的 [macOS 26 失败日志](https://github.com/renyijiu/kinlogue/actions/runs/35070491037/job/104710615643) 在正式 bundle 验证后输出 `KLD_DICOM_XPC_FAILED:helperTimedOut`。控制握手及崩溃错误校验已完成，因此该错误来自随后的恢复 decode；若崩溃请求超时，探针会输出 `unexpectedFailureCode`。本机 `launchd.plist(5)` 说明默认重启节流为 10 秒，与原恢复请求 10 秒超时重合；据此判断恢复预算缺少重启余量，远端日志没有单独记录 launchd 的实际调度时刻。
+- **修正**：只把独立 XPC 探针的恢复请求预算设为 30 秒；崩溃收敛仍要求 2 秒内失败，恢复仍必须返回精确像素，生产 transport 的 10 秒超时、Helper 的 9 秒硬 watchdog 和 hang 探针不变。不增加重试，不修改依赖或系统节流策略。扩展已有包装边界测试，检查恢复预算与原有时限；不新增测试计数。
+- **验证**：恢复预算断言已在旧源码上观察失败；`scripts/test.sh --filter DICOMPackagingBoundaryTests` 的 7 tests / 1 suite 通过。当前 Mac 的 `scripts/verify-dicom-xpc.sh` 通过真实 Release App/Helper 构建、签名、像素夹具、外部崩溃及恢复、hang watchdog、日志 canary 和零运行时 socket；文档、隐私与 diff 检查通过。本次是工作树验证；新提交远端 CI、clean-source bundle、独立系统安装、真实私有样本及人工矩阵尚未验证。

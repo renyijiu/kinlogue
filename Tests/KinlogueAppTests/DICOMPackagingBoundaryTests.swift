@@ -163,6 +163,14 @@ struct DICOMPackagingBoundaryTests {
         #expect(probeSource.contains("crash-ready"))
         #expect(probeSource.contains("crash-armed"))
         #expect(probeSource.contains("crash-request-started"))
+        let recovery = try #require(probeSource.range(of: "let recovered = try await decode("))
+        let recoveryCheck = try #require(probeSource.range(of: "guard recovered.rows == 2"))
+        #expect(probeSource[recovery.lowerBound..<recoveryCheck.lowerBound].contains(
+            "XPCDICOMDecoderTransport(timeoutNanoseconds: 30_000_000_000)"
+        ))
+        #expect(probeSource.contains("throw ProbeFailure.crashContainmentTimedOut"))
+        #expect(probeSource.contains("guard start.duration(to: .now) < .seconds(2)"))
+        #expect(adapter.contains("public init(timeoutNanoseconds: UInt64 = 10_000_000_000)"))
         #expect(!probeSource.contains("for _ in 0..<512"))
         #expect(helper.contains("validateNativePixelElement"))
         #expect(helper.contains("/dev/fd/"))
