@@ -1,5 +1,7 @@
 # Kinlogue 架构说明
 
+本页维护 Swift 基线。独立 Go 重写的模块、存储、系统 API 和生命周期边界见 [Go 原生界面预览版](go-native-preview.md)；Go 预览不复用 Swift Vault，也不继承本页 DICOM XPC 或备份恢复的验收证据。
+
 ## 分层原则
 
 Kinlogue 的主 App 继续由 SwiftPM 构建，并保持 `KinlogueCore → KinloguePlatform → KinlogueApp` 的依赖方向；DICOM 解码是唯一额外的 checked-in Xcode XPC service 构建边界：

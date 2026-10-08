@@ -1,5 +1,11 @@
 # 隐私与安全工程说明
 
+本页具体 Vault、LAN、备份和 DICOM 防护描述 Swift 基线。独立 [Go 预览版](go-native-preview.md)有自己的身份、明文 SQLite 与原件目录、进程内系统解析器及验证记录，不能继承本页的整库删除、备份恢复或 XPC 隔离承诺。无内容日志、真实资料禁区和人工确认门适用于两套实现。
+
+Go v2 将报告与有序来源分开保存；已知 Go v1 通过单个 SQLite 事务无损升级，Swift 目录不参与迁移。原始识别不可覆盖，只有明确保存的确认内容进入搜索。报告删除先事务登记精确清理清单并移除引用，再核对原件的摘要、长度、私有普通文件和 inode 身份，成功移除并同步目录后才消除队列项；失败只保留清理待完成状态，不把已提交删除说成报告仍在。重启仅重试队列，不扫描历史孤儿或导入失败遗留副本，亦不承诺安全擦除。实现与强退测试分别见 [`deletion.go`](../internal/library/deletion.go)和 [`daily_test.go`](../internal/library/daily_test.go)。
+
+Go 单报告导出采用用户选择文件读写 entitlement，导入仍只读源文件，不增加网络权限。ZIP 只保存确认快照中的原始附件，名称按顺序生成，不拼接展示名或附带 OCR/备注/成员元数据；原件内容本身并未匿名化。写入经过私有 staging、完整回读及原子发布，提交前失败不覆盖既有目标；输出是外部明文副本，不能恢复资料库，也不随报告删除。导出实现与目标替换防护见 [`export_darwin.go`](../internal/macos/export_darwin.go)及 [测试](../internal/macos/export_darwin_test.go)。
+
 这是一份面向维护者和 Agent 的工程说明；用户可见承诺以 [`../PRIVACY.md`](../PRIVACY.md) 和 [`../README.md`](../README.md) 为准。本文不把存在的防护夸大成未实现的安全能力。
 
 ## 当前安全姿态

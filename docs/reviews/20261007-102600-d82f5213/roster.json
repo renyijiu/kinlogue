@@ -1,0 +1,38 @@
+[
+  {
+    "reviewer": "correctness",
+    "tier": "session"
+  },
+  {
+    "reviewer": "project-standards",
+    "tier": "mid-tier"
+  },
+  {
+    "reviewer": "testing",
+    "tier": "mid-tier"
+  },
+  {
+    "reviewer": "maintainability",
+    "tier": "mid-tier"
+  },
+  {
+    "reviewer": "security",
+    "tier": "session"
+  },
+  {
+    "reviewer": "performance",
+    "tier": "mid-tier"
+  },
+  {
+    "reviewer": "reliability",
+    "tier": "mid-tier"
+  },
+  {
+    "reviewer": "adversarial",
+    "tier": "session"
+  },
+  {
+    "reviewer": "julik-frontend-races",
+    "tier": "mid-tier"
+  }
+]

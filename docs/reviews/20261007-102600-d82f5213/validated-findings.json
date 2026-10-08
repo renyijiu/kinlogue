@@ -1,0 +1,207 @@
+{
+  "findings": [
+    {
+      "#": 1,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "internal/library/store.go:160: f, e := r.OpenFile(\"library.sqlite\", os.O_CREATE|os.O_EXCL|os.O_RDWR|syscall.O_NOFOLLOW, 0600)",
+        "internal/library/store.go:183-192: On the next Open, databaseExists routes the zero-version file through the version/application check and returns ErrUnsupported.",
+        "internal/library/store.go:202-213: Schema initialization is a later transaction; its errors return without removing or recovering the newly created database."
+      ],
+      "file": "internal/library/store.go",
+      "first_evidence": "internal/library/store.go:160: f, e := r.OpenFile(\"library.sqlite\", os.O_CREATE|os.O_EXCL|os.O_RDWR|syscall.O_NOFOLLOW, 0600)",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 160,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Make first-run schema publication recoverable: initialize and sync a private temporary SQLite database, then atomically publish it as library.sqlite, or explicitly recognize and reinitialize only an app-created, empty version-zero database after validating that it has no user tables or originals. Add a restart test for interruption between file creation and schema commit.",
+      "title": "Interrupted first launch leaves library unable to reopen",
+      "why_it_matters": "A crash or storage error after creating library.sqlite but before the schema transaction commits leaves a version-zero database. Every later launch treats it as an unsupported format, so restarting cannot repair an otherwise empty preview library and the app cannot open.",
+      "validation_status": "confirmed",
+      "validation_reason": "On a first launch interrupted after library.sqlite is created at internal/library/store.go:160 but before the schema transaction commits at 202-213, the next Open takes the existing-database branch at 183-193 and rejects its zero version/application ID; that interruption is reachable, though its incidence was not measured."
+    },
+    {
+      "#": 2,
+      "autofix_class": "manual",
+      "confidence": 75,
+      "evidence": [
+        "internal/desktop/desktop.go:91 -- s.win.Update(func() { s.leave(func() { s.allowClose = true; s.stop(); mygo.App.Quit() }) })",
+        "internal/desktop/desktop.go:82 -- s.win.Update(func() { s.leave(func() { s.allowClose = true; s.win.Close() }) })",
+        "internal/desktop/desktop.go:196-200 -- leave checks if s.busy != \"\", assigns s.message = \"wait_busy\", and returns without retaining next or canceling the job.",
+        "internal/desktop/desktop.go:385-400 -- importFiles starts a cancellable importing job and continues every selected path unless ctx.Err() becomes non-nil; the quit path above never cancels that context while busy.",
+        "cmd/kinlogue/main.go:43-46 -- service.Close() is called only after desktop.Run(service) returns, so its cancellation mechanism cannot help when the UI prevents quit.",
+        "docs/plans/2026-10-07-0812-feat-go-native-report-workflow-plan.md:95 -- KTD5 specifies stopping admission and canceling actions before waiting for entered actions and closing the library during quit."
+      ],
+      "file": "internal/desktop/desktop.go",
+      "first_evidence": "internal/desktop/desktop.go:91 -- s.win.Update(func() { s.leave(func() { s.allowClose = true; s.stop(); mygo.App.Quit() }) })",
+      "independent_reviewers": [
+        "adversarial"
+      ],
+      "line": 91,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "adversarial"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Give window close and OnBeforeQuit a dedicated shutdown request path. For an active cancellable job, remember the close request, cancel jobCancel, and finish closing after that job settles; for a non-cancellable save, remember the request and wait for it to settle. Preserve the existing dirty-review save/discard/cancel handling before closing, and keep Service.Close responsible for waiting for native work and closing storage. Add a focused test that requests quit during the first file of a batch, verifies later files never start, and verifies the pending quit resumes after cleanup.",
+      "title": "Quitting during import leaves the entire batch running",
+      "why_it_matters": "Closing the window or choosing Quit during a multi-file import does not cancel recognition or queue a quit: it only displays the busy message, and all remaining files continue importing. Both close handlers route through the navigation guard, which returns whenever a job is active, so the shutdown cancellation in Service.Close is unreachable until the user separately cancels or waits for the batch and requests quit again. A dedicated close flow can cancel the active import, await its existing cleanup, and then finish quitting without requiring hard interruption of an Apple API.",
+      "validation_status": "confirmed",
+      "validation_reason": "When close or Quit arrives during an import job, internal/desktop/desktop.go:77-91 calls leave, whose busy branch at 196-200 neither cancels jobCancel nor retains the close request, so the batch loop at 383-400 continues until a separate cancellation; the ordering is reachable through the chooser and incidence was not measured.",
+      "protected_subject": "concurrency"
+    },
+    {
+      "#": 3,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "internal/library/store.go:406: if err != nil {",
+        "internal/library/store.go:394-407: The exclusive .part file is created and written; this error branch returns ErrStorage without removing it.",
+        "internal/library/store.go:393-416: No deferred removal covers cancellation or Link failure; directory sync occurs only after the temporary name was removed."
+      ],
+      "file": "internal/library/store.go",
+      "first_evidence": "internal/library/store.go:406: if err != nil {",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 406,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "After creating the .part file, defer a best-effort removal of that temporary name on every exit path, disabling it only after successful removal; keep the separately published .blob behavior unchanged. Add a write/sync failure test that confirms no .part remains.",
+      "title": "Failed original writes retain partial files",
+      "why_it_matters": "When a write, sync, or close fails, the incomplete <id>.part file remains in originals. Repeating imports after disk pressure or another transient I/O failure accumulates unreachable files, consumes more space, and can keep subsequent imports failing. The preview has no cleanup path for these files.",
+      "validation_status": "confirmed",
+      "validation_reason": "If a created original's write, sync, close, cancellation check, or link fails, internal/library/store.go:393-416 returns without removing its .part file, while the documented preservation of published orphan blobs does not cover this incomplete temporary file; failure incidence was not measured."
+    },
+    {
+      "#": 4,
+      "autofix_class": "manual",
+      "confidence": 75,
+      "evidence": [
+        "internal/library/store.go:593: \trows, err := s.db.QueryContext(ctx, \"SELECT \"+reportColumns+\" FROM reports \"+clause, args...)",
+        "internal/library/store.go:431: reportColumns includes corrected_text, notes, and extraction; scanReport at line 443 JSON-decodes extraction for every row.",
+        "internal/library/store.go:615,629: Drafts and Search both call list without a row limit; internal/desktop/desktop.go:153-160 calls both during each list refresh.",
+        "internal/desktop/view.go:145-168: the list builds one UI control tree per returned report, displaying only title, date, and status.",
+        "internal/document/document.go:22 and internal/library/store.go:443,541: extraction and editable text fields have MiB-scale per-report limits."
+      ],
+      "file": "internal/library/store.go",
+      "first_evidence": "internal/library/store.go:593: \trows, err := s.db.QueryContext(ctx, \"SELECT \"+reportColumns+\" FROM reports \"+clause, args...)",
+      "independent_reviewers": [
+        "performance"
+      ],
+      "line": 593,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "performance"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Introduce a lightweight report-list DTO and query only ID, display name/title, date, status, and created time for list views; keep full extraction loading in Get for the selected report. Page the timeline/search results and render only the current page or visible rows. Verify a large synthetic library's load time and peak memory.",
+      "title": "Timeline loads every full report into memory",
+      "why_it_matters": "Opening a member timeline or refreshing after an import, save, or search reads every matching report, including up to 1 MiB of corrected text and up to 2 MiB of extraction JSON per report. The store decodes and validates every extraction, retains all reports in a slice, and the UI builds a control for every item. A household library with hundreds of reports can therefore cause large allocation spikes and slow timeline loads even though the list displays only title, date, and status.",
+      "validation_status": "confirmed",
+      "validation_reason": "For a member with many large confirmed reports, internal/library/store.go:431-445,592-629 selects and decodes full text and extraction for every unbounded result, internal/desktop/desktop.go:150-163 retains the result, and view.go:143-168 constructs a control per row; large-library incidence and peak allocations were not measured.",
+      "protected_subject": "memory-safety"
+    },
+    {
+      "#": 5,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "internal/macos/document_darwin.go:52: if usableText(text) {",
+        "internal/macos/document_darwin.go:63: return recognize(ctx, &result, img, pageNumber)",
+        "internal/macos/native_darwin_test.go:76: if b.Page != i+1 || b.Method != \"pdfTextLayer\" || b.Text != \"SYNTHETIC REPORT 12345\" || b.Bounds.Width <= 0 || b.Bounds.Height <= 0 {",
+        "internal/macos/native_darwin_test.go:124: got, err := Extract(context.Background(), buf.Bytes())"
+      ],
+      "file": "internal/macos/document_darwin.go",
+      "first_evidence": "internal/macos/document_darwin.go:52: if usableText(text) {",
+      "independent_reviewers": [
+        "testing"
+      ],
+      "line": 52,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "testing"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Add a generated image-only PDF test with a legible synthetic text image. Call Extract on the PDF and assert Kind=pdf, the correct page number, Method=vision, and a recognizable text anchor; include a mixed text/scanned two-page case if the fixture can stay small.",
+      "title": "Exercise scanned PDF recognition in native tests",
+      "why_it_matters": "A scanned PDF is a normal report input, but the new native tests exercise only the PDF text-layer branch and Vision on a standalone PNG. The PDF-to-raster-to-Vision branch could fail or lose page provenance while all current tests pass, leaving scanned reports without usable candidates.",
+      "validation_status": "confirmed",
+      "validation_reason": "An image-only PDF reaches renderPDF then recognize at internal/macos/document_darwin.go:52-63, but native_darwin_test.go:63-92 asserts only PDF text-layer extraction and 115-139 asserts Vision only after converting a rendered page to standalone PNG, so no native test checks scanned-PDF Vision output or page provenance."
+    }
+  ],
+  "pre_existing_findings": [],
+  "validation": {
+    "outcome": "verdicts",
+    "batch_count": 1,
+    "selected": 5,
+    "confirmed": 5,
+    "rejected": 0,
+    "unresolved": 0,
+    "malformed": 0,
+    "failed": 0,
+    "shortcut_skipped": 0,
+    "wait_bound_exceeded": false,
+    "shortcut_evidence_basis": "No independently verified cross-model corroboration; all five findings went through one validator batch.",
+    "verdicts": [
+      {
+        "#": 1,
+        "status": "confirmed",
+        "protected_subject": null,
+        "reason": "On a first launch interrupted after library.sqlite is created at internal/library/store.go:160 but before the schema transaction commits at 202-213, the next Open takes the existing-database branch at 183-193 and rejects its zero version/application ID; that interruption is reachable, though its incidence was not measured."
+      },
+      {
+        "#": 2,
+        "status": "confirmed",
+        "protected_subject": "concurrency",
+        "reason": "When close or Quit arrives during an import job, internal/desktop/desktop.go:77-91 calls leave, whose busy branch at 196-200 neither cancels jobCancel nor retains the close request, so the batch loop at 383-400 continues until a separate cancellation; the ordering is reachable through the chooser and incidence was not measured."
+      },
+      {
+        "#": 3,
+        "status": "confirmed",
+        "protected_subject": null,
+        "reason": "If a created original's write, sync, close, cancellation check, or link fails, internal/library/store.go:393-416 returns without removing its .part file, while the documented preservation of published orphan blobs does not cover this incomplete temporary file; failure incidence was not measured."
+      },
+      {
+        "#": 4,
+        "status": "confirmed",
+        "protected_subject": "memory-safety",
+        "reason": "For a member with many large confirmed reports, internal/library/store.go:431-445,592-629 selects and decodes full text and extraction for every unbounded result, internal/desktop/desktop.go:150-163 retains the result, and view.go:143-168 constructs a control per row; large-library incidence and peak allocations were not measured."
+      },
+      {
+        "#": 5,
+        "status": "confirmed",
+        "protected_subject": null,
+        "reason": "An image-only PDF reaches renderPDF then recognize at internal/macos/document_darwin.go:52-63, but native_darwin_test.go:63-92 asserts only PDF text-layer extraction and 115-139 asserts Vision only after converting a rendered page to standalone PNG, so no native test checks scanned-PDF Vision output or page provenance."
+      }
+    ],
+    "protected_subject_reclassifications": [
+      {
+        "#": 4,
+        "from": null,
+        "to": "memory-safety",
+        "reason": "The validator supplied a valid protected-subject key, adding protection to the report leaf classification."
+      }
+    ],
+    "degraded_blockers": []
+  }
+}

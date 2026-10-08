@@ -6,6 +6,12 @@ status: navigation
 
 计划文件保留需求、权衡和实施历史，不直接证明当前代码能力。当前事实以专题页、代码、测试和 [当前候选证据](../acceptance/current-release.md) 为准。
 
+## 当前重写计划
+
+- [`2026-10-07-feat-go-daily-report-workflow-plan.md`](2026-10-07-feat-go-daily-report-workflow-plan.md)：日常报告操作、输入可靠性、多原件来源、确认纠错、删除/导出、已知 Go 格式升级与独立 CI；本机自动化、签名应用和人工门禁分别由 [Go 预览专题](../go-native-preview.md)记载。
+
+- [`2026-10-07-0812-feat-go-native-report-workflow-plan.md`](2026-10-07-0812-feat-go-native-report-workflow-plan.md)：在同一仓库内重写独立 Go 应用，首阶段实现报告整理闭环；当前实现与验证边界由 [Go 预览专题](../go-native-preview.md)维护，不能将计划视为完整替换已经完成。
+
 ## 已实施的决策记录
 
 - [`2026-08-19-1418-feat-encrypted-folder-backup-restore-plan.md`](2026-08-19-1418-feat-encrypted-folder-backup-restore-plan.md)：用户选择目录的客户端加密、版本化备份与整库恢复。Core/Platform/App、自动化、保留和 UI 已实现；真实网盘客户端、Developer ID、macOS 14/15 与完整人工恢复仍在验收账本标为未执行。

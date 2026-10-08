@@ -1,0 +1,230 @@
+[
+  {
+    "path": ".github/workflows/go-ci.yml",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "535e6db4f4234f464263f604c98d67951b9267eaa235bb9a7793a13bb6cd8b72",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "cmd/kinlogue/main.go",
+    "before_sha256": "f70ca38eeff2a9c9987d4cdfeae670e65565ba58a827d1f22999545197914d72",
+    "after_sha256": "bd78e82fe6683ceb20a809783c4af093c3cba916ba752354bdd9f07930876f99",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "go.mod",
+    "before_sha256": "5379aaa1605e6bc751e5ceded68caf9bf525039ae8ba55ae1a5420dfafb8436e",
+    "after_sha256": "4208de1ffe7f593904fa66735ae4df5b2398c25f4570c16ec9de163f41ad99c7",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "go.sum",
+    "before_sha256": "fd3b02695cfacfb11d0802e83d50424a34d360ef0f68c67230ea21e0ec61cc17",
+    "after_sha256": "4984c7f9b5d96873f829d8ec3f85e75871aee945a3646cbcc6dccfb589967802",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/app/daily_test.go",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "1028d3042093fabaf0bd913c6ab70e48704a368c23426f6f934670c807124cb0",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/app/export.go",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "1bbf1448bc47724525ec67f2f2896ab93db23b3dc03fe4ac0353e520da5d6b5a",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/app/export_test.go",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "e7ddee96d2241ce452148a0db3b46bf2ef77b1565ca83a920e5c265ac94249f4",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/app/native_integration_darwin_test.go",
+    "before_sha256": "2d2df632fe8c844aa6f8d439f9f53b94e727a7fe705d4781b62117f254c4a5ea",
+    "after_sha256": "cd24edb978c71280324bf8400e6f72c1e7edd6f50fe0f1ddb7ab332f7d470e52",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/app/service.go",
+    "before_sha256": "bc2ac20e816b48b2e6d26d4dfa3d3627954ca261786e84fb4364bc2eeee82ac8",
+    "after_sha256": "44d02579b00d735099013c7bf67156caea900da46d2b9e69a3e2fb28d1e5e03b",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/app/service_test.go",
+    "before_sha256": "3fe0a394c7276224a5f8faf1e6086b7e6cafc87c6c052b46255e84c1cd424f42",
+    "after_sha256": "302e5835599083ca0648af7510ab042141c8af90a23c1fb59f33a9d3348e691c",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/desktop/daily_test.go",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "c4d54707d51d07647b73286c402778df3f2b10666ea9a1b7b52428bb2fadd65f",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/desktop/desktop.go",
+    "before_sha256": "1bcdd3aac4fd0fbd415e24270a43ebda29b076c18f6703a20ccea5a68090f63c",
+    "after_sha256": "274237e650894050e745404704f68f5820832490e11c34be7fc3b6fc950fb190",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/desktop/desktop_test.go",
+    "before_sha256": "2b46d48f8baeaf48a40d46c49a581845a8aebab41f5d091dc868291675b7f832",
+    "after_sha256": "a70150f2b073341f9d95f5c0210ec96211acbbf6c06c4e5239b86c96cc99b3ae",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/desktop/strings.go",
+    "before_sha256": "eb16dd2d515dc4c3064482c85e3724ddb7ae6ed0e5d8a52b6d8753b62a1c527e",
+    "after_sha256": "bc2042126c23af712a40e68bf9546c88bd0de40867e1d5320d3b7ac89ac90845",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/desktop/view.go",
+    "before_sha256": "1ee18677c20de17d48811245d18a843484a0ea1ddfebf5bcfa993fea0f9900d8",
+    "after_sha256": "3e1754ec1c40422dbdbe4b4bf570d82c5b049d39f6597f151145bb0c00556549",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/document/document.go",
+    "before_sha256": "8be7d93ff2c682cdff0e3a54d1b9e0f5b185637510e4a2f567a5dd220f0a36fd",
+    "after_sha256": "604dc6587dbbcc16100fa4ac1476428ddedc532d1bf1fff8164e4927f814a0ee",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/library/daily_test.go",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "c410e4f4544d29c45ada88a82ae4117a24545acb2f4e7463151803097594061c",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/library/deletion.go",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "d2491f225026f7a42a156b627c2f49b9bd1c22d8495568e4543f098ec6f27a0e",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/library/migration_test.go",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "bbfdba057e8083605e252b49df5629248ec2b808d7b4c103074bb5ca1e6d2e36",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/library/recovery_test.go",
+    "before_sha256": "f1dfe3c23c2ea43ecd75e3394eb33af58136909cae8972486f917fd98dcfd828",
+    "after_sha256": "d8f92ef692ded698adc30f72d7307ab3f5a727f119b1ca4fff43185131dd78f0",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/library/store.go",
+    "before_sha256": "1a013ea903504bbb3ae47578a9d6f8be1001d028af1f94047b97e1febe789aef",
+    "after_sha256": "725b6f16664d54ec579e5e616d3d5632d07cd96e5df04a5142e1d41c0859b75b",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/library/store_test.go",
+    "before_sha256": "c378febb1f306aeb4f2b98cb71044289334ba7f4804a4a7dc37c556b01eeab3f",
+    "after_sha256": "d5b846e01d7532214e984ea60b04e9d3551cff8922bf65b85a15cd8a798379df",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/macos/export_darwin.go",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "99576bf673306a67e27ac06c1f103cf4e598465beb601adeeb4ac0d4e6e39a7c",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/macos/export_darwin_test.go",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "5b81efd1e8d13c9ef79d2ec5ac9cc41042a59fddb7f0aa2d266c022f6bca1546",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "internal/macos/unsupported.go",
+    "before_sha256": "25a8a2846e68e6c4897451aa0b7f9722418df0e6613ee6875a7a18931b7fcb40",
+    "after_sha256": "cf46f787e964d06478b50835b00feb9a39fda4d06aa1b21cca156fca5a973d49",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "packaging/go-preview/Entitlements.plist",
+    "before_sha256": "97a109ec3119b2a192cac305a41c2f4d02651e66e2358723289fb3ff48dc360c",
+    "after_sha256": "0288117aedfa6e05d9af78792ee7fcd89087e94a238d3b57e48f151d4c57ae3a",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "packaging/go-preview/packaging_test.go",
+    "before_sha256": "47552caa607d22205e20744a6eff23d073af911406b14f1fc98ed246b7281c59",
+    "after_sha256": "6ee1e4636b3f6a5fdc8ddba152417118d4400a258780668f4921f406505c3628",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "packaging/go-preview/upgrade_test.go",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "aade65096b2f4a76fbc8bf38ab8ed9fa5634b3b1a77939a4edd335dd354fca34",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "scripts/build-go-preview.sh",
+    "before_sha256": "69a5fe8d03eb35ca99a61011f533df94dee0c084c1f88164d8dcaa868a011120",
+    "after_sha256": "240306fb453e06ffbc636c6a990c6a971256fc0a413394faeb23531c906e6f9e",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "scripts/verify-go-preview.sh",
+    "before_sha256": "3d526994c5e0544eae138ca42d5aa59a86c3cc35806fe43a75c94bc201323680",
+    "after_sha256": "80c3f5e6e3715593e837800b6b51b54a4587c20a2de3c16e0ab8b833e90bec42",
+    "baseline": "milestone-one-snapshot"
+  },
+  {
+    "path": "third_party/mygo/SOURCE.md",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "b50cbfc6a22d45bda14da3966a0be7b2065f100a4785757872b4cbc61e7fa6c8",
+    "baseline": "upstream-v0.2.15"
+  },
+  {
+    "path": "third_party/mygo/ui/access.go",
+    "before_sha256": "d73977cdecc30175246b5bafc307155cf61446d3e2962cde82d5524cb10a57c4",
+    "after_sha256": "5a32176520c2c99e7c044005bf1c07f31f1ecb451c214bb88549a54969812192",
+    "baseline": "upstream-v0.2.15"
+  },
+  {
+    "path": "third_party/mygo/ui/access_test.go",
+    "before_sha256": "b4bf92c0e5fb41eb05f6a6149d321537f290a47f9270b8fbe6740bb649845beb",
+    "after_sha256": "07197c96c24482392e3c7a514362e6773c4e3fe2597411a7c809c4e47cf21dd1",
+    "baseline": "upstream-v0.2.15"
+  },
+  {
+    "path": "third_party/mygo/ui/editor.go",
+    "before_sha256": "c5bac826110422a644c5c8cb1e3ea5828bd7328f0fbb791f4350f1c9b5707a04",
+    "after_sha256": "53d100617f3b88837394e9bb9f7ec25c22ab5d2e4fb27e623c43e62698e2ad77",
+    "baseline": "upstream-v0.2.15"
+  },
+  {
+    "path": "third_party/mygo/ui/editor_regression_test.go",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "aebbc119f809c0da8ef4ae98644efc9316782fe56748972b17e81b2e219c4f4a",
+    "baseline": "upstream-v0.2.15"
+  },
+  {
+    "path": "third_party/mygo/ui/input.go",
+    "before_sha256": "e37303b90e62e2bbe4811048c44bec2cd4d2594fc2f6d0facd42e3b417ccfc2b",
+    "after_sha256": "fcd3c85e4778e73dc7263f32853a7ef92f6bf5a9130dae5ecba48d265c3708d9",
+    "baseline": "upstream-v0.2.15"
+  },
+  {
+    "path": "third_party/mygo/ui/menu.go",
+    "before_sha256": "a4e5dfe1589ae04f655f58709a902ac0945b932f014525777632e4d86973e902",
+    "after_sha256": "bfa8514ac35c906429d7f426b4f5596b51ed200912dae165fcfb63e167e21c73",
+    "baseline": "upstream-v0.2.15"
+  },
+  {
+    "path": "third_party/mygo/ui/runtime.go",
+    "before_sha256": "4bdea9d7ab7f86a530d8c601cf7e0fc177c76d74ada5810608211df022438817",
+    "after_sha256": "880f234a79ac99e2e1ac8c69ba265ca9fe32f8788555e81f9700b86f76fc03de",
+    "baseline": "upstream-v0.2.15"
+  }
+]

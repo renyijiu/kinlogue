@@ -1,0 +1,43 @@
+{
+  "residual_risks": [
+    "Chinese IME composition, VoiceOver, broader keyboard flows, File Provider inputs, HEIC samples, and separate macOS/Intel matrices remain unverified; the signed-app synthetic PDF chooser/import/preview/review/confirmation/search/reopen flow has passed according to the caller evidence."
+  ],
+  "testing_gaps": [
+    "internal/macos/native_darwin_test.go:274 accepts ErrInvalid for a malformed PNG header fixture, so it does not prove that valid oversized images reach the dimension guard. Add a valid compressible over-edge PNG expecting ErrLimit and a direct pixel-budget boundary check.",
+    "Service.Preview's failed-draft branch (zero extracted pages treated as first-page preview) has no service test; add a failed import followed by page-one success and page-two rejection.",
+    "Desktop batch import and cancellation after one file has been durably imported are not exercised by current screen tests; verify the earlier draft remains visible after cancellation."
+  ],
+  "soft_bucket_findings": [
+    {
+      "#": 6,
+      "autofix_class": "advisory",
+      "confidence": 75,
+      "evidence": [
+        "internal/macos/native_darwin_test.go:274: if _, err := RenderPage(context.Background(), data, 1); !errors.Is(err, document.ErrLimit) && !errors.Is(err, document.ErrInvalid) {",
+        "internal/macos/native_darwin_test.go:265: if err := png.Encode(&b, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {",
+        "internal/macos/document_darwin.go:318: if w > document.MaxImageEdge || h > document.MaxImageEdge || w*h > document.MaxImagePixels {"
+      ],
+      "file": "internal/macos/native_darwin_test.go",
+      "first_evidence": "internal/macos/native_darwin_test.go:274: if _, err := RenderPage(context.Background(), data, 1); !errors.Is(err, document.ErrLimit) && !errors.Is(err, document.ErrInvalid) {",
+      "independent_reviewers": [
+        "testing"
+      ],
+      "line": 274,
+      "owner": "human",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "testing"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Keep the malformed-image rejection test separately, and add a valid, compressible PNG just over the edge limit that must return ErrLimit. For the pixel-count branch, extract the production dimension predicate into a small helper called by openImage and test it directly at the boundary.",
+      "title": "Make image limit test reach the limit guard",
+      "why_it_matters": "The fixture changes only a one-pixel PNG header, leaving its compressed pixels inconsistent with the declared dimensions. ImageIO may reject it as invalid before the size guard, and the test explicitly accepts that result. Removing the image dimension limit could therefore leave this test green while oversized valid images proceed to raster creation.",
+      "bucket": "testing_gaps",
+      "demotion_reason": "Keep one material primary testing finding for native extraction; this narrower guard-coverage scenario remains a consequential supplemental gap."
+    }
+  ],
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": []
+}

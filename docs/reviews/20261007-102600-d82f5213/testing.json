@@ -1,0 +1,49 @@
+{
+  "reviewer": "testing",
+  "findings": [
+    {
+      "title": "Exercise scanned PDF recognition in native tests",
+      "severity": "P2",
+      "file": "internal/macos/document_darwin.go",
+      "line": 52,
+      "why_it_matters": "A scanned PDF is a normal report input, but the new native tests exercise only the PDF text-layer branch and Vision on a standalone PNG. The PDF-to-raster-to-Vision branch could fail or lose page provenance while all current tests pass, leaving scanned reports without usable candidates.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "confidence": 75,
+      "evidence": [
+        "internal/macos/document_darwin.go:52: if usableText(text) {",
+        "internal/macos/document_darwin.go:63: return recognize(ctx, &result, img, pageNumber)",
+        "internal/macos/native_darwin_test.go:76: if b.Page != i+1 || b.Method != \"pdfTextLayer\" || b.Text != \"SYNTHETIC REPORT 12345\" || b.Bounds.Width <= 0 || b.Bounds.Height <= 0 {",
+        "internal/macos/native_darwin_test.go:124: got, err := Extract(context.Background(), buf.Bytes())"
+      ],
+      "pre_existing": false,
+      "suggested_fix": "Add a generated image-only PDF test with a legible synthetic text image. Call Extract on the PDF and assert Kind=pdf, the correct page number, Method=vision, and a recognizable text anchor; include a mixed text/scanned two-page case if the fixture can stay small."
+    },
+    {
+      "title": "Make image limit test reach the limit guard",
+      "severity": "P2",
+      "file": "internal/macos/native_darwin_test.go",
+      "line": 274,
+      "why_it_matters": "The fixture changes only a one-pixel PNG header, leaving its compressed pixels inconsistent with the declared dimensions. ImageIO may reject it as invalid before the size guard, and the test explicitly accepts that result. Removing the image dimension limit could therefore leave this test green while oversized valid images proceed to raster creation.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "confidence": 75,
+      "evidence": [
+        "internal/macos/native_darwin_test.go:274: if _, err := RenderPage(context.Background(), data, 1); !errors.Is(err, document.ErrLimit) && !errors.Is(err, document.ErrInvalid) {",
+        "internal/macos/native_darwin_test.go:265: if err := png.Encode(&b, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {",
+        "internal/macos/document_darwin.go:318: if w > document.MaxImageEdge || h > document.MaxImageEdge || w*h > document.MaxImagePixels {"
+      ],
+      "pre_existing": false,
+      "suggested_fix": "Keep the malformed-image rejection test separately, and add a valid, compressible PNG just over the edge limit that must return ErrLimit. For the pixel-count branch, extract the production dimension predicate into a small helper called by openImage and test it directly at the boundary."
+    }
+  ],
+  "residual_risks": [
+    "Chinese IME composition, VoiceOver, broader keyboard flows, File Provider inputs, HEIC samples, and separate macOS/Intel matrices remain unverified; the signed-app synthetic PDF chooser/import/preview/review/confirmation/search/reopen flow has now passed."
+  ],
+  "testing_gaps": [
+    "Service.Preview's failed-draft branch (zero extracted pages treated as first-page preview) has no service test; add a failed import followed by page-one success and page-two rejection.",
+    "Desktop batch import and cancellation after one file has been durably imported are not exercised by current screen tests; verify the earlier draft remains visible after cancellation."
+  ]
+}

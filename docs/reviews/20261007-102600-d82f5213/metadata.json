@@ -1,0 +1,92 @@
+{
+  "branch": "codex/go-native-rewrite",
+  "completed_at": "2026-10-07T02:44:35.910446+00:00",
+  "cost": {
+    "host": "codex",
+    "scope": {
+      "changed_lines": 5694,
+      "depth": "full",
+      "exec_nontest_lines": 3330,
+      "size_band": "large",
+      "unclassified_lines": {
+        ".md": 491,
+        ".mod": 23,
+        ".plist": 28,
+        ".strings": 4,
+        ".sum": 60
+      }
+    },
+    "stages": [
+      {
+        "elapsed_seconds": 0.049,
+        "ended_at": "2026-10-07T02:26:00.679457+00:00",
+        "facts": {
+          "changed_lines": 5694,
+          "depth": "full",
+          "exec_nontest_lines": 3330,
+          "size_band": "large",
+          "unclassified_lines": {
+            ".md": 491,
+            ".mod": 23,
+            ".plist": 28,
+            ".strings": 4,
+            ".sum": 60
+          }
+        },
+        "stage": "scope",
+        "started_at": "2026-10-07T02:26:00.630598+00:00"
+      },
+      {
+        "elapsed_seconds": 151.671,
+        "ended_at": "2026-10-07T02:28:32.350456+00:00",
+        "reviewers": 9,
+        "stage": "select",
+        "started_at": "2026-10-07T02:26:00.679457+00:00"
+      },
+      {
+        "candidates": 0,
+        "elapsed_seconds": 95.809,
+        "ended_at": "2026-10-07T02:36:47.731440+00:00",
+        "reviewers": 3,
+        "stage": "dispatch",
+        "started_at": "2026-10-07T02:35:11.922345+00:00"
+      },
+      {
+        "candidates": 5,
+        "elapsed_seconds": 0.171,
+        "ended_at": "2026-10-07T02:37:40.327213+00:00",
+        "facts": {
+          "native_delta": "fold_in"
+        },
+        "stage": "merge",
+        "started_at": "2026-10-07T02:37:40.156590+00:00"
+      },
+      {
+        "candidates": 5,
+        "elapsed_seconds": 79.471,
+        "ended_at": "2026-10-07T02:39:36.812588+00:00",
+        "reviewers": 1,
+        "stage": "validate",
+        "started_at": "2026-10-07T02:38:17.341479+00:00"
+      },
+      {
+        "candidates": 5,
+        "elapsed_seconds": 185.397,
+        "ended_at": "2026-10-07T02:44:35.959182+00:00",
+        "stage": "report",
+        "started_at": "2026-10-07T02:41:30.562088+00:00"
+      }
+    ],
+    "status": "complete",
+    "totals": {
+      "artifact_bytes": 699456,
+      "candidates": 0,
+      "elapsed_seconds": 512.568,
+      "reviewers": 13
+    },
+    "truncated_events": 0
+  },
+  "head_sha": "4f0f2d864fa62cef63f186870ce11ca95871badd",
+  "run_id": "20261007-102600-d82f5213",
+  "verdict": "Ready with fixes"
+}

@@ -1,0 +1,43 @@
+{
+  "reviewer": "reliability",
+  "findings": [
+    {
+      "title": "Interrupted first launch leaves library unable to reopen",
+      "severity": "P1",
+      "file": "internal/library/store.go",
+      "line": 160,
+      "why_it_matters": "A crash or storage error after creating library.sqlite but before the schema transaction commits leaves a version-zero database. Every later launch treats it as an unsupported format, so restarting cannot repair an otherwise empty preview library and the app cannot open.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "confidence": 75,
+      "evidence": [
+        "internal/library/store.go:160: f, e := r.OpenFile(\"library.sqlite\", os.O_CREATE|os.O_EXCL|os.O_RDWR|syscall.O_NOFOLLOW, 0600)",
+        "internal/library/store.go:183-192: On the next Open, databaseExists routes the zero-version file through the version/application check and returns ErrUnsupported.",
+        "internal/library/store.go:202-213: Schema initialization is a later transaction; its errors return without removing or recovering the newly created database."
+      ],
+      "pre_existing": false,
+      "suggested_fix": "Make first-run schema publication recoverable: initialize and sync a private temporary SQLite database, then atomically publish it as library.sqlite, or explicitly recognize and reinitialize only an app-created, empty version-zero database after validating that it has no user tables or originals. Add a restart test for interruption between file creation and schema commit."
+    },
+    {
+      "title": "Failed original writes retain partial files",
+      "severity": "P2",
+      "file": "internal/library/store.go",
+      "line": 406,
+      "why_it_matters": "When a write, sync, or close fails, the incomplete <id>.part file remains in originals. Repeating imports after disk pressure or another transient I/O failure accumulates unreachable files, consumes more space, and can keep subsequent imports failing. The preview has no cleanup path for these files.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "confidence": 75,
+      "evidence": [
+        "internal/library/store.go:406: if err != nil {",
+        "internal/library/store.go:394-407: The exclusive .part file is created and written; this error branch returns ErrStorage without removing it.",
+        "internal/library/store.go:393-429: No deferred removal covers cancellation or Link/Remove/Sync failure paths; Open permits existing originals when the database exists."
+      ],
+      "pre_existing": false,
+      "suggested_fix": "After creating the .part file, defer a best-effort removal of that temporary name on every exit path, disabling it only after successful removal; keep the separately published .blob behavior unchanged. Add a write/sync failure test that confirms no .part remains."
+    }
+  ],
+  "residual_risks": [],
+  "testing_gaps": []
+}

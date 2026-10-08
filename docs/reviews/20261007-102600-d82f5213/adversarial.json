@@ -1,0 +1,30 @@
+{
+  "reviewer": "adversarial",
+  "findings": [
+    {
+      "title": "Quitting during import leaves the entire batch running",
+      "severity": "P2",
+      "file": "internal/desktop/desktop.go",
+      "line": 91,
+      "why_it_matters": "Closing the window or choosing Quit during a multi-file import does not cancel recognition or queue a quit: it only displays the busy message, and all remaining files continue importing. Both close handlers route through the navigation guard, which returns whenever a job is active, so the shutdown cancellation in Service.Close is unreachable until the user separately cancels or waits for the batch and requests quit again. A dedicated close flow can cancel the active import, await its existing cleanup, and then finish quitting without requiring hard interruption of an Apple API.",
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "suggested_fix": "Give window close and OnBeforeQuit a dedicated shutdown request path. For an active cancellable job, remember the close request, cancel jobCancel, and finish closing after that job settles; for a non-cancellable save, remember the request and wait for it to settle. Preserve the existing dirty-review save/discard/cancel handling before closing, and keep Service.Close responsible for waiting for native work and closing storage. Add a focused test that requests quit during the first file of a batch, verifies later files never start, and verifies the pending quit resumes after cleanup.",
+      "confidence": 75,
+      "evidence": [
+        "internal/desktop/desktop.go:91 -- s.win.Update(func() { s.leave(func() { s.allowClose = true; s.stop(); mygo.App.Quit() }) })",
+        "internal/desktop/desktop.go:82 -- s.win.Update(func() { s.leave(func() { s.allowClose = true; s.win.Close() }) })",
+        "internal/desktop/desktop.go:196-200 -- leave checks if s.busy != \"\", assigns s.message = \"wait_busy\", and returns without retaining next or canceling the job.",
+        "internal/desktop/desktop.go:385-400 -- importFiles starts a cancellable importing job and continues every selected path unless ctx.Err() becomes non-nil; the quit path above never cancels that context while busy.",
+        "cmd/kinlogue/main.go:43-46 -- service.Close() is called only after desktop.Run(service) returns, so its cancellation mechanism cannot help when the UI prevents quit.",
+        "docs/plans/2026-10-07-0812-feat-go-native-report-workflow-plan.md:95 -- KTD5 specifies stopping admission and canceling actions before waiting for entered actions and closing the library during quit."
+      ],
+      "pre_existing": false
+    }
+  ],
+  "residual_risks": [],
+  "testing_gaps": [
+    "The packaged sandbox flow from system file-panel confirmation through import, review, confirmation, and reopen remains unverified; docs/go-native-preview.md records that UI acceptance stopped before the panel's final Open action. Headless UI and native integration tests do not exercise the panel-granted access in the installed bundle."
+  ]
+}

@@ -1,0 +1,6 @@
+# Unified diff context lines require a leading space, including empty lines
+# and Go lines indented with tabs. Preserve these frozen evidence bytes.
+20261007-102600-d82f5213/diff.patch whitespace=-blank-at-eol,-space-before-tab
+20261007-102600-d82f5213/full.diff whitespace=-blank-at-eol,-space-before-tab
+20261007-102600-d82f5213/native-delta.diff whitespace=-blank-at-eol,-space-before-tab
+20261007-113330-65f8d8e7/full.diff whitespace=-blank-at-eol,-space-before-tab

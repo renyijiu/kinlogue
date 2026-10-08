@@ -1,0 +1,26 @@
+{
+  "reviewer": "maintainability",
+  "findings": [
+    {
+      "title": "Separate report persistence from oversized Store module",
+      "severity": "P1",
+      "file": "internal/library/store.go",
+      "line": 516,
+      "why_it_matters": "Maintainers changing report ordering or recognition persistence now work in the same 1,045-line module as private-directory identity checks, initialization recovery, and immutable-blob I/O. This delta grows the file from 855 lines by adding 264 and removing 74, crossing the review persona's explicit 1,000-line structural threshold. Moving the cohesive report/source persistence methods to a same-package file follows the existing deletion.go separation without introducing another abstraction or changing transaction boundaries.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "suggested_fix": "Move CreateDraftSources and the report/source query, extraction, and review persistence methods into internal/library/reports.go within package library. Keep Store ownership, open/recovery, private-path checks, and original-file I/O in store.go; preserve the existing locking and transactions and run library/app tests after the mechanical split.",
+      "confidence": 100,
+      "evidence": [
+        "internal/library/store.go:516 -- func (s *Store) CreateDraftSources(ctx context.Context, names []string, read func(int) ([]byte, error)) (Report, error) {",
+        "The frozen full.diff contains 264 additions and 74 removals for internal/library/store.go; the frozen snapshot contains 1,045 lines, reconstructing an 855-line baseline.",
+        "internal/library/deletion.go:25 -- func (s *Store) DeleteReport(ctx context.Context, id string) (DeleteResult, error) {",
+        "The maintainability persona's Structural simplification criteria explicitly mark a touched file crossing 1,000 lines as a P1 file-size regression. This is a maintainability criterion, not an AGENTS.md rule or a runtime defect."
+      ],
+      "pre_existing": false
+    }
+  ],
+  "residual_risks": [],
+  "testing_gaps": []
+}

@@ -67,6 +67,16 @@ Kinlogue 借鉴 LLM Wiki 的“原始资料 → 编译后的 Wiki → schema”�
 
 正式运行时从 [`AppRuntimeIdentity`](Sources/KinlogueApp/App/AppRuntimeIdentity.swift) 取得可信的 Application Support 路径，由 [`AppComposition`](Sources/KinlogueApp/App/AppComposition.swift) 组装 `PlaintextVault`、本机 OCR、导入 workflow 和 LAN inbox service。不要在 View 中直接创建存储、网络或 OCR 实例。
 
+### Go 重写预览的范围
+
+[`docs/go-native-preview.md`](docs/go-native-preview.md) 是独立 Go 预览版的事实入口；上表和 `Core → Platform → App` 规则继续约束 Swift 基线。Go 代码由 `cmd/kinlogue` 组装：`internal/document` 只保存来源契约和校验，`internal/library` 负责存储，`internal/macos` 封装公开系统 API，`internal/app` 组合用例和生命周期，`internal/desktop` 只通过 Backend 调用业务能力。不得在界面中创建 Store、识别器或任意资料根目录。
+
+Go 预览使用独立 bundle ID 和沙盒资料目录，不扫描、迁移、覆盖或删除 Swift Vault。`go.mod`、`go.sum`、`internal/` 和 `cmd/` 同样是原始事实；依赖必须固定，行为改动先发现并强化 Go 测试。Go 界面文案进入 `internal/desktop/strings.go` 的中英文语义 key，启动文案同时维护中英文，长期错误不保存翻译后的文本；Swift String Catalog 门禁不能代替 Go 界面检查。预览验证命令和未完成门禁统一见其专题页，不能继承 Swift 发布结果。上述范围说明只改变实现组织，不放宽第 3 节的产品与隐私边界。
+
+已知 Go 资料格式升级必须保留用户资料并有事务中断/重启证据；未知版本拒绝打开，旧 App 副本不能冒充资料回滚。删除只清理由数据库事务登记并通过身份校验的原件，不扫描盲删历史孤儿；导出只在用户选择的保存位置发布当前确认报告的明文原件副本，不作为备份。
+
+`third_party/mygo` 是锁定 v0.2.15 的本地源码补丁，必须保留 [来源与修改记录](third_party/mygo/SOURCE.md)及许可，不能描述成未修改的上游依赖。根模块 `go test ./...` 不覆盖该嵌套模块；涉及补丁时另跑其 `ui` 测试、race 和 vet，输入事件自动化不能替代真实输入法/VoiceOver 验收。
+
 ## 5. 修改工作流
 
 ### 开始前

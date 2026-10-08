@@ -1,0 +1,127 @@
+diff --git a/internal/macos/document_darwin.go b/internal/macos/document_darwin.go
+index 0ccc423..30bcc25 100644
+--- a/internal/macos/document_darwin.go
++++ b/internal/macos/document_darwin.go
+@@ -321,21 +321,47 @@ func openImage(data []byte) (uintptr, string, error) {
+ 	// ImageIO applies EXIF orientation to the bounded raster. Vision and preview
+ 	// therefore use the same upright coordinate system and orientation=.up.
+ 	img := sourceThumbnail(source, 0, imageOptions(map[string]int{"kCGImageSourceCreateThumbnailFromImageAlways": 1, "kCGImageSourceCreateThumbnailWithTransform": 1, "kCGImageSourceThumbnailMaxPixelSize": document.MaxRenderEdge, "kCGImageSourceShouldCacheImmediately": 1}))
+ 	if img == 0 {
+ 		return 0, "", document.ErrInvalid
+ 	}
+ 	if imageWidth(img) > document.MaxRenderEdge || imageHeight(img) > document.MaxRenderEdge || imageWidth(img) == 0 || imageHeight(img) == 0 {
+ 		imageRelease(img)
+ 		return 0, "", document.ErrLimit
+ 	}
+-	return img, kind, nil
++	defer imageRelease(img)
++	// In transparent scans, alpha can carry the entire glyph while RGB is all
++	// black. Composite onto the same white paper for OCR and original preview;
++	// dropping alpha or leaving its interpretation to Vision loses that text.
++	opaque, err := whitePaperImage(img)
++	if err != nil {
++		return 0, "", err
++	}
++	return opaque, kind, nil
++}
++
++func whitePaperImage(img uintptr) (uintptr, error) {
++	w, h := int(imageWidth(img)), int(imageHeight(img))
++	bitmap, err := newBitmap(w, h)
++	if err != nil {
++		return 0, err
++	}
++	defer contextRelease(bitmap)
++	target := rect{Size: size{float64(w), float64(h)}}
++	contextFillColor(bitmap, 1, 1, 1, 1)
++	contextFillRect(bitmap, target)
++	contextDrawImage(bitmap, target, img)
++	opaque := bitmapImage(bitmap)
++	if opaque == 0 {
++		return 0, document.ErrInvalid
++	}
++	return opaque, nil
+ }
+ 
+ func newBitmap(w, h int) (uintptr, error) {
+ 	if w < 1 || h < 1 || w > document.MaxRenderEdge || h > document.MaxRenderEdge {
+ 		return 0, document.ErrLimit
+ 	}
+ 	space := colorSpaceCreate()
+ 	if space == 0 {
+ 		return 0, document.ErrUnavailable
+ 	}
+diff --git a/internal/macos/native_darwin_test.go b/internal/macos/native_darwin_test.go
+index 943ee23..deef672 100644
+--- a/internal/macos/native_darwin_test.go
++++ b/internal/macos/native_darwin_test.go
+@@ -131,20 +131,69 @@ func TestVisionGeneratedPNG(t *testing.T) {
+ 	if got.Kind != "png" || !strings.Contains(got.Text(), "SYNTHETIC") {
+ 		t.Fatal("Vision did not recognize generated anchor")
+ 	}
+ 	for _, b := range got.Blocks {
+ 		if b.Method != "vision" || b.Page != 1 {
+ 			t.Fatal("missing Vision provenance")
+ 		}
+ 	}
+ }
+ 
++func TestTransparentBlackTextPNGUsesSameWhitePaperForOCRAndPreview(t *testing.T) {
++	opaque, err := RenderPage(context.Background(), syntheticPDF(1, 600, 300), 1)
++	if err != nil {
++		t.Fatal(err)
++	}
++	transparent := image.NewNRGBA(opaque.Bounds())
++	visiblePixels := 0
++	for y := range opaque.Bounds().Dy() {
++		for x := range opaque.Bounds().Dx() {
++			r, _, _, _ := opaque.At(x, y).RGBA()
++			alpha := uint8(255 - (r >> 8))
++			if alpha > 0 {
++				visiblePixels++
++			}
++			transparent.SetNRGBA(x, y, color.NRGBA{A: alpha})
++		}
++	}
++	if visiblePixels == 0 {
++		t.Fatal("generated transparent fixture is blank")
++	}
++	var b bytes.Buffer
++	if err := png.Encode(&b, transparent); err != nil {
++		t.Fatal(err)
++	}
++	got, err := Extract(context.Background(), b.Bytes())
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !strings.Contains(got.Text(), "SYNTHETIC") {
++		t.Error("Vision lost visible black text on transparent PNG")
++	}
++	preview, err := RenderPage(context.Background(), b.Bytes(), 1)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if preview.Bounds() != opaque.Bounds() {
++		t.Fatal("background normalization changed geometry")
++	}
++	r, g, bl, a := preview.At(0, 0).RGBA()
++	if r != 0xffff || g != 0xffff || bl != 0xffff || a != 0xffff {
++		t.Error("transparent paper is not shown as opaque white in preview")
++	}
++	for _, block := range got.Blocks {
++		if block.Method != "vision" || block.Page != 1 {
++			t.Fatal("transparent PNG lost source provenance")
++		}
++	}
++}
++
+ func TestImportedFileRejectsSpecialFiles(t *testing.T) {
+ 	dir := t.TempDir()
+ 	regular := filepath.Join(dir, "synthetic.pdf")
+ 	want := syntheticPDF(1, 600, 800)
+ 	if err := os.WriteFile(regular, want, 0600); err != nil {
+ 		t.Fatal(err)
+ 	}
+ 	got, err := ReadImportedFile(regular)
+ 	if err != nil || !bytes.Equal(got, want) {
+ 		t.Fatalf("read regular: %v", err)

@@ -1,0 +1,193 @@
+{
+  "plan": "docs/plans/2026-10-07-0812-feat-go-native-report-workflow-plan.md",
+  "source": "explicit",
+  "status_basis": "met means corresponding implementation appears in the reviewed diff; it does not clear findings or unexecuted acceptance gates.",
+  "requirements": [
+    {
+      "id": "R1",
+      "status": "met",
+      "evidence": [
+        "packaging/go-preview/Info.plist",
+        "internal/macos/files_darwin.go:25"
+      ],
+      "note": "Independent bundle identity and trusted sandbox root; no old-store discovery or migration."
+    },
+    {
+      "id": "R2",
+      "status": "met",
+      "evidence": [
+        "go.mod",
+        "scripts/build-go-preview.sh",
+        "scripts/verify-go-preview.sh",
+        "README.md"
+      ],
+      "note": "Separate Go build/verify scripts and preview documentation preserve the Swift tree; caller reports Swift build passed."
+    },
+    {
+      "id": "R3",
+      "status": "met",
+      "evidence": [
+        "internal/library/store.go:330",
+        "internal/desktop/desktop.go:364",
+        "internal/macos/files_darwin.go:109",
+        "internal/macos/document_darwin.go:288"
+      ],
+      "note": "Members, system chooser, bounded original copy, and PDF/JPEG/PNG/HEIC/single-frame TIFF paths exist. HEIC and File Provider manual coverage remain pending."
+    },
+    {
+      "id": "R4",
+      "status": "met",
+      "evidence": [
+        "cmd/kinlogue/main.go:20",
+        "internal/macos/document_darwin.go:23",
+        "internal/app/native_integration_darwin_test.go"
+      ],
+      "note": "Production PDFKit/Vision extraction persists source-linked results; signed-app PDF and transparent-PNG flows passed per caller. Scanned-PDF branch coverage is finding #5."
+    },
+    {
+      "id": "R5",
+      "status": "met",
+      "evidence": [
+        "internal/desktop/desktop.go:192",
+        "internal/desktop/view.go:326",
+        "internal/library/store.go:544",
+        "internal/desktop/desktop_test.go:115"
+      ],
+      "note": "Preview, manual date, review save, member-gated confirmation, and dirty save/discard/cancel are implemented and covered; shutdown while busy remains finding #2."
+    },
+    {
+      "id": "R6",
+      "status": "met",
+      "evidence": [
+        "internal/library/store.go:618",
+        "internal/library/store_test.go:82",
+        "internal/app/native_integration_darwin_test.go"
+      ],
+      "note": "Queries require confirmed status and selected member and search corrected text; native integration and caller UI evidence cover isolation."
+    },
+    {
+      "id": "R7",
+      "status": "met",
+      "evidence": [
+        "internal/library/store.go:215",
+        "internal/app/service.go:131",
+        "internal/app/service_test.go:78",
+        "internal/library/store_test.go:159"
+      ],
+      "note": "Durable reopen, interrupted-draft recovery, serialized mutations, and late-result rejection are present. Empty-library initialization recovery is finding #1."
+    },
+    {
+      "id": "R8",
+      "status": "met",
+      "evidence": [
+        "internal/document/document.go:36",
+        "internal/library/store.go:490",
+        "internal/desktop/desktop_test.go:236",
+        "internal/app/native_integration_darwin_test.go"
+      ],
+      "note": "Extraction stays separate from Review; page, bounds, method, and engine survive save/confirm/reopen and remain visible."
+    },
+    {
+      "id": "R9",
+      "status": "met",
+      "evidence": [
+        "internal/document/document.go:13",
+        "internal/macos/document_darwin.go:23",
+        "internal/macos/document_darwin.go:288"
+      ],
+      "note": "Shared byte/page/image/text budgets and typed failures are enforced. Valid oversized-image guard coverage and scanned-PDF coverage need strengthening."
+    },
+    {
+      "id": "R10",
+      "status": "met",
+      "evidence": [
+        "packaging/go-preview/Entitlements.plist",
+        "internal/library/store.go",
+        "PRIVACY.md",
+        "docs/go-native-preview.md"
+      ],
+      "note": "Preview entitlements allow sandbox and selected-file read only; storage and privacy docs describe plaintext and hash limits."
+    },
+    {
+      "id": "R11",
+      "status": "met",
+      "evidence": [
+        "internal/desktop/strings.go",
+        "internal/desktop/view.go",
+        "internal/desktop/desktop_test.go:149",
+        "internal/library/store_test.go:350"
+      ],
+      "note": "Chinese/English semantic resources, runtime language persistence, and localized labels exist; language-change state is tested. VoiceOver effectiveness remains unverified."
+    },
+    {
+      "id": "R12",
+      "status": "met",
+      "evidence": [
+        "internal/macos/native_darwin_test.go",
+        "docs/go-native-preview.md",
+        "docs/log.md"
+      ],
+      "note": "Fixtures and runtime acceptance use synthetic material; preview docs distinguish current-Mac results from IME, accessibility, architecture, OS, and distribution gates."
+    }
+  ],
+  "implementation_units": [
+    {
+      "id": "U1",
+      "title": "Module and shared contracts",
+      "status": "met",
+      "evidence": [
+        "go.mod",
+        "go.sum",
+        "cmd/kinlogue/main.go",
+        "internal/document/document.go"
+      ]
+    },
+    {
+      "id": "U2",
+      "title": "Library persistence and confirmation gate",
+      "status": "partially addressed",
+      "evidence": [
+        "internal/library/store.go",
+        "internal/library/store_test.go"
+      ],
+      "note": "The implemented store and real SQLite coverage need the initialization-recovery and temporary-write cleanup fixes in #1 and #3."
+    },
+    {
+      "id": "U3",
+      "title": "Native extraction and preview",
+      "status": "partially addressed",
+      "evidence": [
+        "internal/macos/document_darwin.go",
+        "internal/macos/native_darwin_test.go"
+      ],
+      "note": "Real PDFKit/ImageIO/Vision and transparent-PNG regression coverage exist; the planned scanned-PDF Vision assertion is missing (#5)."
+    },
+    {
+      "id": "U4",
+      "title": "Workflow and native desktop",
+      "status": "partially addressed",
+      "evidence": [
+        "internal/app/service.go",
+        "internal/desktop/desktop.go",
+        "internal/desktop/desktop_test.go"
+      ],
+      "note": "The installed report workflow is evidenced; busy-quit behavior does not yet reach KTD5 cancellation (#2)."
+    },
+    {
+      "id": "U5",
+      "title": "Sandboxed preview and documentation",
+      "status": "met",
+      "evidence": [
+        "packaging/go-preview",
+        "scripts/build-go-preview.sh",
+        "scripts/verify-go-preview.sh",
+        "docs/go-native-preview.md"
+      ],
+      "note": "Caller reports signed sandbox PDF/PNG workflows and bundle verification passed; broader manual matrices remain explicit."
+    }
+  ],
+  "unaddressed_requirements": [],
+  "unaddressed_implementation_units": [],
+  "unrequested_behavior_rules": [],
+  "reverse_check": "Checked the plan body and reviewed diff. Independent copies, read-only confirmed records, explicit retries, retained published blobs, language persistence, and member-scoped corrected-text search are within the plan or supplied session decisions; no additional product behavior rule was found."
+}

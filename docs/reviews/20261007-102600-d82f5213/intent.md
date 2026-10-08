@@ -1,0 +1,1 @@
+Implement the first independent Go desktop report workflow: create/select member, choose a local file, real PDFKit/Vision extraction, raw-and-corrected review, explicit confirmation, member-scoped search, and reopen durable records. Preserve the Swift baseline, use a separate sandbox identity/root, and distinguish current preview evidence from deferred functions and manual gates.

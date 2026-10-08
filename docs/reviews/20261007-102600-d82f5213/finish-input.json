@@ -1,0 +1,270 @@
+{
+  "run_id": "20261007-102600-d82f5213",
+  "run_dir": "docs/reviews/20261007-102600-d82f5213",
+  "skill_dir": "ce-code-review skill directory supplied in leaf prompt",
+  "docs_root": "docs",
+  "mode": {
+    "agent": true,
+    "apply_local": false,
+    "grouping": "auto",
+    "depth": "full"
+  },
+  "invocation": {
+    "arguments": "mode:agent base:4f0f2d864fa62cef63f186870ce11ca95871badd depth:full plan:docs/plans/2026-10-07-0812-feat-go-native-report-workflow-plan.md",
+    "constraints": [
+      "No code mutations/git commits/stage/push.",
+      "Scope explicitly includes all new untracked Go implementation and scoped docs additions; review diff artifact includes them.",
+      "Do not persist private absolute host paths, any actual data/credentials, or sensitive logs in docs/review artifacts. Keep reviewed files relative.",
+      "Product: Go clean rewrite, no old data compatibility, same repo isolated worktree. This phase only local report workflow member → system chooser → native PDF/Vision → raw and corrected review → user confirm → member search → reopen.",
+      "No LAN/backup/DICOM/LLM yet intentional. Swift baseline preserved.",
+      "Library owner flock plus serialized service mutations plus state conditions plus UI generation fences under one window; no revisions intentional documented.",
+      "Original blobs retained after draft deletion; UI text corrected. Native synchronous calls cannot hard cancel and in-process parser limitations are documented.",
+      "All test data synthetic.",
+      "Caller reports full Go tests, vet, real native tests, actual Service/native/reopen integration, race library/app/desktop, Swift build, bundle build and verification passed.",
+      "Latest caller evidence: signed app system chooser PDF import succeeded (2 pages actual bitmap), Chinese pasted title/transcript save, dirty leave cancel protects edit, raw page 2 distinct, quit/relaunch preserves draft, confirmed-only before empty/after record, corrected Chinese query hits and raw SYNTHETIC query does not; second member empty; language persists across close/reopen. Final bundle rebuilt after simplify. PNG Vision UI acceptance still underway.",
+      "External Claude disclosure was denied by automatic approval review; no egress/job start. Continue local adversarial fallback, no permission retry.",
+      "Post-snapshot native delta: only internal/macos/document_darwin.go and native_darwin_test.go changed, to composite bounded decoded images over white before OCR and preview. A generated transparent black-text regression failed before and passed after; real synthetic transparent PNG extraction changed from zero blocks to a recognized anchor. Original bytes are unchanged. Targeted correctness, security and testing follow-up is part of this run.",
+      "Final native execution evidence from caller: the same valid transparent black-text PNG imported through the signed app system chooser now shows the synthetic Vision text anchor. Native 16-test suite, full go test ./..., and bundle verification passed again; native files are stable and no other production code changed."
+    ]
+  },
+  "scope": {
+    "mode": "standalone",
+    "base": "4f0f2d864fa62cef63f186870ce11ca95871badd",
+    "diff_a": "4f0f2d864fa62cef63f186870ce11ca95871badd",
+    "diff_b": null,
+    "pr": {
+      "number": null,
+      "url": null,
+      "title": null,
+      "body": null,
+      "base_ref_name": null,
+      "head_ref_oid": null,
+      "head_ref": null,
+      "base_ref": null,
+      "has_prior_comments": false
+    },
+    "branch": "codex/go-native-rewrite",
+    "head_sha": "4f0f2d864fa62cef63f186870ce11ca95871badd",
+    "files": "docs/reviews/20261007-102600-d82f5213/files.txt",
+    "diff": "docs/reviews/20261007-102600-d82f5213/full.diff",
+    "tree_is_reviewed_head": true,
+    "untracked_excluded": []
+  },
+  "intent": {
+    "summary": "Implement the first independent Go desktop report workflow: create/select member, choose a local file, real PDFKit/Vision extraction, raw-and-corrected review, explicit confirmation, member-scoped search, and reopen durable records. Preserve the Swift baseline, use a separate sandbox identity/root, and distinguish current preview evidence from deferred functions and manual gates.",
+    "confidence": "explicit"
+  },
+  "plan": {
+    "path": "docs/plans/2026-10-07-0812-feat-go-native-report-workflow-plan.md",
+    "source": "explicit",
+    "requirements": [
+      {
+        "id": "R1",
+        "text": "新预览版使用与 Swift 版不同的 bundle ID、App 名称和可信 Application Support 子目录；不扫描、迁移、覆盖或删除旧资料。"
+      },
+      {
+        "id": "R2",
+        "text": "保留当前 `Package.swift`、Swift 源码、测试和打包入口可运行；新增 Go 构建入口及明确的预览能力说明。"
+      },
+      {
+        "id": "R3",
+        "text": "用户能创建和选择家庭成员，通过系统文件面板导入 PDF、JPEG、PNG、HEIC 和单帧 TIFF，原始文件保持不变。"
+      },
+      {
+        "id": "R4",
+        "text": "识别必须实际调用本机 PDFKit/Vision，并持久化原件、识别结果及来源信息；不把模拟结果作为产品能力。"
+      },
+      {
+        "id": "R5",
+        "text": "用户可以查看原件、修改标题和转录、选择手工日期或明确“未注明日期”，保存后稍后继续复核；确认前必须指定有效成员。离开有未保存修改的复核页或退出时必须提供保存/放弃/取消选择，保存失败保留当前编辑内容。"
+      },
+      {
+        "id": "R6",
+        "text": "只有用户明确确认的记录进入该成员的时间线和搜索；草稿和其他成员的内容不能通过查询泄露。"
+      },
+      {
+        "id": "R7",
+        "text": "重启后保留成员、原件、已保存草稿和确认记录；识别失败仍保留可处理草稿，迟到结果不得覆盖新草稿或已确认内容。"
+      },
+      {
+        "id": "R8",
+        "text": "原始识别、用户修正和已确认内容保持可区分；每条识别结果保留原件 ID、页码、方法、引擎信息与可用位置，手工输入不得伪造来源。"
+      },
+      {
+        "id": "R9",
+        "text": "导入验证、识别与预览遵守 `docs/import-and-ocr.md` 的输入和输出预算；unsupported、locked、损坏和超限内容给出明确失败类别，不执行附件或发布半份识别结果。"
+      },
+      {
+        "id": "R10",
+        "text": "本阶段无互联网客户端、网络监听、账号、遥测、模型调用或 Keychain；活动 SQLite 与原件为 App Sandbox 内明文，SHA-256 只用于发现意外损坏，不提供保密、认证或防篡改能力。"
+      },
+      {
+        "id": "R11",
+        "text": "所有用户可见文案、错误、空状态、确认动作和无障碍标签有简中/英文资源；运行时语言切换不改变用户内容。"
+      },
+      {
+        "id": "R12",
+        "text": "自动化与预览验收只用合成资料；中文输入法、键盘、VoiceOver 和 macOS 版本兼容性必须分别记录实测与未验证状态。"
+      }
+    ],
+    "implementation_units": [
+      {
+        "id": "U1",
+        "title": "Module and shared contracts"
+      },
+      {
+        "id": "U2",
+        "title": "Library persistence and confirmation gate"
+      },
+      {
+        "id": "U3",
+        "title": "Native extraction and preview"
+      },
+      {
+        "id": "U4",
+        "title": "Workflow and native desktop"
+      },
+      {
+        "id": "U5",
+        "title": "Sandboxed preview and documentation"
+      }
+    ],
+    "settled_decisions": [
+      "- **不要求旧资料和备份格式兼容。** Governs R1. (session-settled: user-directed — chosen over preserving existing storage compatibility: 应用仍处测试阶段，可以重新设计。)",
+      "- **第一阶段继续使用本机 OCR，模型后续加入。** Governs R4, R10. (session-settled: user-approved — chosen over introducing a model provider immediately: 先验证核心闭环，并保留后续识别与整理的扩展边界。)",
+      "- KTD4. **公开 macOS API 的小范围 Go 适配。** `internal/macos` 用 purego 调用 Foundation、PDFKit、ImageIO 与 Vision，不引入生产 Swift helper。遵守线程及 autorelease pool 所有权，逐页/逐图解码，及时释放 native 对象。适配负责可信运行目录、系统选取与临时文件授权、输入探测、文本提取和有界预览。(session-settled: user-approved — chosen over replacing the OCR engine during rewrite: 延续现有系统识别路径便于比较效果。) Governs R4, R9."
+    ]
+  },
+  "roster": {
+    "selected": [
+      {
+        "reviewer": "correctness",
+        "tier": "session",
+        "reason": "Always-on behavioral review"
+      },
+      {
+        "reviewer": "project-standards",
+        "tier": "mid-tier",
+        "reason": "AGENTS.md governs changed files"
+      },
+      {
+        "reviewer": "testing",
+        "tier": "mid-tier",
+        "reason": "New behavioral and native tests"
+      },
+      {
+        "reviewer": "maintainability",
+        "tier": "mid-tier",
+        "reason": "3330 executable non-test lines and new module boundaries"
+      },
+      {
+        "reviewer": "security",
+        "tier": "session",
+        "reason": "Untrusted file input and sandbox identity/permissions"
+      },
+      {
+        "reviewer": "performance",
+        "tier": "mid-tier",
+        "reason": "SQLite result hydration and image/OCR processing"
+      },
+      {
+        "reviewer": "reliability",
+        "tier": "mid-tier",
+        "reason": "Cancellation, persistence and failure recovery"
+      },
+      {
+        "reviewer": "adversarial",
+        "tier": "session",
+        "reason": "Persistence, concurrency and build-verifier fidelity; external route unavailable"
+      },
+      {
+        "reviewer": "julik-frontend-races",
+        "tier": "mid-tier",
+        "reason": "Asynchronous UI actions, preview generation and dirty navigation"
+      }
+    ],
+    "standards": {
+      "criteria": [
+        {
+          "path": "AGENTS.md",
+          "governs": [
+            "AGENTS.md",
+            "PRIVACY.md",
+            "README.md",
+            "cmd/kinlogue/main.go",
+            "docs/architecture.md",
+            "docs/go-native-preview.md",
+            "docs/index.md",
+            "docs/log.md",
+            "docs/plans/2026-10-07-0812-feat-go-native-report-workflow-plan.md",
+            "docs/plans/README.md",
+            "docs/privacy-and-security.md",
+            "docs/project-overview.md",
+            "docs/sources/README.md",
+            "docs/sources/mygo-native-2026-10-07.md",
+            "go.mod",
+            "go.sum",
+            "internal/app/native_integration_darwin_test.go",
+            "internal/app/service.go",
+            "internal/app/service_test.go",
+            "internal/desktop/desktop.go",
+            "internal/desktop/desktop_test.go",
+            "internal/desktop/strings.go",
+            "internal/desktop/view.go",
+            "internal/document/document.go",
+            "internal/document/document_test.go",
+            "internal/library/store.go",
+            "internal/library/store_test.go",
+            "internal/macos/document_darwin.go",
+            "internal/macos/ffi_darwin.go",
+            "internal/macos/files_darwin.go",
+            "internal/macos/native_darwin_test.go",
+            "internal/macos/unsupported.go",
+            "packaging/go-preview/Entitlements.plist",
+            "packaging/go-preview/Info.plist",
+            "packaging/go-preview/en.lproj/InfoPlist.strings",
+            "packaging/go-preview/packaging_test.go",
+            "packaging/go-preview/zh-Hans.lproj/InfoPlist.strings",
+            "scripts/build-go-preview.sh",
+            "scripts/verify-go-preview.sh"
+          ]
+        }
+      ],
+      "fallback_named": true,
+      "not_run_reason": null
+    },
+    "packs": {
+      "roots": [],
+      "errors": [],
+      "warnings": []
+    }
+  },
+  "collection": {
+    "returns": "docs/reviews/20261007-102600-d82f5213/raw-returns.json",
+    "unstructured_returns": [],
+    "failed_reviewers": [],
+    "bound_exceeded": [],
+    "fast_pass": {
+      "emitted_preliminary": false,
+      "candidates": []
+    }
+  },
+  "peer": {
+    "selected": true,
+    "target": "claude",
+    "route": "claude",
+    "preference_source": "default",
+    "outcome": "in-process-fallback",
+    "artifact": null,
+    "coverage": "Cross-model pass not run: automatic approval review rejected disclosure of the scoped private Go preview diff to Claude because the user had not explicitly authorized that destination. No job started and no code was sent; the local adversarial reviewer supplied the lens."
+  },
+  "coverage_notes": [
+    "Full review: 39 files including explicitly included untracked implementation, snapshotted without changing the live Git index.",
+    "Project standards used AGENTS.md as the instruction-file fallback; no other applicable criteria files.",
+    "No plan-exempt future features treated as current defects.",
+    "Declared Compound Packs absent; no matching solutions corpus. Agent-native, API-contract, data-migration, previous-comments and Swift-specific lenses not selected because their scoped runtime surfaces are absent.",
+    "Latest user-visible installation evidence is in invocation.constraints and supersedes the earlier locked-Mac limitation mentioned in the testing reviewer artifact.",
+    "Operational artifact references are repository-relative to avoid persisting private host paths; leaf prompts supply their concrete execution roots.",
+    "Transparent PNG native delta received targeted correctness, security and testing follow-up. Four non-cached native tests passed with macOS service access: transparent PNG OCR/preview, opaque PNG Vision, JPEG orientation and large-image bounds. No additional candidate findings from the delta."
+  ]
+}

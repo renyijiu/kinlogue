@@ -1,0 +1,1 @@
+{"reviewer":"julik-frontend-races","findings":[],"residual_risks":[],"testing_gaps":["The installed preview UI has not completed the file-panel → import → review → confirm → reopen flow; headless desktop and cross-layer tests do not verify native modal focus, close/quit handling, or cancellation timing in that full interaction."]}

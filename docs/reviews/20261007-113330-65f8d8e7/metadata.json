@@ -1,0 +1,75 @@
+{
+  "branch": "codex/go-native-rewrite",
+  "completed_at": "2026-10-07T03:59:48.213071+00:00",
+  "cost": {
+    "host": "codex",
+    "scope": {
+      "changed_lines": null,
+      "depth": "full",
+      "exec_nontest_lines": null,
+      "size_band": "unknown",
+      "unclassified_lines": {}
+    },
+    "stages": [
+      {
+        "elapsed_seconds": 85.793,
+        "ended_at": "2026-10-07T03:34:56.706281+00:00",
+        "facts": {
+          "changed_lines": null,
+          "depth": "full",
+          "exec_nontest_lines": null,
+          "size_band": "unknown",
+          "unclassified_lines": {}
+        },
+        "stage": "scope",
+        "started_at": "2026-10-07T03:33:30.913752+00:00"
+      },
+      {
+        "elapsed_seconds": 96.905,
+        "ended_at": "2026-10-07T03:36:33.611486+00:00",
+        "reviewers": 11,
+        "stage": "select",
+        "started_at": "2026-10-07T03:34:56.706281+00:00"
+      },
+      {
+        "candidates": 6,
+        "elapsed_seconds": 442.318,
+        "ended_at": "2026-10-07T03:43:55.929894+00:00",
+        "stage": "dispatch",
+        "started_at": "2026-10-07T03:36:33.611486+00:00"
+      },
+      {
+        "candidates": 5,
+        "elapsed_seconds": 282.3,
+        "ended_at": "2026-10-07T03:50:14.856678+00:00",
+        "stage": "merge",
+        "started_at": "2026-10-07T03:45:32.556195+00:00"
+      },
+      {
+        "candidates": 5,
+        "elapsed_seconds": 265.704,
+        "ended_at": "2026-10-07T03:55:06.331399+00:00",
+        "stage": "validate",
+        "started_at": "2026-10-07T03:50:40.627808+00:00"
+      },
+      {
+        "candidates": 4,
+        "elapsed_seconds": 202.78,
+        "ended_at": "2026-10-07T03:59:48.259878+00:00",
+        "stage": "report",
+        "started_at": "2026-10-07T03:56:25.480378+00:00"
+      }
+    ],
+    "status": "complete",
+    "totals": {
+      "artifact_bytes": 2156014,
+      "candidates": 6,
+      "elapsed_seconds": 1375.8,
+      "reviewers": 11
+    },
+    "truncated_events": 0
+  },
+  "head_sha": "4f0f2d864fa62cef63f186870ce11ca95871badd",
+  "run_id": "20261007-113330-65f8d8e7",
+  "verdict": "Ready with fixes"
+}

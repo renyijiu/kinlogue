@@ -1,0 +1,61 @@
+{
+  "run_id": "20261007-102600-d82f5213",
+  "record_type": "caller-owned-followup",
+  "date": "2026-10-07",
+  "review_snapshot": "review.json",
+  "review_snapshot_unchanged": true,
+  "status": "complete",
+  "unresolved_actionable_findings": 0,
+  "findings": [
+    {
+      "id": 1,
+      "disposition": "fixed",
+      "implementation": "Durable private initialization marker permits recovery only for an owned empty version-zero database with no schema objects or originals; unknown databases remain rejected.",
+      "files": ["internal/library/store.go", "internal/library/recovery_test.go"],
+      "verification": ["TestInitializationRecoversAfterProcessKill: SIGKILL at four initialization checkpoints followed by durable reopen", "TestInitializationMarkerCannotAdoptUnknownDatabase", "TestUnownedEmptyDatabaseIsNotInitialized"]
+    },
+    {
+      "id": 2,
+      "disposition": "fixed",
+      "implementation": "Dedicated shutdown remembers close intent, cancels cancellable imports, waits for cleanup or non-cancellable saves, then applies the dirty-review save/discard/cancel guard. Cancelling shutdown resumes paused preview.",
+      "files": ["internal/desktop/desktop.go", "internal/desktop/strings.go", "internal/desktop/desktop_test.go"],
+      "verification": ["TestShutdownDuringFirstBatchImportCancelsAndWaitsForCleanup", "TestShutdownDuringSaveWaitsWithoutCancellingWrite", "TestShutdownAfterFailedSavePreservesEditsAndCancelStaysOpen", "TestCancellingShutdownRestartsInterruptedPreview"]
+    },
+    {
+      "id": 3,
+      "disposition": "fixed",
+      "implementation": "Deferred cleanup removes the exclusively created .part only while its regular-file inode still matches, then syncs the originals directory. Published blobs and replacement files are retained.",
+      "files": ["internal/library/store.go", "internal/library/recovery_test.go"],
+      "verification": ["TestOriginalPartCleanupAfterFileFailure: write, short write, sync and close failures", "TestOriginalPartCleanupAfterCancellationAndLinkFailure", "TestOriginalPartCleanupPreservesReplacement"]
+    },
+    {
+      "id": 4,
+      "disposition": "fixed",
+      "implementation": "List queries select metadata only; Get loads the selected report body. The UI renders visible rows with stable IDs through mygo List.",
+      "decision": "Keep the existing list API with documented metadata-only results rather than add a separate DTO and pagination in this first phase. Metadata allocation still scales with result count; the demonstrated full-body hydration and per-row control-tree costs are removed.",
+      "files": ["internal/library/store.go", "internal/library/recovery_test.go", "internal/desktop/view.go", "internal/desktop/desktop_test.go"],
+      "verification": ["TestListsOnlyHydrateMetadataAtScale: 128 synthetic reports containing 25161984 body bytes; metadata allocation below the 4 MiB regression bound", "TestLargeTimelineBuildsVisibleRowsAndCanReachLastRecord: 10000 synthetic summaries, visible-row rendering and selected Get"]
+    },
+    {
+      "id": 5,
+      "disposition": "fixed",
+      "implementation": "A generated two-page image-only PDF now exercises actual PDFKit rasterization and Vision recognition, asserting text anchors, page provenance and bounds. Valid oversized PNG and dimension boundary checks also strengthen the related test gap.",
+      "files": ["internal/macos/document_darwin.go", "internal/macos/native_darwin_test.go"],
+      "verification": ["TestImageOnlyPDFUsesVisionWithPageProvenance", "TestValidPNGOverEdgeLimitIsRejected", "TestRasterDimensionPolicyBoundaries"]
+    }
+  ],
+  "verification": [
+    {"command": "go test ./...", "result": "passed after all fixes, including real native framework tests"},
+    {"command": "go vet ./...", "result": "passed after all fixes"},
+    {"command": "go test -race ./internal/library ./internal/app ./internal/desktop", "result": "passed after all fixes"},
+    {"command": "scripts/build-go-preview.sh", "result": "passed after all fixes, including bundle verification"},
+    {"command": "scripts/verify-go-preview.sh", "result": "passed independently for the final bundle"},
+    {"command": "Current-Mac synthetic UI regression", "result": "final signed bundle reopened saved members and confirmed report; metadata list opened full corrected text, original preview and initial OCR; inbox and timeline accessibility names matched their states"}
+  ],
+  "scope_notes": [
+    "Root inspected the applied changes and consumed the original completed review; the original Ready with fixes verdict is preserved as the pre-fix snapshot.",
+    "No commit, push or PR was created.",
+    "Current-Mac synthetic checks do not establish Chinese IME, VoiceOver, full keyboard operation, real report OCR quality, File Provider, other macOS versions, Intel runtime or public distribution compatibility.",
+    "External Claude review was rejected by automatic approval review for lack of explicit code-disclosure authorization; no external review job started. Local independent review completed."
+  ]
+}

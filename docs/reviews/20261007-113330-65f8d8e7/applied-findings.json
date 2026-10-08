@@ -1,0 +1,83 @@
+{
+  "run_id": "20261007-113330-65f8d8e7",
+  "record_type": "caller-owned-followup",
+  "date": "2026-10-07",
+  "review_snapshot": "review.json",
+  "review_snapshot_unchanged": true,
+  "status": "fixes-verified-manual-acceptance-pending",
+  "unresolved_actionable_findings": 0,
+  "findings": [
+    {
+      "id": 2,
+      "disposition": "fixed",
+      "implementation": "Native Save queues a save intent. The view consumes it after text inputs apply queued events, with the existing busy, modal and composition guards. The asynchronous write receives a copied edit and source order.",
+      "files": ["internal/desktop/desktop.go", "internal/desktop/view.go", "internal/desktop/daily_test.go"],
+      "verification": ["TestNativeSaveIncludesTextQueuedBeforeTheFrame reproduced stale title before the fix; title, transcription and notes pass after the fix", "TestNativeSaveWaitsForPendingComposition", "TestSaveCapturesSourceOrderBeforeBackgroundWrite", "Full desktop race passed after the fixes"]
+    },
+    {
+      "id": 3,
+      "disposition": "fixed",
+      "implementation": "An empty save-panel destination publishes the bilingual export_cancelled semantic status, replacing any previous success or failure without invoking the backend exporter.",
+      "files": ["internal/desktop/desktop.go", "internal/desktop/strings.go", "internal/desktop/daily_test.go"],
+      "verification": ["TestExportCancelIsNormalAndOnlyConfirmedSnapshotCanExport covers cancellation after previous export success and failure", "Full desktop race passed after the fixes"]
+    },
+    {
+      "id": 4,
+      "disposition": "fixed",
+      "implementation": "A real SQLite trigger aborts the second source-order update after valid confirmed fields and the first source have been written. The test checks the entire old report, extraction, original bytes and old/new member search results before and after reopen, then removes the trigger and verifies a successful retry.",
+      "files": ["internal/library/daily_test.go"],
+      "verification": ["TestConfirmedEditFailureRollsBackFieldsAndSourceOrder", "An isolated mutation that partially commits on source-update failure is rejected by the new test", "Full library tests and race passed after the finding fix"]
+    },
+    {
+      "id": 5,
+      "disposition": "fixed",
+      "implementation": "Each confirmation-negative fixture now has a valid complete source order and exactly one invalid field. It requires ErrInvalid, unchanged report state and a positive control that repairs the one field and confirms successfully.",
+      "files": ["internal/library/store_test.go"],
+      "verification": ["TestInvalidConfirmationKeepsDraft covers six isolated invalid cases", "Removing date validation passes the old masked fixture but fails the repaired invalid-date case", "Full library tests and race passed after the finding fix"]
+    }
+  ],
+  "additional_corrections": [
+    {
+      "scope": "Native close, quit and import callbacks adjacent to finding #2",
+      "implementation": "These callbacks now queue their intents and consume them after all fields apply pending input. Shutdown takes priority over import and save in the same frame; an active composition consumes without executing or replaying the request. Existing task cancellation, waiting and dirty guards remain. Approved Window.Close is posted after rendering because it destroys the surface synchronously; App.Quit already posts its sequence.",
+      "files": ["internal/desktop/desktop.go", "internal/desktop/view.go", "internal/desktop/daily_test.go"],
+      "verification": ["Read-only overlay reproduced first-edit loss for draft and confirmed editing through close, quit and import", "TestNativeNavigationWaitsForPendingFirstEdit checks the actual callback helpers, visible dirty dialog, and saving the newest edit before continuation", "TestNativeShutdownTakesPriorityOverSameFrameImportAndSave covers both callback orders and cancellation without replay", "TestNativeNavigationDoesNotInterruptOrReplayComposition", "TestNativeNavigationRendersGuardWithoutAnotherInputEvent", "Eleven timing/composition subcases changed from red to green; final full desktop tests, race and vet passed"]
+    },
+    {
+      "scope": "mygo input milestone",
+      "implementation": "App-side same-field composition cancellation now requests native marked-text discard. Native commit/cancel events restore editor state without a redundant host reset; a newer native event supersedes an earlier queued discard so a new composition remains intact. Cross-field owner changes still reset host input state.",
+      "provenance": "The original review rejected candidate #6 as pre-existing in pinned upstream v0.2.15. This separately authorized input correction does not change that adjudication.",
+      "verification": ["Four app-cancellation probes failed before the correction and passed after it", "TestInputMethodNativeFinishDoesNotResetHost covers four normal native finish paths", "TestInputMethodNativeEventSupersedesQueuedCancellation covers three newer-event paths", "Final nested go test ./ui -count=1, targeted input/composition race and go vet ./ui passed"]
+    },
+    {
+      "scope": "SIGKILL test fixtures",
+      "implementation": "Initialization, migration and deletion helpers wait for a successfully requested SIGKILL instead of racing it with os.Exit(94). Parent tests retain exact checkpoint and signal assertions and reject parent timeouts explicitly. Diagnostics report only bounded status fields.",
+      "files": ["internal/library/recovery_test.go", "internal/library/migration_test.go", "internal/library/daily_test.go"],
+      "verification": ["Diagnostic reproduction before correction: 5 normal exit-94 failures in 200 schema-committed race runs", "The same 200 runs passed after correction", "All seven initialization, migration and deletion checkpoints passed 40 race repetitions, totaling 280 actual process kills", "Final library CGO_ENABLED=0 full tests, full race and vet passed; production recovery code was unchanged"]
+    }
+  ],
+  "simplification": {
+    "applied": ["Count extraction bytes directly for budget checks instead of building temporary full text", "Render only visible import-choice rows with stable positional keys; a 1000-file regression covers bounded nodes, scrolling, ordering and cancellation"],
+    "not_applied": ["No composition-context cache without measured benefit", "No store file split based only on a reviewer line-count preference"]
+  },
+  "verification": [
+    {"command": "CGO_ENABLED=0 go test ./...", "result": "passed after the native navigation and SIGKILL fixture corrections, including native framework and export test packages"},
+    {"command": "go vet ./...", "result": "passed after the native navigation and SIGKILL fixture corrections"},
+    {"command": "go test -race ./internal/library ./internal/app ./internal/desktop", "result": "passed in the final combined run after the native navigation and SIGKILL fixture corrections. The earlier fixture exit race was diagnosed and fixed without changing production recovery or weakening the required signal."},
+    {"command": "scripts/build-go-preview.sh and scripts/verify-go-preview.sh", "result": "passed after final production changes; exact sandbox and user-selected read-write permissions, local pinned mygo replacement, bundle identity and signature verified"},
+    {"command": "scripts/verify-docs.sh, scripts/privacy-guard.sh, gofmt check, git diff --check and review JSON syntax", "result": "passed after the final code, documentation, navigation and follow-up receipt updates"},
+    {"command": "Current-Mac native UI", "result": "blocked by locked Mac; the new bundle has not been launched for this milestone's real-window acceptance"}
+  ],
+  "pending_gates": [
+    "Actual Chinese IME composition, cancellation, undo/redo, complete keyboard navigation and VoiceOver; first input immediately followed by Cmd+W/Q/O and native surface shutdown",
+    "Installed synthetic v1-to-v2 upgrade, multi-original workflow, confirmed editing, deletion and repeated reopening",
+    "Signed NSSavePanel new destination, authorized replacement, cancellation and failure preserving destination; compare exported ZIP bytes",
+    "File Provider and other macOS/Intel environments, hosted Go CI and formal distribution"
+  ],
+  "scope_notes": [
+    "The original review describes its frozen 38-file milestone delta. This caller-owned record describes subsequent fixes and executed verification, without rewriting the original verdict.",
+    "All data used by tests is synthetic. Native low-level and headless tests do not establish signed-window authorization or input-method acceptance.",
+    "Swift runtime code was not changed and Swift tests were not rerun this milestone.",
+    "No commit, push or PR was created."
+  ]
+}

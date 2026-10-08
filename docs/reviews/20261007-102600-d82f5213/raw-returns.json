@@ -1,0 +1,183 @@
+[
+  {
+    "reviewer": "correctness",
+    "findings": [],
+    "residual_risks": [],
+    "testing_gaps": []
+  },
+  {
+    "reviewer": "project-standards",
+    "findings": [],
+    "residual_risks": [],
+    "testing_gaps": []
+  },
+  {
+    "reviewer": "testing",
+    "findings": [
+      {
+        "title": "Exercise scanned PDF recognition in native tests",
+        "severity": "P2",
+        "file": "internal/macos/document_darwin.go",
+        "line": 52,
+        "confidence": 75,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "Add a generated image-only PDF test with a legible synthetic text image. Call Extract on the PDF and assert Kind=pdf, the correct page number, Method=vision, and a recognizable text anchor; include a mixed text/scanned two-page case if the fixture can stay small.",
+        "first_evidence": "internal/macos/document_darwin.go:52: if usableText(text) {",
+        "evidence": [
+          "internal/macos/document_darwin.go:52: if usableText(text) {",
+          "internal/macos/document_darwin.go:63: return recognize(ctx, &result, img, pageNumber)",
+          "internal/macos/native_darwin_test.go:76: if b.Page != i+1 || b.Method != \"pdfTextLayer\" || b.Text != \"SYNTHETIC REPORT 12345\" || b.Bounds.Width <= 0 || b.Bounds.Height <= 0 {",
+          "internal/macos/native_darwin_test.go:124: got, err := Extract(context.Background(), buf.Bytes())"
+        ]
+      },
+      {
+        "title": "Make image limit test reach the limit guard",
+        "severity": "P2",
+        "file": "internal/macos/native_darwin_test.go",
+        "line": 274,
+        "confidence": 75,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "Keep the malformed-image rejection test separately, and add a valid, compressible PNG just over the edge limit that must return ErrLimit. For the pixel-count branch, extract the production dimension predicate into a small helper called by openImage and test it directly at the boundary.",
+        "first_evidence": "internal/macos/native_darwin_test.go:274: if _, err := RenderPage(context.Background(), data, 1); !errors.Is(err, document.ErrLimit) && !errors.Is(err, document.ErrInvalid) {",
+        "evidence": [
+          "internal/macos/native_darwin_test.go:274: if _, err := RenderPage(context.Background(), data, 1); !errors.Is(err, document.ErrLimit) && !errors.Is(err, document.ErrInvalid) {",
+          "internal/macos/native_darwin_test.go:265: if err := png.Encode(&b, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {",
+          "internal/macos/document_darwin.go:318: if w > document.MaxImageEdge || h > document.MaxImageEdge || w*h > document.MaxImagePixels {"
+        ]
+      }
+    ],
+    "residual_risks": [
+      "Chinese IME composition, VoiceOver, broader keyboard flows, File Provider inputs, HEIC samples, and separate macOS/Intel matrices remain unverified; the signed-app synthetic PDF chooser/import/preview/review/confirmation/search/reopen flow has now passed."
+    ],
+    "testing_gaps": [
+      "Service.Preview's failed-draft branch (zero extracted pages treated as first-page preview) has no service test; add a failed import followed by page-one success and page-two rejection.",
+      "Desktop batch import and cancellation after one file has been durably imported are not exercised by current screen tests; verify the earlier draft remains visible after cancellation."
+    ]
+  },
+  {
+    "reviewer": "maintainability",
+    "findings": [],
+    "residual_risks": [],
+    "testing_gaps": []
+  },
+  {
+    "reviewer": "security",
+    "findings": [],
+    "residual_risks": [],
+    "testing_gaps": []
+  },
+  {
+    "reviewer": "performance",
+    "findings": [
+      {
+        "title": "Timeline loads every full report into memory",
+        "severity": "P2",
+        "file": "internal/library/store.go",
+        "line": 593,
+        "confidence": 75,
+        "autofix_class": "manual",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "Introduce a lightweight report-list DTO and query only ID, display name/title, date, status, and created time for list views; keep full extraction loading in Get for the selected report. Page the timeline/search results and render only the current page or visible rows. Verify a large synthetic library's load time and peak memory.",
+        "first_evidence": "internal/library/store.go:593: \trows, err := s.db.QueryContext(ctx, \"SELECT \"+reportColumns+\" FROM reports \"+clause, args...)",
+        "evidence": [
+          "internal/library/store.go:593: \trows, err := s.db.QueryContext(ctx, \"SELECT \"+reportColumns+\" FROM reports \"+clause, args...)",
+          "internal/library/store.go:431: reportColumns includes corrected_text, notes, and extraction; scanReport at line 443 JSON-decodes extraction for every row.",
+          "internal/library/store.go:615,629: Drafts and Search both call list without a row limit; internal/desktop/desktop.go:153-160 calls both during each list refresh.",
+          "internal/desktop/view.go:145-168: the list builds one UI control tree per returned report, displaying only title, date, and status.",
+          "internal/document/document.go:22 and internal/library/store.go:443,541: extraction and editable text fields have MiB-scale per-report limits."
+        ]
+      }
+    ],
+    "residual_risks": [],
+    "testing_gaps": []
+  },
+  {
+    "reviewer": "reliability",
+    "findings": [
+      {
+        "title": "Interrupted first launch leaves library unable to reopen",
+        "severity": "P1",
+        "file": "internal/library/store.go",
+        "line": 160,
+        "confidence": 75,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "Make first-run schema publication recoverable: initialize and sync a private temporary SQLite database, then atomically publish it as library.sqlite, or explicitly recognize and reinitialize only an app-created, empty version-zero database after validating that it has no user tables or originals. Add a restart test for interruption between file creation and schema commit.",
+        "first_evidence": "internal/library/store.go:160: f, e := r.OpenFile(\"library.sqlite\", os.O_CREATE|os.O_EXCL|os.O_RDWR|syscall.O_NOFOLLOW, 0600)",
+        "evidence": [
+          "internal/library/store.go:160: f, e := r.OpenFile(\"library.sqlite\", os.O_CREATE|os.O_EXCL|os.O_RDWR|syscall.O_NOFOLLOW, 0600)",
+          "internal/library/store.go:183-192: On the next Open, databaseExists routes the zero-version file through the version/application check and returns ErrUnsupported.",
+          "internal/library/store.go:202-213: Schema initialization is a later transaction; its errors return without removing or recovering the newly created database."
+        ]
+      },
+      {
+        "title": "Failed original writes retain partial files",
+        "severity": "P2",
+        "file": "internal/library/store.go",
+        "line": 406,
+        "confidence": 75,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "After creating the .part file, defer a best-effort removal of that temporary name on every exit path, disabling it only after successful removal; keep the separately published .blob behavior unchanged. Add a write/sync failure test that confirms no .part remains.",
+        "first_evidence": "internal/library/store.go:406: if err != nil {",
+        "evidence": [
+          "internal/library/store.go:406: if err != nil {",
+          "internal/library/store.go:394-407: The exclusive .part file is created and written; this error branch returns ErrStorage without removing it.",
+          "internal/library/store.go:393-429: No deferred removal covers cancellation or Link/Remove/Sync failure paths; Open permits existing originals when the database exists."
+        ]
+      }
+    ],
+    "residual_risks": [],
+    "testing_gaps": []
+  },
+  {
+    "reviewer": "adversarial",
+    "findings": [
+      {
+        "title": "Quitting during import leaves the entire batch running",
+        "severity": "P2",
+        "file": "internal/desktop/desktop.go",
+        "line": 91,
+        "confidence": 75,
+        "autofix_class": "manual",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "Give window close and OnBeforeQuit a dedicated shutdown request path. For an active cancellable job, remember the close request, cancel jobCancel, and finish closing after that job settles; for a non-cancellable save, remember the request and wait for it to settle. Preserve the existing dirty-review save/discard/cancel handling before closing, and keep Service.Close responsible for waiting for native work and closing storage. Add a focused test that requests quit during the first file of a batch, verifies later files never start, and verifies the pending quit resumes after cleanup.",
+        "first_evidence": "internal/desktop/desktop.go:91 -- s.win.Update(func() { s.leave(func() { s.allowClose = true; s.stop(); mygo.App.Quit() }) })",
+        "evidence": [
+          "internal/desktop/desktop.go:91 -- s.win.Update(func() { s.leave(func() { s.allowClose = true; s.stop(); mygo.App.Quit() }) })",
+          "internal/desktop/desktop.go:82 -- s.win.Update(func() { s.leave(func() { s.allowClose = true; s.win.Close() }) })",
+          "internal/desktop/desktop.go:196-200 -- leave checks if s.busy != \"\", assigns s.message = \"wait_busy\", and returns without retaining next or canceling the job.",
+          "internal/desktop/desktop.go:385-400 -- importFiles starts a cancellable importing job and continues every selected path unless ctx.Err() becomes non-nil; the quit path above never cancels that context while busy.",
+          "cmd/kinlogue/main.go:43-46 -- service.Close() is called only after desktop.Run(service) returns, so its cancellation mechanism cannot help when the UI prevents quit.",
+          "docs/plans/2026-10-07-0812-feat-go-native-report-workflow-plan.md:95 -- KTD5 specifies stopping admission and canceling actions before waiting for entered actions and closing the library during quit."
+        ]
+      }
+    ],
+    "residual_risks": [],
+    "testing_gaps": [
+      "The packaged sandbox flow from system file-panel confirmation through import, review, confirmation, and reopen remains unverified; docs/go-native-preview.md records that UI acceptance stopped before the panel's final Open action. Headless UI and native integration tests do not exercise the panel-granted access in the installed bundle."
+    ]
+  },
+  {
+    "reviewer": "julik-frontend-races",
+    "findings": [],
+    "residual_risks": [],
+    "testing_gaps": [
+      "The installed preview UI has not completed the file-panel → import → review → confirm → reopen flow; headless desktop and cross-layer tests do not verify native modal focus, close/quit handling, or cancellation timing in that full interaction."
+    ]
+  }
+]

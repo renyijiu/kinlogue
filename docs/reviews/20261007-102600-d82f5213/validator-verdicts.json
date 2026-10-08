@@ -1,0 +1,34 @@
+{
+  "verdicts": [
+    {
+      "#": 1,
+      "status": "confirmed",
+      "protected_subject": null,
+      "reason": "On a first launch interrupted after library.sqlite is created at internal/library/store.go:160 but before the schema transaction commits at 202-213, the next Open takes the existing-database branch at 183-193 and rejects its zero version/application ID; that interruption is reachable, though its incidence was not measured."
+    },
+    {
+      "#": 2,
+      "status": "confirmed",
+      "protected_subject": "concurrency",
+      "reason": "When close or Quit arrives during an import job, internal/desktop/desktop.go:77-91 calls leave, whose busy branch at 196-200 neither cancels jobCancel nor retains the close request, so the batch loop at 383-400 continues until a separate cancellation; the ordering is reachable through the chooser and incidence was not measured."
+    },
+    {
+      "#": 3,
+      "status": "confirmed",
+      "protected_subject": null,
+      "reason": "If a created original's write, sync, close, cancellation check, or link fails, internal/library/store.go:393-416 returns without removing its .part file, while the documented preservation of published orphan blobs does not cover this incomplete temporary file; failure incidence was not measured."
+    },
+    {
+      "#": 4,
+      "status": "confirmed",
+      "protected_subject": "memory-safety",
+      "reason": "For a member with many large confirmed reports, internal/library/store.go:431-445,592-629 selects and decodes full text and extraction for every unbounded result, internal/desktop/desktop.go:150-163 retains the result, and view.go:143-168 constructs a control per row; large-library incidence and peak allocations were not measured."
+    },
+    {
+      "#": 5,
+      "status": "confirmed",
+      "protected_subject": null,
+      "reason": "An image-only PDF reaches renderPDF then recognize at internal/macos/document_darwin.go:52-63, but native_darwin_test.go:63-92 asserts only PDF text-layer extraction and 115-139 asserts Vision only after converting a rendered page to standalone PNG, so no native test checks scanned-PDF Vision output or page provenance."
+    }
+  ]
+}

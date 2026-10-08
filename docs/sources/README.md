@@ -32,6 +32,9 @@ kind: pattern-reference | product-decision | external-spec
 
 ### 知识库、发布与产品文档
 
+- [`mygo-native-2026-10-07.md`](mygo-native-2026-10-07.md)：Go 原生界面、公开系统 API 桥接和本机 SQLite 的锁定来源；上游路线图与项目验证分开记录。
+- [`mygo-local-patch-2026-10-07.md`](mygo-local-patch-2026-10-07.md)：在同一锁定 mygo 版本上引入本地输入补丁的来源追加；区分原版摘要、本地源码及嵌套模块验证，不改写上一条点时笔记。
+- [`darwin-directory-search-2026-10-08.md`](darwin-directory-search-2026-10-08.md)：公开 Darwin `O_SEARCH` 头文件定义；用于保存面板授权下固定导出父目录，来源定义与本机沙盒验证分开记录。
 - [`karpathy-llm-wiki.md`](karpathy-llm-wiki.md)：知识库组织方式。
 - [`github-actions-macos-ci-cd-2026-08-05.md`](github-actions-macos-ci-cd-2026-08-05.md)：macOS CI/CD 与 Apple 分发边界。
 - [`dependency-security-review-2026-08-23.md`](dependency-security-review-2026-08-23.md)：SwiftPM 已知公告、CodeQL/Dependabot 能力与独立审计缺口的点时复核。

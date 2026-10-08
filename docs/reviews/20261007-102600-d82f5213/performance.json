@@ -1,0 +1,27 @@
+{
+  "reviewer": "performance",
+  "findings": [
+    {
+      "title": "Timeline loads every full report into memory",
+      "severity": "P2",
+      "file": "internal/library/store.go",
+      "line": 593,
+      "why_it_matters": "Opening a member timeline or refreshing after an import, save, or search reads every matching report, including up to 1 MiB of corrected text and up to 2 MiB of extraction JSON per report. The store decodes and validates every extraction, retains all reports in a slice, and the UI builds a control for every item. A household library with hundreds of reports can therefore cause large allocation spikes and slow timeline loads even though the list displays only title, date, and status.",
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "confidence": 75,
+      "evidence": [
+        "internal/library/store.go:593: \trows, err := s.db.QueryContext(ctx, \"SELECT \"+reportColumns+\" FROM reports \"+clause, args...)",
+        "internal/library/store.go:431: reportColumns includes corrected_text, notes, and extraction; scanReport at line 443 JSON-decodes extraction for every row.",
+        "internal/library/store.go:615,629: Drafts and Search both call list without a row limit; internal/desktop/desktop.go:153-160 calls both during each list refresh.",
+        "internal/desktop/view.go:145-168: the list builds one UI control tree per returned report, displaying only title, date, and status.",
+        "internal/document/document.go:22 and internal/library/store.go:443,541: extraction and editable text fields have MiB-scale per-report limits."
+      ],
+      "pre_existing": false,
+      "suggested_fix": "Introduce a lightweight report-list DTO and query only ID, display name/title, date, status, and created time for list views; keep full extraction loading in Get for the selected report. Page the timeline/search results and render only the current page or visible rows. Verify a large synthetic library's load time and peak memory."
+    }
+  ],
+  "residual_risks": [],
+  "testing_gaps": []
+}
