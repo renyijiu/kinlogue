@@ -112,7 +112,19 @@ is_allowed_repository_media_asset() {
 }
 
 CHECKED_IN_REPORT_LIKE_FILE=""
+GO_RECOVERY_PATTERN='(A[G]E-SECRET-KEY-PQ-1[023456789AC-HJ-NP-Z]{58}|a[g]e-secret-key-pq-1[023456789ac-hj-np-z]{58})'
 while IFS= read -r -d '' candidate; do
+  case "${candidate:l}" in
+    *.kinloguebackup|*.kinloguegobackup)
+      fail "a private backup artifact is present" ;;
+  esac
+  if /usr/bin/grep -a -E -q -- "$GO_RECOVERY_PATTERN" "$candidate" >/dev/null 2>&1; then
+    fail "a complete Go backup recovery code is present"
+  else
+    RECOVERY_SCAN_STATUS=$?
+    [[ "$RECOVERY_SCAN_STATUS" -eq 1 ]] \
+      || fail "the Go backup recovery code audit could not be completed"
+  fi
   if is_report_like_file "$candidate" \
       && ! is_allowed_repository_media_asset "$candidate"; then
     CHECKED_IN_REPORT_LIKE_FILE="$candidate"

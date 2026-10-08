@@ -407,7 +407,7 @@ func TestNativeNavigationWaitsForPendingFirstEdit(t *testing.T) {
 						// Model Window.Update before field construction through the
 						// same helpers used by the production native callbacks.
 						if action == "import" {
-							s.queueImportShortcut(func() { advanced = true })
+							s.queueNavigation(func() { advanced = true })
 						} else {
 							s.queueShutdown(func() { advanced, s.allowClose = true, true })
 						}
@@ -447,7 +447,7 @@ func TestNativeShutdownTakesPriorityOverSameFrameImportAndSave(t *testing.T) {
 					beforeFrame = false
 					shutdown := func() { s.queueShutdown(func() { exited = true }) }
 					others := func() {
-						s.queueImportShortcut(func() { imported = true })
+						s.queueNavigation(func() { imported = true })
 						s.queueSaveShortcut()
 					}
 					if shutdownFirst {
@@ -503,7 +503,7 @@ func TestNativeNavigationDoesNotInterruptOrReplayComposition(t *testing.T) {
 				if beforeFrame {
 					beforeFrame = false
 					if action == "import" {
-						s.queueImportShortcut(func() { advanced = true })
+						s.queueNavigation(func() { advanced = true })
 					} else {
 						s.queueShutdown(func() { advanced = true })
 					}

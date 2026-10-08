@@ -21,6 +21,7 @@ DerivedData/
 # User-created encrypted checkpoints are private even though their payload is
 # authenticated and encrypted.
 *.kinloguebackup
+*.kinloguegobackup
 
 PrivateFixtures/
 private-medical-records/

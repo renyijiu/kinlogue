@@ -34,18 +34,30 @@ func main() {
 		startupFailure(err)
 		return
 	}
-	store, err := library.Open(root)
+	runtime, err := library.OpenRuntime(root)
 	if err != nil {
 		startupFailure(err)
 		return
 	}
-	service := app.New(store, appleProcessor{}, macos.ReadImportedFile, macos.WriteExport)
-	if err := desktop.Run(service); err != nil {
+	runErr, closeErr := runLibrary(runtime, desktop.Run, desktop.RunRecovery)
+	if runErr != nil {
 		fmt.Fprintln(os.Stderr, "application_run_failed")
 	}
-	if err := service.Close(); err != nil {
+	if closeErr != nil {
 		fmt.Fprintln(os.Stderr, "application_close_failed")
 	}
+}
+
+func runLibrary(runtime *library.Runtime, run func(desktop.Backend, desktop.BackupBackend, bool) error, recover func(desktop.BackupBackend) error) (runErr, closeErr error) {
+	if store := runtime.Store(); store != nil {
+		service := app.New(store, appleProcessor{}, macos.ReadImportedFile, macos.WriteExport)
+		controller := app.NewBackupController(runtime, service, macos.WriteBackup, macos.ReadBackup)
+		runErr = run(service, controller, runtime.OpenError() != nil)
+		return runErr, controller.Close()
+	}
+	controller := app.NewRecoveryController(runtime, macos.ReadBackup)
+	runErr = recover(controller)
+	return runErr, controller.Close()
 }
 
 func startupFailure(err error) {

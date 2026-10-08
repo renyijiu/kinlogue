@@ -38,13 +38,13 @@ type Service struct {
 	mu          sync.Mutex
 	closing     bool
 	ops         sync.WaitGroup
-	closed      chan struct{}
+	closeOnce   sync.Once
 	closeError  error
 }
 
 func New(s *library.Store, p Processor, readFile func(string) ([]byte, error), writeExport func(context.Context, string, func(io.Writer) error) error) *Service {
 	c, cancel := context.WithCancel(context.Background())
-	return &Service{store: s, processor: p, readFile: readFile, writeExport: writeExport, shutdown: c, cancel: cancel, mutations: make(chan struct{}, 1), closed: make(chan struct{})}
+	return &Service{store: s, processor: p, readFile: readFile, writeExport: writeExport, shutdown: c, cancel: cancel, mutations: make(chan struct{}, 1)}
 }
 
 func command[T any](s *Service, ctx context.Context, mutation bool, fn func(context.Context) (T, error)) (T, error) {
@@ -78,19 +78,19 @@ func command[T any](s *Service, ctx context.Context, mutation bool, fn func(cont
 // Close stops admission, cancels entered commands and waits for the native
 // recognizer to return before closing SQLite. A native call may not interrupt.
 func (s *Service) Close() error {
+	s.closeOnce.Do(func() {
+		s.seal()
+		s.ops.Wait()
+		s.closeError = s.store.Close()
+	})
+	return s.closeError
+}
+
+func (s *Service) seal() {
 	s.mu.Lock()
-	if s.closing {
-		s.mu.Unlock()
-		<-s.closed
-		return s.closeError
-	}
 	s.closing = true
 	s.cancel()
 	s.mu.Unlock()
-	s.ops.Wait()
-	s.closeError = s.store.Close()
-	close(s.closed)
-	return s.closeError
 }
 
 // Import treats one selected file as a separate report. ImportMany is the

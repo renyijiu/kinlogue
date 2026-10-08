@@ -71,6 +71,9 @@ type Store struct {
 	originalIdentity os.FileInfo
 	databaseIdentity os.FileInfo
 	lockIdentity     os.FileInfo
+
+	snapshotRestoreReady bool
+	restoreOwnedFiles    map[string]os.FileInfo
 }
 
 const reportSchema = `
@@ -98,7 +101,7 @@ CREATE TABLE members (id TEXT PRIMARY KEY, name TEXT NOT NULL);
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO settings VALUES ('language', 'system');
 PRAGMA application_id=1263290191;
-PRAGMA user_version=2;`
+PRAGMA user_version=3;`
 
 const migrationV2 = `
 ALTER TABLE reports RENAME TO reports_v1;
@@ -259,6 +262,7 @@ func openLibrary(path string, checkpoint func(string)) (_ *Store, err error) {
 		return nil, ErrCorrupt
 	}
 	needsSchema := initializing && version == 0 && application == 0
+	s.snapshotRestoreReady = needsSchema
 	if needsSchema {
 		var objects int
 		if e = s.db.QueryRow("SELECT count(*) FROM sqlite_schema").Scan(&objects); e != nil {
@@ -270,7 +274,7 @@ func openLibrary(path string, checkpoint func(string)) (_ *Store, err error) {
 		if _, e = emptyPrivateDirectory(r, "originals"); e != nil {
 			return nil, e
 		}
-	} else if (version != 1 && version != 2) || application != 1263290191 {
+	} else if (version != 1 && version != 2 && version != 3) || application != 1263290191 {
 		return nil, ErrUnsupported
 	}
 	var check string
@@ -295,12 +299,16 @@ func openLibrary(path string, checkpoint func(string)) (_ *Store, err error) {
 		}
 		reached("schema_committed")
 	}
-	if !needsSchema && version == 1 {
+	if !needsSchema && version < 3 {
 		tx, e := s.db.Begin()
 		if e != nil {
 			return nil, ErrStorage
 		}
-		if _, e = tx.Exec(migrationV2); e != nil {
+		migration := "PRAGMA user_version=3;"
+		if version == 1 {
+			migration = migrationV2 + migration
+		}
+		if _, e = tx.Exec(migration); e != nil {
 			_ = tx.Rollback()
 			return nil, ErrCorrupt
 		}

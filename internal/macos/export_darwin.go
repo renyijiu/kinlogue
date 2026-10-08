@@ -30,10 +30,16 @@ const maxExportBytes int64 = document.MaxSources*document.MaxFileBytes + 1<<20
 // The callback must only write ZIP bytes; it must not reenter macos APIs because
 // it runs inside the serialized native scope and file coordination accessor.
 func WriteExport(ctx context.Context, destination string, write func(io.Writer) error) error {
+	return writeSelectedFile(ctx, destination, maxExportBytes, write, func(file *os.File, info os.FileInfo) error {
+		return validateExportZIP(ctx, file, info.Size())
+	})
+}
+
+func writeSelectedFile(ctx context.Context, destination string, limit int64, write func(io.Writer) error, verify func(*os.File, os.FileInfo) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if write == nil || !validExportPath(destination) {
+	if write == nil || verify == nil || !validExportPath(destination) {
 		return ErrWrite
 	}
 	// Cancellation is checked before publication. native's usual late-output
@@ -74,7 +80,7 @@ func WriteExport(ctx context.Context, destination string, write func(io.Writer) 
 			if err != nil || path != destination {
 				return
 			}
-			result = writeCoordinatedExport(ctx, coordinatedURL, path, parent, parentInfo, previous, write)
+			result = writeCoordinatedFile(ctx, coordinatedURL, path, parent, parentInfo, previous, limit, write, verify)
 		})
 		defer accessor.Release()
 		// ForReplacing is required even when the selected destination is new.
@@ -133,7 +139,7 @@ func sameExportTarget(path string, previous os.FileInfo) bool {
 	return os.SameFile(current, previous) && current.Size() == previous.Size() && current.ModTime() == previous.ModTime()
 }
 
-func writeCoordinatedExport(ctx context.Context, destinationURL id, destination string, parent *os.File, parentInfo, previous os.FileInfo, write func(io.Writer) error) error {
+func writeCoordinatedFile(ctx context.Context, destinationURL id, destination string, parent *os.File, parentInfo, previous os.FileInfo, limit int64, write func(io.Writer) error, verify func(*os.File, os.FileInfo) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -191,7 +197,7 @@ func writeCoordinatedExport(ctx context.Context, destinationURL id, destination 
 			_ = os.Remove(temporary)
 		}
 	}()
-	writer := &exportWriter{ctx: ctx, file: file, remaining: maxExportBytes}
+	writer := &exportWriter{ctx: ctx, file: file, remaining: limit}
 	if err := write(writer); err != nil || writer.failed {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -214,7 +220,10 @@ func writeCoordinatedExport(ctx context.Context, destinationURL id, destination 
 	if err != nil || !info.Mode().IsRegular() || !os.SameFile(info, original) || info.Mode().Perm() != 0600 {
 		return ErrWrite
 	}
-	if err := validateExportZIP(ctx, read, info.Size()); err != nil {
+	if info.Size() <= 0 || info.Size() > limit {
+		return ErrWrite
+	}
+	if err := verify(read, info); err != nil {
 		return err
 	}
 	currentParent, err := os.Lstat(filepath.Dir(destination))

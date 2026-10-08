@@ -37,6 +37,10 @@ type Backend interface {
 
 type screen struct {
 	backend                          Backend
+	backups                          BackupBackend
+	backup                           backupFlow
+	backupPage, recoveryOnly         bool
+	restartOnly, activating          bool
 	win                              *mygo.Window
 	post                             func(func())
 	ctx                              context.Context
@@ -73,7 +77,7 @@ type screen struct {
 	importPaths                      []string
 	composing                        bool
 	saveRequested                    bool
-	importRequested                  func()
+	navigationRequested              func()
 	shutdownRequested                func()
 }
 
@@ -82,9 +86,18 @@ func newScreen(backend Backend, systemLanguage string) *screen {
 	return &screen{backend: backend, ctx: ctx, stop: stop, language: "system", systemLanguage: systemLanguage, page: 1, selectedReport: -1, previewGate: make(chan struct{}, 1)}
 }
 
-func Run(backend Backend) error {
+func Run(backend Backend, backups BackupBackend, startupWarning bool) error {
 	s := newScreen(backend, macos.PreferredLanguage())
+	s.backups = backups
+	if startupWarning {
+		s.message = "restore_startup_warning"
+	}
+	return s.run()
+}
+
+func (s *screen) run() error {
 	defer s.stop()
+	defer s.clearBackupSecrets()
 	mygo.App.WhenReady(func() {
 		mygo.Theme.SetSource(mygo.ThemeLight)
 		s.win = mygo.NewWindow(mygo.WindowOptions{Title: s.t("app"), Width: 1240, Height: 880, MinWidth: 1080, MinHeight: 700, Content: ui.View(s.view)})
@@ -137,20 +150,25 @@ func (s *screen) updateChrome() {
 		return
 	}
 	s.win.SetTitle(s.t("app"))
-	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
+	items := []*mygo.MenuItem{
 		{Label: s.t("app"), Submenu: []*mygo.MenuItem{{Label: s.t("quit"), Role: mygo.RoleQuit}}},
-		{Label: s.t("file_menu"), Submenu: []*mygo.MenuItem{
+	}
+	if !s.recoveryOnly && !s.restartOnly && !s.activating {
+		items = append(items, &mygo.MenuItem{Label: s.t("file_menu"), Submenu: []*mygo.MenuItem{
 			{Label: s.t("import"), Accelerator: "CmdOrCtrl+O", Click: func(*mygo.MenuItem, *mygo.Window) {
-				s.win.Update(func() { s.queueImportShortcut(s.chooseFiles) })
+				s.win.Update(func() { s.queueNavigation(s.chooseFiles) })
 			}},
 			{Label: s.t("save_menu"), Accelerator: "CmdOrCtrl+S", Click: func(*mygo.MenuItem, *mygo.Window) { s.win.Update(s.queueSaveShortcut) }},
 			{Label: s.t("close_window"), Role: mygo.RoleClose},
-		}},
-		{Label: s.t("edit_menu"), Submenu: []*mygo.MenuItem{
+		}})
+	}
+	if !s.restartOnly && !s.activating {
+		items = append(items, &mygo.MenuItem{Label: s.t("edit_menu"), Submenu: []*mygo.MenuItem{
 			{Label: s.t("undo"), Role: mygo.RoleUndo}, {Label: s.t("redo"), Role: mygo.RoleRedo}, mygo.Separator(),
 			{Label: s.t("cut"), Role: mygo.RoleCut}, {Label: s.t("copy"), Role: mygo.RoleCopy}, {Label: s.t("paste"), Role: mygo.RolePaste}, {Label: s.t("select_all"), Role: mygo.RoleSelectAll},
-		}},
-	}))
+		}})
+	}
+	mygo.App.SetMenu(mygo.NewMenu(items))
 }
 
 // job captures inputs before starting and accepts only this operation's result.
@@ -170,8 +188,11 @@ func (s *screen) job(key string, cancellable bool, work func(context.Context) fu
 			if s.closed || generation != s.jobGeneration {
 				return
 			}
-			s.busy, s.cancellable, s.cancelling, s.jobCancel = "", false, false, nil
+			s.busy, s.cancellable, s.jobCancel = "", false, nil
 			complete()
+			if s.busy == "" {
+				s.cancelling = false
+			}
 			s.continueShutdown()
 		})
 	}()
@@ -212,6 +233,9 @@ func (s *screen) apply(data snapshot) {
 }
 
 func (s *screen) load(language bool) {
+	if s.recoveryOnly || s.restartOnly || s.activating {
+		return
+	}
 	member, query := s.memberID, s.query
 	s.job("loading", false, func(ctx context.Context) func() {
 		data, err := s.read(ctx, member, query, language)
@@ -239,18 +263,18 @@ func (s *screen) queueSaveShortcut() { s.saveRequested = true }
 
 func (s *screen) queueShutdown(next func()) {
 	s.shutdownRequested = next
-	s.importRequested, s.saveRequested = nil, false
+	s.navigationRequested, s.saveRequested = nil, false
 }
 
-func (s *screen) queueImportShortcut(next func()) {
-	if s.shutdownRequested == nil && s.shutdown == nil {
-		s.importRequested = next
+func (s *screen) queueNavigation(next func()) {
+	if s.shutdownRequested == nil && s.shutdown == nil && !s.recoveryOnly && !s.restartOnly && !s.activating && s.backup.step == "" {
+		s.navigationRequested = next
 	}
 }
 
-func (s *screen) consumeNativeRequests() bool {
-	shutdown, importing, save := s.shutdownRequested, s.importRequested, s.saveRequested
-	s.shutdownRequested, s.importRequested, s.saveRequested = nil, nil, false
+func (s *screen) consumeRequests() bool {
+	shutdown, navigation, save := s.shutdownRequested, s.navigationRequested, s.saveRequested
+	s.shutdownRequested, s.navigationRequested, s.saveRequested = nil, nil, false
 	// An input method owns an unfinished candidate. The user can issue the
 	// action again after committing or cancelling it; never replay it later.
 	if s.closed || s.allowClose || s.composing {
@@ -261,9 +285,9 @@ func (s *screen) consumeNativeRequests() bool {
 	switch {
 	case shutdown != nil:
 		s.requestShutdown(shutdown)
-	case importing != nil:
+	case navigation != nil:
 		if !s.modalOpen() {
-			s.leave(importing)
+			s.leave(navigation)
 		}
 	case save:
 		s.saveShortcut()
@@ -274,7 +298,7 @@ func (s *screen) consumeNativeRequests() bool {
 }
 
 func (s *screen) saveShortcut() {
-	if s.busy != "" || s.modalOpen() || s.composing {
+	if s.busy != "" || s.modalOpen() || s.composing || s.backupPage || s.recoveryOnly || s.restartOnly || s.activating {
 		return
 	}
 	if s.report.Status == "review" || s.editingConfirmed {
@@ -306,6 +330,7 @@ func (s *screen) requestShutdown(next func()) {
 		return
 	}
 	s.shutdown, s.pending = next, nil
+	s.clearBackupSecrets()
 	s.newMember, s.deletePrompt = false, false
 	s.importPaths = nil
 	s.previewGeneration++
@@ -344,7 +369,12 @@ func (s *screen) cancelLeave() {
 }
 
 func (s *screen) selectMember(id string) {
-	s.leave(func() { s.clearReport(); s.memberID, s.query, s.message = id, "", ""; s.load(false) })
+	s.queueNavigation(func() {
+		s.clearReport()
+		s.backupPage = false
+		s.memberID, s.query, s.message = id, "", ""
+		s.load(false)
+	})
 }
 
 func (s *screen) clearReport() {
@@ -577,9 +607,10 @@ func (s *screen) save(confirm bool, after func()) {
 }
 
 func (s *screen) chooseFiles() {
-	if s.win == nil || s.busy != "" {
+	if s.win == nil || s.busy != "" || s.recoveryOnly || s.restartOnly || s.activating {
 		return
 	}
+	s.backupPage = false
 	parent, title, detail, filter := s.win, s.t("import"), s.t("import_detail"), s.t("formats")
 	s.job("loading", false, func(ctx context.Context) func() {
 		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: parent, Title: title, Message: detail, Multiple: true, Filters: []mygo.FileFilter{{Name: filter, Extensions: []string{"pdf", "jpg", "jpeg", "png", "heic", "tif", "tiff"}}}})

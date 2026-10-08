@@ -159,7 +159,7 @@ is_prohibited_historical_path() {
   esac
   case "${candidate:l}" in
     *.dcm|*.dicom|*.nii|*.nii.gz|*.pdf|*.png|*.jpg|*.jpeg|*.heic|*.tif|*.tiff \
-      |*.kinloguebackup|*.key|*.p8|*.p12|*.pfx|*.mobileprovision) return 0 ;;
+      |*.kinloguebackup|*.kinloguegobackup|*.key|*.p8|*.p12|*.pfx|*.mobileprovision) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -227,7 +227,7 @@ fi
 /usr/bin/git cat-file --batch <"$OBJECT_LIST" >"$OBJECT_STREAM" \
   || fail "reachable objects could not be read"
 
-CREDENTIAL_PATTERN='(-----BEGIN ([A-Z0-9]+ )?PRIVATE[[:space:]]+KEY-----|A[K]IA[0-9A-Z]{16}|A[S]IA[0-9A-Z]{16}|g[h][pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{20,255}|x[o]x[baprs]-[A-Za-z0-9-]{10,255}|s[k]_live_[A-Za-z0-9]{16,255}|s[k]-(proj-)?[A-Za-z0-9_-]{20,255}|A[I]za[0-9A-Za-z_-]{35}|K[L]G1-([0-9A-F]{8}-){8}[0-9A-F]{8}|https?://[^/@[:space:]]+:[^/@[:space:]]+@)'
+CREDENTIAL_PATTERN='(-----BEGIN ([A-Z0-9]+ )?PRIVATE[[:space:]]+KEY-----|A[K]IA[0-9A-Z]{16}|A[S]IA[0-9A-Z]{16}|g[h][pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{20,255}|x[o]x[baprs]-[A-Za-z0-9-]{10,255}|s[k]_live_[A-Za-z0-9]{16,255}|s[k]-(proj-)?[A-Za-z0-9_-]{20,255}|A[I]za[0-9A-Za-z_-]{35}|K[L]G1-([0-9A-F]{8}-){8}[0-9A-F]{8}|A[G]E-SECRET-KEY-PQ-1[023456789AC-HJ-NP-Z]{58}|a[g]e-secret-key-pq-1[023456789ac-hj-np-z]{58}|https?://[^/@[:space:]]+:[^/@[:space:]]+@)'
 PRIVATE_INVENTORY_PATTERN='((私[有][^[:cntrl:]]{0,240}|真[实](资料|播放)[^[:cntrl:]]{0,240}|本机真[实][[:space:]]*UI[^[:cntrl:]]{0,240})[0-9]+[[:space:]]*(个|条|张|份)[^[:cntrl:]]{0,240}(S[e]ries|切[片]|对[象]|附[件]|报[告]|草[稿]|检[查]))|((Finder 核对|实际点击)[^[:cntrl:]]{0,240}[0-9]+([.][0-9]+)?[[:space:]]*(个|份|MB|MiB|GiB)[^[:cntrl:]]{0,240}(恢[复]点|[.]kinloguebackup))'
 
 if /usr/bin/grep -a -E -q -- "$CREDENTIAL_PATTERN" "$OBJECT_STREAM"; then

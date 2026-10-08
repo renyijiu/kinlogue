@@ -137,6 +137,7 @@ func TestBuildPreservesLegacyAppAndUsesSelectedToolchain(t *testing.T) {
 		t.Fatal(err)
 	}
 	addLocalMygo(t, root, goPath, "third_party/mygo")
+	put(t, filepath.Join(root, "cmd", "kinlogue", "backup.go"), []byte("package main\nimport _ \"filippo.io/age\"\n"), 0600)
 	// A setup-go-like directory is deliberately absent from the builder's fixed
 	// PATH. The wrapper forwards to the actual pinned compiler, without eval.
 	toolBin := filepath.Join(t.TempDir(), "tool cache $(never-execute)", "bin")
@@ -185,6 +186,13 @@ func TestCurrentVerifierRequiresLocalMygo(t *testing.T) {
 	root, goPath := goFixture(t)
 	assembleFixture(t, root, goPath, "read-write")
 	rejected(t, root, "verify-go-preview.sh", "module replacements differ from the preview contract")
+}
+
+func TestCurrentVerifierRequiresBackupCrypto(t *testing.T) {
+	root, goPath := goFixture(t)
+	addLocalMygo(t, root, goPath, "third_party/mygo")
+	assembleFixture(t, root, goPath, "read-write")
+	rejected(t, root, "verify-go-preview.sh", "backup crypto pin is incorrect")
 }
 
 func TestBuilderRejectsAdditionalReplacementBeforePublishing(t *testing.T) {

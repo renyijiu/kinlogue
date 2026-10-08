@@ -2,14 +2,14 @@
 
 这是当前项目 Wiki 的导航入口。产品契约、实现边界和验收证据分别由对应专题页维护；代码、测试、`Package.swift`、打包配置和脚本仍是最终可执行事实。
 
-仓库另有独立 [Go 原生界面预览版](go-native-preview.md)，报告闭环已扩展至多原件排序、确认后纠错、单报告原件导出与删除清理；已知 Go v1 事务升级为 v2。2026-10-08 已完成当前 Mac 的合成多原件、编辑、保存面板新建导出和重开搜索流程，并修复沙盒导出的父目录访问；中文输入法、VoiceOver、覆盖/删除等剩余窗口门禁单独列出。[本轮审查与修正](reviews/README.md)保留点时记录，新应用身份、资料格式和验证独立于 Swift。下方现有功能及候选状态仍描述 Swift 基线，不能据此推断 Go 已完成全部替换。
+仓库另有独立 [Go 原生界面预览版](go-native-preview.md)，报告闭环已扩展至多原件排序、确认后纠错、单报告原件导出与删除清理，并接通[手动加密整库备份与恢复](go-backup-and-restore.md)；当前源码支持已知 Go v1/v2 事务升级为 v3。2026-10-08 已完成当前 Mac 的合成多原件、编辑、保存面板新建及覆盖导出、删除和重开搜索流程，并修复沙盒导出的父目录访问；真实拼音候选取消/提交/撤销及列表键盘打开已验证。合成备份的整库替换、重启核对，以及恢复后新保存内容在再次重启后保留也已通过；VoiceOver 和完整键盘矩阵仍待人工验收。[本轮审查与修正](reviews/README.md)保留点时记录，新应用身份、资料格式和验证独立于 Swift。下方现有功能及候选状态仍描述 Swift 基线，不能据此推断 Go 已完成全部替换。
 
 ## 从哪里开始
 
 - 新贡献者或 Agent：先读 [`../AGENTS.md`](../AGENTS.md)，再读 [`project-overview.md`](project-overview.md)。
 - 准备 issue、PR 或安全报告：读 [`../CONTRIBUTING.md`](../CONTRIBUTING.md) 和 [`../SECURITY.md`](../SECURITY.md)，只使用合成数据。
 - 想理解模块与调用链：读 [`architecture.md`](architecture.md)。
-- 想开发 Go 重写预览：读 [`go-native-preview.md`](go-native-preview.md)、[日常报告操作计划](plans/2026-10-07-feat-go-daily-report-workflow-plan.md)和 [mygo 本地补丁来源](sources/mygo-local-patch-2026-10-07.md)；首阶段取舍仍保留在[早期计划](plans/2026-10-07-0812-feat-go-native-report-workflow-plan.md)。
+- 想开发 Go 重写预览：读 [`go-native-preview.md`](go-native-preview.md)、[Go 备份专题](go-backup-and-restore.md)、[手动备份恢复计划](plans/2026-10-08-1702-feat-go-backup-restore-plan.md)、[age 锁定来源](sources/age-backup-2026-10-08.md)、[日常报告操作计划](plans/2026-10-07-feat-go-daily-report-workflow-plan.md)和 [mygo 本地补丁来源](sources/mygo-local-patch-2026-10-07.md)；首阶段取舍仍保留在[早期计划](plans/2026-10-07-0812-feat-go-native-report-workflow-plan.md)。
 - 想复核 Go 预览的代码审查范围与结果：读[自动审查证据](reviews/README.md)。
 - 想改 Vault、格式版本、删除或导出：读 [`storage.md`](storage.md) 和 [`privacy-and-security.md`](privacy-and-security.md)。
 - 想改报告导入/OCR：读 [`import-and-ocr.md`](import-and-ocr.md)。
@@ -45,6 +45,7 @@
 ### 产品与架构
 
 - [`go-native-preview.md`](go-native-preview.md)：独立 Go 预览的报告流程、模块、原件/OCR 边界、构建和待验收项。
+- [`go-backup-and-restore.md`](go-backup-and-restore.md)：Go 手动备份的逻辑格式、加密边界、恢复事务与验证进度。
 - [`project-overview.md`](project-overview.md)：唯一当前产品契约、用户流程、边界和产品验收定义。
 - [`architecture.md`](architecture.md)：target 图、运行时组装、跨层调用和并发边界。
 - [`architecture-review-2026-09-08.md`](architecture-review-2026-09-08.md)：公开 main 的完整设计/架构审查、已核实问题、最小改进与外部实践依据。

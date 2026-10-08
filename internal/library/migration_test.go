@@ -130,7 +130,7 @@ func createMigrationV1Fixture(t *testing.T) migrationV1Fixture {
 func assertMigratedV1Fixture(t *testing.T, s *Store, f migrationV1Fixture) {
 	t.Helper()
 	var version, application int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 3 {
 		t.Fatalf("migration version = %d, error %v", version, err)
 	}
 	if err := s.db.QueryRow("PRAGMA application_id").Scan(&application); err != nil || application != 1263290191 {
@@ -343,5 +343,115 @@ func TestMigrationRejectsInvalidOldSchemaWithoutPartialUpgrade(t *testing.T) {
 		if err != nil || !bytes.Equal(data, expected.original) {
 			t.Fatal("failed migration changed original bytes")
 		}
+	}
+}
+
+func createMigrationV2Fixture(t *testing.T) migrationV1Fixture {
+	t.Helper()
+	f := createMigrationV1Fixture(t)
+	db, err := sql.Open("sqlite", filepath.Join(f.root, "library.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Build the previously shipped version directly, without the current Open.
+	if _, err := db.Exec(migrationV2); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func TestMigrationVersionTwoOnlyChangesVersion(t *testing.T) {
+	f := createMigrationV2Fixture(t)
+	db, err := sql.Open("sqlite", filepath.Join(f.root, "library.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := migrationSchemaSnapshot(t, db)
+	db.Close()
+	for range 2 {
+		s, err := Open(f.root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertMigratedV1Fixture(t, s, f)
+		if after := migrationSchemaSnapshot(t, s.db); !reflect.DeepEqual(before, after) {
+			t.Fatal("v2 marker migration changed schema")
+		}
+		s.Close()
+	}
+}
+
+func TestMigrationVersionTwoRecoversAfterProcessKill(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range []string{"migration_uncommitted", "migration_committed"} {
+		t.Run(stage, func(t *testing.T) {
+			f := createMigrationV2Fixture(t)
+			lifetime, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			command := exec.CommandContext(lifetime, executable, "-test.run=^TestMigrationCrashHelper$")
+			command.Env = append(os.Environ(), "KINLOGUE_TEST_MIGRATION_ROOT="+f.root, "KINLOGUE_TEST_MIGRATION_STAGE="+stage)
+			output, err := command.CombinedOutput()
+			assertCheckpointKilled(t, lifetime, output, err, "migration checkpoint reached")
+			db, err := sql.Open("sqlite", filepath.Join(f.root, "library.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var version int
+			if db.QueryRow("PRAGMA user_version").Scan(&version) != nil {
+				t.Fatal("interrupted migration unreadable")
+			}
+			want := 2
+			if stage == "migration_committed" {
+				want = 3
+			}
+			if version != want {
+				t.Fatal("version escaped migration transaction")
+			}
+			db.Close()
+			for range 2 {
+				s, err := Open(f.root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertMigratedV1Fixture(t, s, f)
+				s.Close()
+			}
+		})
+	}
+}
+
+// Frozen from the version-two reader. That binary knows neither the stable
+// parent lease nor the restore receipt, so this version guard is its fence.
+func frozenV2ReaderGuard(db *sql.DB) error {
+	var version, application int
+	if db.QueryRow("PRAGMA user_version").Scan(&version) != nil || db.QueryRow("PRAGMA application_id").Scan(&application) != nil {
+		return ErrCorrupt
+	}
+	if (version != 1 && version != 2) || application != 1263290191 {
+		return ErrUnsupported
+	}
+	return nil
+}
+
+func TestVersionTwoReaderRejectsInstalledUnretiredCandidate(t *testing.T) {
+	root, _ := createRuntimeCrash(t, false, "journal_committed")
+	// SIGKILL released every process lock but left the commit receipt. The old
+	// reader must still reject the candidate before it can perform business writes.
+	db, err := sql.Open("sqlite", filepath.Join(root, "library.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := frozenV2ReaderGuard(db); !errors.Is(err, ErrUnsupported) {
+		t.Fatal("old reader accepted unretired candidate")
+	}
+	if _, err := os.Lstat(filepath.Join(filepath.Dir(root), restoreJournalName)); err != nil {
+		t.Fatal("candidate fixture was already retired")
 	}
 }

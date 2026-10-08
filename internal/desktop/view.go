@@ -31,10 +31,14 @@ func (s *screen) view(c *ui.Context) {
 	c.SetTheme(theme)
 	s.composing = false
 	ui.Row(c).Fill().Gap(0).Children(func() {
-		ui.Column(c).Width(230).FillHeight().Padding(20, 16).Gap(14).Background(c.Theme().SurfacePressed).Disabled(s.modalOpen()).Children(func() { s.sidebar(c) })
+		if !s.recoveryOnly && !s.restartOnly && !s.activating {
+			ui.Column(c).Width(230).FillHeight().Padding(20, 16).Gap(14).Background(c.Theme().SurfacePressed).Disabled(s.modalOpen() || s.backup.step != "").Children(func() { s.sidebar(c) })
+		}
 		ui.Column(c).Grow(1).MinWidth(0).FillHeight().Padding(22).Gap(16).Children(func() {
 			ui.Column(c).Grow(1).MinHeight(0).Disabled(s.modalOpen()).Children(func() {
-				if s.report.ID == "" {
+				if s.backupPage || s.recoveryOnly || s.restartOnly {
+					s.backupView(c)
+				} else if s.report.ID == "" {
 					s.list(c)
 				} else {
 					s.detail(c)
@@ -62,7 +66,7 @@ func (s *screen) view(c *ui.Context) {
 	if c.Shortcut(ui.Cmd, ui.KeyS) {
 		s.queueSaveShortcut()
 	}
-	if s.consumeNativeRequests() {
+	if s.consumeRequests() {
 		// Requests can open a dirty guard after the dialogs were built.
 		c.Invalidate()
 	}
@@ -72,10 +76,10 @@ func (s *screen) sidebar(c *ui.Context) {
 	ui.Text(c, s.t("app")).FontSize(22).Bold().TextColor(c.Theme().Accent)
 	ui.Text(c, s.t("tagline")).TextColor(c.Theme().TextMuted).FontSize(12)
 	if ui.PrimaryButton(c, s.t("import")).FillWidth().Height(42).Disabled(s.busy != "").Clicked() {
-		s.leave(s.chooseFiles)
+		s.queueNavigation(s.chooseFiles)
 	}
 	button := ui.Button(c, s.t("inbox")).FillWidth().Height(44).Disabled(s.busy != "")
-	if s.memberID == "" {
+	if s.memberID == "" && !s.backupPage {
 		button.Background(c.Theme().Surface).TextColor(c.Theme().Accent)
 	}
 	if button.Clicked() {
@@ -89,7 +93,7 @@ func (s *screen) sidebar(c *ui.Context) {
 			}
 			for _, member := range s.members {
 				b := ui.Button(c, member.Name).Key(member.ID).FillWidth().Height(44).Disabled(s.busy != "")
-				if member.ID == s.memberID {
+				if member.ID == s.memberID && !s.backupPage {
 					b.Background(c.Theme().Surface).TextColor(c.Theme().Accent)
 				}
 				if b.Clicked() {
@@ -99,7 +103,10 @@ func (s *screen) sidebar(c *ui.Context) {
 		})
 	})
 	if ui.Button(c, s.t("add_member")).FillWidth().Height(44).Disabled(s.busy != "").Clicked() {
-		s.newMember = true
+		s.queueNavigation(func() { s.newMember = true })
+	}
+	if s.backups != nil && ui.Button(c, s.t("backup_home")).FillWidth().Height(44).Disabled(s.busy != "").Clicked() {
+		s.queueNavigation(s.showBackup)
 	}
 	ui.Field(c, s.t("language"), func() {
 		value := s.language
@@ -215,7 +222,7 @@ func (s *screen) detail(c *ui.Context) {
 	ui.Column(c).Key(s.report.ID).Fill().Gap(14).Children(func() {
 		ui.Row(c).Gap(16).AlignItems(ui.Center).Children(func() {
 			if ui.Button(c, s.t("back")).Disabled(s.busy != "").Clicked() {
-				s.leave(func() { s.clearReport(); s.message = ""; s.load(false) })
+				s.queueNavigation(func() { s.clearReport(); s.message = ""; s.load(false) })
 			}
 			ui.Text(c, s.report.FileName).FontSize(18).Bold().Grow(1).SingleLine()
 			ui.Text(c, s.t(statusKey(s.report.Status))).TextColor(c.Theme().Accent)

@@ -62,7 +62,7 @@ jobs:
       - name: Check application concurrency
         env:
           CGO_ENABLED: "1"
-        run: go test -race ./internal/library ./internal/app ./internal/desktop
+        run: go test -race ./internal/library ./internal/backup ./internal/app ./internal/desktop ./internal/macos
 
       - name: Build and verify sandbox preview
         run: |

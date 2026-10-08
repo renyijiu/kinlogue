@@ -8,6 +8,8 @@ status: navigation
 
 ## 当前重写计划
 
+- [`2026-10-08-1702-feat-go-backup-restore-plan.md`](2026-10-08-1702-feat-go-backup-restore-plan.md)：手动整库加密备份、恢复码确认、完整验证后的替换恢复及中断收敛；不包含自动备份、LAN、DICOM 或模型接入。计划不替代当前能力和验收证据。
+
 - [`2026-10-07-feat-go-daily-report-workflow-plan.md`](2026-10-07-feat-go-daily-report-workflow-plan.md)：日常报告操作、输入可靠性、多原件来源、确认纠错、删除/导出、已知 Go 格式升级与独立 CI；本机自动化、签名应用和人工门禁分别由 [Go 预览专题](../go-native-preview.md)记载。
 
 - [`2026-10-07-0812-feat-go-native-report-workflow-plan.md`](2026-10-07-0812-feat-go-native-report-workflow-plan.md)：在同一仓库内重写独立 Go 应用，首阶段实现报告整理闭环；当前实现与验证边界由 [Go 预览专题](../go-native-preview.md)维护，不能将计划视为完整替换已经完成。

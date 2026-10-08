@@ -1,6 +1,6 @@
 # Go 原生界面预览版
 
-Kinlogue 在同一仓库内开发独立的 Go 预览版。报告整理闭环已扩展到多原件分组与排序、确认后纠错、单份报告原件导出和报告删除；Swift 应用继续作为功能和交互对照，尚未完成全功能替换。Go 预览拥有独立资料格式，本轮提供已知 Go v1 到 v2 的无损升级，不读取或迁移 Swift 资料或备份。
+Kinlogue 在同一仓库内开发独立的 Go 预览版。报告整理闭环已扩展到多原件分组与排序、确认后纠错、单份报告原件导出和报告删除；Swift 应用继续作为功能和交互对照，尚未完成全功能替换。Go 预览拥有独立资料格式，当前源码提供已知 Go v1/v2 到 v3 的事务升级，不读取或迁移 Swift 资料或备份。
 
 本文维护 Go 预览的实现和验证边界；现有[项目总览](project-overview.md)、[Swift 架构](architecture.md)和[当前候选证据](acceptance/current-release.md)继续描述 Swift 基线。需求和取舍分别见[首阶段计划](plans/2026-10-07-0812-feat-go-native-report-workflow-plan.md)与[日常报告操作计划](plans/2026-10-07-feat-go-daily-report-workflow-plan.md)；依赖依据见[原始来源笔记](sources/mygo-native-2026-10-07.md)和[mygo 本地补丁来源追加](sources/mygo-local-patch-2026-10-07.md)。下文区分当前代码能力、自动化、2026-10-08 实际窗口验证和首阶段历史证据。
 
@@ -13,12 +13,13 @@ Kinlogue 在同一仓库内开发独立的 Go 预览版。报告整理闭环已�
 5. 搜索覆盖已确认的标题、修正后转录和备注。中文按字面子串匹配，英文 ASCII 大小写不敏感；`%`、`_` 等按普通字符处理。原始 OCR、失败任务和未确认草稿不进入搜索。
 6. 确认记录默认只读；明确进入编辑后可以修改复核字段及原件顺序，保存时一次提交，取消则回到已保存内容。原始识别不随修改重写；原件重新排序不触发 OCR。
 7. 可以明确删除草稿或已确认报告，也可以经明文提示和系统保存面板，将当前一份已确认报告的原件导出为 ZIP。删除与导出的准确范围见下文；重启不会自动启动识别。
+8. 从侧栏创建手动加密整库备份，每次独立保存并复输恢复码，再选择目标文件。恢复先完整验证并显示摘要，明确确认后替换整个 Go 资料库，成功或激活失败都须退出重启；资料库内容损坏时仍可进入独立恢复界面。格式、限制和旧库保留边界见 [Go 备份专题](go-backup-and-restore.md)。
 
 界面支持简体中文、English 和跟随系统，选择保存在新资料库中。跟随系统时，中文系统语言使用简体中文，其余回退到英文；这与 Swift 的语言回退策略独立。长期界面状态保存语义错误码，在绘制时翻译，不改写报告内容。资源和交互见 [`internal/desktop/`](../internal/desktop/)，启动文案见 [`cmd/kinlogue/main.go`](../cmd/kinlogue/main.go)。
 
-原生保存、关闭、退出和导入入口先等待当前帧将排队输入写入字段，再检查保存或未保存修改保护；同帧关闭优先于导入和保存。输入法仍在组字时，本次原生操作不执行，也不在组字结束后自动重放，用户须在提交或取消候选后重新操作。对应时序回归见 [`daily_test.go`](../internal/desktop/daily_test.go)。实际窗口已检查英文编辑的撤销/重做、未保存时 Cmd+W 的取消保护、Cmd+S 保存及 Cmd+Q 后重开；真实输入法和首字符后立即导航的完整矩阵仍待验收。
+原生保存、关闭、退出和导入入口先等待当前帧将排队输入写入字段，再检查保存或未保存修改保护；同帧关闭优先于导入和保存。输入法仍在组字时，本次原生操作不执行，也不在组字结束后自动重放，用户须在提交或取消候选后重新操作。对应时序回归见 [`daily_test.go`](../internal/desktop/daily_test.go)。实际窗口已检查英文编辑的撤销/重做、未保存时 Cmd+W 的取消保护、Cmd+S 保存及 Cmd+Q 后重开；真实拼音输入的候选取消、提交和撤销，以及组字期间 Cmd+S/W 保护也已通过。首字符后立即导航的完整矩阵仍待验收。
 
-尚未实现 LAN 接收、备份/恢复、整库导出、DICOM、指标比较、结构化医学字段、成员归档或大模型接入。暂时不要把预览版作为真实资料的唯一保存位置。
+尚未实现 LAN 接收、自动备份、整库明文导出、DICOM、指标比较、结构化医学字段、成员归档或大模型接入。[手动加密备份恢复计划](plans/2026-10-08-1702-feat-go-backup-restore-plan.md)保留设计约束；底层测试不能替代完整应用验收。暂时不要把预览版作为真实资料的唯一保存位置。
 
 ## 模块与运行时
 
@@ -29,7 +30,8 @@ flowchart TD
   Main["cmd/kinlogue：身份校验与组装"] --> UI["desktop：mygo 界面"]
   Main --> App["app：用例、取消与退出"]
   UI -->|Backend 调用| App
-  App --> Library["library：SQLite 与不可变原件"]
+  App --> Library["library：Runtime / SQLite / 快照与恢复事务"]
+  App --> Backup["backup：age 加密与完整认证"]
   App --> Native["macos：PDFKit / Vision / ImageIO"]
   Library --> Doc["document：来源 DTO 与资源约束"]
   Native --> Doc
@@ -37,14 +39,15 @@ flowchart TD
 
 | 位置 | 责任 |
 | --- | --- |
-| [`cmd/kinlogue/main.go`](../cmd/kinlogue/main.go) | 校验独立应用身份、组装 Store/Processor/Service、运行界面并关闭服务。 |
+| [`cmd/kinlogue/main.go`](../cmd/kinlogue/main.go) | 校验独立应用身份、组装 Runtime/Processor/Service/BackupController，选择正常或恢复界面并统一关闭 owner。 |
 | [`internal/document/`](../internal/document/) | 页码、归一化区域、原始文本、置信度、引擎标识、资源上限与民用日期校验。 |
-| [`internal/library/`](../internal/library/) | 成员、草稿、原始识别、修正转录、确认门、搜索和持久化语言设置。 |
+| [`internal/library/`](../internal/library/) | 成员、报告、确认门、搜索、语言、逻辑快照及整库恢复事务。 |
+| [`internal/backup/`](../internal/backup/) | 单备份恢复码、流式 age 加解密、真正 EOF 认证和回读摘要验证。 |
 | [`internal/macos/`](../internal/macos/) | 通过 purego 调用公开 Foundation、PDFKit、Vision、ImageIO 和 CoreGraphics API。 |
-| [`internal/app/`](../internal/app/) | 串行命令、识别状态推进、重试、取消和退出等待。 |
+| [`internal/app/`](../internal/app/) | 串行命令、识别状态推进、重试、取消、备份恢复控制器和退出等待。 |
 | [`internal/desktop/`](../internal/desktop/) | 主窗口、复核表单、原件预览、未保存修改处理和中英文文案；不在 UI 中创建存储或识别器。 |
 
-依赖固定在 [`go.mod`](../go.mod) 和 [`go.sum`](../go.sum)：mygo `v0.2.15`、purego `v0.11.1`、modernc SQLite `v1.60.1`、`golang.org/x/sys v0.48.0`；打包工具链固定 Go `1.27.1`。mygo 通过唯一的本地 `replace` 使用仓库内 [`third_party/mygo/`](../third_party/mygo/) 的锁定源码及输入修正，**不是未修改的上游 v0.2.15**；来源、修改清单和 MIT 许可见 [`SOURCE.md`](../third_party/mygo/SOURCE.md)。补丁处理输入法预编辑取消、提交与撤销边界，不能把无窗口事件测试写成真实中文输入法或 VoiceOver 已验收。
+依赖固定在 [`go.mod`](../go.mod) 和 [`go.sum`](../go.sum)：mygo `v0.2.15`、purego `v0.11.1`、modernc SQLite `v1.60.1`、age `v1.3.2`、hpke `v0.4.0`、`golang.org/x/crypto v0.55.0` 与 `golang.org/x/sys v0.48.0`；打包工具链固定 Go `1.27.1`。mygo 通过唯一的本地 `replace` 使用仓库内 [`third_party/mygo/`](../third_party/mygo/) 的锁定源码及输入修正，**不是未修改的上游 v0.2.15**；来源、修改清单和 MIT 许可见 [`SOURCE.md`](../third_party/mygo/SOURCE.md)。补丁处理输入法预编辑取消、提交与撤销边界，不能把无窗口事件测试写成真实中文输入法或 VoiceOver 已验收。
 
 生产包以 `CGO_ENABLED=0` 构建，不包含 Swift helper；系统识别仍依赖 macOS，当前应用不是跨平台实现。预览包声明最低 macOS 14，声明本身不等于已完成该系统的运行验证。
 
@@ -58,13 +61,15 @@ flowchart TD
 
 Store 保持一个 SQLite 连接、`DELETE` journal 和 `EXTRA` 同步设置；资料库生命周期持有排他文件锁，第二个实例不能同时打开。未知格式、损坏数据库或不符合私有目录约束的路径会拒绝打开。应用内写操作通过可取消队列串行执行，Store 再检查草稿状态，已经进入复核或确认的内容不能被迟到识别覆盖。退出停止接收命令、取消活动操作并等待它们结束，再关闭数据库。
 
+Runtime 在 Store 之前持有固定父目录 lease 并收敛恢复 journal；格式或内容无法打开时进入恢复界面，目录身份、锁或 journal 不明确则拒绝启动。恢复替换先封闭命令入口、取消并等候已进入的操作、关闭 Store，再执行目录事务；不能在同一进程继续使用被替换的库。详情和强退证据见 [Go 备份专题](go-backup-and-restore.md)。
+
 首次建库先同步空的私有 `.initializing` 目录；重启只在该标记有效、数据库版本和应用标识均为零、schema 与原件目录均为空时补建 schema，不接管任意零版本数据库。提交完成后复核同一标记再移除。原件写入失败时只清理本次创建且 inode 未被替换的 `.part` 文件，不移除已经发布的 `.blob`。对应强退重开、故障注入和路径替换回归见 [`recovery_test.go`](../internal/library/recovery_test.go)。
 
 草稿与搜索列表只读取 metadata 摘要，转录、备注及完整 OCR 在选中记录后通过 `Get` 加载；搜索仍在数据库内匹配确认内容。UI 列表只构建可见范围的行。忙碌期间关闭窗口或退出会取消可取消的识别任务并等待清理；已进入保存的写入会等待完成，保存失败保留编辑内容和取消退出的入口。
 
-SQLite v2 将报告和有序来源分表保存：每个 `Source` 持有独立原件 ID、展示名和不可变 `Extraction`，报告持有人工修正 `Review`。识别页码始终相对于所属原件；只有全部来源成功且总页数、候选文字未超限时，才按来源顺序以换行拼接初始修订文字并进入 `review`。保存、首次确认及确认后修改都要求提交完整、无重复的来源 ID 排列，字段和顺序在同一事务保存。
+SQLite v3 沿用 v2 的报告与有序来源分表结构：每个 `Source` 持有独立原件 ID、展示名和不可变 `Extraction`，报告持有人工修正 `Review`。识别页码始终相对于所属原件；只有全部来源成功且总页数、候选文字未超限时，才按来源顺序以换行拼接初始修订文字并进入 `review`。保存、首次确认及确认后修改都要求提交完整、无重复的来源 ID 排列，字段和顺序在同一事务保存。
 
-重启把残留 `processing` 草稿标记为可重试的 `failed`，不自动重跑；已成功的来源识别仍保留。已知 Go v1 升级在一个事务内将每份旧报告转为一个来源，复用既有 blob ID，保留成员、状态、原文、修订和语言。未知版本拒绝打开，失败迁移不重新初始化资料库。升级后的 v2 不能由旧 Go v1 二进制打开；构建器保留在 `Previous.*` 目录中的旧 App 只是程序副本，**不是资料回滚方案**。迁移证据见 [`migration_test.go`](../internal/library/migration_test.go)。
+重启把残留 `processing` 草稿标记为可重试的 `failed`，不自动重跑；已成功的来源识别仍保留。已知 Go v1 升级在一个事务内将每份旧报告转为一个来源，复用既有 blob ID，保留成员、状态、原文、修订和语言；已知 v2 只事务更新版本标记，不改变领域数据或 schema。未知版本拒绝打开，失败迁移不重新初始化资料库。v3 标记阻止不认识恢复事务的旧 Go v1/v2 二进制写入恢复候选。构建器保留在 `Previous.*` 目录中的旧 App 只是程序副本，**不是资料回滚方案**。迁移证据见 [`migration_test.go`](../internal/library/migration_test.go)。
 
 明确删除报告时，先在同一 SQLite 事务登记待清理来源并移除报告及引用；提交确定后才清理原件。清理只接受已登记、不再被引用、摘要和长度一致、私有普通文件且 inode 身份仍匹配的原件。文件移除并同步目录后才清除队列项；失败返回“记录已删除，原件清理待完成”，重启重试该队列。损坏、链接或被替换的对象不会按名字强行删除。实现和强退恢复证据见 [`deletion.go`](../internal/library/deletion.go)与 [`daily_test.go`](../internal/library/daily_test.go)。
 
@@ -104,7 +109,7 @@ Vision 使用 `VNRecognizeTextRequest` revision 3、accurate 模式、`zh-Hans` 
 
 ```sh
 CGO_ENABLED=0 go test ./...
-go test -race ./internal/library ./internal/app ./internal/desktop
+go test -race ./internal/library ./internal/backup ./internal/app ./internal/desktop ./internal/macos
 go vet ./...
 (cd third_party/mygo && go test ./ui && go test -race ./ui && go vet ./ui)
 scripts/build-go-preview.sh
@@ -125,17 +130,21 @@ scripts/verify-docs.sh
 
 ## 本轮验证状态
 
-截至 2026-10-08，日常报告操作的阶段性验证如下；自动化、当前 Mac 的实际窗口流程和仍待人工完成的矩阵分开记账。详细执行记录见 [`log.md`](log.md)。
+截至 2026-10-08，日常报告操作及手动备份恢复的阶段性验证如下；自动化、当前 Mac 的实际窗口流程和仍待人工完成的矩阵分开记账。详细执行记录见 [`log.md`](log.md)。
 
 | 验证范围 | 本轮结果与边界 |
 | --- | --- |
-| 根模块自动化 | 沙盒导出修正后，`CGO_ENABLED=0 go test -count=1 ./...`、`go vet ./...` 与 library、app、desktop 三包 `-race -count=1` 全部通过。覆盖首字符后紧接保存/关闭/导入、同帧操作优先级、导出登记、退出等待及提交后取消；新回归证明禁止枚举的目录仍可发布完整 ZIP。 |
-| 存储和真实跨层 | v1→v2 迁移、提交前后 SIGKILL、删除提交后强退/重启清理、原件替换防护、来源排序、部分重试、确认纠错和 ZIP 内容验证有合成测试。确认修改的后续 SQL 失败回滚与独立字段校验已经补齐；七个强退检查点重复 40 轮通过，父进程超时不得冒充强退成功。真实文件协调、PDFKit/Vision、SQLite 与导出串联进入根模块测试。 |
+| 根模块自动化 | 整合备份恢复后，`CGO_ENABLED=0 go test -count=1 ./...`、`go vet ./...` 与 library、backup、app、desktop、macOS 五包 `-race -count=1` 通过；最后关闭屏障和文件名修正再定向复验。覆盖帧末输入/导航、取消后迟到回调、旧准备令牌、密码编辑器撤销隔离、恢复专用入口和真实 Controller 无窗口往返。 |
+| 存储和真实跨层 | 已知 v1/v2→v3 事务迁移、旧 reader 拒绝候选、提交前后 SIGKILL、删除提交后强退/重启清理、来源排序、部分重试、确认纠错和 ZIP 内容验证有合成测试。新增快照严格解析、完整 age EOF 认证、真实系统备份文件读写、恢复激活/回滚各阶段 SIGKILL、连续两次重启、原本无库和损坏库恢复覆盖。真实 Controller → SQLite → age → 原生文件 → stage → 激活 → 重开验证保留字段与原件。 |
 | 本地 mygo | 最后输入修正后的完整嵌套 `go test -race -count=1 ./ui` 已重新通过，补齐此前只做末次定向 race 的缺口；`go vet ./ui` 通过。事件测试不能代替真实输入法或 VoiceOver。 |
-| 打包与 CI | 根模块包含 11 项打包回归；导出修正后重建最终预览包并独立复验，确认精确沙盒/用户选择读写权限、CGO 关闭及本地 mygo 替换。GitHub 托管执行未进行。 |
+| 打包与 CI | 根模块打包回归加入新恢复码、备份文件和历史隐私扫描，以及 age 依赖缺失负例；最终预览包重建并独立复验，确认精确沙盒/用户选择读写权限、CGO 关闭、本地 mygo 替换、age 固定版本及许可证。GitHub 托管执行未进行。 |
 | 实际窗口：整理与保存 | 最终沙盒包经系统面板多选合成 PDF/透明 PNG，调整导入顺序后合为一份；PDF 分页、切换来源后重置页码、Cmd+S 暂存、确认、确认后修改备注及原件顺序均通过。英文撤销/重做、未保存 Cmd+W 取消保护和放弃编辑也通过。 |
-| 实际窗口：导出与重开 | 新建单原件和多原件 ZIP 均成功，归档条目按保存顺序且字节与源文件一致，不附带其他条目；取消面板清除旧成功提示。Cmd+Q 后重开，修改后的备注可搜索，来源顺序、确认状态和文字保留。系统覆盖警告已出现，最终覆盖动作未执行。 |
-| 仍待人工与基线 | 中文文本使用粘贴，未验证真实中文输入法、VoiceOver、完整键盘矩阵、实际覆盖/删除及故障面板路径。既有合成资料重开正常，但没有执行完整的安装式 v1 升级验收。File Provider、其他 macOS/Intel 和正式分发仍未执行；Swift 构建和测试本轮未重跑。 |
+| 实际窗口：导出与重开 | 新建单原件和多原件 ZIP 均成功，归档条目按保存顺序且字节与源文件一致，不附带其他条目；取消面板清除旧成功提示。Cmd+Q 后重开，修改后的备注可搜索，来源顺序、确认状态和文字保留。用户授权系统覆盖提示后，实际替换合成 ZIP 成功，条目顺序、CRC 和源文件字节再次一致。 |
+| 实际窗口：中文输入与删除 | 切换系统拼音后，标题候选取消/提交/Undo、组字中 Cmd+S/W 不保存或关闭、焦点切换后旧候选清理，以及备注和转录的中文提交/Undo 均通过；放弃编辑后原记录保持。用户确认后删除刚导入的合成草稿，队列移除，应用外原始 PDF 字节不变。 |
+| 实际窗口：列表键盘 | 从搜索框按 Tab 到搜索按钮，再按 Tab 进入列表；Down 选择记录，再 Down/Return 正确打开第二条合成记录。只覆盖这一条导航路径，不能代表完整键盘或读屏验收。 |
+| 实际窗口：导出失败 | 系统保存面板选择专用只读合成目录后，App 显示固定导出失败提示且目标目录没有输出；随后仍可重新打开面板，取消后显示取消状态，报告保持可用。这只覆盖不可写目标，不代表所有 File Provider 或磁盘故障。 |
+| 实际窗口：备份与恢复 | 当前 Mac 沙盒包通过新恢复码、旧码不匹配、密码 AX 隐藏、取消重开后 Undo、系统面板加密保存、错误码拒绝和正确码完整验证；验证摘要为 2 位合成成员、4 份报告、5 个原件。取消恢复后资料库仍可用。实际发现并修正默认扩展名重复，最终包保存单扩展名文件成功。用户确认后整库替换成功，窗口仅允许退出；重启后成员隔离、两份草稿、两份确认报告、原件顺序、PDF 分页、初始 OCR、人工修订、中文语言和备注搜索保持。恢复后再次保存的合成备注在第二次重启后仍可搜索、打开，未被旧恢复事务回滚。 |
+| 仍待人工与基线 | VoiceOver、完整键盘矩阵仍待验收。既有合成资料重开正常，但没有执行完整的安装式 v1 升级验收。File Provider、其他 macOS/Intel 和正式分发仍未执行；Swift 构建和测试本轮未重跑。 |
 | 文档与隐私 | 专题、公开 API 来源、导航和日志同步；文档、隐私、格式及 diff 门禁作为提交前检查。运行时资料、导出文件和截图不加入仓库。 |
 
 本轮[独立审查](reviews/20261007-113330-65f8d8e7/review.json)已完成，四项核实发现已处理：[后续回执](reviews/20261007-113330-65f8d8e7/applied-findings.json)分别记录保存时序、导出取消提示、事务回滚覆盖和确认负例校验的修正，并追加输入补丁和强退测试的验证。审查与回执保留 2026-10-07 点时状态；2026-10-08 的沙盒导出修正和窗口结果以上表与日志为准，不改写历史快照。

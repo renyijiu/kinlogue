@@ -103,6 +103,10 @@ print -r -- "$BUILD_INFO" | /usr/bin/awk -F '\t' -v previous="$PREVIOUS" '
   { dependency = ($2 == "dep") ? $3 "\t" $4 : "" }
   END { exit (invalid || count > 1 || (!previous && count != 1)) }
 ' || fail "module replacements differ from the preview contract"
+if [[ "$PREVIOUS" -eq 0 ]]; then
+  print -r -- "$BUILD_INFO" | /usr/bin/awk -F '\t' '$2 == "dep" && $3 == "filippo.io/age" && $4 == "v1.3.2" { found = 1 } END { exit !found }' \
+    || fail "backup crypto pin is incorrect"
+fi
 [[ "$(print -r -- "$BUILD_INFO" | /usr/bin/sed '1d')" == "$(/bin/cat "$RESOURCES/BUILD_INFO.txt")" ]] \
   || fail "bundled build information does not describe this binary"
 while IFS=$'\t' read -r module_path module_version; do

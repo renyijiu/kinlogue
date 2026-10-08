@@ -2,9 +2,11 @@
 
 本页具体 Vault、LAN、备份和 DICOM 防护描述 Swift 基线。独立 [Go 预览版](go-native-preview.md)有自己的身份、明文 SQLite 与原件目录、进程内系统解析器及验证记录，不能继承本页的整库删除、备份恢复或 XPC 隔离承诺。无内容日志、真实资料禁区和人工确认门适用于两套实现。
 
-Go v2 将报告与有序来源分开保存；已知 Go v1 通过单个 SQLite 事务无损升级，Swift 目录不参与迁移。原始识别不可覆盖，只有明确保存的确认内容进入搜索。报告删除先事务登记精确清理清单并移除引用，再核对原件的摘要、长度、私有普通文件和 inode 身份，成功移除并同步目录后才消除队列项；失败只保留清理待完成状态，不把已提交删除说成报告仍在。重启仅重试队列，不扫描历史孤儿或导入失败遗留副本，亦不承诺安全擦除。实现与强退测试分别见 [`deletion.go`](../internal/library/deletion.go)和 [`daily_test.go`](../internal/library/daily_test.go)。
+Go v3 沿用 v2 的报告与有序来源分表结构；已知 Go v1/v2 通过单个 SQLite 事务升级，Swift 目录不参与迁移。v2 到 v3 只更新版本标记，阻止旧程序在恢复收敛前写入候选资料库。原始识别不可覆盖，只有明确保存的确认内容进入搜索。报告删除先事务登记精确清理清单并移除引用，再核对原件的摘要、长度、私有普通文件和 inode 身份，成功移除并同步目录后才消除队列项；失败只保留清理待完成状态，不把已提交删除说成报告仍在。重启仅重试队列，不扫描历史孤儿或导入失败遗留副本，亦不承诺安全擦除。实现与强退测试分别见 [`deletion.go`](../internal/library/deletion.go)和 [`daily_test.go`](../internal/library/daily_test.go)。
 
 Go 单报告导出采用用户选择文件读写 entitlement，导入仍只读源文件，不增加网络权限。ZIP 只保存确认快照中的原始附件，名称按顺序生成，不拼接展示名或附带 OCR/备注/成员元数据；原件内容本身并未匿名化。写入经过私有 staging、完整回读及原子发布，提交前失败不覆盖既有目标；输出是外部明文副本，不能恢复资料库，也不随报告删除。导出实现与目标替换防护见 [`export_darwin.go`](../internal/macos/export_darwin.go)及 [测试](../internal/macos/export_darwin_test.go)。
+
+Go 手动备份使用独立 `.kinloguegobackup` 和每次新生成的 age Hybrid 恢复码，完整认证与快照回读后发布；恢复只接受有界逻辑归档，在私有新库中重建并核对全部原件，不导入任意 SQLite。整库替换由固定父目录 lease、精确拥有的 stage、同步 journal 和无覆盖 rename 协调；启动先收敛恢复事务，才允许业务写入。原库和可能残留的准备文件仍是本机明文，没有自动扫描清扫。Go 不具备下表 Swift 备份的设备签名、自动保留或远端状态能力；详见 [Go 备份专题](go-backup-and-restore.md)。
 
 这是一份面向维护者和 Agent 的工程说明；用户可见承诺以 [`../PRIVACY.md`](../PRIVACY.md) 和 [`../README.md`](../README.md) 为准。本文不把存在的防护夸大成未实现的安全能力。
 
@@ -101,6 +103,7 @@ Go 单报告导出采用用户选择文件读写 entitlement，导入仍只读�
 - DICOM 自动化只能在运行时生成不含 Patient Name/ID/Birth Date 等身份 tag 的 synthetic fixture；仓库和 bundle 门禁拒绝 checked-in `.dcm`、`.dicom`、`.nii` 和 `.nii.gz` fixture。当前 Mac 的 U7 安装验收只使用该生成器；此外，一份经用户明确授权、始终位于仓库外的私有 MRI 样本已完成隔离完整导入并通过，未保留样本、路径、身份 tag、UID、像素或截图。这个结果只覆盖当前 Mac 上的一份样本，更广的厂商、检查类型与独立系统矩阵仍未执行。
 - `scripts/privacy-guard.sh` 默认拒绝仓库内 PDF、JPEG、PNG、HEIC 和 TIFF 等受支持报告原件扩展，只精确放行已审查的 AppIcon 文件路径与摘要锁定的合成产品预览；新增图片也必须逐路径评审，不能通过目录级通配放行。该扩展名门禁不声称能语义识别任意 PHI；已知敏感值仍通过 `KINLOGUE_FORBIDDEN_VALUES` 扫描，代码、文档和其他扩展中的身份信息继续受仓库禁区约束。
 - `scripts/privacy-history-guard.sh` 通过 Git object database 扫描准备公开的 reachable refs，覆盖曾提交后删除的医疗/报告类附件、备份或签名容器、`.env`/私钥路径、完整格式的恢复码、常见凭据模式、精确私密资料库存证据和调用方提供的 forbidden values；`.env.example` 是唯一环境文件名例外。门禁只报告规则类别，不回显命中路径或内容；它不能替代公开托管平台上的 PR、Issue、Actions log、release asset 和 fork 审计。
+- Go 的 `.kinloguegobackup` 同样被忽略并纳入当前树与历史扫描；完整 age Hybrid 恢复码的大小写形式都会被识别，错误不回显恢复码。生成码和临时 Git 历史的回归位于 [`privacy_test.go`](../packaging/go-preview/privacy_test.go)；测试资料只在临时目录生成。
 - 不要使用真实文件名来验证去重、展示名、OCR 或 LAN；使用生成 fixture 和 run-scoped canary。
 - 不要因为调试方便打开内容日志、保存 cookie/验证码、把 App Sandbox 路径写进报告或把整页 PDF 输出到终端。
 - 不要在未确认可信网络前启动 LAN listener；不要把 `network.server` entitlement、可行性 marker 或 test-only client entitlement 扩大到不该有的 bundle。

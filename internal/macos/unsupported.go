@@ -28,3 +28,20 @@ func WriteExport(ctx context.Context, _ string, _ func(io.Writer) error) error {
 	}
 	return ErrWrite
 }
+
+var ErrBackupWrite = errors.New("backup_file_write_failed")
+var ErrBackupRead = errors.New("backup_file_read_failed")
+
+func WriteBackup(ctx context.Context, _ string, _ func(io.Writer) error, _ func(io.Reader) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return ErrBackupWrite
+}
+
+func ReadBackup(ctx context.Context, _ string, _ func(io.Reader) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return ErrBackupRead
+}
