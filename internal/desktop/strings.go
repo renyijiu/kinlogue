@@ -5,6 +5,15 @@ import "fmt"
 // Persist semantic keys, never a translation. User content is never translated.
 // Each entry is simplified Chinese followed by English.
 var stringsTable = map[string][2]string{
+	"brand":                {"续页", "Kinlogue"},
+	"browse":               {"浏览", "Browse"},
+	"all_records":          {"全部记录", "All records"},
+	"family_timeline":      {"家庭时间线", "Family timeline"},
+	"settings":             {"设置", "Settings"},
+	"select_record":        {"选择一条记录", "Select a record"},
+	"select_record_detail": {"这里会显示已确认的转录与原件。", "Confirmed transcription and originals appear here."},
+	"confirmed_text":       {"已确认转录", "Confirmed transcription"},
+
 	"backup_home":               {"备份与恢复", "Backup and recovery"},
 	"backup_help":               {"手动备份包含这份 Go 资料库的成员、报告、草稿、OCR、原件和设置。文件经过加密，仅支持恢复 Go 预览版；保存成功只证明本机文件已写入，不能证明网盘已上传。", "A manual backup includes this Go library's members, reports, drafts, OCR, originals and settings. The encrypted file restores only the Go preview. Success confirms a local file, not a cloud upload."},
 	"backup_create":             {"创建加密备份", "Create encrypted backup"},
@@ -47,7 +56,6 @@ var stringsTable = map[string][2]string{
 	"recovery_help":             {"当前资料库无法正常打开。您可以选择 Go 备份并输入恢复码，完整验证后再确认替换，或退出应用。原有资料不会因进入此页面而被删除。没有有效备份时，请保留原资料并寻求帮助。", "The current library could not be opened. Choose a Go backup and enter its recovery code, then confirm replacement after full validation, or quit. Opening this screen does not delete existing data. Without a valid backup, preserve the library and seek help."},
 
 	"app":                  {"续页 Go 预览版", "Kinlogue Go Preview"},
-	"tagline":              {"翻开一页，接上过去。", "Your family's records, together."},
 	"import":               {"导入报告…", "Import reports…"},
 	"import_detail":        {"选择 PDF 或报告图片。选择多个文件后，可分别导入或合为一份报告。", "Choose PDFs or report images. Multiple files can be imported separately or combined into one report."},
 	"import_choice":        {"如何整理这些文件？", "How should these files be organized?"},
@@ -82,7 +90,7 @@ var stringsTable = map[string][2]string{
 	"search":               {"搜索已确认转录", "Search confirmed transcription"},
 	"search_action":        {"搜索", "Search"},
 	"timeline":             {"已确认记录", "Confirmed records"},
-	"back":                 {"返回列表", "Back to list"},
+	"original_pane":        {"原件查看区", "Original viewer"},
 	"original":             {"原件", "Original"},
 	"previous_page":        {"上一页", "Previous page"},
 	"next_page":            {"下一页", "Next page"},

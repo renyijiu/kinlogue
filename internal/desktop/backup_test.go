@@ -333,7 +333,7 @@ func TestBackupSidebarUsesUnsavedGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Type("Synthetic saved before backup")
-	if err := tt.Click("Backup and recovery"); err != nil {
+	if err := tt.Click("Settings"); err != nil {
 		t.Fatal(err)
 	}
 	if s.backupPage || s.pending == nil {

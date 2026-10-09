@@ -265,7 +265,8 @@ func TestInitialRecognitionStaysReadableAfterCorrectionAndConfirmation(t *testin
 	s, _, _ := testScreen(t)
 	s.report.Status = "confirmed"
 	s.report.Sources[0].Extraction.Blocks = []document.Block{{Page: 1, Text: "Synthetic initial OCR"}}
-	s.edit.Text = "Synthetic corrected transcription"
+	s.report.Review.Text = "Synthetic corrected transcription"
+	s.edit.Text = s.report.Review.Text
 	tt := ui.NewTester(s.view, 1240, 900)
 	if err := tt.Click("Show initial recognition"); err != nil {
 		t.Fatal(err)
@@ -514,8 +515,12 @@ func TestLargeTimelineBuildsVisibleRowsAndCanReachLastRecord(t *testing.T) {
 		t.Fatal("timeline eagerly constructed off-screen rows")
 	}
 	// Scroll through the container rather than loading another API page.
+	bounds, ok := tt.Find("Confirmed records")
+	if !ok {
+		t.Fatal("timeline is unavailable")
+	}
 	for range 8 {
-		tt.Scroll(1000, 500, 0, 200_000)
+		tt.Scroll(bounds.X+bounds.W/2, bounds.Y+bounds.H/2, 0, 200_000)
 	}
 	if !tt.HasText("Synthetic report 09999") {
 		t.Fatal("virtualized timeline cannot reach the last record")

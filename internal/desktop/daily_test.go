@@ -157,7 +157,7 @@ func TestReportListKeyboardSelectsAndOpensMetadataRecord(t *testing.T) {
 	s.memberID = "member-a"
 	s.records = []library.Report{{ID: "report-a", Review: library.Edit{Title: "Synthetic first"}}, {ID: "report-b", Review: library.Edit{Title: "Synthetic second"}}}
 	f.report.ID = "report-b"
-	tt := ui.NewTester(s.list, 800, 600)
+	tt := ui.NewTester(func(c *ui.Context) { s.list(c); s.consumeRequests() }, 800, 600)
 	tt.Key(0, ui.KeyTab)
 	tt.Key(0, ui.KeyTab)
 	tt.Key(0, ui.KeyTab)

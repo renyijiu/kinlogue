@@ -10,7 +10,7 @@ import (
 func (s *screen) backupView(c *ui.Context) {
 	ui.Scroll(c).Fill().Children(func() {
 		ui.Column(c).FillWidth().Gap(18).Padding(4).Children(func() {
-			title := "backup_home"
+			title := "settings"
 			if s.recoveryOnly {
 				title = "recovery_title"
 			}
@@ -33,13 +33,38 @@ func (s *screen) backupView(c *ui.Context) {
 			ui.Column(c).Key(s.backup.generation).FillWidth().Gap(16).Disabled(s.busy != "").Children(func() {
 				switch s.backup.step {
 				case "":
-					ui.Text(c, s.t("backup_help"))
-					if !s.recoveryOnly && ui.PrimaryButton(c, s.t("backup_create")).Height(42).Clicked() {
-						s.startBackup()
-						c.Invalidate()
+					if !s.recoveryOnly {
+						ui.Row(c).FillWidth().Padding(18).Gap(20).AlignItems(ui.Center).Radius(12).Background(c.Theme().SurfacePressed).Border(1, c.Theme().Border).Children(func() {
+							ui.Text(c, s.t("language")).Bold().Grow(1)
+							ui.Column(c).Width(240).Children(func() {
+								value := s.language
+								picker(c, &value, []choice{{"system", s.t("system")}, {"zh-Hans", s.t("chinese")}, {"en", s.t("english")}}, s.t("language"), s.busy != "")
+								if value != s.language {
+									s.changeLanguage(value)
+								}
+							})
+						})
 					}
-					if ui.Button(c, s.t("restore_choose")).Height(42).Clicked() {
-						s.chooseRestoreFile()
+					if s.backups != nil {
+						ui.Row(c).FillWidth().Padding(18).Gap(24).Radius(12).Background(c.Theme().SurfacePressed).Border(1, c.Theme().Border).Children(func() {
+							ui.Column(c).Grow(1).MinWidth(0).Gap(10).Children(func() {
+								ui.Text(c, s.t("backup_home")).FontSize(18).Bold().TextColor(c.Theme().Accent)
+								ui.Text(c, s.t("backup_help")).TextColor(c.Theme().TextMuted)
+							})
+							ui.Column(c).Width(240).Gap(10).Children(func() {
+								if !s.recoveryOnly && ui.PrimaryButton(c, s.t("backup_create")).FillWidth().Height(42).Clicked() {
+									s.startBackup()
+									c.Invalidate()
+								}
+								if ui.Button(c, s.t("restore_choose")).FillWidth().Height(42).Clicked() {
+									s.chooseRestoreFile()
+								}
+							})
+						})
+					}
+					if !s.recoveryOnly {
+						ui.Text(c, s.t("privacy")).FontSize(12).TextColor(c.Theme().TextMuted)
+						ui.Text(c, s.t("preview_scope")).FontSize(12).TextColor(c.Theme().TextMuted)
 					}
 				case "generated":
 					ui.Text(c, s.t("backup_code_title")).FontSize(21).Bold()

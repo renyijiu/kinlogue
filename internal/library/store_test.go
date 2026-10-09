@@ -147,8 +147,10 @@ func TestConfirmationGateMemberIsolationAndLiteralSearch(t *testing.T) {
 	if _, err := s.SaveReview(ctx, r.ID, edit); err != nil {
 		t.Fatal(err)
 	}
-	if hits, err := s.Search(ctx, a.ID, ""); err != nil || len(hits) != 0 {
-		t.Fatal("draft leaked into timeline")
+	for _, member := range []string{a.ID, ""} {
+		if hits, err := s.Search(ctx, member, ""); err != nil || len(hits) != 0 {
+			t.Fatal("draft leaked into timeline")
+		}
 	}
 	if _, err := s.Confirm(ctx, r.ID, edit); err != nil {
 		t.Fatal(err)
@@ -159,12 +161,22 @@ func TestConfirmationGateMemberIsolationAndLiteralSearch(t *testing.T) {
 			t.Fatalf("missing expected search: %v", err)
 		}
 	}
-	for _, scope := range []struct{ member, query string }{{b.ID, ""}, {a.ID, "10__value"}, {a.ID, "Source OCR"}, {"", ""}} {
+	for _, scope := range []struct{ member, query string }{{b.ID, ""}, {a.ID, "10__value"}, {a.ID, "Source OCR"}} {
 		hits, err := s.Search(ctx, scope.member, scope.query)
 		if err == nil && len(hits) != 0 {
-			t.Fatal("unscoped, OCR, or wildcard search leaked data")
+			t.Fatal("member, OCR, or wildcard search leaked data")
 		}
 	}
+	for _, query := range []string{"", "合成", "10%_value"} {
+		hits, err := s.Search(ctx, "", query)
+		if err != nil || len(hits) != 1 || hits[0].ID != r.ID {
+			t.Fatalf("all-members confirmed search: %v", err)
+		}
+	}
+	if hits, err := s.Search(ctx, "", "Source OCR"); err != nil || len(hits) != 0 {
+		t.Fatal("all-members search included initial OCR")
+	}
+
 	got, err := s.Get(ctx, r.ID)
 	if err != nil || !reflect.DeepEqual(got.Sources[0].Extraction, extraction()) || !got.Review.Equal(edit) {
 		t.Fatalf("review overwrote OCR: %v", err)

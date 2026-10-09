@@ -35,6 +35,8 @@ type Backend interface {
 	SetLanguage(context.Context, string) error
 }
 
+const allMembers = "all"
+
 type screen struct {
 	backend                          Backend
 	backups                          BackupBackend
@@ -83,7 +85,7 @@ type screen struct {
 
 func newScreen(backend Backend, systemLanguage string) *screen {
 	ctx, stop := context.WithCancel(context.Background())
-	return &screen{backend: backend, ctx: ctx, stop: stop, language: "system", systemLanguage: systemLanguage, page: 1, selectedReport: -1, previewGate: make(chan struct{}, 1)}
+	return &screen{backend: backend, ctx: ctx, stop: stop, language: "system", systemLanguage: systemLanguage, memberID: allMembers, page: 1, selectedReport: -1, previewGate: make(chan struct{}, 1)}
 }
 
 func Run(backend Backend, backups BackupBackend, startupWarning bool) error {
@@ -214,6 +216,9 @@ func (s *screen) read(ctx context.Context, member, query string, language bool) 
 		return result, err
 	}
 	if member != "" {
+		if member == allMembers {
+			member = ""
+		}
 		if result.records, err = s.backend.Search(ctx, member, query); err != nil {
 			return result, err
 		}
@@ -477,7 +482,7 @@ func (s *screen) initialText() string {
 }
 
 func (s *screen) open(id string) {
-	s.leave(func() {
+	s.queueNavigation(func() {
 		s.job("loading", false, func(ctx context.Context) func() {
 			report, err := s.backend.Get(ctx, id)
 			return func() {

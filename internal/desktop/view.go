@@ -32,23 +32,42 @@ func (s *screen) view(c *ui.Context) {
 	s.composing = false
 	ui.Row(c).Fill().Gap(0).Children(func() {
 		if !s.recoveryOnly && !s.restartOnly && !s.activating {
-			ui.Column(c).Width(230).FillHeight().Padding(20, 16).Gap(14).Background(c.Theme().SurfacePressed).Disabled(s.modalOpen() || s.backup.step != "").Children(func() { s.sidebar(c) })
+			ui.Column(c).Width(196).Shrink(0).FillHeight().Padding(16, 10).Gap(12).Background(c.Theme().Background).Disabled(s.modalOpen() || s.backup.step != "").Children(func() { s.sidebar(c) })
+			ui.Box(c).Width(1).FillHeight().Background(c.Theme().Border)
 		}
-		ui.Column(c).Grow(1).MinWidth(0).FillHeight().Padding(22).Gap(16).Children(func() {
+		ui.Column(c).Grow(1).MinWidth(0).FillHeight().Children(func() {
 			ui.Column(c).Grow(1).MinHeight(0).Disabled(s.modalOpen()).Children(func() {
 				if s.backupPage || s.recoveryOnly || s.restartOnly {
-					s.backupView(c)
-				} else if s.report.ID == "" {
-					s.list(c)
-				} else {
-					s.detail(c)
+					ui.Column(c).Fill().Padding(24).Children(func() { s.backupView(c) })
+					return
 				}
+				ui.Row(c).FillWidth().Padding(10, 18).Gap(12).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, s.t("family_timeline")).Bold().Grow(1).TextColor(c.Theme().TextMuted)
+					if ui.Button(c, s.t("import")).Disabled(s.busy != "").Clicked() {
+						s.queueNavigation(s.chooseFiles)
+					}
+				})
+				ui.Box(c).Height(1).FillWidth().Background(c.Theme().Border)
+				ui.Row(c).Grow(1).MinHeight(0).FillWidth().Children(func() {
+					ui.Column(c).Width(284).Shrink(0).FillHeight().Padding(16, 14).Children(func() { s.list(c) })
+					ui.Box(c).Width(1).FillHeight().Background(c.Theme().Border)
+					ui.Column(c).Grow(1).MinWidth(0).FillHeight().Padding(18).Children(func() {
+						if s.report.ID == "" {
+							ui.Column(c).Fill().Center().Gap(12).Children(func() {
+								ui.Text(c, s.t("select_record")).FontSize(22).Bold()
+								ui.Text(c, s.t("select_record_detail")).TextColor(c.Theme().TextMuted)
+							})
+						} else {
+							s.detail(c)
+						}
+					})
+				})
 			})
 			if s.message != "" {
-				ui.Text(c, s.t(s.message)).TextColor(c.Theme().TextMuted)
+				ui.Text(c, s.t(s.message)).Padding(8, 18).TextColor(c.Theme().TextMuted)
 			}
 			if s.busy != "" {
-				ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Row(c).Padding(8, 18).Gap(12).AlignItems(ui.Center).Children(func() {
 					key := s.busy
 					if s.cancelling {
 						key = "cancelling"
@@ -73,68 +92,72 @@ func (s *screen) view(c *ui.Context) {
 }
 
 func (s *screen) sidebar(c *ui.Context) {
-	ui.Text(c, s.t("app")).FontSize(22).Bold().TextColor(c.Theme().Accent)
-	ui.Text(c, s.t("tagline")).TextColor(c.Theme().TextMuted).FontSize(12)
-	if ui.PrimaryButton(c, s.t("import")).FillWidth().Height(42).Disabled(s.busy != "").Clicked() {
-		s.queueNavigation(s.chooseFiles)
+	ui.Text(c, s.t("brand")).Padding(4, 10).FontSize(20).Bold().TextColor(c.Theme().Accent)
+	ui.Text(c, s.t("browse")).Padding(0, 10).FontSize(11).TextColor(c.Theme().TextMuted)
+	if s.sidebarButton(c, s.t("all_records"), "◷", s.memberID == allMembers && !s.backupPage) {
+		s.selectMember(allMembers)
 	}
-	button := ui.Button(c, s.t("inbox")).FillWidth().Height(44).Disabled(s.busy != "")
-	if s.memberID == "" && !s.backupPage {
-		button.Background(c.Theme().Surface).TextColor(c.Theme().Accent)
-	}
-	if button.Clicked() {
+	if s.sidebarButton(c, s.t("inbox"), "▤", s.memberID == "" && !s.backupPage) {
 		s.selectMember("")
 	}
-	ui.Text(c, s.t("members")).Bold().TextColor(c.Theme().TextMuted)
+	ui.Text(c, s.t("members")).Padding(10, 10, 0, 10).FontSize(11).TextColor(c.Theme().TextMuted)
 	ui.Scroll(c).Grow(1).MinHeight(60).Children(func() {
-		ui.Column(c).FillWidth().Gap(6).Children(func() {
+		ui.Column(c).FillWidth().Gap(4).Children(func() {
 			if len(s.members) == 0 {
-				ui.Text(c, s.t("empty_members")).FontSize(12)
+				ui.Text(c, s.t("empty_members")).Padding(10).FontSize(12).TextColor(c.Theme().TextMuted)
 			}
 			for _, member := range s.members {
-				b := ui.Button(c, member.Name).Key(member.ID).FillWidth().Height(44).Disabled(s.busy != "")
-				if member.ID == s.memberID && !s.backupPage {
-					b.Background(c.Theme().Surface).TextColor(c.Theme().Accent)
-				}
-				if b.Clicked() {
-					s.selectMember(member.ID)
-				}
+				ui.Column(c).Key(member.ID).FillWidth().Children(func() {
+					if s.sidebarButton(c, member.Name, "●", member.ID == s.memberID && !s.backupPage) {
+						s.selectMember(member.ID)
+					}
+				})
+			}
+			if s.sidebarButton(c, s.t("add_member"), "+", false) {
+				s.queueNavigation(func() { s.newMember = true })
 			}
 		})
 	})
-	if ui.Button(c, s.t("add_member")).FillWidth().Height(44).Disabled(s.busy != "").Clicked() {
-		s.queueNavigation(func() { s.newMember = true })
-	}
-	if s.backups != nil && ui.Button(c, s.t("backup_home")).FillWidth().Height(44).Disabled(s.busy != "").Clicked() {
+	ui.Box(c).Height(1).FillWidth().Background(c.Theme().Border)
+	if s.sidebarButton(c, s.t("settings"), "⚙", s.backupPage) {
 		s.queueNavigation(s.showBackup)
 	}
-	ui.Field(c, s.t("language"), func() {
-		value := s.language
-		picker(c, &value, []choice{{"system", s.t("system")}, {"zh-Hans", s.t("chinese")}, {"en", s.t("english")}}, s.t("language"), s.busy != "")
-		if value != s.language {
-			s.changeLanguage(value)
+}
+
+func (s *screen) sidebarButton(c *ui.Context, label, icon string, selected bool) bool {
+	b := ui.ButtonBase(c).Label(label).Selected(selected).FillWidth().Height(44).Padding(10).Radius(7).Gap(10).AlignItems(ui.Center).Disabled(s.busy != "")
+	b.Background(c.Theme().Background).TextColor(c.Theme().TextMuted)
+	if selected {
+		b.Background(c.Theme().SurfacePressed).TextColor(c.Theme().Accent)
+	} else if b.Hovered() {
+		b.Background(c.Theme().SurfaceHover)
+	}
+	b.Children(func() { ui.Text(c, icon).Width(16); ui.Text(c, label).Grow(1).MinWidth(0).SingleLine() })
+	return b.Clicked()
+}
+
+func (s *screen) memberLabel(id string) string {
+	for _, member := range s.members {
+		if member.ID == id {
+			return member.Name
 		}
-	}).FillWidth()
-	ui.Text(c, s.t("privacy")).FontSize(11).TextColor(c.Theme().TextMuted)
-	ui.Text(c, s.t("preview_scope")).FontSize(11).TextColor(c.Theme().TextMuted)
+	}
+	return ""
 }
 
 func (s *screen) list(c *ui.Context) {
 	title := s.t("inbox")
-	if s.memberID != "" {
-		for _, member := range s.members {
-			if member.ID == s.memberID {
-				title = member.Name
-			}
-		}
+	if s.memberID == allMembers {
+		title = s.t("all_records")
+	} else if s.memberID != "" {
+		title = s.memberLabel(s.memberID)
 	}
-	ui.Column(c).Fill().Gap(16).Children(func() {
-		ui.Text(c, title).FontSize(28).Bold().TextColor(c.Theme().Accent)
+	ui.Column(c).Fill().Gap(14).Children(func() {
+		ui.Text(c, title).FontSize(16).Bold().TextColor(c.Theme().Accent).SingleLine()
 		if s.memberID != "" {
-			ui.Text(c, s.t("timeline")).TextColor(c.Theme().TextMuted)
-			ui.Row(c).Gap(10).Children(func() {
-				field := ui.TextInput(c, &s.query).Label(s.t("search")).Placeholder(s.t("search")).Grow(1).Disabled(s.busy != "")
-				if ui.Button(c, s.t("search_action")).Disabled(s.busy != "").Clicked() || field.Submitted() {
+			ui.Row(c).Gap(6).Children(func() {
+				field := ui.TextInput(c, &s.query).Label(s.t("search")).Placeholder(s.t("search")).MinWidth(0).Grow(1).Disabled(s.busy != "")
+				if ui.Button(c, "⌕").Label(s.t("search_action")).Disabled(s.busy != "").Clicked() || field.Submitted() {
 					s.load(false)
 				}
 			})
@@ -152,55 +175,69 @@ func (s *screen) list(c *ui.Context) {
 						key = "empty_search"
 					}
 				}
-				ui.Text(c, s.t(key)).FontSize(22).Bold()
+				ui.Text(c, s.t(key)).FontSize(16).Bold()
 				if s.memberID == "" {
 					ui.Text(c, s.t("empty_inbox_detail")).TextColor(c.Theme().TextMuted)
 				}
 			})
-		} else {
-			if scope := [2]string{s.memberID, s.query}; scope != s.reportListScope {
-				s.reportList, s.reportListScope = ui.ListState{}, scope
-				s.selectedReport = -1
+			return
+		}
+		if scope := [2]string{s.memberID, s.query}; scope != s.reportListScope {
+			s.reportList, s.reportListScope = ui.ListState{}, scope
+			s.selectedReport = -1
+		}
+		s.reportList.Selected = &s.selectedReport
+		s.reportList.Key = func(i int) any { return records[i].ID }
+		s.reportList.Label = func(i int) string {
+			if records[i].Review.Title != "" {
+				return records[i].Review.Title
 			}
-			s.reportList.Selected = &s.selectedReport
-			s.reportList.Key = func(i int) any { return records[i].ID }
-			s.reportList.Label = func(i int) string {
-				if records[i].Review.Title != "" {
-					return records[i].Review.Title
+			return records[i].FileName
+		}
+		listLabel := "inbox"
+		if s.memberID != "" {
+			listLabel = "timeline"
+		}
+		list := ui.List(c, &s.reportList, len(records), func(i int) {
+			r := records[i]
+			if i == 0 || r.Review.Date != records[i-1].Review.Date {
+				date := r.Review.Date
+				if date == "" {
+					date = s.t("unknown_date")
 				}
-				return records[i].FileName
+				ui.Text(c, date).FontSize(12).Bold().TextColor(c.Theme().Accent).Background(c.Theme().Background).Padding(8, 0)
 			}
-			listLabel := "inbox"
-			if s.memberID != "" {
-				listLabel = "timeline"
-			}
-			list := ui.List(c, &s.reportList, len(records), func(i int) {
-				r := records[i]
+			ui.Row(c).FillWidth().Gap(8).Background(c.Theme().Background).Children(func() {
+				ui.Column(c).Width(8).FillHeight().AlignItems(ui.Center).Children(func() {
+					ui.Box(c).Size(7, 7).Radius(4).Background(c.Theme().Accent).Margin(14, 0, 0, 0)
+					ui.Box(c).Width(1).Grow(1).Background(c.Theme().Border)
+				})
 				label := s.reportList.Label(i)
-				button := ui.ButtonBase(c).Key(r.ID).FillWidth().Padding(18).Radius(10).Background(c.Theme().Surface).Border(1, c.Theme().Border).Label(label).Disabled(s.busy != "")
+				button := ui.ButtonBase(c).Key(r.ID).Grow(1).MinWidth(0).Padding(12).Radius(10).Background(c.Theme().Surface).TextColor(c.Theme().Text).Border(1, c.Theme().Border).Label(label).Disabled(s.busy != "")
 				if i == s.selectedReport {
-					button.Background(c.Theme().SurfacePressed).Border(2, c.Theme().Accent)
+					button.Background(c.Theme().SurfacePressed)
+				}
+				if r.ID == s.report.ID {
+					button.Border(2, c.Theme().Accent)
+				} else if button.Hovered() {
+					button.Background(c.Theme().SurfaceHover)
 				}
 				button.Children(func() {
-					ui.Column(c).Gap(8).Children(func() {
-						ui.Text(c, label).FontSize(17).Bold().SingleLine()
-						ui.Row(c).Gap(16).Children(func() {
-							date := r.Review.Date
-							if date == "" {
-								date = s.t("unknown_date")
-							}
-							ui.Text(c, date).TextColor(c.Theme().TextMuted)
-							ui.Text(c, s.t(statusKey(r.Status))).TextColor(c.Theme().Accent)
-						})
+					ui.Column(c).FillWidth().Gap(8).Children(func() {
+						ui.Text(c, label).FontSize(14).Bold().SingleLine()
+						if name := s.memberLabel(r.Review.MemberID); name != "" {
+							ui.Text(c, name).FontSize(11).TextColor(c.Theme().TextMuted).Background(c.Theme().SurfacePressed).Padding(3, 7).Radius(6).AlignSelf(ui.Start)
+						}
+						ui.Text(c, s.t(statusKey(r.Status))).FontSize(11).TextColor(c.Theme().TextMuted)
 					})
 				})
 				if button.Clicked() {
 					s.open(r.ID)
 				}
-			}).Grow(1).MinHeight(0).Gap(10).Label(s.t(listLabel)).Disabled(s.busy != "")
-			if list.Submitted() && s.selectedReport >= 0 && s.selectedReport < len(records) {
-				s.open(records[s.selectedReport].ID)
-			}
+			})
+		}).Grow(1).MinHeight(0).Gap(10).Label(s.t(listLabel)).Disabled(s.busy != "")
+		if list.Submitted() && s.selectedReport >= 0 && s.selectedReport < len(records) {
+			s.open(records[s.selectedReport].ID)
 		}
 	})
 }
@@ -220,15 +257,14 @@ func statusKey(status string) string {
 
 func (s *screen) detail(c *ui.Context) {
 	ui.Column(c).Key(s.report.ID).Fill().Gap(14).Children(func() {
-		ui.Row(c).Gap(16).AlignItems(ui.Center).Children(func() {
-			if ui.Button(c, s.t("back")).Disabled(s.busy != "").Clicked() {
-				s.queueNavigation(func() { s.clearReport(); s.message = ""; s.load(false) })
-			}
-			ui.Text(c, s.report.FileName).FontSize(18).Bold().Grow(1).SingleLine()
-			ui.Text(c, s.t(statusKey(s.report.Status))).TextColor(c.Theme().Accent)
-		})
-		ui.Row(c).Grow(1).MinHeight(0).Gap(22).Children(func() {
-			ui.Column(c).WidthPercent(43).FillHeight().Gap(12).Children(func() { s.original(c) })
+		if s.report.Status == "confirmed" && !s.editingConfirmed {
+			ui.Scroll(c).FillWidth().HeightPercent(40).MinHeight(180).Children(func() { s.summary(c) })
+			ui.Column(c).Grow(1).MinHeight(0).FillWidth().Padding(12).Gap(8).Background(c.Theme().SurfacePressed).Border(1, c.Theme().Border).Radius(12).Children(func() { s.original(c) })
+			return
+		}
+		ui.Text(c, s.report.FileName).FontSize(18).Bold().SingleLine()
+		ui.Row(c).Grow(1).MinHeight(0).Gap(16).Children(func() {
+			ui.Column(c).WidthPercent(40).FillHeight().Gap(10).Children(func() { s.original(c) })
 			ui.Scroll(c).Grow(1).MinWidth(0).Children(func() {
 				ui.Column(c).FillWidth().Gap(14).Padding(0, 4, 12, 0).Children(func() { s.review(c) })
 			})
@@ -236,70 +272,114 @@ func (s *screen) detail(c *ui.Context) {
 	})
 }
 
-func (s *screen) original(c *ui.Context) {
-	if len(s.report.Sources) > 1 {
-		choices := make([]choice, 0, len(s.edit.SourceIDs))
-		for i, id := range s.edit.SourceIDs {
-			for _, source := range s.report.Sources {
-				if source.ID == id {
-					choices = append(choices, choice{id, s.t("source_item", i+1, source.FileName)})
-					break
-				}
+func (s *screen) summary(c *ui.Context) {
+	ui.Column(c).FillWidth().Gap(14).Padding(0, 4, 12, 0).Children(func() {
+		ui.Text(c, s.report.Review.Title).FontSize(20).Bold()
+		ui.Row(c).Gap(10).Wrap().AlignItems(ui.Center).Children(func() {
+			ui.Text(c, s.memberLabel(s.report.Review.MemberID)).TextColor(c.Theme().TextMuted)
+			date := s.report.Review.Date
+			if date == "" {
+				date = s.t("unknown_date")
 			}
-		}
-		selected := s.sourceID
-		picker(c, &selected, choices, s.t("source_selector"), s.busy != "")
-		if selected != s.sourceID {
-			s.selectSource(selected)
-		}
-		if s.report.Status == "review" || s.editingConfirmed {
-			i := slices.Index(s.edit.SourceIDs, s.sourceID)
-			ui.Row(c).Gap(8).Children(func() {
-				if ui.Button(c, s.t("source_up")).Disabled(s.busy != "" || i <= 0).Clicked() {
-					s.moveSource(-1)
-				}
-				if ui.Button(c, s.t("source_down")).Disabled(s.busy != "" || i < 0 || i >= len(s.edit.SourceIDs)-1).Clicked() {
-					s.moveSource(1)
-				}
+			ui.Text(c, date).FontSize(12).Padding(4, 8).Radius(6).Background(c.Theme().SurfacePressed)
+		})
+		ui.Row(c).Gap(8).Wrap().Disabled(s.busy != "").Children(func() {
+			if ui.Button(c, s.t("edit_record")).Clicked() {
+				s.startEditing()
+			}
+			if ui.Button(c, s.t("export")).Clicked() {
+				s.chooseExport()
+			}
+			if ui.Button(c, s.t("delete_report")).TextColor(c.Theme().Danger).Clicked() {
+				s.deletePrompt = true
+			}
+		})
+		ui.Text(c, s.t("confirmed_hint")).FontSize(12).TextColor(c.Theme().TextMuted)
+		for _, item := range []struct{ heading, label, value string }{{"confirmed_text", "transcription", s.report.Review.Text}, {"notes", "notes", s.report.Review.Notes}} {
+			if item.value == "" {
+				continue
+			}
+			ui.Column(c).FillWidth().Gap(8).Padding(14).Background(c.Theme().SurfacePressed).Border(1, c.Theme().Border).Radius(12).Children(func() {
+				ui.Text(c, s.t(item.heading)).FontSize(12).Bold().TextColor(c.Theme().Accent)
+				value := item.value
+				ui.TextArea(c, &value).Label(s.t(item.label)).ReadOnly(true).FillWidth().Height(100).Padding(0).Background(c.Theme().SurfacePressed).Border(0, c.Theme().SurfacePressed)
 			})
 		}
-	}
-	ui.Row(c).Gap(8).Children(func() {
-		ui.Text(c, s.t("original")).FontSize(18).Bold().Grow(1)
-		ui.Text(c, s.t("page", s.page, max(1, s.source().Extraction.PageCount))).TextColor(c.Theme().TextMuted)
 	})
-	ui.Column(c).Grow(1).MinHeight(200).FillWidth().Background(c.Theme().Surface).Border(1, c.Theme().Border).Radius(8).Padding(8).Children(func() {
-		if s.bitmap != nil {
-			ui.Image(c, s.bitmap).Label(s.t("original")).Fill().Fit(ui.Contain)
-		} else {
-			key := s.previewError
-			if key == "" {
-				key = "loading"
+}
+
+func (s *screen) original(c *ui.Context) {
+	ui.Scroll(c).Fill().Label(s.t("original_pane")).Children(func() {
+		column := ui.Column(c).FillWidth().MinHeightPercent(100).Gap(8)
+		if !s.showRaw {
+			column.HeightPercent(100)
+		}
+		column.Children(func() {
+			if len(s.report.Sources) > 1 {
+				choices := make([]choice, 0, len(s.edit.SourceIDs))
+				for i, id := range s.edit.SourceIDs {
+					for _, source := range s.report.Sources {
+						if source.ID == id {
+							choices = append(choices, choice{id, s.t("source_item", i+1, source.FileName)})
+							break
+						}
+					}
+				}
+				selected := s.sourceID
+				picker(c, &selected, choices, s.t("source_selector"), s.busy != "")
+				if selected != s.sourceID {
+					s.selectSource(selected)
+				}
+				if s.report.Status == "review" || s.editingConfirmed {
+					i := slices.Index(s.edit.SourceIDs, s.sourceID)
+					ui.Row(c).Gap(8).Children(func() {
+						if ui.Button(c, s.t("source_up")).Disabled(s.busy != "" || i <= 0).Clicked() {
+							s.moveSource(-1)
+						}
+						if ui.Button(c, s.t("source_down")).Disabled(s.busy != "" || i < 0 || i >= len(s.edit.SourceIDs)-1).Clicked() {
+							s.moveSource(1)
+						}
+					})
+				}
 			}
-			ui.Column(c).Fill().Center().Children(func() { ui.Text(c, s.t(key)).TextColor(c.Theme().TextMuted) })
-		}
+			ui.Row(c).Gap(8).Children(func() {
+				ui.Text(c, s.t("original")).FontSize(18).Bold().Grow(1)
+				ui.Text(c, s.t("page", s.page, max(1, s.source().Extraction.PageCount))).TextColor(c.Theme().TextMuted)
+			})
+			ui.Column(c).Grow(1).MinHeight(200).FillWidth().Background(c.Theme().Surface).Border(1, c.Theme().Border).Radius(8).Padding(8).Children(func() {
+				if s.bitmap != nil {
+					ui.Image(c, s.bitmap).Label(s.t("original")).Fill().Fit(ui.Contain)
+				} else {
+					key := s.previewError
+					if key == "" {
+						key = "loading"
+					}
+					ui.Column(c).Fill().Center().Children(func() { ui.Text(c, s.t(key)).TextColor(c.Theme().TextMuted) })
+				}
+			})
+			ui.Row(c).Gap(8).Children(func() {
+				if ui.Button(c, s.t("previous_page")).Disabled(s.page <= 1).Clicked() {
+					s.preview(s.page - 1)
+				}
+				if ui.Button(c, s.t("next_page")).Disabled(s.page >= s.source().Extraction.PageCount).Clicked() {
+					s.preview(s.page + 1)
+				}
+			})
+			if s.source().Extraction.PageCount > 0 {
+				ui.Checkbox(c, &s.showRaw, s.t("raw_ocr"))
+				if s.showRaw {
+					ui.Text(c, s.t("raw_hint")).FontSize(12).TextColor(c.Theme().TextMuted)
+					raw := s.initialText()
+					ui.Field(c, s.t("source_page", s.page), func() { ui.TextArea(c, &raw).ReadOnly(true).Height(170).FillWidth() }).FillWidth()
+				}
+			}
+
+		})
 	})
-	ui.Row(c).Gap(8).Children(func() {
-		if ui.Button(c, s.t("previous_page")).Disabled(s.page <= 1).Clicked() {
-			s.preview(s.page - 1)
-		}
-		if ui.Button(c, s.t("next_page")).Disabled(s.page >= s.source().Extraction.PageCount).Clicked() {
-			s.preview(s.page + 1)
-		}
-	})
-	if s.source().Extraction.PageCount > 0 {
-		ui.Checkbox(c, &s.showRaw, s.t("raw_ocr"))
-		if s.showRaw {
-			ui.Text(c, s.t("raw_hint")).FontSize(12).TextColor(c.Theme().TextMuted)
-			raw := s.initialText()
-			ui.Field(c, s.t("source_page", s.page), func() { ui.TextArea(c, &raw).ReadOnly(true).Height(170).FillWidth() }).FillWidth()
-		}
-	}
 }
 
 func (s *screen) review(c *ui.Context) {
 	confirmed := s.report.Status == "confirmed"
-	readOnly := confirmed && !s.editingConfirmed
 	if s.report.Status == "failed" || s.report.Status == "processing" {
 		ui.Text(c, s.t("failed")).FontSize(22).Bold()
 		ui.Text(c, s.t(failureKey(s.report.Failure))).TextColor(c.Theme().TextMuted)
@@ -319,47 +399,27 @@ func (s *screen) review(c *ui.Context) {
 	}
 	ui.Text(c, s.t(key)).TextColor(c.Theme().TextMuted)
 	ui.Column(c).FillWidth().Gap(14).Disabled(s.busy != "").Children(func() {
-		if readOnly {
-			ui.Row(c).Gap(8).Wrap().Children(func() {
-				if ui.PrimaryButton(c, s.t("edit_record")).Clicked() {
-					s.startEditing()
-				}
-				if ui.Button(c, s.t("export")).Clicked() {
-					s.chooseExport()
-				}
-			})
-		}
-		if readOnly {
-			memberName := ""
+		ui.Field(c, s.t("member"), func() {
+			choices := []choice{{"", s.t("choose_member")}}
 			for _, member := range s.members {
-				if member.ID == s.edit.MemberID {
-					memberName = member.Name
-				}
+				choices = append(choices, choice{member.ID, member.Name})
 			}
-			ui.Text(c, memberName).Bold()
-		} else {
-			ui.Field(c, s.t("member"), func() {
-				choices := []choice{{"", s.t("choose_member")}}
-				for _, member := range s.members {
-					choices = append(choices, choice{member.ID, member.Name})
-				}
-				picker(c, &s.edit.MemberID, choices, s.t("member"), false)
-			}).FillWidth()
-		}
+			picker(c, &s.edit.MemberID, choices, s.t("member"), false)
+		}).FillWidth()
 		ui.Field(c, s.t("title"), func() {
-			field := ui.TextInput(c, &s.edit.Title).ReadOnly(readOnly).FillWidth()
+			field := ui.TextInput(c, &s.edit.Title).FillWidth()
 			s.composing = s.composing || field.Composing()
 		}).FillWidth()
 		ui.Field(c, s.t("date"), func() {
-			field := ui.TextInput(c, &s.edit.Date).ReadOnly(readOnly).FillWidth().Placeholder(s.t("unknown_date"))
+			field := ui.TextInput(c, &s.edit.Date).FillWidth().Placeholder(s.t("unknown_date"))
 			s.composing = s.composing || field.Composing()
 		}).Description(s.t("date_hint")).FillWidth()
 		ui.Field(c, s.t("transcription"), func() {
-			field := ui.TextArea(c, &s.edit.Text).ReadOnly(readOnly).Height(230).FillWidth()
+			field := ui.TextArea(c, &s.edit.Text).Height(230).FillWidth()
 			s.composing = s.composing || field.Composing()
 		}).FillWidth()
 		ui.Field(c, s.t("notes"), func() {
-			field := ui.TextArea(c, &s.edit.Notes).ReadOnly(readOnly).Height(100).FillWidth()
+			field := ui.TextArea(c, &s.edit.Notes).Height(100).FillWidth()
 			s.composing = s.composing || field.Composing()
 		}).FillWidth()
 		if s.editingConfirmed {
@@ -384,9 +444,6 @@ func (s *screen) review(c *ui.Context) {
 			if ui.Button(c, s.t("discard_draft")).TextColor(c.Theme().Danger).Clicked() {
 				s.deletePrompt = true
 			}
-		}
-		if readOnly && ui.Button(c, s.t("delete_report")).TextColor(c.Theme().Danger).Clicked() {
-			s.deletePrompt = true
 		}
 	})
 }

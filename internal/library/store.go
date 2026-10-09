@@ -959,6 +959,7 @@ func (s *Store) Drafts(ctx context.Context) ([]Report, error) {
 }
 
 // Search matches confirmed corrected text/notes but returns metadata only.
+// An empty memberID selects confirmed records across all family members.
 // Review.Text, Review.Notes and Sources are loaded through Get, not lists.
 func (s *Store) Search(ctx context.Context, memberID, query string) ([]Report, error) {
 	s.mu.Lock()
@@ -966,12 +967,19 @@ func (s *Store) Search(ctx context.Context, memberID, query string) ([]Report, e
 	if err := s.begin(ctx); err != nil {
 		return nil, err
 	}
-	if !validID(memberID) || !bounded(query, 1024) {
+	if (memberID != "" && !validID(memberID)) || !bounded(query, 1024) {
 		return nil, ErrInvalid
 	}
 	// instr treats %, _ and backslashes literally. SQLite lower folds ASCII;
 	// Chinese characters remain exact, so both intended languages work.
-	return s.list(ctx, "WHERE status='confirmed' AND member_id=? AND (instr(lower(title),lower(?))>0 OR instr(lower(corrected_text),lower(?))>0 OR instr(lower(notes),lower(?))>0) ORDER BY report_date DESC,created_at DESC,id", memberID, query, query, query)
+	where := "WHERE status='confirmed'"
+	args := []any{}
+	if memberID != "" {
+		where += " AND member_id=?"
+		args = append(args, memberID)
+	}
+	where += " AND (instr(lower(title),lower(?))>0 OR instr(lower(corrected_text),lower(?))>0 OR instr(lower(notes),lower(?))>0) ORDER BY report_date DESC,created_at DESC,id"
+	return s.list(ctx, where, append(args, query, query, query)...)
 }
 
 func (s *Store) ReadOriginal(ctx context.Context, reportID, sourceID string) ([]byte, error) {
