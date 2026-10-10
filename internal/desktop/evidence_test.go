@@ -131,7 +131,7 @@ func TestUIEvidence(t *testing.T) {
 
 	s, drain, tt := screenFor()
 	settle(tt, drain)
-	write(tt, "01-all-records-empty-detail")
+	write(tt, "01-all-records")
 	s.open(first)
 	settle(tt, drain)
 	write(tt, "02-all-records-detail")

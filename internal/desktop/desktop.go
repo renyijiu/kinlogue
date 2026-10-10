@@ -78,6 +78,7 @@ type screen struct {
 	reportListScope                  [2]string
 	newMember, deletePrompt, showRaw bool
 	deleteTarget                     string
+	focusSearch                      bool
 	inboxCount                       int
 	memberName                       string
 	editingConfirmed                 bool
@@ -182,6 +183,9 @@ func (s *screen) updateChrome() {
 			{Label: s.t("import"), Accelerator: "CmdOrCtrl+O", Click: func(*mygo.MenuItem, *mygo.Window) {
 				s.win.Update(func() { s.queueNavigation(s.chooseFiles) })
 			}},
+			{Label: s.t("find_menu"), Accelerator: "CmdOrCtrl+F", Click: func(*mygo.MenuItem, *mygo.Window) {
+				s.win.Update(s.requestSearchFocus)
+			}},
 			{Label: s.t("save_menu"), Accelerator: "CmdOrCtrl+S", Click: func(*mygo.MenuItem, *mygo.Window) { s.win.Update(s.queueSaveShortcut) }},
 			{Label: s.t("close_window"), Role: mygo.RoleClose},
 		}})
@@ -284,6 +288,27 @@ func (s *screen) load(language bool) {
 				return
 			}
 			s.apply(data)
+			s.autoSelect()
+		}
+	})
+}
+
+// autoSelect opens the newest record when a timeline loads with nothing
+// open, so the detail column is never an empty pair of panes.
+func (s *screen) autoSelect() {
+	if s.report.ID != "" || s.phonePage || s.backupPage || s.recoveryOnly || s.restartOnly || s.activating || s.shutdown != nil || len(s.records) == 0 || s.busy != "" {
+		return
+	}
+	id := s.records[0].ID
+	s.job("loading", false, func(ctx context.Context) func() {
+		report, err := s.backend.Get(ctx, id)
+		return func() {
+			// The user may have opened something else or left the timeline.
+			if err != nil || s.report.ID != "" || s.phonePage || s.backupPage {
+				return
+			}
+			s.accept(report)
+			s.preview(1)
 		}
 	})
 }

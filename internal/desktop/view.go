@@ -80,8 +80,15 @@ func (s *screen) view(c *ui.Context) {
 					})
 				}
 			})
-			if s.message != "" {
-				ui.Text(c, s.t(s.message)).Padding(8, 18).TextColor(c.Theme().TextMuted)
+			if s.message != "" && !successMessage(s.message) && !(s.phonePage && phoneInlineMessage(s.message)) {
+				ui.Row(c).FillWidth().Padding(8, 18).Gap(8).AlignItems(ui.Center).Children(func() {
+					color := c.Theme().TextMuted
+					if errorMessage(s.message) {
+						color = tokenDanger
+						icon(c, iconWarning, 15, color)
+					}
+					ui.Text(c, s.t(s.message)).TextColor(color).Grow(1).MinWidth(0).MaxLines(2)
+				})
 			}
 			if s.busy != "" {
 				ui.Row(c).Padding(8, 18).Gap(12).AlignItems(ui.Center).Children(func() {
@@ -98,6 +105,15 @@ func (s *screen) view(c *ui.Context) {
 			}
 		})
 	})
+	// Outcomes of what the user just did show briefly as toasts, as macOS
+	// apps do, instead of a line at the bottom that is easy to miss.
+	if successMessage(s.message) {
+		c.AddToast(ui.Toast{ID: s.message, Title: s.t(s.message), Type: "success"})
+		s.message = ""
+	}
+	if !s.modalOpen() && !s.reviewOpen() && !s.phone.receiverOpen && c.Shortcut(ui.Cmd, ui.KeyF) {
+		s.requestSearchFocus()
+	}
 	s.reviewSheet(c)
 	s.receiverSheet(c)
 	s.dialogs(c)
@@ -152,7 +168,7 @@ func (s *screen) toolbarButton(c *ui.Context, glyph *ui.SVG, label, help string)
 }
 
 func sectionHeader(c *ui.Context, text string) {
-	ui.Text(c, text).Padding(14, 12, 4, 12).FontSize(11).Bold().TextColor(c.Theme().TextMuted)
+	ui.Text(c, text).Padding(14, 12, 4, 12).FontSize(12).Bold().TextColor(c.Theme().TextMuted)
 }
 
 func (s *screen) sidebar(c *ui.Context) {
@@ -196,14 +212,15 @@ func (s *screen) sidebar(c *ui.Context) {
 				}
 			}
 			if len(waiting) > 0 {
-				sectionHeader(c, s.t("awaiting_review"))
+				sectionHeader(c, s.t("awaiting_review_count", len(waiting)))
 				for _, draft := range waiting {
 					ui.Column(c).Key(draft.ID).FillWidth().Children(func() {
-						hint := s.t("open_draft_hint")
-						if title := strings.TrimSpace(draft.Review.Title); title != "" {
-							hint = title + " · " + hint
+						// Name each draft so several waiting reports are distinguishable.
+						name := strings.TrimSpace(draft.Review.Title)
+						if name == "" {
+							name = draft.FileName
 						}
-						if s.sidebarAction(c, iconDocClock, s.t("draft_awaiting"), hint) {
+						if s.sidebarAction(c, iconDocClock, s.t("draft_awaiting"), name, s.t("open_draft_hint")) {
 							s.open(draft.ID)
 						}
 					})
@@ -273,14 +290,23 @@ func (s *screen) sidebarRow(c *ui.Context, glyph *ui.SVG, label, trailing string
 }
 
 // sidebarAction is a command row (draft to review), not a navigation choice.
-func (s *screen) sidebarAction(c *ui.Context, glyph *ui.SVG, label, hint string) bool {
-	b := ui.ButtonBase(c).Label(label).Tooltip(hint).FillWidth().MinHeight(44).Padding(0, 12).Radius(8).Gap(10).AlignItems(ui.Center).TextColor(c.Theme().TextMuted).Disabled(s.busy != "")
+func (s *screen) sidebarAction(c *ui.Context, glyph *ui.SVG, label, detail, hint string) bool {
+	accessible := label
+	if detail != "" {
+		accessible = s.t("labeled_item", label, detail)
+	}
+	b := ui.ButtonBase(c).Label(accessible).Tooltip(hint).FillWidth().MinHeight(44).Padding(4, 12).Radius(8).Gap(10).AlignItems(ui.Center).TextColor(c.Theme().TextMuted).Disabled(s.busy != "")
 	if b.Hovered() {
 		b.Background(tokenHover)
 	}
 	b.Children(func() {
 		icon(c, glyph, 17, c.Theme().TextMuted)
-		ui.Text(c, label).Grow(1).MinWidth(0).SingleLine()
+		ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
+			ui.Text(c, label).SingleLine()
+			if detail != "" {
+				ui.Text(c, detail).FontSize(11).SingleLine().TextColor(c.Theme().TextMuted)
+			}
+		})
 		icon(c, iconChevron, 12, c.Theme().Border)
 	})
 	return b.Clicked()
@@ -366,7 +392,9 @@ func (s *screen) list(c *ui.Context) {
 						ui.Column(c).FillWidth().Gap(9).Children(func() {
 							ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 								ui.Text(c, label).FontSize(15).Bold().Grow(1).MinWidth(0).SingleLine()
-								if name := s.memberLabel(r.Review.MemberID); name != "" {
+								// A single member's timeline does not repeat its name on
+								// every card; All Records needs it to tell people apart.
+								if name := s.memberLabel(r.Review.MemberID); name != "" && s.memberID == allMembers {
 									chip(c, name)
 								}
 							})
@@ -398,7 +426,11 @@ func (s *screen) searchField(c *ui.Context) {
 	ui.Row(c).FillWidth().Padding(16).Children(func() {
 		ui.Row(c).FillWidth().Padding(2, 6, 2, 14).Gap(6).AlignItems(ui.Center).Radius(20).Background(tokenContainer).Border(1, c.Theme().Border).Children(func() {
 			icon(c, iconSearch, 15, c.Theme().TextMuted)
-			field := ui.TextInput(c, &s.query).Label(s.t("search")).Placeholder(s.t("search_placeholder")).Grow(1).MinWidth(0).Background(tokenContainer).Border(0, tokenContainer).Padding(8, 2).Disabled(s.busy != "")
+			field := ui.TextInput(c, &s.query).Label(s.t("search")).Placeholder(s.t("search_placeholder")).Grow(1).MinWidth(0).Background(tokenContainer).Border(0, tokenContainer).Padding(8, 2).Disabled(s.busy != "").Tooltip("⌘F")
+			if s.focusSearch {
+				s.focusSearch = false
+				field.Focus()
+			}
 			s.composing = s.composing || field.Composing()
 			if field.Submitted() && !field.Composing() {
 				s.load(false)
@@ -434,19 +466,18 @@ func firstLines(text string) string {
 // detail is the Swift RecordDetailView: confirmed fields on top, the original
 // pane below. Drafts and edits open in the review sheet instead.
 func (s *screen) detail(c *ui.Context) {
-	ui.Column(c).Fill().Gap(0).Children(func() {
-		confirmed := s.report.ID != "" && s.report.Status == "confirmed" && !s.editingConfirmed
-		ui.Scroll(c).FillWidth().HeightPercent(42).MinHeight(180).Children(func() {
-			if confirmed {
-				s.summary(c)
-				return
-			}
-			ui.Column(c).FillWidth().MinHeight(180).Center().Gap(8).Padding(24).Children(func() {
-				icon(c, iconDoc, 30, c.Theme().TextMuted)
-				ui.Text(c, s.t("select_record")).FontSize(17).Bold()
-				ui.Text(c, s.t("select_record_detail")).TextColor(c.Theme().TextMuted)
-			})
+	confirmed := s.report.ID != "" && s.report.Status == "confirmed" && !s.editingConfirmed
+	if !confirmed {
+		// One empty state for the whole column instead of two empty panes.
+		ui.Column(c).Fill().Center().Gap(8).Padding(24).Children(func() {
+			icon(c, iconDoc, 34, c.Theme().TextMuted)
+			ui.Text(c, s.t("select_record")).FontSize(17).Bold()
+			ui.Text(c, s.t("select_record_detail")).TextColor(c.Theme().TextMuted)
 		})
+		return
+	}
+	ui.Column(c).Fill().Gap(0).Children(func() {
+		ui.Scroll(c).FillWidth().HeightPercent(42).MinHeight(180).Children(func() { s.summary(c) })
 		ui.Column(c).Grow(1).MinHeight(0).FillWidth().Padding(0, 24, 24, 24).Children(func() {
 			s.originalCard(c, confirmed)
 		})
@@ -474,26 +505,35 @@ func (s *screen) originalCard(c *ui.Context, confirmed bool) {
 
 func (s *screen) summary(c *ui.Context) {
 	ui.Column(c).FillWidth().Gap(20).Padding(24).Children(func() {
-		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Start).Children(func() {
-			ui.Column(c).Grow(1).MinWidth(0).Gap(5).Children(func() {
+		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Start).Children(func() {
+			ui.Column(c).Grow(1).MinWidth(0).Gap(6).Children(func() {
 				ui.Text(c, s.report.Review.Title).FontSize(21).Bold()
 				member := s.memberLabel(s.report.Review.MemberID)
 				if member == "" {
 					member = s.t("member")
 				}
-				ui.Text(c, member).TextColor(c.Theme().TextMuted)
+				ui.Text(c, member+"  ·  "+s.formatDate(s.report.Review.Date)).TextColor(c.Theme().TextMuted)
 			})
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Disabled(s.busy != "").Children(func() {
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Disabled(s.busy != "").Children(func() {
 				if ui.Button(c, s.t("edit_record")).Clicked() {
 					s.startEditing()
 				}
-				if ui.Button(c, s.t("export")).Clicked() {
-					s.chooseExport()
+				// Export and delete are less frequent; keep them one click away so
+				// the destructive action does not compete with Edit.
+				more := ui.ButtonBase(c).Label(s.t("more_actions")).Tooltip(s.t("more_actions")).Padding(7).Radius(7).Border(1, c.Theme().Border).Background(c.Theme().Surface)
+				if more.Hovered() {
+					more.Background(c.Theme().SurfaceHover)
 				}
-				if ui.Button(c, s.t("delete_report")).TextColor(tokenDanger).Clicked() {
-					s.promptDelete(s.report.ID)
-				}
-				ui.Text(c, s.formatDate(s.report.Review.Date)).FontSize(12).Bold().TextColor(c.Theme().TextMuted).Background(tokenChip).Padding(6, 12).Radius(13)
+				more.Children(func() { icon(c, iconMore, 16, c.Theme().TextMuted) })
+				more.Menu(func(m *ui.Menu) {
+					if m.Item(s.t("export")).Chosen() {
+						s.chooseExport()
+					}
+					m.Separator()
+					if m.Item(s.t("delete_report")).Chosen() {
+						s.promptDelete(s.report.ID)
+					}
+				})
 			})
 		})
 		text := s.report.Review.Text
@@ -667,26 +707,31 @@ func (s *screen) reviewSheet(c *ui.Context) {
 				if s.message != "" && (s.message == "save_failed" || s.message == "invalid_date" || s.message == "invalid_review") {
 					ui.Text(c, s.t(s.message)).FontSize(12).TextColor(tokenDanger).MaxLines(2).Shrink(1)
 				}
+				// Cmd+Return runs the primary action. The footer is built after
+				// the fields, so an active input-method composition blocks it.
+				commit := c.Shortcut(ui.Cmd, ui.KeyEnter) && s.busy == "" && !s.composing && !s.modalOpen()
 				switch {
 				case editing:
 					if ui.Button(c, s.t("cancel_edit")).Disabled(s.busy != "").Clicked() {
 						s.edit, s.editingConfirmed, s.message = cloneEdit(s.report.Review), false, ""
 					}
-					if ui.PrimaryButton(c, s.t("save_update")).Disabled(s.busy != "" || !s.canConfirm() || s.composing).Clicked() {
+					ready := s.busy == "" && s.canConfirm() && !s.composing
+					if ui.PrimaryButton(c, s.t("save_update")).Tooltip("⌘↩").Disabled(!ready).Clicked() || (commit && ready) {
 						s.save(false, nil)
 					}
 				case failed:
 					if ui.Button(c, s.t("close")).Disabled(s.busy != "").Clicked() {
 						s.leave(s.clearReport)
 					}
-					if ui.PrimaryButton(c, s.t("retry")).Disabled(s.busy != "").Clicked() {
+					if ui.PrimaryButton(c, s.t("retry")).Tooltip("⌘↩").Disabled(s.busy != "").Clicked() || commit {
 						s.retry()
 					}
 				default:
 					if ui.Button(c, s.t("save")).Disabled(s.busy != "" || s.composing).Clicked() {
 						s.save(false, s.clearReport)
 					}
-					if ui.PrimaryButton(c, s.t("confirm")).Disabled(s.busy != "" || !s.canConfirm() || s.composing).Clicked() {
+					ready := s.busy == "" && s.canConfirm() && !s.composing
+					if ui.PrimaryButton(c, s.t("confirm")).Tooltip("⌘↩").Disabled(!ready).Clicked() || (commit && ready) {
 						s.save(true, nil)
 					}
 				}
@@ -722,6 +767,33 @@ func (s *screen) methodLabel(e document.Extraction) string {
 	}
 }
 
+// dateField replaces typing YYYY-MM-DD: a calendar picker for a known date,
+// or an explicit unknown date, as the Swift date selection offers. A stored
+// value that is not a valid date stays visible until replaced or cleared.
+func (s *screen) dateField(c *ui.Context, value *string, label string, disabled bool) {
+	ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+		if *value == "" {
+			ui.Text(c, s.t("unknown_date")).TextColor(c.Theme().TextMuted).Grow(1).MinWidth(0)
+			if ui.Button(c, s.t("date_choose")).Disabled(disabled).Clicked() {
+				*value = time.Now().Format("2006-01-02")
+			}
+			return
+		}
+		if t, err := time.Parse("2006-01-02", *value); err == nil {
+			chosen := ui.DateInput(c, &t).Label(label).Disabled(disabled)
+			if chosen.Changed() {
+				*value = t.Format("2006-01-02")
+			}
+			ui.Box(c).Grow(1)
+		} else {
+			ui.Text(c, *value).TextColor(tokenDanger).Grow(1).MinWidth(0)
+		}
+		if ui.Button(c, s.t("date_clear")).Disabled(disabled).Clicked() {
+			*value = ""
+		}
+	})
+}
+
 func (s *screen) review(c *ui.Context) {
 	if s.report.Status == "failed" || s.report.Status == "processing" {
 		ui.Column(c).FillWidth().Gap(10).Children(func() {
@@ -741,10 +813,7 @@ func (s *screen) review(c *ui.Context) {
 			}
 			picker(c, &s.edit.MemberID, choices, s.t("member"), false)
 		}).FillWidth()
-		ui.Field(c, s.t("date"), func() {
-			field := ui.TextInput(c, &s.edit.Date).FillWidth().Placeholder(s.t("unknown_date"))
-			s.composing = s.composing || field.Composing()
-		}).Description(s.t("date_hint")).FillWidth()
+		ui.Field(c, s.t("date"), func() { s.dateField(c, &s.edit.Date, s.t("date"), false) }).FillWidth()
 		ui.Field(c, s.t("title"), func() {
 			field := ui.TextInput(c, &s.edit.Title).FillWidth()
 			s.composing = s.composing || field.Composing()
@@ -908,4 +977,40 @@ func (s *screen) dialogs(c *ui.Context) {
 			s.importPaths = nil
 		}
 	}
+}
+
+// successMessage lists outcomes shown as a toast; everything else stays on
+// screen until the next action.
+func successMessage(key string) bool {
+	switch key {
+	case "saved", "updated", "confirmed", "exported", "export_cancelled", "phone_deleted", "phone_stopped", "phone_existing_confirmed":
+		return true
+	}
+	return false
+}
+
+// errorMessage marks failures, which carry a warning icon and the danger color.
+func errorMessage(key string) bool {
+	switch key {
+	case "invalid_date", "invalid_review", "unsupported", "locked", "limit", "invalid_document", "unavailable", "recognition_failed", "sources_limit", "wait_busy", "cleanup_pending", "phone_no_interface":
+		return true
+	}
+	return strings.HasSuffix(key, "_failed")
+}
+
+// phoneInlineMessage lists messages the phone queue already shows inline.
+func phoneInlineMessage(key string) bool {
+	switch key {
+	case "phone_load_failed", "phone_archive_failed", "phone_retry_failed", "phone_delete_failed", "phone_selection_changed":
+		return true
+	}
+	return false
+}
+
+// requestSearchFocus is Cmd+F: focus the timeline search like the Swift app.
+func (s *screen) requestSearchFocus() {
+	if s.phonePage || s.backupPage || s.recoveryOnly || s.restartOnly || s.activating || s.modalOpen() || s.reviewOpen() || s.phone.receiverOpen {
+		return
+	}
+	s.focusSearch = true
 }

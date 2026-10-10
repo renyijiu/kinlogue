@@ -6,6 +6,13 @@ import "fmt"
 // Each entry is simplified Chinese followed by English. Wording follows the
 // Swift app's Localizable strings wherever the Go preview has the same control.
 var stringsTable = map[string][2]string{
+	"phone_select_hint":           {"点选原件即可选择，选好后可作为一份报告归档。", "Click originals to select them, then file them as one report."},
+	"find_menu":                   {"搜索记录", "Find Records"},
+	"date_clear":                  {"设为日期未知", "Set Unknown"},
+	"date_choose":                 {"选择日期", "Choose Date"},
+	"more_actions":                {"更多操作", "More Actions"},
+	"labeled_item":                {"%s，%s", "%s, %s"},
+	"awaiting_review_count":       {"待确认 · %d", "Awaiting Review · %d"},
 	"settings_subtitle":           {"管理续页的显示语言和本机数据。", "Manage Kinlogue's display language and local data."},
 	"data_backup":                 {"数据备份", "Data Backup"},
 	"language_hint":               {"选择界面语言", "Select the interface language"},
@@ -13,7 +20,6 @@ var stringsTable = map[string][2]string{
 	"add_member":                  {"添加家庭成员", "Add Family Member"},
 	"all_records":                 {"全部记录", "All Records"},
 	"app":                         {"续页 Go 预览版", "Kinlogue Go Preview"},
-	"awaiting_review":             {"待确认", "Awaiting Review"},
 	"backup_cancelled":            {"已取消本次备份。再次创建会生成新恢复码。", "Backup cancelled. Creating again generates a new recovery code."},
 	"backup_choose_destination":   {"选择保存位置…", "Choose backup destination…"},
 	"backup_code_title":           {"保存这份备份的恢复码", "Save this backup's recovery code"},
@@ -48,7 +54,6 @@ var stringsTable = map[string][2]string{
 	"copy":                        {"复制", "Copy"},
 	"cut":                         {"剪切", "Cut"},
 	"date":                        {"时间线日期", "Timeline Date"},
-	"date_hint":                   {"YYYY-MM-DD；留空表示日期未知", "YYYY-MM-DD; leave empty if the date is unknown"},
 	"delete_confirm":              {"从续页删除", "Delete from Kinlogue"},
 	"delete_detail":               {"记录及其不再共享的原件将无法在续页中查看；最初选择的源文件和已导出的副本不会被删除。", "The record and originals it no longer shares will no longer be viewable in Kinlogue. Source files you originally selected and exported copies are not deleted."},
 	"delete_failed":               {"无法删除报告，请重试。", "Could not delete the report. Try again."},

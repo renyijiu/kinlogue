@@ -1294,3 +1294,11 @@
 - **修正**：手机删除结果使用了不存在的文案键，清理待完成时会触发缺失键 panic，已改为既有 `cleanup_pending`。弹窗内 Cmd+S 原本收不到（mygo 只把快捷键送到最上层弹窗），复核弹窗现在自行注册。
 - **测试**：更新界面测试以覆盖弹窗阻止导航、稍后处理关闭弹窗、编辑取消恢复基线、接收弹窗开始后关闭不停止接收、归档停留队列及“查看已有资料”；新增默认跳过的 `TestUIEvidence` 合成截图。desktop 包 vet 与测试在当前 Mac 通过；合成截图只用于对照，不代表实际窗口、键盘或 VoiceOver 验收。
 - **已知差异**：没有结构化医学字段、医学影像、比较和独立原图窗口；日期仍为文本输入。详见 [Go 预览界面对齐](go-native-preview.md#与-swift-基线的界面对齐)。
+
+## 2026-10-10：界面易用性优化
+
+在 Swift 对齐的基础上，按复盘建议调整：自动打开最新记录并合并空详情；详情标题行只保留“编辑”，导出与删除进入“更多操作”菜单，日期移到标题下；成员时间线隐藏重复的成员标签；日期改用 mygo 日历选择器并保留“日期未知”；手机归档不预选成员、可选原件显示勾选圈、未选择时折叠归档表单；侧栏草稿显示数量与名称；成功结果改为 toast，错误带警示图标留在页面；新增 Cmd+F 搜索与弹窗内 Cmd+Return 主操作（组字期间不触发）。这些属于有意偏离 Swift 的易用性改进，见 [Go 预览界面对齐](go-native-preview.md#与-swift-基线的界面对齐)。新增 `ux_test.go` 覆盖上述行为；列表行只含元数据，卡片仍显示原件文件名，原件数/页数需改动资料层，暂未实施。
+
+- **收尾修正**：自动打开最新记录会立即渲染原件，`TestAllRecordsSearchAndMemberFilterUseRealLibrary` 原先以无 Processor 的真实 Service 运行，在预览中空指针失败；测试改用合成 Processor，生产组装不变。`TestMemberChipOnlyInAllRecords` 的预期计数漏算侧栏行的无障碍标签，已更正。移除不再使用的 `date_hint`、`awaiting_review` 文案；[Go 预览](go-native-preview.md)和 [Go 手机上传](go-lan-upload.md)中“日期为文本输入”“底部选择归档成员”的旧描述同步为日历选择器与选中后展开的归档表单。
+- **验证**：当前 Mac（Go 1.27.2、arm64）`gofmt`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 go test -count=1 ./...`、六包 `-race -count=1`、签名预览构建与校验、隐私、文档和 `git diff --check` 通过。本轮未改动 `third_party/mygo`，未重跑其嵌套测试。`verify-docs.sh` 在未设置 locale 的 shell 中因 Ruby 按 US-ASCII 读取而失败，设置 UTF-8 locale 后通过。
+- **边界**：易用性调整只有无窗口测试和合成截图依据，未在实际窗口中检查日历选择器、“更多操作”菜单、toast、Cmd+F 与 Cmd+Return；真实输入法、VoiceOver 和完整键盘矩阵仍待验收。未提交、未推送。

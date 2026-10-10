@@ -92,16 +92,28 @@ func (s *screen) phoneRow(c *ui.Context, item library.InboxItem) {
 			row.Background(tokenHover)
 		}
 		row.Children(func() {
-			glyph, color := phoneStatusIcon(item.Status), c.Theme().TextMuted
-			switch item.Status {
-			case "reviewable":
-				color = c.Theme().Accent
-			case "failed":
-				color = tokenDanger
-			case "unsupported":
-				color = ui.Hex("#B8661F")
+			if item.Status == "reviewable" {
+				// A visible check circle shows that rows can be selected, and
+				// which are, without relying on the row tint alone.
+				circle := ui.Box(c).Size(18, 18).Shrink(0).Radius(9).Border(1.5, c.Theme().Border).Center()
+				if selected {
+					circle.Background(c.Theme().Accent).Border(1.5, c.Theme().Accent)
+				}
+				circle.Children(func() {
+					if selected {
+						icon(c, iconTick, 12, ui.Hex("#FFFFFF"))
+					}
+				})
+			} else {
+				glyph, color := phoneStatusIcon(item.Status), c.Theme().TextMuted
+				switch item.Status {
+				case "failed":
+					color = tokenDanger
+				case "unsupported":
+					color = ui.Hex("#B8661F")
+				}
+				icon(c, glyph, 18, color)
 			}
-			icon(c, glyph, 18, color)
 			ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
 				ui.Text(c, item.FileName).TextColor(c.Theme().Text).MaxLines(2)
 				ui.Text(c, s.t(phoneStatusKey(item.Status))+"  "+s.formatBytes(item.ByteCount)+"  "+s.formatReceived(item.CreatedAt)).FontSize(11).TextColor(c.Theme().TextMuted).SingleLine()
@@ -126,6 +138,15 @@ func (s *screen) phoneRow(c *ui.Context, item library.InboxItem) {
 
 func (s *screen) phoneArchiveBar(c *ui.Context) {
 	divider(c, false)
+	if len(s.phone.selected) == 0 {
+		// The archive form appears once something is selected; until then a
+		// single line explains how to start, leaving room for the queue.
+		ui.Row(c).FillWidth().Padding(12, 16).Gap(8).AlignItems(ui.Center).Background(tokenContainer).Children(func() {
+			icon(c, iconTick, 14, c.Theme().TextMuted)
+			ui.Text(c, s.t("phone_select_hint")).FontSize(12).TextColor(c.Theme().TextMuted).MaxLines(2)
+		})
+		return
+	}
 	ui.Column(c).FillWidth().Gap(10).Padding(12).Background(tokenContainer).Children(func() {
 		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, s.t("phone_selected_summary", len(s.phone.selected))).TextColor(c.Theme().TextMuted).Grow(1).MinWidth(0).MaxLines(2)
@@ -138,10 +159,7 @@ func (s *screen) phoneArchiveBar(c *ui.Context) {
 			options = append(options, choice{member.ID, member.Name})
 		}
 		ui.Field(c, s.t("phone_file_for"), func() { picker(c, &s.phone.memberID, options, s.t("phone_file_for"), s.busy != "") }).FillWidth()
-		ui.Field(c, s.t("phone_report_date"), func() {
-			e := ui.TextInput(c, &s.phone.date).FillWidth().Placeholder(s.t("unknown_date")).Disabled(s.busy != "")
-			s.composing = s.composing || e.Composing()
-		}).Description(s.t("date_hint")).FillWidth()
+		ui.Field(c, s.t("phone_report_date"), func() { s.dateField(c, &s.phone.date, s.t("phone_report_date"), s.busy != "") }).FillWidth()
 		ui.Row(c).FillWidth().Children(func() {
 			ui.Box(c).Grow(1)
 			if ui.PrimaryButton(c, s.t("phone_archive")).Disabled(s.busy != "" || len(s.phone.selected) == 0 || s.phone.memberID == "").Clicked() {

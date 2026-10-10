@@ -117,9 +117,8 @@ func (s *screen) showPhone() {
 	s.phonePage = true
 	s.message = ""
 	s.phone.generation++
-	if s.phone.memberID == "" && len(s.members) > 0 {
-		s.phone.memberID = s.members[0].ID
-	}
+	// No member is preselected: filing a report to the wrong person is easy
+	// to miss, so the Swift picker starts at "Select Family Member…" too.
 	s.startPhoneRefresh()
 	s.refreshPhone()
 }

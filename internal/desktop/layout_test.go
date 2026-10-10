@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -77,7 +78,8 @@ func TestAllRecordsSearchAndMemberFilterUseRealLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := app.New(store, nil, nil, nil)
+	// The timeline opens its newest record, which renders the original.
+	service := app.New(store, evidenceProcessor{}, nil, nil)
 	t.Cleanup(func() { _ = service.Close() })
 	ctx := context.Background()
 	for i, name := range []string{"Synthetic A", "Synthetic B", "Synthetic draft"} {
@@ -117,7 +119,10 @@ func TestAllRecordsSearchAndMemberFilterUseRealLibrary(t *testing.T) {
 	tt.Key(0, ui.KeyEnter)
 	drain()
 	tt.Frame()
-	if !tt.HasText("Synthetic A record") || !tt.HasText("Synthetic B record") || tt.HasText("Synthetic draft record") {
+	found := func(title string) bool {
+		return slices.ContainsFunc(s.records, func(r library.Report) bool { return r.Review.Title == title })
+	}
+	if !tt.HasText("Synthetic A record") || !tt.HasText("Synthetic B record") || found("Synthetic draft record") {
 		t.Fatal("all-records search did not aggregate confirmed members only")
 	}
 	if err := tt.Click("Synthetic A"); err != nil {
