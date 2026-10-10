@@ -1,6 +1,7 @@
 package lan
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -605,39 +606,226 @@ func TestSessionRevocationPreventsStoreCommitWaitingForSnapshot(t *testing.T) {
 	}
 }
 
-func TestSessionHasNonRenewableDeadline(t *testing.T) {
-	r := receiver(t, func(context.Context, string, int64, io.Reader) (Staged, error) { return nil, nil })
-	deadline, ok := r.ctx.Deadline()
-	if !ok || deadline.Sub(r.created) > 15*time.Minute || deadline.Sub(r.created) < 14*time.Minute {
-		t.Fatal("session needs an absolute bound independent of phone activity")
-	}
-	cookie, csrf := pair(t, r)
-	reserveFile(t, r, cookie, csrf, fid)
-	r.mu.Lock()
-	r.activity = time.Now().Add(time.Hour)
-	r.mu.Unlock()
-	next, ok := r.ctx.Deadline()
-	if !ok || !next.Equal(deadline) {
-		t.Fatal("accepted activity extended absolute session bound")
-	}
-}
-
-func TestAbsoluteDeadlineRevokesDespiteFreshActivity(t *testing.T) {
-	r, err := newReceiver(Config{Authority: authority, Prefix: netip.MustParsePrefix("192.168.50.0/24"), ValidateNetwork: func() bool { return true }, Stage: func(context.Context, string, int64, io.Reader) (Staged, error) { return nil, nil }}, 100*time.Millisecond)
+func timedReceiver(t *testing.T, pairing, idle time.Duration) *Receiver {
+	t.Helper()
+	r, err := newReceiver(Config{Authority: authority, Prefix: netip.MustParsePrefix("192.168.50.0/24"), ValidateNetwork: func() bool { return true }, Stage: func(ctx context.Context, _ string, _ int64, b io.Reader) (Staged, error) {
+		_, e := io.Copy(io.Discard, b)
+		return nil, e
+	}}, pairing, idle)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(r.Stop)
-	r.mu.Lock()
-	r.paired = true
-	r.activity = time.Now().Add(time.Hour)
-	r.mu.Unlock()
+	return r
+}
+
+func awaitStopped(t *testing.T, r *Receiver, why string) {
+	t.Helper()
 	select {
 	case <-r.Done():
-	case <-time.After(2 * time.Second):
-		t.Fatal("traffic can keep session alive beyond absolute deadline")
+	case <-time.After(3 * time.Second):
+		t.Fatal(why)
 	}
 	if r.Active() || r.PairingCode() != "" {
-		t.Fatal("expired session proof retained")
+		t.Fatal("ended session retained a proof")
+	}
+}
+
+// The Swift receiver ends a paired session only after idle time; accepted phone
+// activity keeps a long transfer alive and no absolute cap applies.
+func TestSessionHasNoAbsoluteDeadline(t *testing.T) {
+	r := receiver(t, func(context.Context, string, int64, io.Reader) (Staged, error) { return nil, nil })
+	if _, ok := r.ctx.Deadline(); ok {
+		t.Fatal("session must not carry an absolute deadline")
+	}
+	cookie, csrf := pair(t, r)
+	r.mu.Lock()
+	r.created = time.Now().Add(-time.Hour)
+	r.activity = time.Now().Add(-14 * time.Minute)
+	r.mu.Unlock()
+	reserveFile(t, r, cookie, csrf, fid)
+	if !r.Active() {
+		t.Fatal("accepted activity must extend an old session")
+	}
+	r.mu.Lock()
+	refreshed := time.Since(r.activity) < time.Minute
+	r.mu.Unlock()
+	if !refreshed {
+		t.Fatal("reservation did not refresh idle")
+	}
+}
+
+func TestIdleTimeoutStopsPairedSessionAfterActivityStops(t *testing.T) {
+	r := timedReceiver(t, time.Minute, 600*time.Millisecond)
+	cookie, csrf := pair(t, r)
+	time.Sleep(350 * time.Millisecond)
+	reserveFile(t, r, cookie, csrf, fid)
+	time.Sleep(350 * time.Millisecond)
+	if !r.Active() {
+		t.Fatal("activity inside the idle window must keep the session")
+	}
+	awaitStopped(t, r, "idle session was not stopped")
+	if w := request(r, "GET", "/api/session", "", cookie, ""); w.Code != 410 {
+		t.Fatal("idle-stopped session still answered", w.Code)
+	}
+}
+
+func TestUnpairedCodeExpires(t *testing.T) {
+	r := timedReceiver(t, 200*time.Millisecond, time.Hour)
+	awaitStopped(t, r, "unused pairing code did not expire")
+}
+
+type slowBody struct {
+	chunks chan []byte
+	rest   []byte
+}
+
+func (b *slowBody) Read(p []byte) (int, error) {
+	if len(b.rest) == 0 {
+		next, ok := <-b.chunks
+		if !ok {
+			return 0, io.EOF
+		}
+		b.rest = next
+	}
+	n := copy(p, b.rest)
+	b.rest = b.rest[n:]
+	return n, nil
+}
+func (b *slowBody) Close() error { return nil }
+
+// A streaming upload is accepted activity, so a slow but progressing transfer
+// is not cut off by the idle timeout.
+func TestUploadProgressRefreshesIdle(t *testing.T) {
+	var commits atomic.Int32
+	r := receiver(t, func(ctx context.Context, _ string, _ int64, b io.Reader) (Staged, error) {
+		_, e := io.Copy(io.Discard, b)
+		return staged{&commits}, e
+	})
+	cookie, csrf := pair(t, r)
+	reserveFile(t, r, cookie, csrf, fid)
+	r.mu.Lock()
+	r.activity = time.Now().Add(-14 * time.Minute)
+	r.mu.Unlock()
+	body := &slowBody{chunks: make(chan []byte)}
+	q := httptest.NewRequest("PUT", "http://"+authority+"/api/files/"+fid, nil)
+	q.Body = body
+	q.ContentLength = 3
+	q.RemoteAddr = "192.168.50.3:12345"
+	q.Header.Set("Origin", "http://"+authority)
+	q.Header.Set("Cookie", cookie)
+	q.Header.Set("X-Kinlogue-CSRF", csrf)
+	q.Header.Set("Content-Type", "application/octet-stream")
+	q.Header.Set("X-Kinlogue-Attempt-Revision", "1")
+	done := make(chan *httptest.ResponseRecorder)
+	go func() {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, q)
+		done <- w
+	}()
+	body.chunks <- []byte("a")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		r.mu.Lock()
+		fresh := time.Since(r.activity) < time.Minute
+		r.mu.Unlock()
+		if fresh {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("received bytes did not refresh idle")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	body.chunks <- []byte("bc")
+	close(body.chunks)
+	if w := <-done; w.Code != 200 || commits.Load() != 1 {
+		t.Fatal("progressing upload was not saved", w.Code, w.Body)
+	}
+}
+
+func rawUpload(t *testing.T, r *Receiver, cookie, csrf string) (net.Conn, chan string) {
+	t.Helper()
+	server, client := net.Pipe()
+	base := &pipeListener{make(chan net.Conn, 1)}
+	base.conns <- endpointConn{server, "192.168.50.3:1234"}
+	go func() { _ = r.Serve(base) }()
+	head := "PUT /api/files/" + fid + " HTTP/1.1\r\nHost: " + authority + "\r\nOrigin: http://" + authority + "\r\nCookie: " + cookie + "\r\nX-Kinlogue-CSRF: " + csrf + "\r\nX-Kinlogue-Attempt-Revision: 1\r\nContent-Type: application/octet-stream\r\nContent-Length: 3\r\n\r\n"
+	if _, err := io.WriteString(client, head); err != nil {
+		t.Fatal(err)
+	}
+	status := make(chan string, 1)
+	go func() {
+		line, _ := bufio.NewReader(client).ReadString('\n')
+		status <- line
+	}()
+	return client, status
+}
+
+func shortenTransportDeadlines(t *testing.T, request, progress, body time.Duration) {
+	oldRequest, oldProgress, oldBody := requestDeadline, uploadProgressDeadline, uploadBodyDeadline
+	requestDeadline, uploadProgressDeadline, uploadBodyDeadline = request, progress, body
+	t.Cleanup(func() { requestDeadline, uploadProgressDeadline, uploadBodyDeadline = oldRequest, oldProgress, oldBody })
+}
+
+// A body that keeps progressing may outlast the short per-request deadline.
+func TestProgressingUploadOutlivesRequestDeadline(t *testing.T) {
+	shortenTransportDeadlines(t, 300*time.Millisecond, 250*time.Millisecond, 5*time.Second)
+	var commits atomic.Int32
+	r := receiver(t, func(ctx context.Context, _ string, _ int64, b io.Reader) (Staged, error) {
+		_, e := io.Copy(io.Discard, b)
+		return staged{&commits}, e
+	})
+	cookie, csrf := pair(t, r)
+	reserveFile(t, r, cookie, csrf, fid)
+	client, status := rawUpload(t, r, cookie, csrf)
+	defer client.Close()
+	for _, b := range []string{"a", "b", "c"} {
+		time.Sleep(200 * time.Millisecond)
+		if _, err := io.WriteString(client, b); err != nil {
+			t.Fatal("server closed a progressing upload", err)
+		}
+	}
+	select {
+	case line := <-status:
+		if !strings.Contains(line, " 200 ") || commits.Load() != 1 {
+			t.Fatal("progressing upload was not saved:", line)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no response")
+	}
+}
+
+// A stalled body is interrupted after the progress deadline instead of holding
+// an upload slot until the total body deadline.
+func TestStalledUploadIsInterrupted(t *testing.T) {
+	shortenTransportDeadlines(t, 5*time.Second, 200*time.Millisecond, 5*time.Second)
+	var commits atomic.Int32
+	r := receiver(t, func(ctx context.Context, _ string, _ int64, b io.Reader) (Staged, error) {
+		_, e := io.Copy(io.Discard, b)
+		return staged{&commits}, e
+	})
+	cookie, csrf := pair(t, r)
+	reserveFile(t, r, cookie, csrf, fid)
+	client, _ := rawUpload(t, r, cookie, csrf)
+	defer client.Close()
+	if _, err := io.WriteString(client, "a"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		r.mu.Lock()
+		state, uploads := r.files[fid].State, r.uploads
+		r.mu.Unlock()
+		if state == "interrupted" && uploads == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stalled upload kept its slot:", state)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if commits.Load() != 0 {
+		t.Fatal("stalled upload was published")
 	}
 }

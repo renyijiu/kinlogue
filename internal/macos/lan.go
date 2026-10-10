@@ -11,13 +11,6 @@ import (
 )
 
 var ErrLANUnavailable = errors.New("lan_interface_unavailable")
-var ErrLANLockUnavailable = errors.New("lan_lock_revocation_unavailable")
-
-// LANReceptionReadiness retains the disabled-preview gate pending separately
-// authorized inbound networking and device acceptance. The historical error name
-// is retained; automatic lock detection is no longer a product requirement.
-// No setting or environment override enables reception.
-func LANReceptionReadiness() error { return ErrLANLockUnavailable }
 
 // LANInterface identifies the exact address, interface and prefix chosen by the user.
 type LANInterface struct {

@@ -94,7 +94,7 @@ func TestVerifierRefusesMissingApp(t *testing.T) {
 
 // This is an inert copy of a system binary, never launched. Real codesign and
 // plutil exercise the verifier's rejection path before Go build-info checks.
-func signedFixture(t *testing.T, extraEntitlement bool) (string, string) {
+func signedFixture(t *testing.T, editEntitlements func(string) string) (string, string) {
 	t.Helper()
 	root := fixture(t)
 	app := filepath.Join(root, "dist", "GoPreview", "KinlogueGoPreview.app")
@@ -136,8 +136,8 @@ func signedFixture(t *testing.T, extraEntitlement bool) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if extraEntitlement {
-		entitlements = []byte(strings.Replace(string(entitlements), "</dict>", "<key>com.apple.security.network.client</key><true/></dict>", 1))
+	if editEntitlements != nil {
+		entitlements = []byte(editEntitlements(string(entitlements)))
 	}
 	entitlementsPath := filepath.Join(root, "synthetic-entitlements.plist")
 	if err := os.WriteFile(entitlementsPath, entitlements, 0600); err != nil {
@@ -149,13 +149,26 @@ func signedFixture(t *testing.T, extraEntitlement bool) (string, string) {
 	return root, app
 }
 
+const entitlementContract = "entitlements must be exactly sandbox, user-selected read-write and network server"
+
 func TestVerifierRejectsAdditionalNetworkEntitlement(t *testing.T) {
-	root, _ := signedFixture(t, true)
-	rejected(t, root, "verify-go-preview.sh", "entitlements must be exactly sandbox and user-selected read-write")
+	root, _ := signedFixture(t, func(e string) string {
+		return strings.Replace(e, "</dict>", "<key>com.apple.security.network.client</key><true/></dict>", 1)
+	})
+	rejected(t, root, "verify-go-preview.sh", entitlementContract)
+}
+
+// Phone upload needs the inbound server entitlement; a current bundle without
+// it would build but could never accept a phone connection.
+func TestVerifierRequiresNetworkServerEntitlement(t *testing.T) {
+	root, _ := signedFixture(t, func(e string) string {
+		return strings.Replace(e, "<key>com.apple.security.network.server</key><true/>", "", 1)
+	})
+	rejected(t, root, "verify-go-preview.sh", entitlementContract)
 }
 
 func TestVerifierRejectsUnexpectedHelper(t *testing.T) {
-	root, app := signedFixture(t, false)
+	root, app := signedFixture(t, nil)
 	if err := os.WriteFile(filepath.Join(app, "Contents", "MacOS", "acceptance-helper"), []byte("synthetic"), 0600); err != nil {
 		t.Fatal(err)
 	}

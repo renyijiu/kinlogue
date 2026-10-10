@@ -11,13 +11,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// ListenLAN remains blocked pending explicit networking authorization and
-// acceptance. Any future enabled path must bind an explicitly selected address.
+// ListenLAN binds only the exact address and interface the user selected; it
+// never listens on a wildcard address. Each accepted socket is re-validated and
+// restricted to the selected interface prefix before HTTP reads a byte. The
+// sandboxed preview needs com.apple.security.network.server for this call.
 func ListenLAN(ctx context.Context, i LANInterface) (net.Listener, error) {
-	if err := LANReceptionReadiness(); err != nil {
-		return nil, err
-	}
-	if !i.Valid() {
+	if ctx.Err() != nil || !i.Valid() {
 		return nil, ErrLANUnavailable
 	}
 	network := "tcp6"

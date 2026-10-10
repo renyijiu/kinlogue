@@ -107,8 +107,12 @@ func startSyntheticLAN(t *testing.T, a *Service) *lan.Receiver {
 	if a.LANStatus().Active {
 		t.Fatal("configuration started receiver")
 	}
-	if _, e = a.StartLAN(context.Background(), iface); e != nil {
+	status, e := a.StartLAN(context.Background(), iface)
+	if e != nil {
 		t.Fatal(e)
+	}
+	if status.Address != "http://192.168.50.2:8080/" || len(status.Code) != 6 {
+		t.Fatalf("advertised address must be the root URL: %q", status.Address)
 	}
 	c := a.lanController()
 	c.mu.Lock()

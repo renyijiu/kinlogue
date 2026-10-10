@@ -197,7 +197,9 @@ func (c *lanController) start(ctx context.Context, iface macos.LANInterface, gen
 		return LANStatus{}, document.ErrUnavailable
 	}
 	session.receiver = receiver
-	session.status = LANStatus{Active: true, Address: "http://" + listener.Addr().String(), Code: receiver.PairingCode()}
+	// The Swift receiver advertises the root URL with a trailing slash; the QR
+	// code and copy action use exactly this string.
+	session.status = LANStatus{Active: true, Address: "http://" + listener.Addr().String() + "/", Code: receiver.PairingCode()}
 	c.mu.Lock()
 	c.session = session
 	c.mu.Unlock()

@@ -47,9 +47,27 @@ type Config struct {
 
 const MaxFileBytes int64 = 100 * 1024 * 1024
 
-// MaxSessionDuration is a non-renewable containment bound, not lock detection.
-// Phone traffic cannot extend it; a new session requires an explicit Mac start.
-const MaxSessionDuration = 15 * time.Minute
+// Session timing follows the Swift receiver contract: an unpaired code expires
+// after PairingLifetime; a paired session ends after SessionIdleTimeout without
+// accepted activity (pairing, reservation, cancellation, upload bytes or a saved
+// upload). Session polling alone never extends it. Manual stop, lifecycle and
+// network revocation end the session immediately regardless of activity.
+const (
+	PairingLifetime    = 10 * time.Minute
+	SessionIdleTimeout = 15 * time.Minute
+)
+
+// Per-request transport deadlines match the Swift handler: request heads must
+// arrive promptly, JSON bodies are small, and an upload body may stream for at
+// most uploadBodyDeadline as long as bytes keep arriving within
+// uploadProgressDeadline. They are variables only so tests can shorten them.
+var (
+	requestHeadDeadline    = 15 * time.Second
+	requestDeadline        = 30 * time.Second
+	uploadProgressDeadline = 30 * time.Second
+	uploadBodyDeadline     = 15 * time.Minute
+)
+
 const cookieName = "KinlogueLANSession"
 
 var errEnded = errors.New("LAN session ended")
@@ -84,6 +102,7 @@ type Receiver struct {
 	code, cookie, csrf string
 	paired, stopped    bool
 	created, activity  time.Time
+	pairing, idle      time.Duration
 	files              map[string]*file
 	peers              map[netip.Addr]*rate
 	global             rate
@@ -96,9 +115,9 @@ type Receiver struct {
 	server             *http.Server
 }
 
-func New(c Config) (*Receiver, error) { return newReceiver(c, MaxSessionDuration) }
+func New(c Config) (*Receiver, error) { return newReceiver(c, PairingLifetime, SessionIdleTimeout) }
 
-func newReceiver(c Config, lifetime time.Duration) (*Receiver, error) {
+func newReceiver(c Config, pairing, idle time.Duration) (*Receiver, error) {
 	ap, e := netip.ParseAddrPort(c.Authority)
 	if e != nil || ap.Port() == 0 || ap.Addr().IsUnspecified() || ap.Addr().IsMulticast() || ap.Addr().Is4In6() || ap.Addr().Zone() != "" || !c.Prefix.IsValid() || c.Prefix.Bits() == 0 || !c.Prefix.Contains(ap.Addr()) || c.Prefix.Addr().Is4In6() || c.Stage == nil || c.ValidateNetwork == nil {
 		return nil, errors.New("invalid LAN configuration")
@@ -124,9 +143,12 @@ func newReceiver(c Config, lifetime time.Duration) (*Receiver, error) {
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parent, lifetime)
+	if pairing <= 0 || idle <= 0 {
+		return nil, errors.New("invalid LAN session timing")
+	}
+	ctx, cancel := context.WithCancel(parent)
 	now := time.Now()
-	r := &Receiver{config: c, code: fmt.Sprintf("%06d", n.Int64()), cookie: cookie, csrf: csrf, created: now, activity: now, files: map[string]*file{}, peers: map[netip.Addr]*rate{}, ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	r := &Receiver{config: c, code: fmt.Sprintf("%06d", n.Int64()), cookie: cookie, csrf: csrf, created: now, activity: now, pairing: pairing, idle: idle, files: map[string]*file{}, peers: map[netip.Addr]*rate{}, ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
@@ -170,9 +192,9 @@ func (r *Receiver) Active() bool {
 func (r *Receiver) Done() <-chan struct{} { return r.done }
 func (r *Receiver) expiredLocked() bool {
 	if r.paired {
-		return time.Since(r.activity) >= 15*time.Minute
+		return time.Since(r.activity) >= r.idle
 	}
-	return time.Since(r.created) >= 10*time.Minute
+	return time.Since(r.created) >= r.pairing
 }
 func (r *Receiver) revokeLocked() {
 	r.stopped = true
@@ -229,7 +251,7 @@ func (r *Receiver) Serve(l net.Listener) error {
 		_ = l.Close()
 		return errEnded
 	}
-	s := &http.Server{ErrorLog: log.New(io.Discard, "", 0), Handler: r, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 2 * time.Minute, WriteTimeout: 2 * time.Minute, IdleTimeout: 15 * time.Second, MaxHeaderBytes: 16 * 1024, BaseContext: func(net.Listener) context.Context { return r.ctx }}
+	s := &http.Server{ErrorLog: log.New(io.Discard, "", 0), Handler: r, ReadHeaderTimeout: requestHeadDeadline, ReadTimeout: requestDeadline, WriteTimeout: requestDeadline, IdleTimeout: 15 * time.Second, MaxHeaderBytes: 16 * 1024, BaseContext: func(net.Listener) context.Context { return r.ctx }}
 	r.server = s
 	r.serverMu.Unlock()
 	e := s.Serve(&peerListener{Listener: l, receiver: r, slots: make(chan struct{}, 64)})
@@ -653,10 +675,25 @@ func (r *Receiver) uploadLocked(w http.ResponseWriter, q *http.Request, ctx cont
 	defer cancel()
 	closeBody := context.AfterFunc(uploadCtx, func() { _ = q.Body.Close() })
 	defer closeBody()
-	reader := &countReader{r: io.LimitReader(q.Body, size+1), ctx: uploadCtx, progress: func(n int64) {
+	// The server-wide request deadline is too short for a large body. Replace it
+	// with a progress deadline bounded by the total upload deadline; recorders and
+	// other writers without deadline support keep the server defaults.
+	transport := http.NewResponseController(w)
+	uploadEnd := time.Now().Add(uploadBodyDeadline)
+	_ = transport.SetWriteDeadline(uploadEnd.Add(requestDeadline))
+	reader := &countReader{r: io.LimitReader(q.Body, size+1), ctx: uploadCtx, before: func() {
+		next := time.Now().Add(uploadProgressDeadline)
+		if next.After(uploadEnd) {
+			next = uploadEnd
+		}
+		_ = transport.SetReadDeadline(next)
+	}, progress: func(n int64) {
 		r.mu.Lock()
 		if f.State == "receiving" && f.Revision == rev {
 			f.Received = min(n, size)
+			if !r.stopped {
+				r.activity = time.Now()
+			}
 		}
 		r.mu.Unlock()
 	}}
@@ -700,12 +737,16 @@ type countReader struct {
 	r        io.Reader
 	ctx      context.Context
 	n        int64
+	before   func()
 	progress func(int64)
 }
 
 func (r *countReader) Read(b []byte) (int, error) {
 	if e := r.ctx.Err(); e != nil {
 		return 0, e
+	}
+	if r.before != nil {
+		r.before()
 	}
 	if len(b) > 1024*1024 {
 		b = b[:1024*1024]

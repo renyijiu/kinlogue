@@ -179,7 +179,7 @@ func TestVerifierRejectsUnapprovedReplacement(t *testing.T) {
 func TestCurrentVerifierRejectsLegacyPermission(t *testing.T) {
 	root, goPath := goFixture(t)
 	assembleFixture(t, root, goPath, "read-only")
-	rejected(t, root, "verify-go-preview.sh", "entitlements must be exactly sandbox and user-selected read-write")
+	rejected(t, root, "verify-go-preview.sh", entitlementContract)
 }
 
 func TestCurrentVerifierRequiresLocalMygo(t *testing.T) {

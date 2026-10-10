@@ -14,15 +14,10 @@ func (s *screen) phoneView(c *ui.Context) {
 		ui.Text(c, s.t("phone_help")).TextColor(c.Theme().TextMuted)
 		ui.Column(c).FillWidth().Gap(8).Padding(12).Background(c.Theme().Surface).Radius(10).Children(func() {
 			if s.phone.status.Active {
-				ui.Text(c, s.t("phone_address", s.phone.status.Address)).Selectable()
-				if s.phone.status.Code == "" {
-					ui.Text(c, s.t("phone_paired")).Bold()
-				} else {
-					ui.Text(c, s.t("phone_code", s.phone.status.Code)).Bold()
-					ui.Text(c, s.t("phone_code_help")).FontSize(12)
-				}
+				s.phoneActive(c)
 			} else {
-				ui.Text(c, s.t("phone_stopped"))
+				ui.Text(c, s.t("phone_private_only")).Bold()
+				ui.Text(c, s.t("phone_plain_http")).FontSize(12).TextColor(c.Theme().TextMuted)
 				options := make([]choice, 0, len(s.phone.interfaces))
 				for _, i := range s.phone.interfaces {
 					options = append(options, choice{phoneInterfaceID(i), fmt.Sprintf("%s · %s", i.Name, i.Address)})
@@ -105,6 +100,11 @@ func (s *screen) phoneView(c *ui.Context) {
 							}
 						})
 					}
+					if len(s.phone.selected) > 0 {
+						if ui.Button(c, s.t("phone_delete_selected")).TextColor(c.Theme().Danger).Disabled(s.busy != "").Clicked() {
+							s.promptDeleteSelectedPhone()
+						}
+					}
 					options := make([]choice, 0, len(s.members))
 					for _, member := range s.members {
 						options = append(options, choice{member.ID, member.Name})
@@ -162,7 +162,7 @@ func (s *screen) phoneDialogs(c *ui.Context) {
 	}
 	open := true
 	ui.Modal(c, &open, func() {
-		ui.Text(c, s.t("phone_delete_title")).FontSize(20).Bold()
+		ui.Text(c, s.t("phone_delete_title", len(s.phone.deleteSelection))).FontSize(20).Bold()
 		ui.Text(c, s.t("phone_delete_help"))
 		ui.Row(c).Gap(8).Children(func() {
 			if ui.Button(c, s.t("cancel")).Clicked() {
@@ -176,4 +176,48 @@ func (s *screen) phoneDialogs(c *ui.Context) {
 	if !open {
 		s.phone.deleteSelection = nil
 	}
+}
+
+// phoneActive mirrors the Swift receiver sheet: an address QR code (without the
+// pairing code), the URL with a copy action, the one-time code and the
+// troubleshooting note about guest isolation and the macOS firewall.
+func (s *screen) phoneActive(c *ui.Context) {
+	ui.Row(c).FillWidth().Gap(22).Children(func() {
+		if bitmap := s.phoneQR(s.phone.status.Address); bitmap != nil {
+			ui.Image(c, bitmap).Label(s.t("phone_qr_label")).Size(190, 190).Shrink(0).Fit(ui.Contain)
+		}
+		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
+			ui.Text(c, s.t("phone_receiving")).Bold().TextColor(c.Theme().Accent)
+			ui.Text(c, s.t("phone_open_in_browser")).TextColor(c.Theme().TextMuted)
+			ui.Text(c, s.phone.status.Address).Font("monospace").Bold().Selectable()
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				if ui.Button(c, s.t("phone_copy_address")).Clicked() {
+					s.copyPhoneAddress()
+				}
+				if s.phone.copied {
+					ui.Text(c, s.t("phone_address_copied")).FontSize(12).TextColor(c.Theme().TextMuted)
+				}
+			})
+			ui.Divider(c)
+			if s.phone.status.Code == "" {
+				ui.Text(c, s.t("phone_paired")).Bold()
+			} else {
+				ui.Text(c, s.t("phone_code_title")).TextColor(c.Theme().TextMuted)
+				ui.Text(c, s.phone.status.Code).Font("monospace").FontSize(32).Bold().Label(s.t("phone_code_label", spacedDigits(s.phone.status.Code)))
+				ui.Text(c, s.t("phone_code_help")).FontSize(12).TextColor(c.Theme().TextMuted)
+			}
+			ui.Text(c, s.t("phone_troubleshoot")).FontSize(12)
+		})
+	})
+}
+
+func spacedDigits(code string) string {
+	out := make([]rune, 0, 2*len(code))
+	for i, r := range code {
+		if i > 0 {
+			out = append(out, ' ')
+		}
+		out = append(out, r)
+	}
+	return string(out)
 }

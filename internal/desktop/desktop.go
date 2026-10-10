@@ -39,6 +39,7 @@ const allMembers = "all"
 
 type screen struct {
 	phoneBackend                     LANBackend
+	copyText                         func(string)
 	phonePage                        bool
 	phone                            phoneFlow
 	backend                          Backend
@@ -109,7 +110,11 @@ func (s *screen) run() error {
 		mygo.Theme.SetSource(mygo.ThemeLight)
 		s.win = mygo.NewWindow(mygo.WindowOptions{Title: s.t("app"), Width: 1240, Height: 880, MinWidth: 1080, MinHeight: 700, Content: ui.View(s.view)})
 		s.post = s.win.Update
-		if s.phoneBackend != nil && macos.LANReceptionReadiness() == nil {
+		s.copyText = mygo.Clipboard.WriteText
+		if s.phoneBackend != nil {
+			// Like the Swift adapter, documented sleep, display sleep and session
+			// resign notifications revoke reception; failing to install them keeps
+			// receiving unavailable rather than silently unguarded.
 			remove, err := macos.ObserveLANLifecycle(s.phoneBackend.RevokeLAN)
 			s.phone.lifecycleReady = err == nil
 			if err == nil {

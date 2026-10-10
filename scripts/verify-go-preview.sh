@@ -65,10 +65,18 @@ if [[ "$PREVIOUS" -eq 1 ]] \
     && print -r -- "$ENTITLEMENTS" | /usr/bin/plutil -extract 'com\.apple\.security\.files\.user-selected\.read-only' raw -expect bool - >/dev/null 2>&1; then
   FILE_PERMISSION='com\.apple\.security\.files\.user-selected\.read-only'
 fi
+# Phone upload binds a user-selected private address, so the current preview
+# also needs the inbound server entitlement. A retained earlier build may
+# predate it; only --previous accepts that two-key legacy form.
+EXPECTED_KEYS=3
+if [[ "$(print -r -- "$ENTITLEMENTS" | /usr/bin/plutil -extract 'com\.apple\.security\.network\.server' raw -expect bool - 2>/dev/null)" != true ]]; then
+  [[ "$PREVIOUS" -eq 1 ]] || fail "entitlements must be exactly sandbox, user-selected read-write and network server"
+  EXPECTED_KEYS=2
+fi
 [[ "$(print -r -- "$ENTITLEMENTS" | /usr/bin/plutil -extract 'com\.apple\.security\.app-sandbox' raw -expect bool - 2>/dev/null)" == true \
     && "$(print -r -- "$ENTITLEMENTS" | /usr/bin/plutil -extract "$FILE_PERMISSION" raw -expect bool - 2>/dev/null)" == true \
-    && "$(print -r -- "$ENTITLEMENTS" | /usr/bin/grep -c '<key>')" -eq 2 ]] \
-  || fail "entitlements must be exactly sandbox and user-selected read-write"
+    && "$(print -r -- "$ENTITLEMENTS" | /usr/bin/grep -c '<key>')" -eq "$EXPECTED_KEYS" ]] \
+  || fail "entitlements must be exactly sandbox, user-selected read-write and network server"
 if [[ -z "$GO_EXECUTABLE" ]]; then
   GO_EXECUTABLE="$(whence -p go)" || fail "Go is unavailable"
 fi

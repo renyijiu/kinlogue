@@ -12,6 +12,7 @@ import (
 	"kinlogue/internal/document"
 	"kinlogue/internal/library"
 	"kinlogue/internal/macos"
+	"kinlogue/internal/qr"
 )
 
 // LANBackend is optional so recovery mode never opens a receiving session.
@@ -43,8 +44,38 @@ type phoneFlow struct {
 	page                                          int
 	bitmap                                        *ui.Bitmap
 	deleteSelection                               []library.InboxSelection
+	qr                                            *ui.Bitmap
+	qrFor                                         string
+	copied                                        bool
 }
 
+// phoneQR caches the address QR code. It encodes only the URL, never the
+// pairing code, exactly like the Swift receiver sheet.
+func (s *screen) phoneQR(address string) *ui.Bitmap {
+	if address == "" {
+		return nil
+	}
+	if s.phone.qrFor != address {
+		s.phone.qrFor, s.phone.qr = address, nil
+		if code, err := qr.Encode([]byte(address)); err == nil {
+			s.phone.qr = ui.NewBitmap(code.Image(8))
+		}
+	}
+	return s.phone.qr
+}
+func (s *screen) copyPhoneAddress() {
+	if !s.phone.status.Active || s.phone.status.Address == "" || s.copyText == nil {
+		return
+	}
+	s.copyText(s.phone.status.Address)
+	s.phone.copied = true
+}
+func (s *screen) promptDeleteSelectedPhone() {
+	if s.busy != "" || len(s.phone.selected) == 0 {
+		return
+	}
+	s.phone.deleteSelection = append([]library.InboxSelection(nil), s.phone.selected...)
+}
 func phoneInterfaceID(i macos.LANInterface) string {
 	return fmt.Sprintf("%d/%s/%d", i.Index, i.Address, i.PrefixBits)
 }
@@ -177,6 +208,7 @@ func (s *screen) startPhone() {
 				return
 			}
 			s.phone.status = status
+			s.phone.copied = false
 			s.message = ""
 		}
 	})
@@ -187,6 +219,7 @@ func (s *screen) stopPhone() {
 	}
 	s.phone.stopping = true
 	s.phone.status = app.LANStatus{}
+	s.phone.copied = false
 	s.phone.trusted = false
 	s.phone.generation++
 	backend := s.phoneBackend
@@ -263,6 +296,11 @@ func (s *screen) deletePhone() {
 		return func() {
 			if loadErr == nil {
 				s.applyPhoneItems(items)
+			}
+			if err == nil {
+				s.phone.selected = slices.DeleteFunc(s.phone.selected, func(sel library.InboxSelection) bool {
+					return slices.ContainsFunc(selected, func(d library.InboxSelection) bool { return d.ID == sel.ID })
+				})
 			}
 			switch {
 			case err != nil:

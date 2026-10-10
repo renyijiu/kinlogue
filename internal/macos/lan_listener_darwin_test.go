@@ -54,16 +54,29 @@ func TestLANListenerClosesChangedInterface(t *testing.T) {
 	}
 }
 
-func TestLANListenerBlockedUntilLockRevocationSupported(t *testing.T) {
-	// Invalid synthetic interface prevents any real socket even if the gate regresses.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	listener, err := ListenLAN(ctx, LANInterface{})
-	if listener != nil {
-		listener.Close()
-		t.Fatal("unverified receiver opened")
-	}
-	if !errors.Is(err, ErrLANLockUnavailable) {
-		t.Fatalf("must reject for lock capability before socket setup: %v", err)
+func TestListenLANRejectsInvalidInterfaceBeforeSocket(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		iface LANInterface
+		ctx   func() context.Context
+	}{
+		{"zero interface", LANInterface{}, context.Background},
+		{"cancelled", LANInterface{Name: "synthetic", Index: 7, Address: netip.MustParseAddr("192.0.2.10"), PrefixBits: 24}, func() context.Context {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx
+		}},
+		{"unknown synthetic interface", LANInterface{Name: "synthetic", Index: 7, Address: netip.MustParseAddr("192.0.2.10"), PrefixBits: 24}, context.Background},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			listener, err := ListenLAN(tc.ctx(), tc.iface)
+			if listener != nil {
+				listener.Close()
+				t.Fatal("unselected interface opened a socket")
+			}
+			if !errors.Is(err, ErrLANUnavailable) {
+				t.Fatalf("expected interface rejection: %v", err)
+			}
+		})
 	}
 }

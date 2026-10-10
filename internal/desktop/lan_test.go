@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ type phoneBackend struct {
 	archived      []library.InboxSelection
 	archiveEdit   library.Edit
 	starts, stops int
+	deleted       []library.InboxSelection
 }
 
 func (f *phoneBackend) LANInterfaces(context.Context) ([]macos.LANInterface, error) {
@@ -31,7 +33,7 @@ func (f *phoneBackend) LANInterfaces(context.Context) ([]macos.LANInterface, err
 }
 func (f *phoneBackend) StartLAN(context.Context, macos.LANInterface) (app.LANStatus, error) {
 	f.starts++
-	return app.LANStatus{Active: true, Address: "http://192.0.2.2:1234", Code: "123456"}, nil
+	return app.LANStatus{Active: true, Address: "http://192.0.2.2:1234/", Code: "123456"}, nil
 }
 func (f *phoneBackend) RevokeLAN()               { f.stops++ }
 func (f *phoneBackend) StopLAN()                 { f.stops++ }
@@ -50,7 +52,11 @@ func (f *phoneBackend) GetInbox(_ context.Context, id string) (library.InboxItem
 func (f *phoneBackend) RetryInbox(context.Context, library.InboxSelection) (library.InboxItem, error) {
 	return library.InboxItem{}, nil
 }
-func (f *phoneBackend) DeleteInbox(context.Context, []library.InboxSelection) (library.DeleteResult, error) {
+func (f *phoneBackend) DeleteInbox(_ context.Context, selected []library.InboxSelection) (library.DeleteResult, error) {
+	f.deleted = append([]library.InboxSelection(nil), selected...)
+	f.items = slices.DeleteFunc(f.items, func(item library.InboxItem) bool {
+		return slices.ContainsFunc(selected, func(sel library.InboxSelection) bool { return sel.ID == item.ID })
+	})
 	return library.DeleteResult{}, nil
 }
 func (f *phoneBackend) ArchiveInbox(_ context.Context, selected []library.InboxSelection, e library.Edit) (library.Report, error) {
@@ -222,14 +228,15 @@ func TestPhoneDuplicateConfirmedOpensExistingMember(t *testing.T) {
 
 func TestPhoneUnavailableLifecyclePreservesInbox(t *testing.T) {
 	s, f, drain := phoneScreen(t)
-	s.phone.lifecycleReady = macos.LANReceptionReadiness() == nil
+	// Observer installation failed: receiving stays unavailable, organizing works.
+	s.phone.lifecycleReady = false
 	s.phone.trusted = true
 	s.phone.interfaces, _ = f.LANInterfaces(context.Background())
 	s.phone.interfaceID = phoneInterfaceID(s.phone.interfaces[0])
 	s.startPhone()
 	drain()
-	if f.starts != 0 || s.phone.lifecycleReady {
-		t.Fatal("unsupported lock capability must block receiving")
+	if f.starts != 0 {
+		t.Fatal("missing lifecycle observer must block receiving")
 	}
 	tt := ui.NewTester(s.view, 1080, 700)
 	for _, lang := range []string{"en", "zh-Hans"} {
@@ -247,5 +254,85 @@ func TestPhoneUnavailableLifecyclePreservesInbox(t *testing.T) {
 	drain()
 	if len(f.archived) != 1 || s.report.ID != f.report.ID {
 		t.Fatal("blocking reception must retain archive workflow")
+	}
+}
+
+// The active panel mirrors the Swift sheet: QR code for the URL only, the URL
+// with a copy action that never copies the pairing code, and the code itself.
+func TestPhoneActivePanelShowsQRCodeAddressAndCode(t *testing.T) {
+	for _, lang := range []string{"en", "zh-Hans"} {
+		s, f, drain := phoneScreen(t)
+		var copied []string
+		s.copyText = func(v string) { copied = append(copied, v) }
+		s.language = lang
+		s.phone.trusted = true
+		s.phone.interfaces, _ = f.LANInterfaces(context.Background())
+		s.phone.interfaceID = phoneInterfaceID(s.phone.interfaces[0])
+		s.startPhone()
+		drain()
+		tt := ui.NewTester(s.view, 1080, 700)
+		// The code is exposed digit by digit to VoiceOver, like the Swift sheet.
+		for _, text := range []string{"http://192.0.2.2:1234/", s.t("phone_code_label", "1 2 3 4 5 6"), s.t("phone_troubleshoot"), s.t("phone_copy_address")} {
+			box, ok := tt.Find(text)
+			if !ok || box.X < 0 || box.Y < 0 || box.X+box.W > 1081 || box.Y+box.H > 701 {
+				t.Fatalf("%s: active panel item hidden or clipped: %s", lang, text)
+			}
+		}
+		if s.phone.qr == nil || s.phone.qrFor != "http://192.0.2.2:1234/" {
+			t.Fatal("QR code must encode the advertised URL")
+		}
+		if err := tt.Click(s.t("phone_copy_address")); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+		if len(copied) != 1 || copied[0] != "http://192.0.2.2:1234/" {
+			t.Fatalf("copy must place only the URL on the clipboard: %q", copied)
+		}
+		if !tt.HasText(s.t("phone_address_copied")) {
+			t.Fatal("copy confirmation hidden")
+		}
+		s.stopPhone()
+		drain()
+		if s.phone.copied || s.phone.status.Active {
+			t.Fatal("stopping must clear the active panel")
+		}
+	}
+}
+
+func TestPhoneQRCodeFollowsAddress(t *testing.T) {
+	s, _, _ := phoneScreen(t)
+	first := s.phoneQR("http://192.0.2.2:1234/")
+	if first == nil || s.phoneQR("http://192.0.2.2:1234/") != first {
+		t.Fatal("QR code should be cached for one address")
+	}
+	if next := s.phoneQR("http://192.0.2.2:5678/"); next == nil || next == first {
+		t.Fatal("a new address needs a new QR code")
+	}
+	if s.phoneQR("") != nil {
+		t.Fatal("no address, no QR code")
+	}
+}
+
+func TestPhoneDeleteSelectedRemovesOnlySelection(t *testing.T) {
+	s, f, drain := phoneScreen(t)
+	f.items = append(f.items, library.InboxItem{ID: "inbox-c", FileName: "synthetic-c.pdf", Status: "reviewable", Revision: 3})
+	s.phone.items = f.items
+	s.togglePhoneItem(s.phone.items[0])
+	s.togglePhoneItem(s.phone.items[2])
+	tt := ui.NewTester(s.view, 1080, 700)
+	if err := tt.Click(s.t("phone_delete_selected")); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(s.phone.deleteSelection) != 2 || !tt.HasText(s.t("phone_delete_title", 2)) {
+		t.Fatal("delete prompt must freeze the whole selection")
+	}
+	s.deletePhone()
+	drain()
+	if len(f.deleted) != 2 || f.deleted[0] != (library.InboxSelection{ID: "inbox-a", Revision: 1}) || f.deleted[1] != (library.InboxSelection{ID: "inbox-c", Revision: 3}) {
+		t.Fatalf("deleted the wrong items: %v", f.deleted)
+	}
+	if len(s.phone.selected) != 0 || len(s.phone.items) != 1 || s.phone.items[0].ID != "inbox-b" || s.message != "phone_deleted" {
+		t.Fatal("unselected item must remain and selection must clear")
 	}
 }
