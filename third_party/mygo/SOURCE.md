@@ -16,6 +16,11 @@ The patch addresses reproducible text-input data loss and undo boundaries. It ch
 - `ui/access_test.go`: update the original input-method test to expect the selected character to remain in the bound value until commit.
 - `ui/editor_regression_test.go`: add synthetic regression coverage for cancellation, direct and macOS-style unmark/commit sequences, replacement ranges, undo/redo, selection direction, paragraphs, app-set values, focus/read-only transitions, typing pauses, caret movement, and paste boundaries. Host-event tests verify same-field app cancellation and the inactive/active handoff between different input identities; native completion, replacement candidates, and later native events queued after an app command keep their context without unnecessary resets.
 
+A second, separate patch lets the app word calendars in its own language; upstream v0.2.15 draws them in English only. It changes only:
+
+- `ui/date.go`: add `CalendarText` and `SetCalendarText`. The month title, weekday headings, day names for accessibility and the previous/next month button names come from it; the default is the upstream English wording, so an app that never calls `SetCalendarText` sees no change.
+- `ui/datetime_test.go`: add a regression test for app-provided wording, partial wording and restoring the default.
+
 Composition candidates are still rendered through the upstream layout path. No private macOS API, replacement widget, additional dependency, or runtime bypass was introduced. Platform bridges are unchanged.
 
 ## Verification and updates
@@ -31,4 +36,4 @@ go vet ./ui
 
 The root module's `go test ./...` does not traverse this nested module; CI must run its UI tests explicitly. These tests use the public headless event path and generated synthetic text. They do not prove that any particular installed Chinese input method, VoiceOver session, or another operating system works end to end; those remain manual/platform acceptance tasks.
 
-When upgrading, compare the seven local patch files against this exact upstream revision, check whether upstream has resolved the same cases, and run both the nested UI tests and Kinlogue's application/package checks. Remove the local replacement only after the selected upstream version passes these regressions. Avoid unrelated formatting or vendoring additional upstream tools into this directory.
+When upgrading, compare the nine local patch files against this exact upstream revision, check whether upstream has resolved the same cases, and run both the nested UI tests and Kinlogue's application/package checks. Remove the local replacement only after the selected upstream version passes these regressions. Avoid unrelated formatting or vendoring additional upstream tools into this directory.

@@ -243,7 +243,7 @@ func TestLocateFindsEveryLineOrNothing(t *testing.T) {
 		{"", nil},
 		{strings.Repeat("合成结论续行。\n", 65), nil},
 	} {
-		if got := Locate(sources, test.value); !reflect.DeepEqual(got, test.want) {
+		if got, _ := Locate(sources, test.value); !reflect.DeepEqual(got, test.want) {
 			t.Fatalf("Locate(%q) = %+v, want %+v", test.value, got, test.want)
 		}
 	}
@@ -379,7 +379,7 @@ func TestVariantCharactersMatchAndLocate(t *testing.T) {
 		t.Fatalf("conclusion = %q", c.Conclusion)
 	}
 	// The corrected proposal is still found where recognition read the variant.
-	if got := Locate(sources, c.Conclusion); !reflect.DeepEqual(got, []Location{{1, 1}}) {
+	if got, _ := Locate(sources, c.Conclusion); !reflect.DeepEqual(got, []Location{{1, 1}}) {
 		t.Fatalf("Locate = %+v", got)
 	}
 }
@@ -392,5 +392,17 @@ func TestALabelNeedsASeparatorBeforeItsValue(t *testing.T) {
 	c = extract(1, line("科室 合成科室", 1, 0.9), line("报告类型:合成类型", 1, 0.8))
 	if c.Department != "合成科室" || c.ReportType != "合成类型" {
 		t.Fatalf("candidates = %+v", c)
+	}
+}
+
+func TestLocateReportsTheLeastCertainBlock(t *testing.T) {
+	sources := []document.Extraction{{Kind: "png", PageCount: 1, Engine: "synthetic", Blocks: []document.Block{
+		line("合成清晰一行", 1, 0.8, sized(0.04, 1)), line("合成模糊一行", 1, 0.7, sized(0.04, 0.3)),
+	}}}
+	if _, confidence := Locate(sources, "合成清晰一行"); confidence != 1 {
+		t.Fatalf("confidence = %v", confidence)
+	}
+	if _, confidence := Locate(sources, "合成清晰一行\n合成模糊一行"); confidence != 0.3 {
+		t.Fatalf("confidence = %v", confidence)
 	}
 }

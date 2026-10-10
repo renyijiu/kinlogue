@@ -411,10 +411,11 @@ func dates(blocks []block) []Date {
 // Location is a one-based source and page within it.
 type Location struct{ Source, Page int }
 
-// Locate reports the pages whose recognized text contains value. It finds
+// Locate reports the pages whose recognized text contains value, and the
+// lowest confidence recognition gave the blocks it was found in. It finds
 // where a field can be checked against the original; it does not know who
 // typed the field. Every line of value must appear, or nothing is reported.
-func Locate(sources []document.Extraction, value string) []Location {
+func Locate(sources []document.Extraction, value string) ([]Location, float64) {
 	var lines []string
 	for _, line := range strings.FieldsFunc(value, func(r rune) bool { return r == '\n' || r == '\r' }) {
 		if line = variants.Replace(strings.TrimSpace(line)); line != "" {
@@ -422,13 +423,14 @@ func Locate(sources []document.Extraction, value string) []Location {
 		}
 	}
 	if len(lines) == 0 || len(lines) > 64 {
-		return nil
+		return nil, 0
 	}
 	var result []Location
+	confidence := 1.0
 	for _, line := range lines {
 		// One character is found on almost any page and proves nothing.
 		if utf8.RuneCountInString(line) < 2 {
-			return nil
+			return nil, 0
 		}
 		found := false
 	search:
@@ -438,13 +440,14 @@ func Locate(sources []document.Extraction, value string) []Location {
 					if at := (Location{i + 1, b.Page}); !slices.Contains(result, at) {
 						result = append(result, at)
 					}
+					confidence = min(confidence, b.Confidence)
 					found = true
 					break search
 				}
 			}
 		}
 		if !found {
-			return nil
+			return nil, 0
 		}
 	}
 	slices.SortFunc(result, func(a, b Location) int {
@@ -453,5 +456,5 @@ func Locate(sources []document.Extraction, value string) []Location {
 		}
 		return a.Page - b.Page
 	})
-	return result
+	return result, confidence
 }

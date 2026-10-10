@@ -531,7 +531,12 @@ func (s *screen) extractions() []document.Extraction {
 type locatedText struct {
 	value, order string
 	at           []candidate.Location
+	confidence   float64
 }
+
+// lowConfidence is the lowest of the three levels Vision reports for a line;
+// text read at it is wrong often enough to say so.
+const lowConfidence = 0.3
 
 // sourceHint says on which pages of the originals a field's text can be
 // checked, or nothing when recognition did not read that text anywhere.
@@ -543,7 +548,8 @@ func (s *screen) sourceHint(key, value string) string {
 	order := strings.Join(s.edit.SourceIDs, ",")
 	entry, ok := s.located[key]
 	if !ok || entry.value != value || entry.order != order {
-		entry = locatedText{value, order, candidate.Locate(s.extractions(), value)}
+		at, confidence := candidate.Locate(s.extractions(), value)
+		entry = locatedText{value, order, at, confidence}
 		if s.located == nil {
 			s.located = map[string]locatedText{}
 		}
@@ -561,8 +567,12 @@ func (s *screen) sourceHint(key, value string) string {
 		}
 		return strings.Join(list, s.t("list_separator"))
 	}
+	unsure := ""
+	if entry.confidence <= lowConfidence {
+		unsure = s.t("source_unsure")
+	}
 	if len(s.report.Sources) == 1 {
-		return s.t("source_pages", pages(1))
+		return s.t("source_pages", pages(1)) + unsure
 	}
 	var parts []string
 	for source := 1; source <= len(s.report.Sources); source++ {
@@ -570,7 +580,18 @@ func (s *screen) sourceHint(key, value string) string {
 			parts = append(parts, s.t("source_part", source, list))
 		}
 	}
-	return s.t("source_parts", strings.Join(parts, s.t("part_separator")))
+	return s.t("source_parts", strings.Join(parts, s.t("part_separator"))) + unsure
+}
+
+// calendarText words the date picker in the interface language.
+func (s *screen) calendarText() ui.CalendarText {
+	text := ui.CalendarText{PreviousMonth: s.t("calendar_previous"), NextMonth: s.t("calendar_next")}
+	copy(text.Weekdays[:], strings.Fields(s.t("calendar_weekdays")))
+	if s.lang() != "en" {
+		text.Month = func(t time.Time) string { return s.t("calendar_month", t.Year(), int(t.Month())) }
+		text.Day = func(t time.Time) string { return s.formatDate(t.Format("2006-01-02")) }
+	}
+	return text
 }
 
 // proposals pairs each field recognition can propose with its proposal.

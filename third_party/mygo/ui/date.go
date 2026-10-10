@@ -5,6 +5,50 @@ import (
 	"time"
 )
 
+// CalendarText is the wording of a calendar, which an app sets in its own
+// language with SetCalendarText. Kinlogue local patch: upstream v0.2.15 has
+// English wording only.
+type CalendarText struct {
+	// Month names the month a calendar shows, and Day a day to assistive
+	// technology.
+	Month, Day func(time.Time) string
+	// Weekdays head the columns, from Monday.
+	Weekdays [7]string
+	// PreviousMonth and NextMonth name the buttons to assistive technology.
+	PreviousMonth, NextMonth string
+}
+
+var englishCalendarText = CalendarText{
+	Month:         func(t time.Time) string { return t.Format("January 2006") },
+	Day:           func(t time.Time) string { return t.Format("January 2, 2006") },
+	Weekdays:      [7]string{"Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"},
+	PreviousMonth: "Previous month",
+	NextMonth:     "Next month",
+}
+
+var calendarText = englishCalendarText
+
+// SetCalendarText sets the wording of every calendar built from now on. A
+// field left empty keeps its English wording. Call it on the UI goroutine.
+func SetCalendarText(text CalendarText) {
+	calendarText = englishCalendarText
+	if text.Month != nil {
+		calendarText.Month = text.Month
+	}
+	if text.Day != nil {
+		calendarText.Day = text.Day
+	}
+	if text.Weekdays != [7]string{} {
+		calendarText.Weekdays = text.Weekdays
+	}
+	if text.PreviousMonth != "" {
+		calendarText.PreviousMonth = text.PreviousMonth
+	}
+	if text.NextMonth != "" {
+		calendarText.NextMonth = text.NextMonth
+	}
+}
+
 // DateInput creates a field showing *date as 2006-01-02, which a calendar
 // below it changes. A click, Enter or Space opens the calendar, where a
 // click chooses a day, as do the arrows and Enter; Page Up and Page Down,
@@ -96,7 +140,7 @@ func calendarGrid(c *Context, date, cursor *time.Time, moveChooses bool, choose 
 	t := c.theme
 	cur := *cursor
 	month := time.Date(cur.Year(), cur.Month(), 1, 0, 0, 0, 0, time.UTC)
-	grid := Column(c).Gap(t.Space(0.5)).Focusable().Shrink(0).Role(RoleTable).Label(month.Format("January 2006"))
+	grid := Column(c).Gap(t.Space(0.5)).Focusable().Shrink(0).Role(RoleTable).Label(calendarText.Month(month))
 	grid.flags |= flagOwnRing
 	move := func(d time.Time) {
 		// Choosing it moves the cursor where it is the date chosen.
@@ -129,16 +173,16 @@ func calendarGrid(c *Context, date, cursor *time.Time, moveChooses bool, choose 
 	}
 	grid.Children(func() {
 		Row(c).AlignItems(Center).Gap(t.Space(1)).Children(func() {
-			if Button(c, "‹").Padding(t.Space(0.5), t.Space(2.5)).Label("Previous month").Clicked() {
+			if Button(c, "‹").Padding(t.Space(0.5), t.Space(2.5)).Label(calendarText.PreviousMonth).Clicked() {
 				move(cur.AddDate(0, -1, 0))
 			}
-			Text(c, month.Format("January 2006")).Bold().Grow(1).TextAlign(Center)
-			if Button(c, "›").Padding(t.Space(0.5), t.Space(2.5)).Label("Next month").Clicked() {
+			Text(c, calendarText.Month(month)).Bold().Grow(1).TextAlign(Center)
+			if Button(c, "›").Padding(t.Space(0.5), t.Space(2.5)).Label(calendarText.NextMonth).Clicked() {
 				move(cur.AddDate(0, 1, 0))
 			}
 		})
 		Row(c).Children(func() {
-			for _, d := range []string{"Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"} {
+			for _, d := range calendarText.Weekdays {
 				Text(c, d).Width(t.Space(8)).TextAlign(Center).FontSize(t.FontSize - 2).TextColor(t.TextMuted).Role(RoleColumnHeader)
 			}
 		})
@@ -149,7 +193,7 @@ func calendarGrid(c *Context, date, cursor *time.Time, moveChooses bool, choose 
 			Row(c).Role(RoleRow).Children(func() {
 				for d := range 7 {
 					day := start.AddDate(0, 0, w*7+d)
-					cell := Box(c).Size(t.Space(8), t.Space(7)).Center().Radius(t.Radius).Role(RoleButton).Label(day.Format("January 2, 2006"))
+					cell := Box(c).Size(t.Space(8), t.Space(7)).Center().Radius(t.Radius).Role(RoleButton).Label(calendarText.Day(day))
 					cell.flags |= flagClickable | flagHover
 					if cell.Clicked() {
 						choose(day)

@@ -357,3 +357,45 @@ func TestLongImportShowsProgressAndExplainsTheWait(t *testing.T) {
 		t.Fatal("the explanation or progress outlived the import")
 	}
 }
+
+func TestDatePickerFollowsTheInterfaceLanguage(t *testing.T) {
+	t.Cleanup(func() { ui.SetCalendarText(ui.CalendarText{}) })
+	s, f, drain := testScreen(t)
+	f.report.Review.Date = "2026-07-10"
+	s.accept(f.report)
+	tt := ui.NewTester(s.view, 1240, 900)
+	if err := tt.Click("2026-07-10"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("July 2026") || !tt.HasText("Mo") {
+		t.Fatal("the English calendar lost its wording")
+	}
+	s.changeLanguage("zh-Hans")
+	drain()
+	tt.Frame()
+	if !tt.HasText("2026年7月") || !tt.HasText("日") || tt.HasText("July 2026") || tt.HasText("Mo") {
+		t.Fatal("the calendar did not follow the interface language")
+	}
+	if err := tt.Click("2026年7月21日"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if s.edit.Date != "2026-07-21" {
+		t.Fatalf("choosing a day in the Chinese calendar set %q", s.edit.Date)
+	}
+}
+
+func TestSourceHintWarnsWhenRecognitionWasUnsure(t *testing.T) {
+	s, f, _ := testScreen(t)
+	source := labeledSource("source-a", "Synthetic Hospital")
+	source.Extraction.Blocks[1].Confidence = 0.3 // the department line
+	f.report.Sources = []library.Source{source}
+	s.accept(f.report)
+	if got := s.sourceHint("organization", "Synthetic Hospital"); got != "Source: original pages 1" {
+		t.Fatalf("confident hint = %q", got)
+	}
+	if got := s.sourceHint("department", "Synthetic Radiology"); got != "Source: original pages 1"+s.t("source_unsure") {
+		t.Fatalf("unsure hint = %q", got)
+	}
+}

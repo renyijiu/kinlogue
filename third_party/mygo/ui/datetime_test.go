@@ -164,3 +164,34 @@ func TestColorWell(t *testing.T) {
 		t.Error("Escape left the picker open")
 	}
 }
+
+// Kinlogue local patch: an app words calendars in its own language.
+func TestCalendarTextFollowsTheApp(t *testing.T) {
+	t.Cleanup(func() { SetCalendarText(CalendarText{}) })
+	SetCalendarText(CalendarText{
+		Month:         func(m time.Time) string { return m.Format("2006年1月") },
+		Day:           func(d time.Time) string { return d.Format("2006年1月2日") },
+		Weekdays:      [7]string{"一", "二", "三", "四", "五", "六", "日"},
+		PreviousMonth: "上个月",
+	})
+	day := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
+	tt := NewTester(func(c *Context) { Calendar(c, &day) }, 400, 400)
+	if !tt.HasText("2026年7月") || !tt.HasText("日") || tt.HasText("July 2026") || tt.HasText("Mo") {
+		t.Fatal("the calendar kept its English wording")
+	}
+	if err := tt.Click("2026年7月20日"); err != nil || !sameDay(day, time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("a day is not named in the app's wording: %v", err)
+	}
+	if err := tt.Click("上个月"); err != nil || !tt.HasText("2026年6月") {
+		t.Fatalf("the previous month button is not named in the app's wording: %v", err)
+	}
+	// A field left empty keeps the English wording.
+	if _, ok := tt.Find("Next month"); !ok {
+		t.Fatal("an unset name lost its default")
+	}
+	SetCalendarText(CalendarText{})
+	tt.Frame()
+	if !tt.HasText("June 2026") || !tt.HasText("Mo") {
+		t.Fatal("clearing did not restore the English wording")
+	}
+}
