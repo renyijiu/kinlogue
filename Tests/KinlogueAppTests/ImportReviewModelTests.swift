@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import KinlogueApp
 @testable import KinlogueCore
@@ -277,6 +279,118 @@ struct ImportReviewModelTests {
         #expect(!model.isPresented)
         #expect(model.conclusion == "Current conclusion")
         #expect(model.errorMessage == nil)
+    }
+
+    @Test
+    func commandReturnInTheReviewWindowConfirmsTheDraftAndPlainReturnDoesNot() async throws {
+        let fixture = try ReviewFixture()
+        let service = AppServiceSpy(
+            snapshot: fixture.snapshot,
+            documents: [fixture.draft.id: fixture.content]
+        )
+        let model = ImportReviewModel(draftID: fixture.draft.id, service: service)
+        await model.load()
+        model.selectedMemberID = fixture.member.id
+        let hostingView = NSHostingView(rootView: ImportReviewView(model: model))
+        hostingView.frame = NSRect(x: 0, y: 0, width: 1_080, height: 720)
+        let window = NSWindow(
+            contentRect: hostingView.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.alphaValue = 0
+        window.orderBack(nil)
+        window.layoutIfNeeded()
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        func returnKey(_ modifiers: NSEvent.ModifierFlags) throws -> NSEvent {
+            try #require(NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: modifiers,
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber,
+                context: nil,
+                characters: "\r",
+                charactersIgnoringModifiers: "\r",
+                isARepeat: false,
+                keyCode: 36
+            ))
+        }
+
+        #expect(window.performKeyEquivalent(with: try returnKey([])) == false)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await service.confirmedCommands.isEmpty)
+
+        #expect(window.performKeyEquivalent(with: try returnKey(.command)))
+        for _ in 0..<400 where await service.confirmedCommands.isEmpty {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(await service.confirmedCommands.map(\.draftID) == [fixture.draft.id])
+    }
+
+    @Test
+    func aLongRecognitionIsExplainedUntilItEndsOrTheReviewCloses() async throws {
+        let fixture = try ReviewFixture()
+        let gate = OriginalLoadGate()
+        let service = AppServiceSpy(
+            snapshot: fixture.snapshot,
+            documents: [fixture.draft.id: fixture.content],
+            recognizedReviews: [fixture.draft.id: RecognizedReviewContent(
+                draftRevision: fixture.draft.revision + 1,
+                document: try recognizedDocument()
+            )],
+            recognizeReviewGate: gate
+        )
+        let model = ImportReviewModel(
+            draftID: fixture.draft.id,
+            service: service,
+            slowRecognitionNoticeDelay: .zero
+        )
+        await model.load()
+        #expect(model.isRecognitionSlow == false)
+
+        let recognition = Task { await model.recognizeAgain() }
+        await gate.waitUntilLoadStarts()
+        for _ in 0..<400 where !model.isRecognitionSlow {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(model.isRecognitionSlow)
+
+        await gate.open()
+        await recognition.value
+        #expect(model.isRecognitionInFlight == false)
+        #expect(model.isRecognitionSlow == false)
+    }
+
+    @Test
+    func aQuickRecognitionIsNotExplained() async throws {
+        let fixture = try ReviewFixture()
+        let service = AppServiceSpy(
+            snapshot: fixture.snapshot,
+            documents: [fixture.draft.id: fixture.content],
+            recognizedReviews: [fixture.draft.id: RecognizedReviewContent(
+                draftRevision: fixture.draft.revision + 1,
+                document: try recognizedDocument()
+            )]
+        )
+        let model = ImportReviewModel(
+            draftID: fixture.draft.id,
+            service: service,
+            slowRecognitionNoticeDelay: .seconds(3_600)
+        )
+        await model.load()
+
+        await model.recognizeAgain()
+
+        #expect(model.isRecognitionSlow == false)
     }
 
     @Test

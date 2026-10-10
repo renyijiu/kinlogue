@@ -135,7 +135,7 @@ struct RecordEditView: View {
             VStack(spacing: 8) {
                 HStack {
                     if let errorMessage {
-                        Text(errorMessage)
+                        Label(errorMessage, systemImage: "exclamationmark.triangle")
                             .font(.caption)
                             .foregroundStyle(.red)
                             .accessibilityLabel(AppLocalization.string("错误：\(errorMessage)"))

@@ -102,7 +102,7 @@ func candidateExtractorRecognizesCommonReportMetadataLabels() throws {
 }
 
 @Test(arguments: [
-    "检查结果", "检查表现", "影像所见", "影像学表现", "放射学表现",
+    "检查结果", "检查结果描述", "检查表现", "影像所见", "影像学表现", "放射学表现",
     "超声所见", "内镜所见", "病理所见", "检验结果",
 ])
 func candidateExtractorRecognizesCommonNarrativeResultHeadings(_ heading: String) throws {
@@ -388,4 +388,323 @@ private func block(
         method: .vision,
         engineVersion: "synthetic"
     )
+}
+
+// The two layouts below copy the geometry of the Go preview's regression
+// fixtures, which in turn keep only the coordinates of two recognitions; every
+// text is synthetic wording.
+
+@Test
+func candidateExtractorReadsAPhoneScreenshotLayout() throws {
+    let blocks = try [
+        block("18:27", page: 1, x: 0.123, y: 0.949, width: 0.120, height: 0.025, confidence: 1),
+        block("：！今85", page: 1, x: 0.700, y: 0.948, width: 0.221, height: 0.026, confidence: 0.3),
+        block("检查报告", page: 1, x: 0.407, y: 0.897, width: 0.180, height: 0.023, confidence: 0.5),
+        block("●••", page: 1, x: 0.792, y: 0.904, width: 0.057, height: 0.013, confidence: 0.3),
+        block("医疗名称", page: 1, x: 0.041, y: 0.839, width: 0.152, height: 0.021, confidence: 0.5),
+        block("合成部位CTA", page: 1, x: 0.038, y: 0.799, width: 0.259, height: 0.027, confidence: 1),
+        block("姓名：合成成员", page: 1, x: 0.038, y: 0.732, width: 0.243, height: 0.021, confidence: 0.5),
+        block("送检医生：合成医生", page: 1, x: 0.498, y: 0.732, width: 0.303, height: 0.020, confidence: 0.5),
+        block("检查日期：2026-07-31 08:46:43", page: 1, x: 0.041, y: 0.622, width: 0.562, height: 0.020, confidence: 1),
+        block("具体报告信息请以医院纸质报告为准。", page: 1, x: 0.041, y: 0.576, width: 0.496, height: 0.018, confidence: 1),
+        block("检查结果", page: 1, x: 0.041, y: 0.491, width: 0.170, height: 0.019, confidence: 0.5),
+        block("合成检查结果一句。", page: 1, x: 0.040, y: 0.450, width: 0.474, height: 0.025, confidence: 1),
+        block("检查结果描述", page: 1, x: 0.041, y: 0.366, width: 0.256, height: 0.021, confidence: 0.5),
+        block("合成描述第一行，", page: 1, x: 0.041, y: 0.325, width: 0.896, height: 0.023, confidence: 0.5),
+        block("合成描述第二行。", page: 1, x: 0.041, y: 0.299, width: 0.884, height: 0.028, confidence: 1),
+        block("查看影像", page: 1, x: 0.413, y: 0.107, width: 0.171, height: 0.021, confidence: 0.5),
+        block("下载影像", page: 1, x: 0.413, y: 0.036, width: 0.170, height: 0.022, confidence: 1),
+    ]
+
+    let candidates = ReportCandidateExtractor().extract(from: blocks)
+
+    #expect(candidates.title?.transcription == "合成部位CTA")
+    #expect(candidates.title?.references.map(\.blockID) == [blocks[5].id])
+    #expect(candidates.memberName?.transcription == "合成成员")
+    #expect(candidates.organization == nil)
+    #expect(candidates.department == nil)
+    #expect(candidates.reportType == nil)
+    #expect(candidates.reportedResults?.transcription == "合成检查结果一句。\n合成描述第一行，\n合成描述第二行。")
+    #expect(candidates.reportedResults?.references.map(\.blockID) == [
+        blocks[11].id, blocks[13].id, blocks[14].id,
+    ])
+    #expect(candidates.conclusion == nil)
+    #expect(candidates.dateCandidates.map(\.kind) == [.examination])
+    #expect(candidates.dateCandidates.first?.source.transcription == "2026-07-31 08:46:43")
+    #expect(candidates.abnormalItems.isEmpty)
+}
+
+@Test
+func candidateExtractorReadsAPhotographedPaperReportLayout() throws {
+    let blocks = try [
+        block("合成市第一附属医院", page: 1, x: 0.282, y: 0.906, width: 0.375, height: 0.058, confidence: 1),
+        block("MRI检査报告单", page: 1, x: 0.360, y: 0.822, width: 0.206, height: 0.060, confidence: 0.5),
+        block("检查号：SYNTHETIC0001", page: 1, x: 0.579, y: 0.739, width: 0.254, height: 0.045, confidence: 0.5),
+        block("扫码查看报告及影像", page: 1, x: 0.078, y: 0.632, width: 0.177, height: 0.037, confidence: 1),
+        block("姓名：合成成员", page: 1, x: 0.071, y: 0.551, width: 0.115, height: 0.040, confidence: 0.5),
+        block("登记号：", page: 1, x: 0.641, y: 0.551, width: 0.078, height: 0.039, confidence: 0.5),
+        block("0000000001", page: 1, x: 0.751, y: 0.554, width: 0.108, height: 0.032, confidence: 1),
+        block("8/6/2026 3:36:47", page: 1, x: 0.724, y: 0.506, width: 0.124, height: 0.034, confidence: 1),
+        block("科室：合成内科门诊", page: 1, x: 0.070, y: 0.473, width: 0.249, height: 0.063, confidence: 0.3),
+        block("检查日期：PM", page: 1, x: 0.637, y: 0.477, width: 0.125, height: 0.053, confidence: 0.3),
+        block("合成成像，合成平扫", page: 1, x: 0.276, y: 0.337, width: 0.353, height: 0.057, confidence: 0.5),
+        block("检査所见：", page: 1, x: 0.073, y: 0.252, width: 0.112, height: 0.049, confidence: 0.5),
+        block("合成所见第一行，", page: 1, x: 0.133, y: 0.179, width: 0.696, height: 0.052, confidence: 0.5),
+        block("合成所见第二行。", page: 1, x: 0.096, y: 0.127, width: 0.575, height: 0.053, confidence: 1),
+    ]
+
+    let candidates = ReportCandidateExtractor().extract(from: blocks)
+
+    #expect(candidates.organization?.transcription == "合成市第一附属医院")
+    #expect(candidates.department?.transcription == "合成内科门诊")
+    #expect(candidates.reportType?.transcription == "MRI检查报告单")
+    #expect(candidates.reportType?.originalTranscription == "MRI检査报告单")
+    #expect(candidates.reportType?.references.map(\.blockID) == [blocks[1].id])
+    #expect(candidates.title == nil)
+    #expect(candidates.memberName?.transcription == "合成成员")
+    #expect(candidates.reportedResults?.transcription == "合成所见第一行，\n合成所见第二行。")
+    #expect(candidates.conclusion == nil)
+    #expect(candidates.dateCandidates.isEmpty)
+}
+
+@Test(arguments: [
+    "具体报告信息请以医院纸质报告为准。",
+    "本报告仅供本院医师参考",
+    "如有疑问请到医院咨询",
+    "医院地址：合成路 1 号",
+    "扫码关注医院公众号",
+    String(repeating: "合成", count: 20) + "医院",
+])
+func candidateExtractorDoesNotReadASentenceMentioningAHospitalAsItsName(_ text: String) throws {
+    let candidates = ReportCandidateExtractor().extract(from: [
+        try block(text, page: 1, y: 0.9),
+    ])
+
+    #expect(candidates.organization == nil)
+}
+
+@Test(arguments: ["合成市测试医院", "合成大学附属医院东院区", "合成市测试医院检验报告单"])
+func candidateExtractorStillReadsAShortLetterheadAsTheOrganization(_ text: String) throws {
+    let candidates = ReportCandidateExtractor().extract(from: [
+        try block(text, page: 1, y: 0.9),
+    ])
+
+    #expect(candidates.organization?.transcription == text)
+}
+
+@Test
+func candidateExtractorReadsAFormNameEndingInReportSheetAsTheReportType() throws {
+    let extractor = ReportCandidateExtractor()
+
+    #expect(extractor.extract(from: [
+        try block("合成超声检查报告单", page: 1, y: 0.9),
+    ]).reportType?.transcription == "合成超声检查报告单")
+    // A labelled line is some other field that happens to end the same way.
+    #expect(extractor.extract(from: [
+        try block("备注：详见合成报告单", page: 1, y: 0.9),
+    ]).reportType == nil)
+    #expect(extractor.extract(from: [
+        try block(String(repeating: "合", count: 22) + "报告单", page: 1, y: 0.9),
+    ]).reportType == nil)
+    // An explicit label earlier on the page still wins.
+    #expect(extractor.extract(from: [
+        try block("报告类型：合成类型", page: 1, y: 0.9),
+        try block("合成超声检查报告单", page: 1, y: 0.8),
+    ]).reportType?.transcription == "合成类型")
+}
+
+@Test
+func candidateExtractorTakesTheValueBesideOrUnderALabelThatStandsAlone() throws {
+    func label(_ text: String) throws -> OCRBlock {
+        try block(text, page: 1, x: 0.05, y: 0.8, width: 0.15)
+    }
+    let cases: [(name: String, blocks: [OCRBlock], expected: String?)] = try [
+        ("under", [label("检查名称"), block("合成检查", page: 1, x: 0.05, y: 0.76, width: 0.3)], "合成检查"),
+        ("under, spaced", [label("检 查 名 称："), block("合成检查", page: 1, x: 0.06, y: 0.76, width: 0.3)], "合成检查"),
+        ("beside", [label("检查名称："), block("合成检查", page: 1, x: 0.25, y: 0.801, width: 0.3)], "合成检查"),
+        ("beside wins", [
+            label("检查名称"),
+            block("合成旁边", page: 1, x: 0.25, y: 0.8, width: 0.3),
+            block("合成下方", page: 1, x: 0.05, y: 0.76, width: 0.3),
+        ], "合成旁边"),
+        ("nearest under", [
+            label("检查名称"),
+            block("合成较远", page: 1, x: 0.05, y: 0.73, width: 0.3),
+            block("合成较近", page: 1, x: 0.05, y: 0.77, width: 0.3),
+        ], "合成较近"),
+        ("too far under", [label("检查名称"), block("合成检查", page: 1, x: 0.05, y: 0.6, width: 0.3)], nil),
+        ("another column", [label("检查名称"), block("合成检查", page: 1, x: 0.5, y: 0.76, width: 0.3)], nil),
+        ("another page", [label("检查名称"), block("合成检查", page: 2, x: 0.05, y: 0.76, width: 0.3)], nil),
+        ("another label", [label("检查名称"), block("姓名：合成成员", page: 1, x: 0.05, y: 0.76, width: 0.3)], nil),
+        ("a heading", [label("检查名称"), block("检查所见", page: 1, x: 0.05, y: 0.76, width: 0.3)], nil),
+        ("a button", [label("检查名称"), block("下载报告", page: 1, x: 0.05, y: 0.76, width: 0.3)], nil),
+        ("not only a label", [label("检查名称及说明"), block("合成检查", page: 1, x: 0.05, y: 0.76, width: 0.3)], nil),
+    ]
+
+    for testCase in cases {
+        let candidates = ReportCandidateExtractor().extract(from: testCase.blocks)
+        #expect(
+            candidates.title?.transcription == testCase.expected,
+            "\(testCase.name)"
+        )
+        if testCase.expected != nil {
+            // The proposal points at the block that holds the value, not the label.
+            let valueBlock = try #require(testCase.blocks.first(where: { $0.text == testCase.expected }))
+            #expect(candidates.title?.references.map(\.blockID) == [valueBlock.id], "\(testCase.name)")
+        }
+    }
+}
+
+@Test(arguments: ["检验项目", "项目名称", "检查项目"])
+func candidateExtractorDoesNotReadAResultsTableColumnHeaderAsATitleLabel(_ header: String) throws {
+    let blocks = try [
+        block(header, page: 1, x: 0.05, y: 0.9, width: 0.2),
+        block("结果", page: 1, x: 0.3, y: 0.9, width: 0.1),
+        block("参考值", page: 1, x: 0.65, y: 0.9, width: 0.2),
+        block("合成项目甲", page: 1, x: 0.05, y: 0.86, width: 0.25),
+        block("1", page: 1, x: 0.3, y: 0.86, width: 0.1),
+        block("0~2", page: 1, x: 0.65, y: 0.86, width: 0.2),
+    ]
+
+    let candidates = ReportCandidateExtractor().extract(from: blocks)
+
+    #expect(candidates.title == nil)
+}
+
+@Test
+func candidateExtractorNeedsASeparatorBetweenALabelAndItsValue() throws {
+    let longerWords = ReportCandidateExtractor().extract(from: [
+        try block("科室主任：合成主任", page: 1, y: 0.9),
+        try block("报告类型说明", page: 1, y: 0.8),
+        try block("标题栏", page: 1, y: 0.7),
+        try block("姓名性别年龄", page: 1, y: 0.6),
+    ])
+    #expect(longerWords == ReportCandidates())
+
+    let separated = ReportCandidateExtractor().extract(from: [
+        try block("科室 合成科室", page: 1, y: 0.9),
+        try block("报告类型:合成类型", page: 1, y: 0.8),
+        try block("姓名 合成成员", page: 1, y: 0.7),
+        try block("检查名称\u{3000}合成检查", page: 1, y: 0.6),
+    ])
+    #expect(separated.department?.transcription == "合成科室")
+    #expect(separated.reportType?.transcription == "合成类型")
+    #expect(separated.memberName?.transcription == "合成成员")
+    #expect(separated.title?.transcription == "合成检查")
+}
+
+@Test
+func candidateExtractorKeepsTheSourceTextOfADateWhoseLabelHasNoSeparator() throws {
+    let candidates = ReportCandidateExtractor().extract(from: [
+        try block("检查日期2026-01-02", page: 1, y: 0.8),
+    ])
+
+    #expect(candidates.dateCandidates.map(\.kind) == [.examination])
+    #expect(candidates.dateCandidates.first?.source.transcription == "2026-01-02")
+}
+
+@Test
+func candidateExtractorStopsFindingsAtConclusionsAndViewerButtons() throws {
+    let blocks = try [
+        block("检查所见：合成所见同行。", page: 1, y: 0.9),
+        block("合成所见续行。", page: 1, y: 0.85),
+        block("诊断意见", page: 1, y: 0.8),
+        block("合成诊断。", page: 1, y: 0.75),
+        block("检查结果描述：合成描述。", page: 1, y: 0.7),
+        block("下载报告", page: 1, y: 0.65),
+        block("合成按钮之后的文字", page: 1, y: 0.6),
+    ]
+
+    let candidates = ReportCandidateExtractor().extract(from: blocks)
+
+    #expect(candidates.reportedResults?.transcription == "合成所见同行。\n合成所见续行。\n合成描述。")
+    #expect(candidates.conclusion?.transcription == "合成诊断。")
+}
+
+@Test(arguments: ["查看影像", "查看图像", "下载影像", "下载图像", "下载报告"])
+func candidateExtractorStopsASectionBeforeViewerAndDownloadButtons(_ button: String) throws {
+    let candidates = ReportCandidateExtractor().extract(from: [
+        try block("检查结论", page: 1, y: 0.7),
+        try block("合成结论正文。", page: 1, y: 0.6),
+        try block(button, page: 1, y: 0.4),
+        try block("合成按钮之后的文字", page: 1, y: 0.3),
+    ])
+
+    #expect(candidates.conclusion?.transcription == "合成结论正文。")
+}
+
+@Test
+func candidateExtractorMatchesVariantCharactersWithoutRewritingRecognition() throws {
+    let label = try block("检査名称：合成复査项目", page: 1, y: 0.9)
+    let heading = try block("检査结论", page: 1, y: 0.8)
+    let body = try block("合成复査结论。", page: 1, y: 0.7)
+    let date = try block("检査日期：2026-01-02", page: 1, y: 0.5)
+    let blocks = [label, heading, body, date]
+
+    let candidates = ReportCandidateExtractor().extract(from: blocks)
+
+    // The proposal restores the character; what recognition read stays as the
+    // original transcription, and the reference still names the same block.
+    let conclusion = try #require(candidates.conclusion)
+    #expect(conclusion.transcription == "合成复查结论。")
+    #expect(conclusion.originalTranscription == "合成复査结论。")
+    #expect(conclusion.correctedTranscription == "合成复查结论。")
+    #expect(conclusion.entryMethod == nil)
+    #expect(conclusion.references.map(\.blockID) == [body.id])
+    let title = try #require(candidates.title)
+    #expect(title.transcription == "合成复查项目")
+    #expect(title.originalTranscription == "合成复査项目")
+    #expect(title.references.map(\.blockID) == [label.id])
+    #expect(candidates.dateCandidates.map(\.kind) == [.examination])
+    #expect(candidates.dateCandidates.first?.source.originalTranscription == "2026-01-02")
+    #expect(candidates.dateCandidates.first?.source.correctedTranscription == nil)
+    #expect(blocks.map(\.text) == ["检査名称：合成复査项目", "检査结论", "合成复査结论。", "检査日期：2026-01-02"])
+
+    // The saved recognition and its proposals survive a round trip unchanged.
+    let source = try ReportSource(attachmentID: UUID(), displayName: "synthetic.png", pageCount: 1)
+    let sources = try ReportSources([source])
+    let attributed = try blocks.map { try $0.attributedAndValidated(for: sources) }
+    let document = try ImportDraftDocument(
+        blocks: attributed,
+        candidates: ReportCandidateExtractor().extract(from: attributed, sources: sources)
+    ).attributedAndValidated(for: sources)
+    let reopened = try JSONDecoder().decode(
+        ImportDraftDocument.self,
+        from: JSONEncoder().encode(document)
+    ).attributedAndValidated(for: sources)
+    #expect(reopened.blocks.map(\.text) == blocks.map(\.text))
+    #expect(reopened.candidates.conclusion?.originalTranscription == "合成复査结论。")
+    #expect(reopened.candidates.conclusion?.transcription == "合成复查结论。")
+}
+
+@Test
+func candidateExtractorLeavesTextWithoutVariantsUncorrected() throws {
+    let candidates = ReportCandidateExtractor().extract(from: [
+        try block("检查结论", page: 1, y: 0.8),
+        try block("合成复查结论。", page: 1, y: 0.7),
+    ])
+
+    #expect(candidates.conclusion?.originalTranscription == "合成复查结论。")
+    #expect(candidates.conclusion?.correctedTranscription == nil)
+}
+
+@Test
+func candidateExtractorRebuildsATableWhoseFooterLabelUsesAVariantCharacter() throws {
+    let blocks = try [
+        block("项目", page: 1, x: 0.05, y: 0.9, width: 0.2),
+        block("结果", page: 1, x: 0.4, y: 0.9, width: 0.2),
+        block("参考值", page: 1, x: 0.65, y: 0.9, width: 0.2),
+        block("合成项目甲", page: 1, x: 0.05, y: 0.8, width: 0.25),
+        block("1", page: 1, x: 0.4, y: 0.8, width: 0.1),
+        block("0~2", page: 1, x: 0.65, y: 0.8, width: 0.2),
+        block("检査时间：2026-07-18 09:30", page: 1, x: 0.05, y: 0.45, width: 0.35),
+        block("页脚伪项目", page: 1, x: 0.05, y: 0.35, width: 0.25),
+        block("99", page: 1, x: 0.4, y: 0.351, width: 0.1),
+        block("1~2", page: 1, x: 0.65, y: 0.349, width: 0.2),
+    ]
+
+    let candidates = ReportCandidateExtractor().extract(from: blocks)
+
+    #expect(candidates.reportedResults?.transcription == "合成项目甲\t1\t0~2")
+    #expect(candidates.dateCandidates.map(\.kind) == [.examination])
 }

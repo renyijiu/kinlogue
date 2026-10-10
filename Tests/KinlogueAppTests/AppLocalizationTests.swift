@@ -98,6 +98,53 @@ struct AppLocalizationTests {
     }
 
     @Test
+    func recognitionStatusAndWaitingDraftCopyResolveWithTheirArguments() {
+        let position = 2
+        let total = 3
+        let count = 1
+        let fileName = "synthetic-a.pdf"
+
+        #expect(
+            AppLocalization.string(
+                "正在识别报告（第 \(position)/\(total) 个）…",
+                language: .simplifiedChinese
+            ) == "正在识别报告（第 2/3 个）…"
+        )
+        #expect(
+            AppLocalization.string(
+                "正在识别报告（第 \(position)/\(total) 个）…",
+                language: .english
+            ) == "Recognizing reports (2 of 3)…"
+        )
+        #expect(
+            AppLocalization.string("正在识别报告…", language: .english) == "Recognizing report…"
+        )
+        #expect(
+            AppLocalization.string(
+                "识别仍在进行。系统首次识别需要准备识别模型，可能要等半分钟左右，之后会快很多；页数多的文件也需要更久。",
+                language: .english
+            ).hasPrefix("Recognition is still running.")
+        )
+        #expect(
+            AppLocalization.string("待确认（\(count)）", language: .simplifiedChinese) == "待确认（1）"
+        )
+        #expect(
+            AppLocalization.string("待确认（\(count)）", language: .english) == "Awaiting Review (1)"
+        )
+        #expect(
+            AppLocalization.string("待确认（\(total)）", language: .english) == "Awaiting Review (3)"
+        )
+        #expect(
+            AppLocalization.string("等待确认：\(fileName)", language: .simplifiedChinese)
+                == "等待确认：synthetic-a.pdf"
+        )
+        #expect(
+            AppLocalization.string("等待确认：\(fileName)", language: .english)
+                == "Awaiting review: synthetic-a.pdf"
+        )
+    }
+
+    @Test
     func settingsCopyResolvesForAnExplicitLanguageSelection() {
         #expect(
             AppLocalization.string(

@@ -466,6 +466,7 @@ struct AppShellView: View {
                             searchResults: model.searchResults,
                             isSearching: !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                             selectedRecordID: model.selectedRecordID,
+                            showsMemberLabels: model.selectedMemberID == nil,
                             memberLabel: model.memberLabel(for:),
                             dicomMemberLabel: model.dicomLibraryModel.memberLabel(for:),
                             onSelect: { id in Task { await model.selectRecord(id) } },
@@ -477,6 +478,11 @@ struct AppShellView: View {
                         )
                     }
                     .background(KinlogueTheme.surface)
+                    // Runs each time this timeline is entered: at launch, on
+                    // returning from another section and on choosing a member.
+                    .task(id: model.selectedMemberID) {
+                        await model.openNewestRecordIfNothingIsOpen()
+                    }
                     .navigationTitle(model.selectedMemberID.flatMap { id in
                         RecordQuery.selectionLabels(for: model.members)[id]
                     } ?? AppLocalization.string("家庭时间线"))
@@ -572,6 +578,8 @@ struct AppShellView: View {
             reviewQueue: model.reviewQueue,
             backgroundDrafts: model.backgroundDrafts,
             busyDraftIDs: model.busyDraftIDs,
+            reportRecognitionActivity: model.reportRecognitionActivity,
+            isReportRecognitionSlow: model.isReportRecognitionSlow,
             onAdd: { presentNewMemberEditorIfAvailable() },
             onOpenDraft: { presentReviewIfAvailable($0) },
             onRetryDraft: { id in Task { await model.retryDraft(id) } },

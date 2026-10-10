@@ -1,6 +1,6 @@
 # 当前候选证据
 
-<!-- release-facts: short=0.5.0 build=5 minimum-macos=26.0 tests=994 suites=91 automated-gates=not-verified overall=pendingManual -->
+<!-- release-facts: short=0.5.0 build=5 minimum-macos=26.0 tests=1030 suites=93 automated-gates=not-verified overall=pendingManual -->
 
 本页是当前版本、测试清单、候选身份和发布状态的唯一权威账本。其他页面只链接本页，不复制这些易漂移数字。
 
@@ -8,14 +8,14 @@
 
 | 维度 | 当前状态 | 说明 |
 | --- | --- | --- |
-| 源码自动化 | `not-verified` | 当前确定性主测试清单为 994 tests / 91 suites；macOS 27.0 / Xcode 27.0 上的完整 `scripts/test.sh`、lint、文档、本地化与当前树隐私门禁已在本轮工作树通过，逐项结果见[实现日志](../log.md)，尚未登记绑定不可变 source ref 的整套候选证据 |
+| 源码自动化 | `not-verified` | 当前确定性主测试清单为 1030 tests / 93 suites；macOS 27.0 / Xcode 27.0 上的完整 `scripts/test.sh`、lint、文档、本地化与当前树隐私门禁已在本轮工作树通过，逐项结果见[实现日志](../log.md)，尚未登记绑定不可变 source ref 的整套候选证据 |
 | clean-source bundle / XPC | `notExecuted` | macOS 27.0 / Xcode 27.0 上本轮 dirty-source Release 构建、资源清单、签名和真实 XPC 门禁已通过，详见[实现日志](../log.md)；尚未登记 `scripts/verify-app.sh --require-clean-source` 及绑定同一不可变 source ref 的候选证据 |
 | Git 历史隐私 | `verified-baseline` | 历史已验证基线为 `f9cc99b8adcfbfeba35bddc8575a8a464d25eaa2`；历史通过不替代每次公开推送前对待发布 ref 运行 history guard，全部公开 refs 仍须单独核验 |
 | 公开托管 | `external` | CI、CodeQL、Dependabot 与治理文件已入库；GitHub 安全设置、branch rules 和 workflow 运行属于可变远端状态，必须在托管平台实时核对，不把它们固化成 commit 内的永久结论 |
 | 公共分发 | `notExecuted` | 没有 Developer ID、notarization 或正式公众下载渠道证明 |
 | 整体状态 | `pendingManual` | 自动化即使通过，也不能覆盖真实设备、真实样本、Powerbox 和可访问性人工门禁 |
 
-`automated-gates` 只描述当前 source ref 是否完成整套自动化；`overall` 描述包含人工门禁的候选整体状态。当前确定性主测试清单为 994 tests / 91 suites；derived-artifact XCTest 由已构建 bundle 的完整 inventory 动态发现并逐 case 启动有界进程，不再维护手写 selector 名单。仅在大小写不敏感卷启用的别名锁测试，以及 storage process、DICOM 导入集成、验收扫描、安装 LAN 生产 HTTP 探针和真实双流 LAN RSS/背压用例另按脚本要求分别串行隔离。条件式测试在不适用卷上明确跳过，不进入固定主账。源码自动化通过不替代下列安装、真机与人工门禁。
+`automated-gates` 只描述当前 source ref 是否完成整套自动化；`overall` 描述包含人工门禁的候选整体状态。当前确定性主测试清单为 1030 tests / 93 suites；derived-artifact XCTest 由已构建 bundle 的完整 inventory 动态发现并逐 case 启动有界进程，不再维护手写 selector 名单。仅在大小写不敏感卷启用的别名锁测试，以及 storage process、DICOM 导入集成、验收扫描、安装 LAN 生产 HTTP 探针和真实双流 LAN RSS/背压用例另按脚本要求分别串行隔离。条件式测试在不适用卷上明确跳过，不进入固定主账。源码自动化通过不替代下列安装、真机与人工门禁。
 
 ## 开源 baseline 身份
 

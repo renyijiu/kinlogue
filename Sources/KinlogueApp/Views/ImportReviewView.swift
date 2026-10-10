@@ -1,3 +1,4 @@
+import AppKit
 import KinlogueCore
 import SwiftUI
 
@@ -33,6 +34,9 @@ struct ImportReviewView: View {
                     Text(AppLocalization.string("识别结果只是转录建议，请对照左侧原件确认。"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                    if model.isRecognitionSlow {
+                        SlowRecognitionNotice()
+                    }
                 }
                 Spacer()
                 Button {
@@ -199,7 +203,9 @@ struct ImportReviewView: View {
             HStack {
                 if model.loadFailed {
                     if let error = model.errorMessage {
-                        Text(error).foregroundStyle(.red).accessibilityLabel(AppLocalization.string("错误：\(error)"))
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                            .accessibilityLabel(AppLocalization.string("错误：\(error)"))
                     }
                     Spacer()
                     Button(AppLocalization.string("关闭")) { model.closeReview() }
@@ -211,14 +217,27 @@ struct ImportReviewView: View {
                         .accessibilityIdentifier("import-review-discard")
                     Spacer()
                     if let error = model.errorMessage {
-                        Text(error).foregroundStyle(.red).accessibilityLabel(AppLocalization.string("错误：\(error)"))
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                            .accessibilityLabel(AppLocalization.string("错误：\(error)"))
                     }
                     Button(AppLocalization.string("稍后处理")) { Task { await model.deferReview() } }
                         .buttonStyle(.kinlogueSecondary)
                         .disabled(model.isLoading || model.isTerminalActionInFlight || model.isRecognitionInFlight)
                         .accessibilityIdentifier("import-review-defer")
-                    Button(AppLocalization.string("确认并加入时间线")) { Task { await model.confirm() } }
+                    Button(AppLocalization.string("确认并加入时间线")) {
+                        // The shortcut arrives before an input method commits
+                        // its text; confirming then would drop that text.
+                        if NSApp.currentEvent?.type == .keyDown,
+                           TextInputComposition.isActive(in: NSApp.keyWindow?.firstResponder) {
+                            return
+                        }
+                        Task { await model.confirm() }
+                    }
                         .buttonStyle(.kinloguePrimary)
+                        // Return adds a line in the transcription editors, so
+                        // the form is confirmed with Command-Return instead.
+                        .keyboardShortcut(.return, modifiers: .command)
                         .disabled(model.isLoading || model.isTerminalActionInFlight || model.isRecognitionInFlight)
                         .accessibilityIdentifier("import-review-confirm")
                 }

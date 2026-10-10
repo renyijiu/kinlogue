@@ -61,11 +61,14 @@ final class ImportReviewModel: ObservableObject {
     private var originalLoadTask: Task<OriginalDocumentPayload, Error>?
     private var originalLoadID: UUID?
     private var recognitionRequestID: UUID?
+    private let slowRecognitionNoticeDelay: Duration
+    private var slowRecognitionNoticeTask: Task<Void, Never>?
 
     @Published private(set) var isLoading = true
     @Published private(set) var loadFailed = false
     @Published private(set) var isTerminalActionInFlight = false
     @Published private(set) var isRecognitionInFlight = false
+    @Published private(set) var isRecognitionSlow = false
     @Published var isPresented = true
     @Published var isDiscardConfirmationPresented = false
     @Published private(set) var members: [FamilyMember] = []
@@ -92,9 +95,14 @@ final class ImportReviewModel: ObservableObject {
     @Published private(set) var abnormalSourceDescriptions: [String] = []
     @Published private var userError: ImportReviewError?
 
-    init(draftID: ImportDraft.ID, service: any AppDataServicing) {
+    init(
+        draftID: ImportDraft.ID,
+        service: any AppDataServicing,
+        slowRecognitionNoticeDelay: Duration = ReportRecognitionNotice.slowDelay
+    ) {
         self.draftID = draftID
         self.service = service
+        self.slowRecognitionNoticeDelay = slowRecognitionNoticeDelay
     }
 
     var errorMessage: String? { userError?.localizedText }
@@ -133,10 +141,12 @@ final class ImportReviewModel: ObservableObject {
         recognitionRequestID = requestID
         isRecognitionInFlight = true
         userError = nil
+        startSlowRecognitionNotice(for: requestID)
         defer {
             if recognitionRequestID == requestID {
                 recognitionRequestID = nil
                 isRecognitionInFlight = false
+                endSlowRecognitionNotice()
             }
         }
         do {
@@ -282,7 +292,24 @@ final class ImportReviewModel: ObservableObject {
         isOriginalLoading = false
         recognitionRequestID = nil
         isRecognitionInFlight = false
+        endSlowRecognitionNotice()
         isPresented = false
+    }
+
+    private func startSlowRecognitionNotice(for requestID: UUID) {
+        slowRecognitionNoticeTask?.cancel()
+        slowRecognitionNoticeTask = Task { [weak self, slowRecognitionNoticeDelay] in
+            try? await Task.sleep(for: slowRecognitionNoticeDelay)
+            guard !Task.isCancelled, let self,
+                  self.recognitionRequestID == requestID else { return }
+            self.isRecognitionSlow = true
+        }
+    }
+
+    private func endSlowRecognitionNotice() {
+        slowRecognitionNoticeTask?.cancel()
+        slowRecognitionNoticeTask = nil
+        isRecognitionSlow = false
     }
 
     private func apply(document: ImportDraftDocument, sources: ReportSources) {
