@@ -58,6 +58,53 @@ struct ImportReviewViewSafetyTests {
         )
     }
 
+    @Test
+    func commandReturnConfirmsTheReviewButNotWhileAnInputMethodIsComposing() throws {
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let confirmStart = try #require(source.range(
+            of: "Button(AppLocalization.string(\"确认并加入时间线\"))"
+        ))
+        let confirmEnd = try #require(source.range(
+            of: ".accessibilityIdentifier(\"import-review-confirm\")",
+            range: confirmStart.lowerBound..<source.endIndex
+        ))
+        let confirm = source[confirmStart.lowerBound..<confirmEnd.upperBound]
+
+        #expect(confirm.contains(".keyboardShortcut(.return, modifiers: .command)"))
+        #expect(confirm.contains("NSApp.currentEvent?.type == .keyDown"))
+        #expect(confirm.contains("TextInputComposition.isActive(in: NSApp.keyWindow?.firstResponder)"))
+        #expect(confirm.contains(
+            ".disabled(model.isLoading || model.isTerminalActionInFlight || model.isRecognitionInFlight)"
+        ))
+        // Plain Return stays with the text editors; no other action takes it.
+        #expect(!source.contains(".keyboardShortcut(.defaultAction)"))
+    }
+
+    @Test
+    func reviewExplainsALongRecognition() throws {
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        #expect(source.contains("if model.isRecognitionSlow {\n                        SlowRecognitionNotice()"))
+    }
+
+    @Test
+    func inlineErrorsCarryAWarningSymbolAndNotOnlyColour() throws {
+        for filename in [
+            "ImportReviewView.swift", "RecordEditView.swift", "MemberSidebarView.swift",
+            "ComparisonView.swift", "DICOMStudyReviewView.swift",
+        ] {
+            let source = try source(named: filename)
+            // Red is reserved for an error message, which is always a Label
+            // with a symbol, or for a destructive control.
+            #expect(!source.contains("Text(error)"), "\(filename)")
+            #expect(!source.contains("Text(errorMessage)"), "\(filename)")
+            let redCount = source.components(separatedBy: ".foregroundStyle(.red)").count - 1
+            let warningCount = source.components(separatedBy: "systemImage: \"exclamationmark.triangle\"").count - 1
+            #expect(redCount > 0, "\(filename)")
+            #expect(warningCount >= redCount, "\(filename)")
+        }
+    }
+
     private var sourceURL: URL {
         repositoryURL
             .appendingPathComponent("Sources/KinlogueApp/Views/ImportReviewView.swift")

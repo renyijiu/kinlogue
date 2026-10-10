@@ -29,6 +29,19 @@ struct DICOMStudyReviewPresentation: Equatable, Identifiable {
     let id: DICOMStudy.ID
 }
 
+/// The file a report import or retry is on, counted from one.
+struct ReportRecognitionActivity: Equatable {
+    let position: Int
+    let total: Int
+}
+
+enum ReportRecognitionNotice {
+    /// How long recognition runs before the interface explains the wait. The
+    /// system prepares its recognition model on first use, which takes far
+    /// longer than any later recognition.
+    static let slowDelay: Duration = .seconds(4)
+}
+
 enum UpdateRecordResult: Equatable {
     case saved
     case recordChanged(latest: HealthRecord?)
@@ -65,6 +78,9 @@ final class AppModel: ObservableObject {
     private var pendingAutomaticReviewID: ImportDraft.ID?
     private var pendingDiscardDraftCommand: DiscardDraftCommand?
     private var activeDICOMStudyReviewModel: DICOMStudyReviewModel?
+    private let slowRecognitionNoticeDelay: Duration
+    private var reportRecognitionJobs: [(id: UUID, activity: ReportRecognitionActivity)] = []
+    private var slowRecognitionNoticeTask: Task<Void, Never>?
     let comparisonModel: ComparisonModel
     let dicomImportModel: DICOMImportModel
     let dicomLibraryModel: DICOMLibraryModel
@@ -101,6 +117,8 @@ final class AppModel: ObservableObject {
     @Published var pendingDeleteMemberID: FamilyMember.ID?
     @Published var pendingDiscardDraftID: ImportDraft.ID?
     @Published private(set) var busyDraftIDs: Set<ImportDraft.ID> = []
+    @Published private(set) var reportRecognitionActivity: ReportRecognitionActivity?
+    @Published private(set) var isReportRecognitionSlow = false
     @Published var banner: AppBanner?
     @Published private(set) var searchFocusRequestID = 0
 
@@ -112,9 +130,11 @@ final class AppModel: ObservableObject {
             UnavailableDICOMSliceService()
         },
         dicomViewerRegistry: DICOMViewerRegistry = DICOMViewerRegistry(),
+        slowRecognitionNoticeDelay: Duration = ReportRecognitionNotice.slowDelay,
         onDurableStateChanged: @escaping @MainActor @Sendable () -> Void = {}
     ) {
         self.service = service
+        self.slowRecognitionNoticeDelay = slowRecognitionNoticeDelay
         self.dicomService = dicomService
         self.dicomSliceServiceFactory = dicomSliceServiceFactory
         self.dicomViewerRegistry = dicomViewerRegistry
@@ -465,8 +485,11 @@ final class AppModel: ObservableObject {
         }
         guard !urls.isEmpty else { return }
 
+        let jobID = beginReportRecognitionJob(total: urls.count)
+        defer { endReportRecognitionJob(jobID) }
         var nextReviewID: ImportDraft.ID?
-        for url in urls {
+        for (index, url) in urls.enumerated() {
+            advanceReportRecognitionJob(jobID, to: index + 1)
             do {
                 switch try await service.importFile(at: url) {
                 case .needsReview(let id), .existingDraft(let id):
@@ -486,8 +509,10 @@ final class AppModel: ObservableObject {
 
     func retryDraft(_ id: ImportDraft.ID) async {
         guard busyDraftIDs.insert(id).inserted else { return }
+        let jobID = beginReportRecognitionJob(total: 1)
         defer {
             busyDraftIDs.remove(id)
+            endReportRecognitionJob(jobID)
             presentationDidEnd()
         }
         do {
@@ -550,6 +575,26 @@ final class AppModel: ObservableObject {
         )
     }
 
+    /// Opens the newest record of the visible timeline when it is entered with
+    /// nothing open. An open record, a search, a comparison selection or a
+    /// presented sheet is never disturbed.
+    func openNewestRecordIfNothingIsOpen() async {
+        guard phase == .ready,
+              selectedRecordID == nil,
+              !hasBlockingPresentation,
+              !comparisonModel.isSelecting,
+              searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let newest = timelineSections.lazy.flatMap(\.records).first else { return }
+        // The user did not ask for this record, so a failed load stays in the
+        // detail pane instead of raising an alert.
+        await loadOriginal(
+            for: newest,
+            sourceID: newest.sources.first.id,
+            isInitialSelection: true,
+            reportsFailure: false
+        )
+    }
+
     func selectOriginalSource(_ sourceID: ReportSource.ID) async {
         guard let record = selectedRecord,
               record.sources.elements.contains(where: { $0.id == sourceID }),
@@ -564,7 +609,8 @@ final class AppModel: ObservableObject {
     private func loadOriginal(
         for record: HealthRecord,
         sourceID: ReportSource.ID,
-        isInitialSelection: Bool
+        isInitialSelection: Bool,
+        reportsFailure: Bool = true
     ) async {
         originalLoadTask?.cancel()
         let loadID = UUID()
@@ -608,7 +654,9 @@ final class AppModel: ObservableObject {
                         original: nil
                     )
                     self.isOriginalLoading = false
-                    self.reportBanner(AppLocalization.string("原件暂时无法打开"))
+                    if reportsFailure {
+                        self.reportBanner(AppLocalization.string("原件暂时无法打开"))
+                    }
                 }
             }
         }
@@ -910,6 +958,8 @@ final class AppModel: ObservableObject {
         pendingDiscardDraftID = nil
         pendingDiscardDraftCommand = nil
         busyDraftIDs = []
+        reportRecognitionJobs = []
+        publishReportRecognitionActivity()
         banner = nil
         deferredBanner = nil
         pendingAutomaticReviewID = nil
@@ -984,6 +1034,47 @@ final class AppModel: ObservableObject {
             deferredBanner = next
         } else {
             banner = next
+        }
+    }
+
+    private func beginReportRecognitionJob(total: Int) -> UUID {
+        let id = UUID()
+        reportRecognitionJobs.append(
+            (id, ReportRecognitionActivity(position: 1, total: total))
+        )
+        publishReportRecognitionActivity()
+        return id
+    }
+
+    private func advanceReportRecognitionJob(_ id: UUID, to position: Int) {
+        guard let index = reportRecognitionJobs.firstIndex(where: { $0.id == id }) else { return }
+        reportRecognitionJobs[index].activity = ReportRecognitionActivity(
+            position: position,
+            total: reportRecognitionJobs[index].activity.total
+        )
+        publishReportRecognitionActivity()
+    }
+
+    private func endReportRecognitionJob(_ id: UUID) {
+        reportRecognitionJobs.removeAll { $0.id == id }
+        publishReportRecognitionActivity()
+    }
+
+    /// Shows the most recently started job. The wait is explained once, for as
+    /// long as any job keeps running.
+    private func publishReportRecognitionActivity() {
+        reportRecognitionActivity = reportRecognitionJobs.last?.activity
+        guard !reportRecognitionJobs.isEmpty else {
+            slowRecognitionNoticeTask?.cancel()
+            slowRecognitionNoticeTask = nil
+            isReportRecognitionSlow = false
+            return
+        }
+        guard slowRecognitionNoticeTask == nil else { return }
+        slowRecognitionNoticeTask = Task { [weak self, slowRecognitionNoticeDelay] in
+            try? await Task.sleep(for: slowRecognitionNoticeDelay)
+            guard !Task.isCancelled, let self, !self.reportRecognitionJobs.isEmpty else { return }
+            self.isReportRecognitionSlow = true
         }
     }
 

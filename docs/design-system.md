@@ -74,7 +74,7 @@ SwiftUI 独立次要操作可使用 `.buttonStyle(.kinlogueSecondary)`。取消�
 ## macOS 适配规则
 
 1. 保留控件角色。破坏性操作继续使用 `role: .destructive`；取消操作和工具栏按钮优先使用系统外观。窗口工具栏只统一背景为 Surface，不重做交通灯、按钮形态或键盘行为。
-2. 保留键盘语义。主操作仍可使用 `.keyboardShortcut(.defaultAction)`，取消操作使用 `.cancelAction`。
+2. 保留键盘语义。主操作仍可使用 `.keyboardShortcut(.defaultAction)`，取消操作使用 `.cancelAction`；含多行编辑器的报告复核页改用 Command-Return，见第 24 条。
 3. 自定义按钮和卡片不能移除可访问性标签、提示、禁用状态或键盘激活能力。
 4. `Reduce Motion` 开启时不执行按压缩放和状态动画，颜色仍即时变化。
 5. `Increase Contrast` 开启时增加组件描边，并提高辅助文字对比度。
@@ -92,6 +92,14 @@ SwiftUI 独立次要操作可使用 `.buttonStyle(.kinlogueSecondary)`。取消�
 17. 报告复核在重新识别、确认、稍后处理或删除进行中禁用整个编辑表单，避免请求已经捕获字段后仍接受无法保存的新输入；失败结束后恢复编辑。原件仍可供核对。实现与门禁见 [`ImportReviewView`](../Sources/KinlogueApp/Views/ImportReviewView.swift) 和 [`ImportReviewViewSafetyTests`](../Tests/KinlogueAppTests/ImportReviewViewSafetyTests.swift)。
 18. 报告详情随已接受的 catalog 快照更新到当前记录 revision，同时保留仍有效的原件选择与不可变原件；已打开编辑页仍保留自己的 revision，冲突后由用户明确重新载入。见 [`AppModelTests`](../Tests/KinlogueAppTests/AppModelTests.swift)。
 19. 确认整库恢复后，正常和资料库不可用的启动路径都先清空报告、手机收件箱与所有独立 Viewer 状态，等待 Viewer 关闭后才激活恢复；成功或激活失败均禁止普通资料访问，直到重新启动。恢复前验证失败仍不进入这条破坏性边界。组装与跨模型检查见 [`AppComposition`](../Sources/KinlogueApp/App/AppComposition.swift) 和 [`RestoreModelTests`](../Tests/KinlogueAppTests/RestoreModelTests.swift)。
+20. 报告时间线每次出现且没有打开任何记录时，自动打开当前可见时间线中最新的一条：启动完成、从医学影像/手机上传/设置返回、切换“全部记录”或某位成员，以及资料库内容换代后界面重新载入（例如确认一份报告之后）。最新按时间线日期判断，所以确认报告后打开的不一定是刚确认的那一条。已经打开的记录不会被替换；搜索中、比较选择中或有 sheet/提示时不触发；只有日期未知的记录时打开其中一条，医学影像检查不参与。这次打开不是用户点选的，原件读取失败时只在详情区显示“原件不可用”，不弹提示；用户手动点选同一条记录仍照常提示。删除当前记录后详情保持为空，直到时间线下一次出现。见 [`AppModel.openNewestRecordIfNothingIsOpen`](../Sources/KinlogueApp/App/AppModel.swift) 和 [`AppModelTests`](../Tests/KinlogueAppTests/AppModelTests.swift)。
+21. 时间线卡片上的成员 Chip 只在“全部记录”显示。选中某位成员后窗口标题已经是该成员，每张报告卡和影像卡不再重复；搜索结果遵循同一规则。卡片的 VoiceOver 标签和值仍包含成员。
+22. 侧边栏“待确认”分区标题显示草稿数量，每一行显示该草稿第一份原件的文件名，过长时中间截断并在悬停时给出全名；没有文件名时回退为“等待确认”。文件名是用户内容，不翻译。多份原件组成的草稿只显示第一份的名称；草稿标题保存在草稿文档里，侧边栏不为此逐份读取文档，因此不显示标题。
+23. 导入或重试报告时，侧边栏列表与“设置”之间显示识别状态：一个不确定进度指示和“正在识别报告…”，一次选择多份文件时附带“第 n/总数 个”。这块状态不在滚动列表内，列表滚到任何位置都可见。识别持续超过 4 秒后追加一段说明，告诉用户识别仍在进行、系统首次识别需要准备模型；报告复核页的“重新识别并覆盖”使用同一段说明。说明只解释等待，不改变识别调用，也不在启动时预热。整库删除或恢复清空界面状态时这块状态随之清除，迟到的导入结果不能把它恢复出来。手机上传项的后台预处理不使用这块状态。
+24. 报告复核页的“确认并加入时间线”可用 Command-Return 触发；逐字转录编辑器里的 Return 仍是换行，页面不设置 Return 默认按钮。快捷键先于输入法提交到达表单，所以当焦点控件还有未上屏的组合文字时这次按键不执行确认，用鼠标点按不受影响。已确认记录编辑页保持原有的 Return 默认按钮；SwiftUI 的一个按钮只能绑定一个快捷键，为它再加 Command-Return 需要一个不可见控件或放弃 Return，本轮没有做。
+25. sheet 内联错误统一使用带 `exclamationmark.triangle` 的 `Label` 加红色前景，不单独用红色文字表示错误；错误在页面上保留到下一次操作。全局错误继续使用需要用户关闭的系统提示。Kinlogue 没有会滞留的成功状态行，成功结果由 sheet 关闭、时间线更新或页面内的结果说明表达，因此没有引入短暂浮层提示。
+
+第 20–25 条的自动化只覆盖模型行为、宿主窗口中的 Command-Return 键等价和源码结构；实际窗口中的焦点、输入法、VoiceOver 朗读和窄侧边栏下的换行仍属于人工矩阵。
 
 ## 组件映射
 

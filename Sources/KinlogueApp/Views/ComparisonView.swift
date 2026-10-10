@@ -14,7 +14,7 @@ struct ComparisonSelectionBar: View {
                     .foregroundStyle(KinlogueTheme.primary)
                     .accessibilityLabel(AppLocalization.string("比较选择，已选择 \(model.selectionCountText)"))
                 if let error = model.errorMessage {
-                    Text(error)
+                    Label(error, systemImage: "exclamationmark.triangle")
                         .font(.subheadline)
                         .foregroundStyle(.red)
                 }

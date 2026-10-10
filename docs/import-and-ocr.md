@@ -66,6 +66,10 @@ locked PDF、空/损坏文件、实际类型不支持、页数/尺寸/像素超�
 
 OCR 输出预算：最多 4,096 blocks；单 block UTF-8 最多 64 KiB；总文本最多 1 MiB。预算超限属于 resource failure，不通过截断把不完整内容伪装成成功。
 
+### 首次识别的等待
+
+系统在一台 Mac 上首次执行 Vision 文字识别时要先准备识别模型。Go 预览在相同的 Vision 设置下观察到单页约半分钟，之后每页不到一秒；Swift 使用相同设置，推断会有同样的等待，尚未在 Swift 候选包上计时，也没有确认准备结果按构建、系统版本还是开机周期缓存。Finder 导入和失败草稿重试期间，侧边栏显示识别状态和当前是第几份文件；识别超过 4 秒后说明识别仍在进行以及首次识别较慢的原因，复核页“重新识别并覆盖”显示同一说明。界面规则见 [`design-system.md`](design-system.md) 第 23 条。
+
 ## 候选字段与来源
 
 `ReportCandidateExtractor` 只做可重复的候选抽取，例如成员名、机构、科室、报告类型、标题、日期候选、reported results、conclusion 和 abnormal items。它不生成 OCR 中不存在的 conclusion。当前 extraction version 5 在保留既有标签的基础上，覆盖以下保守别名：
@@ -116,6 +120,7 @@ Vision 常把“查”识别成异体字“査”，使“检査所见”一类�
 - 图片原件可在当前预览中向左或向右旋转 90°，旋转只改变显示方向，不重写附件字节、OCR blocks、来源引用或已提取候选；PDF 保持原始页面方向；
 - 已确认记录的编辑页面继续并排显示不可变原件和可编辑转录；切换原件只更新内存预览，不修改原件或来源顺序；页面冻结记录 revision，陈旧保存返回记录已变化而不能覆盖另一实例的新内容；
 - 用户可以明确要求重新 OCR 并覆盖当前字段；处理中确认、稍后处理和删除动作保持禁用；
+- “确认并加入时间线”可用 Command-Return 触发，输入法还有未上屏文字时这次按键不确认；
 - 用户必须选择成员，时间线日期可以选择一个 detected candidate、手工日期或 unknown；
 - `HealthRecord` 保存 ordered sources、OCR document object ID、候选字段、修正和 notes；
 - 只有 transition 到 `.confirmed` 后才出现在普通 App snapshot、时间线、搜索和比较中；
