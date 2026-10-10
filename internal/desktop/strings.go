@@ -6,6 +6,20 @@ import "fmt"
 // Each entry is simplified Chinese followed by English. Wording follows the
 // Swift app's Localizable strings wherever the Go preview has the same control.
 var stringsTable = map[string][2]string{
+	"fill_available":              {"识别结果中有可填入空白字段的内容，填入后请对照原件核对。", "Recognition found text for empty fields. Check it against the original after filling."},
+	"fill_empty":                  {"填入空白字段", "Fill Empty Fields"},
+	"printed_dates":               {"原件上印有：", "Printed on the original:"},
+	"date_kind_report":            {"报告日期", "Report Date"},
+	"date_kind_examination":       {"检查日期", "Study Date"},
+	"date_kind_collection":        {"采样日期", "Collection Date"},
+	"date_kind_admission":         {"入院日期", "Admission Date"},
+	"date_kind_discharge":         {"出院日期", "Discharge Date"},
+	"date_kind_other":             {"其他日期", "Other Date"},
+	"source_pages":                {"来源：原件第 %s 页", "Source: original pages %s"},
+	"source_part":                 {"原件 %d 第 %s 页", "original %d pages %s"},
+	"source_parts":                {"来源：%s", "Source: %s"},
+	"list_separator":              {"、", ", "},
+	"part_separator":              {"；", "; "},
 	"organization":                {"医院", "Hospital"},
 	"department":                  {"科室", "Department"},
 	"report_type":                 {"报告类型", "Report Type"},

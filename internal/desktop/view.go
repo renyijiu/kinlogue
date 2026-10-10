@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"kinlogue/internal/candidate"
 	"kinlogue/internal/document"
 	"kinlogue/internal/library"
 )
@@ -560,6 +562,7 @@ func (s *screen) summary(c *ui.Context) {
 			}
 			// No label: mygo reads a label instead of the text it is set on.
 			ui.Text(c, conclusion).Selectable()
+			s.sourceLine(c, "conclusion", conclusion)
 		})
 		info := []struct{ key, value string }{
 			{"organization", s.report.Review.Organization},
@@ -574,7 +577,10 @@ func (s *screen) summary(c *ui.Context) {
 					}
 					ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Start).Children(func() {
 						ui.Text(c, s.t(row.key)).Width(84).Shrink(0).TextColor(c.Theme().TextMuted)
-						ui.Text(c, row.value).Grow(1).MinWidth(0).Selectable()
+						ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
+							ui.Text(c, row.value).Selectable()
+							s.sourceLine(c, row.key, row.value)
+						})
 					})
 				}
 			})
@@ -585,6 +591,13 @@ func (s *screen) summary(c *ui.Context) {
 			})
 		}
 	})
+}
+
+// sourceLine is the Swift SourcePages caption under a confirmed field.
+func (s *screen) sourceLine(c *ui.Context, key, value string) {
+	if hint := s.sourceHint(key, value); hint != "" {
+		ui.Text(c, hint).FontSize(11).TextColor(c.Theme().TextMuted)
+	}
 }
 
 // detailCard is the Swift DetailCard: Container, Outline, 16pt corners.
@@ -829,6 +842,28 @@ func (s *screen) dateField(c *ui.Context, value *string, label string, disabled 
 	})
 }
 
+// printedDates offers the dates the report prints under a known label. The
+// user chooses; none is taken as the timeline date on its own.
+func (s *screen) printedDates(c *ui.Context) {
+	var offered []candidate.Date
+	for _, date := range s.found.Dates {
+		if date.Value != s.edit.Date && len(offered) < 4 {
+			offered = append(offered, date)
+		}
+	}
+	if len(offered) == 0 {
+		return
+	}
+	ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, s.t("printed_dates")).FontSize(12).TextColor(c.Theme().TextMuted)
+		for _, date := range offered {
+			if ui.Button(c, s.t("date_kind_"+date.Kind)+" "+date.Value).Key(date.Kind + date.Value).FontSize(12).Clicked() {
+				s.edit.Date = date.Value
+			}
+		}
+	})
+}
+
 func (s *screen) review(c *ui.Context) {
 	if s.report.Status == "failed" || s.report.Status == "processing" {
 		ui.Column(c).FillWidth().Gap(10).Children(func() {
@@ -841,6 +876,15 @@ func (s *screen) review(c *ui.Context) {
 		return
 	}
 	ui.Column(c).FillWidth().Gap(16).Disabled(s.busy != "").Children(func() {
+		if s.canFill() {
+			ui.Row(c).FillWidth().Gap(10).Padding(10, 12).AlignItems(ui.Center).Background(tokenContainer).Border(1, c.Theme().Border).Radius(10).Children(func() {
+				icon(c, iconScan, 16, c.Theme().TextMuted)
+				ui.Text(c, s.t("fill_available")).FontSize(12).TextColor(c.Theme().TextMuted).Grow(1).MinWidth(0).MaxLines(2)
+				if ui.Button(c, s.t("fill_empty")).Clicked() {
+					s.fillFromRecognition()
+				}
+			})
+		}
 		ui.Field(c, s.t("member"), func() {
 			choices := []choice{{"", s.t("choose_member")}}
 			for _, member := range s.members {
@@ -848,19 +892,18 @@ func (s *screen) review(c *ui.Context) {
 			}
 			picker(c, &s.edit.MemberID, choices, s.t("member"), false)
 		}).FillWidth()
-		ui.Field(c, s.t("date"), func() { s.dateField(c, &s.edit.Date, s.t("date"), false) }).FillWidth()
-		ui.Field(c, s.t("title"), func() {
-			field := ui.TextInput(c, &s.edit.Title).FillWidth()
-			s.composing = s.composing || field.Composing()
+		ui.Field(c, s.t("date"), func() {
+			s.dateField(c, &s.edit.Date, s.t("date"), false)
+			s.printedDates(c)
 		}).FillWidth()
 		for _, field := range []struct {
 			key   string
 			value *string
-		}{{"organization", &s.edit.Organization}, {"department", &s.edit.Department}, {"report_type", &s.edit.ReportType}} {
+		}{{"title", &s.edit.Title}, {"organization", &s.edit.Organization}, {"department", &s.edit.Department}, {"report_type", &s.edit.ReportType}} {
 			ui.Field(c, s.t(field.key), func() {
 				input := ui.TextInput(c, field.value).FillWidth()
 				s.composing = s.composing || input.Composing()
-			}).FillWidth()
+			}).Description(s.sourceHint(field.key, *field.value)).FillWidth()
 		}
 		ui.Field(c, s.t("transcription"), func() {
 			field := ui.TextArea(c, &s.edit.Text).Height(230).FillWidth().Padding(8)
@@ -869,7 +912,7 @@ func (s *screen) review(c *ui.Context) {
 		ui.Field(c, s.t("conclusion_verbatim"), func() {
 			field := ui.TextArea(c, &s.edit.Conclusion).Height(120).FillWidth().Padding(8)
 			s.composing = s.composing || field.Composing()
-		}).Description(s.t("verbatim_hint")).FillWidth()
+		}).Description(cmp.Or(s.sourceHint("conclusion", s.edit.Conclusion), s.t("verbatim_hint"))).FillWidth()
 		ui.Field(c, s.t("notes_optional"), func() {
 			field := ui.TextArea(c, &s.edit.Notes).Height(96).FillWidth().Padding(8)
 			s.composing = s.composing || field.Composing()

@@ -501,6 +501,7 @@ func (s *Store) archiveInbox(ctx context.Context, selected []InboxSelection, edi
 	r := Report{ID: opaqueID(), FileName: records[0].FileName, Status: "review", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Review: Edit{MemberID: edit.MemberID, Date: edit.Date, Title: edit.Title, Notes: edit.Notes}}
 	var originals []snapshotOriginal
 	var texts []string
+	var extractions []document.Extraction
 	pages := 0
 	for _, item := range records {
 		if item.Status != "reviewable" {
@@ -513,12 +514,15 @@ func (s *Store) archiveInbox(ctx context.Context, selected []InboxSelection, edi
 		r.Review.SourceIDs = append(r.Review.SourceIDs, item.ID)
 		originals = append(originals, snapshotOriginal{item.Digest, item.ByteCount})
 		texts = append(texts, item.Extraction.Text())
+		extractions = append(extractions, item.Extraction)
 		pages += item.Extraction.PageCount
 	}
 	r.Review.Text = strings.Join(texts, "\n")
 	if pages > document.MaxPages || len(r.Review.Text) > document.MaxTextBytes {
 		return Report{}, document.ErrLimit
 	}
+	// The title the user archived under is kept; only empty fields are filled.
+	proposeFields(&r.Review, extractions)
 	duplicate, e := s.matchInboxReport(ctx, originals)
 	if e != nil {
 		return Report{}, e

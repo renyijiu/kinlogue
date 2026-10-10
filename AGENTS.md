@@ -69,7 +69,7 @@ Kinlogue 借鉴 LLM Wiki 的“原始资料 → 编译后的 Wiki → schema”�
 
 ### Go 重写预览的范围
 
-[`docs/go-native-preview.md`](docs/go-native-preview.md) 是独立 Go 预览版的事实入口；上表和 `Core → Platform → App` 规则继续约束 Swift 基线。Go 代码由 `cmd/kinlogue` 组装：`internal/document` 只保存来源契约和校验，`internal/library` 负责存储，`internal/macos` 封装公开系统 API，`internal/app` 组合用例和生命周期，`internal/desktop` 只通过 Backend 调用业务能力。不得在界面中创建 Store、识别器或任意资料根目录。
+[`docs/go-native-preview.md`](docs/go-native-preview.md) 是独立 Go 预览版的事实入口；上表和 `Core → Platform → App` 规则继续约束 Swift 基线。Go 代码由 `cmd/kinlogue` 组装：`internal/document` 只保存来源契约和校验，`internal/candidate` 只从已保存的识别块给出字段建议和来源页，`internal/library` 负责存储，`internal/macos` 封装公开系统 API，`internal/app` 组合用例和生命周期，`internal/desktop` 只通过 Backend 调用业务能力。不得在界面中创建 Store、识别器或任意资料根目录。
 
 Go 预览使用独立 bundle ID 和沙盒资料目录，不扫描、迁移、覆盖或删除 Swift Vault。`go.mod`、`go.sum`、`internal/` 和 `cmd/` 同样是原始事实；依赖必须固定，行为改动先发现并强化 Go 测试。Go 界面文案进入 `internal/desktop/strings.go` 的中英文语义 key，启动文案同时维护中英文，长期错误不保存翻译后的文本；Swift String Catalog 门禁不能代替 Go 界面检查。预览验证命令和未完成门禁统一见其专题页，不能继承 Swift 发布结果。上述范围说明只改变实现组织，不放宽第 3 节的产品与隐私边界。
 

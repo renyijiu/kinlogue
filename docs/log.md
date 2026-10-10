@@ -1313,3 +1313,14 @@
 - **测试**：新增 [`internal/library/fields_test.go`](../internal/library/fields_test.go)和 [`internal/desktop/fields_test.go`](../internal/desktop/fields_test.go)。临时改坏“只读候选库按版本选列”和“空字段不写入”两处实现时，对应测试均失败，恢复后通过。首轮 race 发现新界面测试按 map 顺序点击字段导致偶发失败，改为固定表单顺序后重复 20 次通过。
 - **验证**：当前 Mac（Go 1.27.2、arm64）`gofmt`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 go test -count=1 ./...`、六包 `-race -count=1`、签名预览构建与校验、隐私、文档（UTF-8 locale）和 `git diff --check` 通过。未改动 `third_party/mygo`，未重跑其嵌套测试。同步 README、PRIVACY、[Go 预览](go-native-preview.md)、[Go 备份](go-backup-and-restore.md)、[Go 手机上传](go-lan-upload.md)、隐私工程页和索引中的格式版本与能力描述。
 - **边界**：只有无窗口测试与合成截图依据，未在实际窗口中填写、滚动或用输入法操作新字段；没有用已安装的旧版预览资料库做 v4→v5 升级验收；VoiceOver 和完整键盘矩阵仍待验收。升级后旧 Go 预览程序不能再打开该资料库。未推送。
+
+## 2026-10-10：Go 按标签和标题给出报告字段建议
+
+用户确认只做预填与现算的来源提示，不持久化来源、不升资料格式。新增纯函数包 [`internal/candidate`](../internal/candidate/)，按 Swift `ReportCandidateExtractor` 的规则移植标题、医院、科室、报告类型、检查结论和日期候选；受检者姓名、检验表格重建、叙述型检查所见和“报告自带标记”没有移植。
+
+- **预填**：`SaveSourceExtraction` 在全部原件识别完成、草稿进入待确认的同一事务写入建议，只填仍为空的字段；手机归档同样处理并保留归档标题。日期不预填，表单在日期栏下列出原件上印有的日期供点选。此前保存的草稿与已确认记录不自动改动，表单提供“填入空白字段”。检查结果（逐字）仍以全部识别文字为初稿。
+- **来源提示**：表单与详情的“来源：原件第 N 页”由字段当前文字在已保存识别块中逐行查找得出，不保存；改写后找不到即不显示，也不区分建议填入与用户录入。
+- **与 Swift 一致的已知行为**：结论段落会延续到下一页或下一个原件，直到出现已知标题、日期标签、签名行或查看类按钮文字；移植时未另加停止规则。
+- **测试**：[`candidate_test.go`](../internal/candidate/candidate_test.go)按 Swift 用例移植并补充“无标签不产生建议”、超长建议整条放弃和来源查找；库层与界面用例追加在两个 `fields_test.go`。合成截图核对了预填、日期选项与来源提示。
+- **验证**：当前 Mac（Go 1.27.2、arm64）`gofmt`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 go test -count=1 ./...`、含 candidate 的七包 `-race -count=1`、签名预览构建与校验、隐私、文档（UTF-8 locale）和 `git diff --check` 通过。未改动 `third_party/mygo`。同步 AGENTS、README、[Go 预览](go-native-preview.md)、[Go 手机上传](go-lan-upload.md)和索引。
+- **边界**：规则只用合成识别块验证，没有经过真实 PDFKit/Vision 对中文标签报告的输出，也没有用真实报告样本评估命中率和误填；合成 PDF 夹具没有内嵌中文字体，现有真实框架链路测试不产生任何建议。未在实际窗口中操作。未推送。

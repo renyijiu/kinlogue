@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"kinlogue/internal/candidate"
 	"kinlogue/internal/document"
 	_ "modernc.org/sqlite"
 )
@@ -836,10 +837,12 @@ func (s *Store) SaveSourceExtraction(ctx context.Context, id, sourceID string, e
 	r.Sources[index].Extraction = e
 	pages := 0
 	texts := []string{}
+	extractions := []document.Extraction{}
 	for _, source := range r.Sources {
 		pages += source.Extraction.PageCount
 		if source.Extraction.Engine != "" {
 			texts = append(texts, source.Extraction.Text())
+			extractions = append(extractions, source.Extraction)
 		}
 	}
 	text := strings.Join(texts, "\n")
@@ -857,7 +860,11 @@ func (s *Store) SaveSourceExtraction(ctx context.Context, id, sourceID string, e
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, "UPDATE sources SET extraction=? WHERE id=? AND report_id=? AND extraction=''", string(raw), sourceID, id)
 	if err == nil && len(texts) == len(r.Sources) {
-		_, err = tx.ExecContext(ctx, "UPDATE reports SET corrected_text=?,status='review',failure='' WHERE id=?", text, id)
+		// The draft becomes reviewable together with its proposals, so review
+		// never opens on a draft that is still waiting for them.
+		review := r.Review
+		proposeFields(&review, extractions)
+		_, err = tx.ExecContext(ctx, "UPDATE reports SET corrected_text=?,title=?,organization=?,department=?,report_type=?,conclusion=?,status='review',failure='' WHERE id=?", text, review.Title, review.Organization, review.Department, review.ReportType, review.Conclusion, id)
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -866,6 +873,28 @@ func (s *Store) SaveSourceExtraction(ctx context.Context, id, sourceID string, e
 		return Report{}, storageError(ctx, err)
 	}
 	return s.get(ctx, id)
+}
+
+// proposeFields copies what recognition found under known labels into the
+// fields that are still empty. The date stays unknown until the user picks
+// one, and nothing here confirms the report.
+func proposeFields(e *Edit, sources []document.Extraction) {
+	found := candidate.Extract(sources)
+	for _, field := range []struct {
+		value    *string
+		proposal string
+		max      int
+	}{
+		{&e.Title, found.Title, 1024},
+		{&e.Organization, found.Organization, 1024},
+		{&e.Department, found.Department, 1024},
+		{&e.ReportType, found.ReportType, 1024},
+		{&e.Conclusion, found.Conclusion, document.MaxTextBytes},
+	} {
+		if *field.value == "" && bounded(field.proposal, field.max) {
+			*field.value = field.proposal
+		}
+	}
 }
 
 func (s *Store) FailDraft(ctx context.Context, id, code string) error {

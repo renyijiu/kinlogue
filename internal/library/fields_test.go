@@ -34,8 +34,8 @@ func TestStructuredFieldsSurviveSaveConfirmEditAndReopen(t *testing.T) {
 	s, root := openTest(t)
 	m, _ := s.AddMember(ctx, "Synthetic member")
 	r := ready(t, s)
-	if r.Review.hasFields() {
-		t.Fatal("recognition must not fill verbatim fields")
+	if r.Review.hasFields() || r.Review.Title != "" {
+		t.Fatal("recognition without labels or headings must propose nothing")
 	}
 	e := fieldsEdit(r, m.ID)
 	saved, err := s.SaveReview(ctx, r.ID, e)
@@ -423,5 +423,90 @@ func TestFieldsUnretiredV4JournalAndLegacyV2Backup(t *testing.T) {
 	assertMigratedV1Fixture(t, runtime.Store(), fixture)
 	if _, err = os.Stat(filepath.Join(filepath.Dir(root), restoreJournalName)); !os.IsNotExist(err) {
 		t.Fatal("journal not retired")
+	}
+}
+
+func labeledExtraction(hospital, conclusion string) document.Extraction {
+	line := func(text string, y float64) document.Block {
+		return document.Block{Page: 1, Text: text, Method: "synthetic", Confidence: 1, Bounds: document.Rect{X: .05, Y: y, Width: .8, Height: .04}}
+	}
+	return document.Extraction{Kind: "pdf", PageCount: 1, Engine: "synthetic", Blocks: []document.Block{
+		line("医院名称："+hospital, .9), line("申请科室：合成科室", .85), line("报告类型：合成影像", .8), line("检查名称：合成检查", .75),
+		line("检查日期：2026-01-02", .7), line("检查结论", .6), line(conclusion, .55), line("报告医师：合成医师", .5),
+	}}
+}
+
+func TestRecognitionProposesFieldsWhenTheDraftBecomesReviewable(t *testing.T) {
+	s, root := openTest(t)
+	m, _ := s.AddMember(ctx, "Synthetic member")
+	r := multiDraft(t, s)
+	first, second := labeledExtraction("合成第一医院", "合成第一结论。"), labeledExtraction("合成第二医院", "合成第二结论。")
+	partial, err := s.SaveSourceExtraction(ctx, r.ID, r.Sources[0].ID, first)
+	if err != nil || partial.Status != "processing" || partial.Review.hasFields() || partial.Review.Title != "" {
+		t.Fatalf("a partly recognized draft took proposals: %v", err)
+	}
+	for _, source := range r.Sources[1:] {
+		if partial, err = s.SaveSourceExtraction(ctx, r.ID, source.ID, second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := Edit{Title: "合成检查", Organization: "合成第一医院", Department: "合成科室", ReportType: "合成影像"}
+	got := partial.Review
+	if partial.Status != "review" || got.Title != want.Title || got.Organization != want.Organization || got.Department != want.Department || got.ReportType != want.ReportType {
+		t.Fatalf("proposals = %+v", got)
+	}
+	if !strings.HasPrefix(got.Conclusion, "合成第一结论。\n合成第二结论。") {
+		t.Fatalf("conclusion did not follow source order: %q", got.Conclusion)
+	}
+	// A printed date is offered in review, never chosen, and the findings
+	// still start from the whole recognized text.
+	if got.Date != "" || got.MemberID != "" || !strings.Contains(got.Text, "医院名称：合成第一医院") {
+		t.Fatalf("proposals went beyond the labeled fields: %+v", got)
+	}
+	// Proposals are draft content: they are not searchable before confirmation.
+	if found, _ := s.Search(ctx, "", "合成第一医院"); len(found) != 0 {
+		t.Fatal("unconfirmed proposal is searchable")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	reopened, err := s.Get(ctx, r.ID)
+	if err != nil || !reopened.Review.Equal(got) {
+		t.Fatalf("proposals not saved with the review transition: %v", err)
+	}
+	// The user's corrections replace proposals like any other edit.
+	got.MemberID, got.Organization, got.Conclusion = m.ID, "用户改写的医院", ""
+	if confirmed, err := s.Confirm(ctx, r.ID, got); err != nil || !confirmed.Review.Equal(got) {
+		t.Fatalf("correction lost: %v", err)
+	}
+}
+
+func TestInboxArchiveProposesFieldsButKeepsTheGivenTitle(t *testing.T) {
+	s, _ := openTest(t)
+	member, _ := s.AddMember(ctx, "Synthetic member")
+	item := receiveTest(t, s, "synthetic-labeled")
+	item, err := s.BeginInboxProcessing(ctx, item.ID, item.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item, err = s.SaveInboxExtraction(ctx, item.ID, item.Revision, labeledExtraction("合成手机医院", "合成手机结论。")); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.ArchiveInbox(ctx, []InboxSelection{{item.ID, item.Revision}}, Edit{MemberID: member.ID, Title: "synthetic.pdf", Date: "2026-10-09"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, r.ID)
+	if err != nil || !got.Review.Equal(r.Review) {
+		t.Fatalf("archived report differs from the returned one: %v", err)
+	}
+	e := got.Review
+	if e.Title != "synthetic.pdf" || e.Date != "2026-10-09" || e.Organization != "合成手机医院" || e.Department != "合成科室" || e.ReportType != "合成影像" || e.Conclusion != "合成手机结论。" {
+		t.Fatalf("archive proposals = %+v", e)
 	}
 }

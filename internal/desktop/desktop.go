@@ -7,10 +7,12 @@ import (
 	"errors"
 	"image"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"kinlogue/internal/candidate"
 	"kinlogue/internal/document"
 	"kinlogue/internal/library"
 	"kinlogue/internal/macos"
@@ -88,6 +90,11 @@ type screen struct {
 	saveRequested                    bool
 	navigationRequested              func()
 	shutdownRequested                func()
+
+	// found is what recognition proposes for the open report; located caches
+	// where each field's current text appears in the originals.
+	found   candidate.Candidates
+	located map[string]locatedText
 }
 
 func newScreen(backend Backend, systemLanguage string) *screen {
@@ -453,6 +460,7 @@ func (s *screen) clearReport() {
 		s.previewCancel()
 	}
 	s.report, s.edit, s.bitmap, s.page, s.previewError, s.previewBusy, s.showRaw = library.Report{}, library.Edit{}, nil, 1, "", false, false
+	s.found, s.located = candidate.Candidates{}, nil
 	s.sourcePage, s.sourceText = 0, ""
 	s.sourceID, s.cachedSourceID, s.editingConfirmed = "", "", false
 	s.previewPaused = false
@@ -461,6 +469,7 @@ func (s *screen) clearReport() {
 func (s *screen) accept(report library.Report) {
 	previousReport, previousSource := s.report.ID, s.sourceID
 	s.report, s.edit = report, cloneEdit(report.Review)
+	s.found, s.located = candidate.Extract(s.extractions()), nil
 	s.sourceID = ""
 	if previousReport == report.ID {
 		for _, source := range report.Sources {
@@ -477,6 +486,103 @@ func (s *screen) accept(report library.Report) {
 	s.showRaw = false
 	s.sourcePage, s.sourceText = 0, ""
 	s.cachedSourceID = ""
+}
+
+// extractions lists the open report's recognition in the order being edited,
+// which is the numbering the original picker shows.
+func (s *screen) extractions() []document.Extraction {
+	result := make([]document.Extraction, 0, len(s.edit.SourceIDs))
+	for _, id := range s.edit.SourceIDs {
+		for _, source := range s.report.Sources {
+			if source.ID == id && source.Extraction.Engine != "" {
+				result = append(result, source.Extraction)
+				break
+			}
+		}
+	}
+	return result
+}
+
+type locatedText struct {
+	value, order string
+	at           []candidate.Location
+}
+
+// sourceHint says on which pages of the originals a field's text can be
+// checked, or nothing when recognition did not read that text anywhere.
+func (s *screen) sourceHint(key, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(s.report.Sources) == 0 {
+		return ""
+	}
+	order := strings.Join(s.edit.SourceIDs, ",")
+	entry, ok := s.located[key]
+	if !ok || entry.value != value || entry.order != order {
+		entry = locatedText{value, order, candidate.Locate(s.extractions(), value)}
+		if s.located == nil {
+			s.located = map[string]locatedText{}
+		}
+		s.located[key] = entry
+	}
+	if len(entry.at) == 0 {
+		return ""
+	}
+	pages := func(source int) string {
+		var list []string
+		for _, at := range entry.at {
+			if at.Source == source {
+				list = append(list, strconv.Itoa(at.Page))
+			}
+		}
+		return strings.Join(list, s.t("list_separator"))
+	}
+	if len(s.report.Sources) == 1 {
+		return s.t("source_pages", pages(1))
+	}
+	var parts []string
+	for source := 1; source <= len(s.report.Sources); source++ {
+		if list := pages(source); list != "" {
+			parts = append(parts, s.t("source_part", source, list))
+		}
+	}
+	return s.t("source_parts", strings.Join(parts, s.t("part_separator")))
+}
+
+// proposals pairs each field recognition can propose with its proposal.
+func (s *screen) proposals() [5]struct {
+	value    *string
+	proposal string
+} {
+	return [5]struct {
+		value    *string
+		proposal string
+	}{
+		{&s.edit.Title, s.found.Title},
+		{&s.edit.Organization, s.found.Organization},
+		{&s.edit.Department, s.found.Department},
+		{&s.edit.ReportType, s.found.ReportType},
+		{&s.edit.Conclusion, s.found.Conclusion},
+	}
+}
+
+// canFill reports whether an empty field has a proposal. New drafts are
+// filled as they become reviewable; this serves reports saved before that.
+func (s *screen) canFill() bool {
+	for _, field := range s.proposals() {
+		if *field.value == "" && field.proposal != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// fillFromRecognition never replaces what a field already holds.
+func (s *screen) fillFromRecognition() {
+	for _, field := range s.proposals() {
+		if *field.value == "" {
+			*field.value = field.proposal
+		}
+	}
 }
 
 func cloneEdit(edit library.Edit) library.Edit {

@@ -79,15 +79,25 @@ func TestUIEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		report, err = store.SaveSourceExtraction(ctx, report.ID, report.Sources[0].ID, document.Extraction{Kind: "pdf", PageCount: 1, Engine: "synthetic", Blocks: []document.Block{{Page: 1, Text: "合成示例内容 · 仅用于产品界面展示", Method: "synthetic", Confidence: 1}}})
+		extraction := document.Extraction{Kind: "pdf", PageCount: 1, Engine: "synthetic", Blocks: []document.Block{{Page: 1, Text: "合成示例内容 · 仅用于产品界面展示", Method: "synthetic", Confidence: 1}}}
+		if i == len(rows) {
+			// The draft shows what recognition proposes from labeled lines.
+			extraction.Blocks = nil
+			for n, text := range []string{"医院名称：示例健康中心（合成）", "申请科室：合成示例科室", "检查名称：待确认的合成报告", "检查日期：2025-12-01", "报告日期：2025-12-02", "检查结论", "合成示例结论 · 仅用于产品界面展示", "报告医师：合成示例"} {
+				extraction.Blocks = append(extraction.Blocks, document.Block{Page: 1, Text: text, Method: "synthetic", Confidence: 1, Bounds: document.Rect{X: .05, Y: .9 - float64(n)*.05, Width: .8, Height: .04}})
+			}
+		}
+		report, err = store.SaveSourceExtraction(ctx, report.ID, report.Sources[0].ID, extraction)
 		if err != nil {
 			t.Fatal(err)
 		}
 		edit := report.Review
-		edit.MemberID, edit.Title, edit.Date = members[r.member], r.title, r.date
-		edit.Text, edit.Notes = "合成示例内容 · 仅用于产品界面展示", "合成备注 · 示例健康中心"
+		if i < len(rows) {
+			edit.MemberID, edit.Title, edit.Date = members[r.member], r.title, r.date
+			edit.Text, edit.Notes = "合成示例内容 · 仅用于产品界面展示", "合成备注 · 示例健康中心"
+		}
 		// Every fourth record keeps the fields empty to show the fallbacks.
-		if i%4 != 3 {
+		if i < len(rows) && i%4 != 3 {
 			edit.Organization, edit.Department, edit.ReportType = "示例健康中心（合成）", "合成示例科室", r.title
 			edit.Conclusion = "合成示例结论 · 仅用于产品界面展示"
 		}

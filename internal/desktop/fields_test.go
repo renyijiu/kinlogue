@@ -181,3 +181,119 @@ func TestVerbatimFieldsReachTimelineSearchAndDetailThroughRealLibrary(t *testing
 		t.Fatal("opened record lacks its verbatim fields")
 	}
 }
+
+func labeledSource(id, hospital string) library.Source {
+	line := func(text string, y float64) document.Block {
+		return document.Block{Page: 1, Text: text, Method: "synthetic", Confidence: 1, Bounds: document.Rect{X: .05, Y: y, Width: .8, Height: .04}}
+	}
+	return library.Source{ID: id, FileName: id + ".pdf", Extraction: document.Extraction{Kind: "pdf", PageCount: 1, Engine: "synthetic", Blocks: []document.Block{
+		line("医院名称："+hospital, .9), line("申请科室：Synthetic Radiology", .85), line("检查日期：2026-01-02", .8), line("报告日期：2026-01-03", .75),
+		line("检查结论", .6), line("Synthetic printed conclusion", .55), line("报告医师：Synthetic", .5),
+	}}}
+}
+
+func TestOlderDraftFillsOnlyEmptyFieldsOnRequest(t *testing.T) {
+	s, f, _ := testScreen(t)
+	f.report.Sources = []library.Source{labeledSource("source-a", "Synthetic Hospital")}
+	f.report.Review.Organization = "Typed by the user"
+	s.accept(f.report)
+	tt := ui.NewTester(s.view, 1240, 900)
+	if !tt.HasText(s.t("fill_available")) || s.dirty() {
+		t.Fatal("a draft with proposals for empty fields must offer them without applying them")
+	}
+	if err := tt.Click(s.t("fill_empty")); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if s.edit.Organization != "Typed by the user" || s.edit.Title != "Synthetic report" {
+		t.Fatal("filling replaced what the user had entered")
+	}
+	if s.edit.Department != "Synthetic Radiology" || s.edit.Conclusion != "Synthetic printed conclusion" || !s.dirty() {
+		t.Fatalf("empty fields not filled: %+v", s.edit)
+	}
+	if s.edit.Date != "" {
+		t.Fatal("filling chose a date")
+	}
+	if tt.HasText(s.t("fill_available")) {
+		t.Fatal("offer stayed after nothing was left to fill")
+	}
+}
+
+func TestPrintedDatesAreOfferedAndNeverChosenAutomatically(t *testing.T) {
+	s, f, _ := testScreen(t)
+	f.report.Sources = []library.Source{labeledSource("source-a", "Synthetic Hospital")}
+	s.accept(f.report)
+	tt := ui.NewTester(s.view, 1240, 900)
+	if s.edit.Date != "" || !tt.HasText("Study Date 2026-01-02") || !tt.HasText("Report Date 2026-01-03") {
+		t.Fatal("printed dates must be offered while the date stays unknown")
+	}
+	if err := tt.Click("Report Date 2026-01-03"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if s.edit.Date != "2026-01-03" || !s.dirty() {
+		t.Fatalf("choosing a printed date did not set it: %q", s.edit.Date)
+	}
+	if tt.HasText("Report Date 2026-01-03") || !tt.HasText("Study Date 2026-01-02") {
+		t.Fatal("the chosen date must leave the offers and the other stay")
+	}
+}
+
+func TestSourceHintFollowsTheCurrentText(t *testing.T) {
+	s, f, _ := testScreen(t)
+	f.report.Sources = []library.Source{labeledSource("source-a", "Synthetic Hospital")}
+	f.report.Review.Organization = "Synthetic Hospital"
+	s.accept(f.report)
+	tt := ui.NewTester(s.view, 1240, 900)
+	if !tt.HasText("Source: original pages 1") {
+		t.Fatal("a field found in the recognized text must name its page")
+	}
+	if err := clickField(tt, "Hospital"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type(" annex")
+	tt.Frame()
+	// The original does not say this, so no page is claimed for it.
+	if s.edit.Organization != "Synthetic Hospital annex" || tt.HasText("Source: original pages 1") {
+		t.Fatal("edited text kept a source it no longer has")
+	}
+
+	// With several originals the hint names the original as the picker numbers it.
+	f.report.Sources = []library.Source{labeledSource("source-a", "First Hospital"), labeledSource("source-b", "Second Hospital")}
+	f.report.Review.SourceIDs = []string{"source-a", "source-b"}
+	s.accept(f.report)
+	if got := s.sourceHint("organization", "Second Hospital"); got != "Source: original 2 pages 1" {
+		t.Fatalf("hint = %q", got)
+	}
+	s.edit.SourceIDs = []string{"source-b", "source-a"}
+	if got := s.sourceHint("organization", "Second Hospital"); got != "Source: original 1 pages 1" {
+		t.Fatalf("hint after reordering = %q", got)
+	}
+	s.language = "zh-Hans"
+	if got := s.sourceHint("conclusion", "Synthetic printed conclusion"); got != "来源：原件 1 第 1 页" {
+		t.Fatalf("Chinese hint = %q", got)
+	}
+}
+
+func TestConfirmedDetailNamesSourcePages(t *testing.T) {
+	s, f, _ := testScreen(t)
+	f.report.Status = "confirmed"
+	f.report.Sources = []library.Source{labeledSource("source-a", "Synthetic Hospital")}
+	f.report.Review.Organization, f.report.Review.Conclusion, f.report.Review.ReportType = "Synthetic Hospital", "Synthetic printed conclusion", "Entered by hand"
+	s.accept(f.report)
+	tt := ui.NewTester(s.view, 1240, 1800)
+	hints := 0
+	for _, text := range tt.Texts() {
+		if text == "Source: original pages 1" {
+			hints++
+		}
+	}
+	// The hospital and the conclusion are on the page; the typed report type is not.
+	if hints != 2 {
+		t.Fatalf("detail shows %d source captions", hints)
+	}
+	// A confirmed record is not offered a fill until the user starts editing.
+	if tt.HasText(s.t("fill_available")) {
+		t.Fatal("fill offered outside the edit sheet")
+	}
+}
