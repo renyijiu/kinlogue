@@ -35,7 +35,7 @@ func (s *screen) backupView(c *ui.Context) {
 				ui.Text(c, s.t("restore_activating_detail"))
 				return
 			}
-			ui.Column(c).Key(s.backup.generation).FillWidth().Gap(16).Disabled(s.busy != "").Children(func() {
+			ui.Column(c.Key(s.backup.generation)).FillWidth().Gap(16).Disabled(s.busy != "").Children(func() {
 				switch s.backup.step {
 				case "":
 					if !s.recoveryOnly {

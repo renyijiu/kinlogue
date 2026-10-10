@@ -142,3 +142,24 @@ func TestAllRecordsSearchAndMemberFilterUseRealLibrary(t *testing.T) {
 		t.Fatal("all-records navigation failed after member filtering")
 	}
 }
+
+// The page preview scales down to its card. With mygo v0.3 a filled column
+// keeps the height of its content, which pushed the page past the card.
+func TestOriginalPreviewStaysInsideItsCard(t *testing.T) {
+	s, f, drain := testScreen(t)
+	f.report.Status = "confirmed"
+	s.accept(f.report)
+	s.preview(1)
+	drain()
+	tt := ui.NewTester(s.view, 1366, 768)
+	tt.Frame()
+	card, ok := tt.Find(s.t("original_pane"))
+	if !ok || card.H < 200 || card.Y+card.H > 768-20 {
+		t.Fatalf("original card is not laid out above the window's bottom margin: %+v", card)
+	}
+	// The strip under the card is the window's warm background, not the
+	// white surface of the page.
+	if below := tt.Image().RGBAAt(int(card.X+card.W/2), int(card.Y+card.H)+8); below.R == 0xFF && below.G == 0xFF && below.B == 0xFF {
+		t.Fatal("the page preview is drawn past the bottom of its card")
+	}
+}

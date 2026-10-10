@@ -142,7 +142,7 @@ func (s *screen) view(c *ui.Context) {
 	}
 }
 
-func divider(c *ui.Context, vertical bool) *ui.Element {
+func divider(c *ui.Context, vertical bool) ui.Element {
 	if vertical {
 		return ui.Box(c).Width(1).FillHeight().Shrink(0).Background(c.Theme().Border)
 	}
@@ -209,7 +209,7 @@ func (s *screen) sidebar(c *ui.Context) {
 			}
 			sectionHeader(c, s.t("members"))
 			for _, member := range s.members {
-				ui.Column(c).Key(member.ID).FillWidth().Children(func() {
+				ui.Column(c.Key(member.ID)).FillWidth().Children(func() {
 					if s.sidebarRow(c, iconPerson, member.Name, "", records && member.ID == s.memberID) {
 						s.selectMember(member.ID)
 					}
@@ -229,7 +229,7 @@ func (s *screen) sidebar(c *ui.Context) {
 			if len(waiting) > 0 {
 				sectionHeader(c, s.t("awaiting_review_count", len(waiting)))
 				for _, draft := range waiting {
-					ui.Column(c).Key(draft.ID).FillWidth().Children(func() {
+					ui.Column(c.Key(draft.ID)).FillWidth().Children(func() {
 						// Name each draft so several waiting reports are distinguishable.
 						name := strings.TrimSpace(draft.Review.Title)
 						if name == "" {
@@ -244,7 +244,7 @@ func (s *screen) sidebar(c *ui.Context) {
 			if len(background) > 0 {
 				sectionHeader(c, s.t("import_status"))
 				for _, draft := range background {
-					ui.Row(c).Key(draft.ID).FillWidth().Gap(4).AlignItems(ui.Center).Children(func() {
+					ui.Row(c.Key(draft.ID)).FillWidth().Gap(4).AlignItems(ui.Center).Children(func() {
 						if draft.Status == "processing" {
 							ui.Row(c).Grow(1).MinHeight(36).Padding(0, 12).Gap(10).AlignItems(ui.Center).Children(func() {
 								icon(c, iconHourglass, 16, c.Theme().TextMuted)
@@ -395,7 +395,7 @@ func (s *screen) list(c *ui.Context) {
 					})
 					label := s.reportList.Label(i)
 					highlighted := r.ID == s.report.ID || i == s.selectedReport
-					card := ui.ButtonBase(c).Key(r.ID).Grow(1).MinWidth(0).Padding(16).Radius(16).Background(c.Theme().Surface).TextColor(c.Theme().Text).Border(1, c.Theme().Border).Label(label).Disabled(s.busy != "").Margin(0, 0, 12, 0)
+					card := ui.ButtonBase(c.Key(r.ID)).Grow(1).MinWidth(0).Padding(16).Radius(16).Background(c.Theme().Surface).TextColor(c.Theme().Text).Border(1, c.Theme().Border).Label(label).Disabled(s.busy != "").Margin(0, 0, 12, 0)
 					card.Shadow(0, 1, 3, 0, ui.RGBA(0, 0, 0, 0.06))
 					if card.Hovered() {
 						card.Background(c.Theme().SurfaceHover).Shadow(0, 4, 8, 0, ui.RGBA(0, 0, 0, 0.13))
@@ -470,7 +470,7 @@ func (s *screen) searchField(c *ui.Context) {
 	})
 }
 
-func chip(c *ui.Context, text string) *ui.Element {
+func chip(c *ui.Context, text string) ui.Element {
 	return ui.Text(c, text).FontSize(11).Bold().SingleLine().TextColor(c.Theme().TextMuted).Background(tokenChip).Padding(4, 10).Radius(11).Shrink(0)
 }
 
@@ -510,7 +510,7 @@ func (s *screen) detail(c *ui.Context) {
 // originalCard is the Swift record-original-pane: Container with an outline,
 // a Primary "Original" label, a divider, then the inline original.
 func (s *screen) originalCard(c *ui.Context, confirmed bool) {
-	ui.Column(c).Key(s.report.ID).Fill().Padding(12).Gap(10).Background(tokenContainer).Border(1, c.Theme().Border).Radius(12).Label(s.t("original_pane")).Children(func() {
+	ui.Column(c.Key(s.report.ID)).Fill().Padding(12).Gap(10).Background(tokenContainer).Border(1, c.Theme().Border).Radius(12).Label(s.t("original_pane")).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			icon(c, iconDoc, 17, c.Theme().Accent)
 			ui.Text(c, s.t("original")).Bold().TextColor(c.Theme().Accent)
@@ -627,7 +627,9 @@ func (s *screen) detailCard(c *ui.Context, glyph *ui.SVG, title string, content 
 // original shows the selected source with the page bar above it, like the
 // Swift inline original view. review adds source ordering and initial OCR.
 func (s *screen) original(c *ui.Context, review bool) {
-	ui.Column(c).Fill().Gap(8).Children(func() {
+	// Grow rather than Fill: the preview scales down to the room its card
+	// has, where a filled column would keep the height of the page image.
+	ui.Column(c).FillWidth().Grow(1).MinHeight(0).Gap(8).Children(func() {
 		if len(s.report.Sources) > 1 {
 			choices := make([]choice, 0, len(s.edit.SourceIDs))
 			for i, id := range s.edit.SourceIDs {
@@ -666,7 +668,7 @@ func (s *screen) original(c *ui.Context, review bool) {
 				s.preview(s.page + 1)
 			}
 		})
-		image := func(e *ui.Element) {
+		image := func(e ui.Element) {
 			e.FillWidth().Background(c.Theme().Surface).Border(1, c.Theme().Border).Padding(8).Children(func() {
 				if s.bitmap != nil {
 					ui.Image(c, s.bitmap).Label(s.t("original")).Fill().Fit(ui.Contain)
@@ -799,7 +801,7 @@ func (s *screen) reviewSheet(c *ui.Context) {
 			})
 		})
 	})
-	if panel != nil {
+	if panel.Valid() {
 		w, h := c.Size()
 		panel.Width(min(w-40, 1180)).Height(min(h-40, 780)).Label(s.t("review_title"))
 	}
@@ -870,7 +872,7 @@ func (s *screen) printedDates(c *ui.Context) {
 	ui.Row(c).FillWidth().Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, s.t("printed_dates")).FontSize(12).TextColor(c.Theme().TextMuted)
 		for _, date := range offered {
-			if ui.Button(c, s.t("date_kind_"+date.Kind)+" "+date.Value).Key(date.Kind + date.Value).FontSize(12).Clicked() {
+			if ui.Button(c.Key(date.Kind+date.Value), s.t("date_kind_"+date.Kind)+" "+date.Value).FontSize(12).Clicked() {
 				s.edit.Date = date.Value
 			}
 		}
@@ -951,7 +953,7 @@ func picker(c *ui.Context, value *string, options []choice, label string, disabl
 		ui.Text(c, selectedLabel).SingleLine().Grow(1).MinWidth(0)
 		ui.Text(c, "▾").TextColor(c.Theme().TextMuted)
 	})
-	p.Popup(func(panel *ui.Element) {
+	p.Popup(func(panel ui.Element) {
 		panel.Padding(4).Background(c.Theme().Surface).Border(1, c.Theme().Border).Radius(7)
 		for _, option := range options {
 			item := p.Item(option).Padding(9, 10).Radius(5).Label(option.label)

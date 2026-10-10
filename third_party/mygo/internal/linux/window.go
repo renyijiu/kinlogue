@@ -23,6 +23,7 @@ const (
 	stateMaximized  = 1 << 2
 	stateFullscreen = 1 << 4
 	stateAbove      = 1 << 5
+	stateFocused    = 1 << 7
 	stateTiled      = 1 << 8
 	// The edges the window manager lets resize (GDK 3.22.23 and later).
 	stateTopResizable    = 1 << 10
@@ -69,6 +70,15 @@ type window struct {
 	minW, minH   int32
 	maxW, maxH   int32
 
+	// activationResize holds the latest bounds asked for while a window
+	// drawing with GL on Wayland is not focused, and activationPrevious the
+	// size it had before: the configure event of its activation can bring
+	// that size back. resizeIdle is the idle source that then asks for the
+	// bounds again (cbActivationResize).
+	activationResize   *platform.Rect
+	activationPrevious [2]int32
+	resizeIdle         uint32
+
 	// dragged holds the paths of the files dragged over the page, dropped
 	// those of the files dropped on it, for DroppedFiles.
 	dragged, dropped []string
@@ -83,6 +93,10 @@ type window struct {
 		event      ptr
 		hasPressed bool
 	}
+
+	// dragPending holds whether a window drag was requested with the last
+	// press and waits for the pointer to move; see StartDrag.
+	dragPending bool
 
 	// cursor is the resize cursor shown over an edge of a frameless
 	// window, and the page's cursor it replaced.
@@ -323,6 +337,16 @@ func (w *window) SetBounds(r platform.Rect) {
 		gtkWindowGetSize(w.win, &w.previous[0], &w.previous[1])
 	}
 	w.requested = &r
+	if w.resizeIdle != 0 {
+		w.activationResize = &r // the idle callback asks for it
+		return
+	}
+	if !w.b.onX11 && w.surface != nil && w.surface.rendered && w.surface.drawsGL() && w.state&stateFocused == 0 {
+		if w.activationResize == nil {
+			gtkWindowGetSize(w.win, &w.activationPrevious[0], &w.activationPrevious[1])
+		}
+		w.activationResize = &r
+	}
 	// GTK keeps a window the user cannot resize at least as large as its
 	// default size.
 	gtkWindowSetDefaultSize(w.win, width, height)
@@ -533,10 +557,40 @@ func (w *window) SetIgnoreMouseEvents(bool) {}
 func (w *window) SetContentProtection(bool) {}
 func (w *window) SetVibrancy(string)        {}
 
+// StartDrag begins moving the window with the last button press. On an
+// undecorated window the compositor takes the pointer once the move
+// starts, so the move waits until the pointer moves, keeping a second
+// press free to reach the page as a double click. Decorated windows
+// observe no motion on the page, so they move at once.
 func (w *window) StartDrag() {
 	if !w.press.hasPressed {
 		return
 	}
+	if !w.undecorated() {
+		gtkWindowBeginMoveDrag(w.win, w.press.button, int32(w.press.rootX), int32(w.press.rootY), w.press.time)
+		return
+	}
+	w.dragPending = true
+}
+
+// checkDragStart starts a pending window drag once the pointer moves past
+// the drag threshold with the button still down.
+func (w *window) checkDragStart(event ptr) {
+	if !w.dragPending {
+		return
+	}
+	// GdkEventMotion: state 48, x_root 64, y_root 72.
+	if field[uint32](event, 48)&(1<<8) == 0 {
+		// The button went up without the pointer moving.
+		w.dragPending = false
+		return
+	}
+	const dragThreshold = 8 // pixels, as GTK's
+	dx, dy := field[float64](event, 64)-w.press.rootX, field[float64](event, 72)-w.press.rootY
+	if dx*dx+dy*dy < dragThreshold*dragThreshold {
+		return
+	}
+	w.dragPending = false
 	gtkWindowBeginMoveDrag(w.win, w.press.button, int32(w.press.rootX), int32(w.press.rootY), w.press.time)
 }
 
@@ -931,7 +985,7 @@ var (
 	cbScriptMessage, cbLoadChanged, cbLoadFailed, cbTitle, cbDecidePolicy       ptr
 	cbCreate, cbClose, cbCrashed, cbButtonPress, cbAsyncReady, cbPNGWrite       ptr
 	cbDragData, cbDragDrop, cbPrintFinished, cbPrintFailed, cbPermission        ptr
-	cbMotion, cbControlsAllocated, cbDecorationLayout                           ptr
+	cbMotion, cbControlsAllocated, cbDecorationLayout, cbActivationResize       ptr
 )
 
 func field[T any](p ptr, offset uintptr) T {
@@ -965,6 +1019,38 @@ func initWindowCallbacks() {
 		}
 		return false
 	})
+	// A window drawing with GL on Wayland got focus: the configure event of
+	// the activation can carry the size of the last buffer it drew, from
+	// before a resize GTK already took, and GTK went back to it. Ask for the
+	// latest bounds again then, unless the window manager sized the window.
+	cbActivationResize = purego.NewCallback(func(data ptr) int32 {
+		w := b().window(data)
+		if w == nil {
+			return 0
+		}
+		r := w.activationResize
+		w.activationResize, w.resizeIdle = nil, 0
+		var width, height int32
+		gtkWindowGetSize(w.win, &width, &height)
+		if w.state&(stateMaximized|stateFullscreen|stateTiled) == 0 &&
+			(w.requested != nil || [2]int32{width, height} == w.activationPrevious) {
+			// GTK skips a request for the size it asked for last: the first
+			// check takes the configure, the second asks for the size the
+			// window has, so that the bounds are asked for again. Handlers
+			// of the new size may close the window.
+			gtkWindowResize(w.win, width, height)
+			gtkContainerCheckResize(w.win)
+			if !w.closed {
+				gtkContainerCheckResize(w.win)
+			}
+			if !w.closed {
+				w.SetBounds(*r)
+			}
+		} else {
+			w.requested = nil
+		}
+		return 0
+	})
 	cbConfigure = purego.NewCallback(func(widget, event, data ptr) bool {
 		w := b().window(data)
 		if w == nil {
@@ -976,7 +1062,7 @@ func initWindowCallbacks() {
 		moved := x != w.x || y != w.y
 		resized := width != w.w || height != w.hgt
 		w.x, w.y, w.w, w.hgt = x, y, width, height
-		if r := w.requested; r != nil {
+		if r := w.requested; r != nil && w.resizeIdle == 0 {
 			// Without the decorations GTK draws, as requested.
 			var cw, ch int32
 			gtkWindowGetSize(w.win, &cw, &ch)
@@ -1026,6 +1112,11 @@ func initWindowCallbacks() {
 		// GdkEventWindowState: changed_mask at 20, new_window_state at 24.
 		changed, state := field[uint32](event, 20), field[uint32](event, 24)
 		w.state = state
+		if changed&stateFocused != 0 && state&stateFocused != 0 && w.activationResize != nil && w.resizeIdle == 0 {
+			// G_PRIORITY_DEFAULT_IDLE: after GTK took the configure event
+			// of the activation.
+			w.resizeIdle = gIdleAddFull(200, cbActivationResize, ptr(w.id), 0)
+		}
 		if changed&stateIconified != 0 {
 			if state&stateIconified != 0 {
 				w.h.Minimized()
@@ -1101,6 +1192,7 @@ func initWindowCallbacks() {
 		}
 		edge := w.resizeEdge(event)
 		w.showResizeCursor(edge)
+		w.checkDragStart(event)
 		return edge >= 0
 	})
 	// WebKit asks for the data of a drag while it moves over the page,

@@ -80,7 +80,7 @@ RESOURCES="$STAGED_APP/Contents/Resources"
 /bin/mkdir -p "$STAGED_APP/Contents/MacOS" "$RESOURCES/en.lproj" "$RESOURCES/zh-Hans.lproj" "$RESOURCES/ThirdPartyLicenses"
 cd "$REPO_DIR"
 REPLACEMENTS="$("$GO_EXECUTABLE" list -mod=readonly -m -f '{{if .Replace}}{{.Path}} {{.Version}} => {{.Replace.Path}} {{.Replace.Version}}{{end}}' all | /usr/bin/sed '/^$/d')"
-[[ "$REPLACEMENTS" == 'github.com/egoist/mygo v0.2.15 => ./third_party/mygo ' \
+[[ "$REPLACEMENTS" == 'github.com/egoist/mygo v0.3.7 => ./third_party/mygo ' \
     && -d "$REPO_DIR/third_party" && ! -L "$REPO_DIR/third_party" \
     && -d "$REPO_DIR/third_party/mygo" && ! -L "$REPO_DIR/third_party/mygo" ]] \
   || fail "module replacements differ from the preview contract"

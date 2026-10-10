@@ -54,7 +54,7 @@ func goFixture(t *testing.T) (string, string) {
 	run(t, root, goPath, "mod", "edit", "-dropreplace=github.com/egoist/mygo")
 	// Root tidy may omit the replaced module's checksum. The legacy fixture
 	// explicitly fetches the locked upstream version into its own go.sum.
-	run(t, root, goPath, "mod", "download", "github.com/egoist/mygo@v0.2.15")
+	run(t, root, goPath, "mod", "download", "github.com/egoist/mygo@"+mygoPin)
 	for _, name := range []string{"Info.plist", "Entitlements.plist", "en.lproj/InfoPlist.strings", "zh-Hans.lproj/InfoPlist.strings"} {
 		data, err := os.ReadFile(name)
 		if err != nil {
@@ -72,6 +72,11 @@ func main() {}
 `), 0600)
 	return root, goPath
 }
+
+// mygoPin is the upstream version the preview links through its local
+// replacement; legacyMygoPin is the one preview bundles built before the
+// upgrade still carry.
+const mygoPin, legacyMygoPin = "v0.3.7", "v0.2.15"
 
 func addLocalMygo(t *testing.T, root, goPath, replacement string) {
 	t.Helper()
@@ -130,12 +135,28 @@ func assembleFixture(t *testing.T, root, goPath, permission string) string {
 }
 
 func TestBuildPreservesLegacyAppAndUsesSelectedToolchain(t *testing.T) {
+	// The earlier bundle was built against the mygo version pinned before,
+	// first from upstream and later through the local replacement.
+	for name, replaced := range map[string]bool{"upstream": false, "local replacement": true} {
+		t.Run(name, func(t *testing.T) { buildPreservesLegacyApp(t, replaced) })
+	}
+}
+
+func buildPreservesLegacyApp(t *testing.T, replaced bool) {
 	root, goPath := goFixture(t)
-	app := assembleFixture(t, root, goPath, "read-only")
+	run(t, root, goPath, "mod", "edit", "-require=github.com/egoist/mygo@"+legacyMygoPin)
+	run(t, root, goPath, "mod", "download", "github.com/egoist/mygo@"+legacyMygoPin)
+	permission := "read-only"
+	if replaced {
+		addLocalMygo(t, root, goPath, "third_party/mygo")
+		permission = "read-write"
+	}
+	app := assembleFixture(t, root, goPath, permission)
 	original, err := os.ReadFile(filepath.Join(app, "Contents", "MacOS", "KinlogueGoPreview"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	run(t, root, goPath, "mod", "edit", "-require=github.com/egoist/mygo@"+mygoPin)
 	addLocalMygo(t, root, goPath, "third_party/mygo")
 	put(t, filepath.Join(root, "cmd", "kinlogue", "backup.go"), []byte("package main\nimport _ \"filippo.io/age\"\n"), 0600)
 	// A setup-go-like directory is deliberately absent from the builder's fixed
@@ -163,7 +184,7 @@ func TestBuildPreservesLegacyAppAndUsesSelectedToolchain(t *testing.T) {
 	if err != nil || !bytes.Equal(original, retained) {
 		t.Fatal("the earlier signed binary was not preserved exactly")
 	}
-	license, err := os.ReadFile(filepath.Join(app, "Contents", "Resources", "ThirdPartyLicenses", "github.com_egoist_mygo@v0.2.15.txt"))
+	license, err := os.ReadFile(filepath.Join(app, "Contents", "Resources", "ThirdPartyLicenses", "github.com_egoist_mygo@"+mygoPin+".txt"))
 	if err != nil || string(license) != "synthetic local replacement license\n" {
 		t.Fatalf("local replacement license not included: %v", err)
 	}

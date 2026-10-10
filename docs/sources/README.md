@@ -37,6 +37,7 @@ kind: pattern-reference | product-decision | external-spec
 - [`mygo-native-2026-10-07.md`](mygo-native-2026-10-07.md)：Go 原生界面、公开系统 API 桥接和本机 SQLite 的锁定来源；上游路线图与项目验证分开记录。
 - [`mygo-local-patch-2026-10-07.md`](mygo-local-patch-2026-10-07.md)：在同一锁定 mygo 版本上引入本地输入补丁的来源追加；区分原版摘要、本地源码及嵌套模块验证，不改写上一条点时笔记。
 - [`mygo-calendar-text-2026-10-10.md`](mygo-calendar-text-2026-10-10.md)：在同一锁定 mygo 版本上追加日历文案的本地补丁，使日期选择器跟随界面语言。
+- [`mygo-0.3.7-upgrade-2026-10-10.md`](mygo-0.3.7-upgrade-2026-10-10.md)：升级到 mygo v0.3.7 的锁定来源、上游相关变化，以及原输入补丁不再移植的对照依据。
 - [`darwin-directory-search-2026-10-08.md`](darwin-directory-search-2026-10-08.md)：公开 Darwin `O_SEARCH` 头文件定义；用于保存面板授权下固定导出父目录，来源定义与本机沙盒验证分开记录。
 - [`karpathy-llm-wiki.md`](karpathy-llm-wiki.md)：知识库组织方式。
 - [`github-actions-macos-ci-cd-2026-08-05.md`](github-actions-macos-ci-cd-2026-08-05.md)：macOS CI/CD 与 Apple 分发边界。

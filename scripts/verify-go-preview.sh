@@ -102,16 +102,22 @@ fi
     && "$BUILD_INFO" == *$'\n\tbuild\tCGO_ENABLED=0\n'* \
     && "$BUILD_INFO" == *$'\n\tbuild\t-trimpath=true\n'* \
     && "$BUILD_INFO" == *$'\n\tbuild\t-tags=mygo_noinspector\n'* ]] || fail "Go build settings differ from the preview contract"
-for pin in $'github.com/egoist/mygo\tv0.2.15' $'github.com/ebitengine/purego\tv0.11.1' $'modernc.org/sqlite\tv1.60.1'; do
+MYGO_PIN=$'github.com/egoist/mygo\tv0.3.7'
+# A preserved earlier bundle may still link the mygo version pinned before.
+if [[ "$PREVIOUS" -eq 1 ]] && print -r -- "$BUILD_INFO" \
+    | /usr/bin/awk -F '\t' '$2 == "dep" && $3 == "github.com/egoist/mygo" && $4 == "v0.2.15" { found = 1 } END { exit !found }'; then
+  MYGO_PIN=$'github.com/egoist/mygo\tv0.2.15'
+fi
+for pin in "$MYGO_PIN" $'github.com/ebitengine/purego\tv0.11.1' $'modernc.org/sqlite\tv1.60.1'; do
   print -r -- "$BUILD_INFO" | /usr/bin/awk -F '\t' -v pin="$pin" '$2 == "dep" && $3 "\t" $4 == pin { found = 1 } END { exit !found }' \
     || fail "direct dependency pin is incorrect"
 done
 # A replacement record belongs to its immediately preceding dependency. Only
 # the in-repo mygo patch is accepted; every other module keeps its locked source.
-print -r -- "$BUILD_INFO" | /usr/bin/awk -F '\t' -v previous="$PREVIOUS" '
+print -r -- "$BUILD_INFO" | /usr/bin/awk -F '\t' -v previous="$PREVIOUS" -v mygo="$MYGO_PIN" '
   $2 == "=>" {
     count++
-    if (dependency != "github.com/egoist/mygo\tv0.2.15" || $3 != "./third_party/mygo" || $4 != "(devel)" || $5 != "") invalid = 1
+    if (dependency != mygo || $3 != "./third_party/mygo" || $4 != "(devel)" || $5 != "") invalid = 1
   }
   { dependency = ($2 == "dep") ? $3 "\t" $4 : "" }
   END { exit (invalid || count > 1 || (!previous && count != 1)) }

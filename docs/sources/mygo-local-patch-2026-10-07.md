@@ -18,6 +18,6 @@
 
 本地补丁针对已定位的预编辑取消丢失选区文字、提交/撤销边界和跨输入状态处理。精确修改范围以随源码维护的 [`SOURCE.md`](../../third_party/mygo/SOURCE.md)为准；补丁代码不是上游发布内容，文档不能将本地修正归于原版 v0.2.15。
 
-输入回归在 [`ui/editor_regression_test.go`](../../third_party/mygo/ui/editor_regression_test.go)使用合成文字及事件；根模块测试不会进入嵌套模块，必须从 `third_party/mygo` 单独运行 UI 测试、race 和 vet。[独立 Go workflow](../../.github/workflows/go-ci.yml)显式包含嵌套 UI 测试和 vet；真实输入法、焦点切换与 VoiceOver 仍需平台人工验收。
+输入回归在 `ui/editor_regression_test.go`（该文件已在 2026-10-10 升级到 v0.3.7 时随输入补丁移除，见[升级来源追加](mygo-0.3.7-upgrade-2026-10-10.md)）使用合成文字及事件；根模块测试不会进入嵌套模块，必须从 `third_party/mygo` 单独运行 UI 测试、race 和 vet。[独立 Go workflow](../../.github/workflows/go-ci.yml)显式包含嵌套 UI 测试和 vet；真实输入法、焦点切换与 VoiceOver 仍需平台人工验收。
 
 更新上游版本时，应按 `SOURCE.md` 比对本地修改、重跑嵌套和应用测试，并重新核对生产包构建信息与许可证；不得只删除 `replace` 就假定相同行为已由上游提供。

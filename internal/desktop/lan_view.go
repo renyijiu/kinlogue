@@ -85,7 +85,7 @@ func (s *screen) phoneQueue(c *ui.Context) {
 func (s *screen) phoneRow(c *ui.Context, item library.InboxItem) {
 	selected := s.phoneSelected(item.ID)
 	ui.Row(c).FillWidth().Padding(2, 8).AlignItems(ui.Center).Background(c.Theme().Background).Children(func() {
-		row := ui.ButtonBase(c).Key(item.ID).Label(s.t("phone_row_label", item.FileName, s.t(phoneStatusKey(item.Status)))).Selected(selected).Grow(1).MinWidth(0).Padding(8).Radius(8).Gap(10).AlignItems(ui.Center).Disabled(s.busy != "" || item.Status != "reviewable")
+		row := ui.ButtonBase(c.Key(item.ID)).Label(s.t("phone_row_label", item.FileName, s.t(phoneStatusKey(item.Status)))).Selected(selected).Grow(1).MinWidth(0).Padding(8).Radius(8).Gap(10).AlignItems(ui.Center).Disabled(s.busy != "" || item.Status != "reviewable")
 		if selected {
 			row.Background(tokenContainer)
 		} else if row.Hovered() && item.Status == "reviewable" {
@@ -190,7 +190,7 @@ func (s *screen) phoneSelection(c *ui.Context) {
 			ui.Text(c, s.t("phone_page_order")).Bold()
 			for index, selected := range s.phone.selected {
 				item, _ := s.phoneItem(selected.ID)
-				ui.Row(c).Key(selected.ID).FillWidth().Gap(10).AlignItems(ui.Center).Padding(6, 8).Radius(8).Children(func() {
+				ui.Row(c.Key(selected.ID)).FillWidth().Gap(10).AlignItems(ui.Center).Padding(6, 8).Radius(8).Children(func() {
 					ui.Text(c, fmt.Sprint(index+1)).FontSize(12).TextColor(c.Theme().TextMuted).Width(22)
 					b := ui.ButtonBase(c).Label(s.t("phone_view_original", index+1)).Grow(1).MinWidth(0).Padding(4, 6).Radius(6)
 					if s.phone.preview.ID == selected.ID {

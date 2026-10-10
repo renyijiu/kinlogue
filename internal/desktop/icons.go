@@ -46,6 +46,6 @@ var (
 )
 
 // icon draws a line icon at size, in color.
-func icon(c *ui.Context, svg *ui.SVG, size float32, color ui.Color) *ui.Element {
+func icon(c *ui.Context, svg *ui.SVG, size float32, color ui.Color) ui.Element {
 	return ui.Icon(c, svg).Size(size, size).Shrink(0).TextColor(color)
 }
