@@ -56,19 +56,20 @@ type snapshotGraph struct {
 	sources      map[string]bool
 	lastReport   string
 	lastInbox    string
+	version      int
 	sequences    map[int64]bool
 	inboxDigests map[string]bool
 	summary      SnapshotSummary
 }
 
 func newSnapshotGraph(h snapshotHeader) (*snapshotGraph, error) {
-	if h.Version != 1 && h.Version != 2 {
+	if h.Version < 1 || h.Version > 3 {
 		return nil, ErrUnsupported
 	}
 	if !snapshotLanguage(h.Language) || len(h.Members) > maxSnapshotRecords || h.Reports < 0 || h.Reports > maxSnapshotRecords || h.Inbox < 0 || h.Inbox > MaxInboxItems || h.Version == 1 && h.Inbox != 0 {
 		return nil, ErrCorrupt
 	}
-	g := &snapshotGraph{members: make(map[string]bool), sources: make(map[string]bool), sequences: make(map[int64]bool), inboxDigests: make(map[string]bool)}
+	g := &snapshotGraph{version: h.Version, members: make(map[string]bool), sources: make(map[string]bool), sequences: make(map[int64]bool), inboxDigests: make(map[string]bool)}
 	for _, m := range h.Members {
 		if !validID(m.ID) || !bounded(m.Name, 256) || strings.TrimSpace(m.Name) == "" || g.members[m.ID] {
 			return nil, ErrCorrupt
@@ -83,6 +84,10 @@ func snapshotLanguage(s string) bool { return s == "system" || s == "zh-Hans" ||
 
 func (g *snapshotGraph) report(r *snapshotReport) error {
 	if !validID(r.ID) || r.ID <= g.lastReport || !bounded(r.FileName, 1024) || strings.TrimSpace(r.FileName) == "" || !validEdit(r.Review) || r.Review.MemberID != "" && !g.members[r.Review.MemberID] {
+		return ErrCorrupt
+	}
+	// Structured fields exist from snapshot v3; an older format never wrote them.
+	if g.version < 3 && r.Review.hasFields() {
 		return ErrCorrupt
 	}
 	if _, err := time.Parse(time.RFC3339Nano, r.CreatedAt); err != nil {
@@ -162,8 +167,9 @@ func (s *Store) WriteSnapshot(ctx context.Context, dst io.Writer) (SnapshotSumma
 		return SnapshotSummary{}, err
 	}
 	h := snapshotHeader{Version: 1, Members: []Member{}}
-	// Preserve the exact v1 serialization when verifying an unfinished restore
-	// journal whose candidate is still schema v3. Never migrate before hashing.
+	// Preserve the exact v1 or v2 serialization when verifying an unfinished
+	// restore journal whose candidate is still schema v3 or v4. Never migrate
+	// before hashing.
 	var schemaVersion int
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schemaVersion); err != nil {
 		return SnapshotSummary{}, storageError(ctx, err)
@@ -194,6 +200,9 @@ func (s *Store) WriteSnapshot(ctx context.Context, dst io.Writer) (SnapshotSumma
 			return SnapshotSummary{}, snapshotError(ctx, err)
 		}
 		h.Inbox = len(inboxIDs)
+	}
+	if schemaVersion >= 5 {
+		h.Version = 3
 	}
 	if err := s.db.QueryRowContext(ctx, "SELECT value FROM settings WHERE key='language'").Scan(&h.Language); err != nil {
 		return SnapshotSummary{}, storageError(ctx, err)
@@ -488,7 +497,7 @@ func insertSnapshotReport(ctx context.Context, tx *sql.Tx, r snapshotReport) err
 	if r.Review.MemberID != "" {
 		member = r.Review.MemberID
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO reports(id,file_name,status,member_id,title,report_date,corrected_text,notes,created_at,failure) VALUES (?,?,?,?,?,?,?,?,?,?)`, r.ID, r.FileName, r.Status, member, r.Review.Title, r.Review.Date, r.Review.Text, r.Review.Notes, r.CreatedAt, r.Failure)
+	_, err := tx.ExecContext(ctx, `INSERT INTO reports(id,file_name,status,member_id,title,report_date,corrected_text,notes,created_at,failure,organization,department,report_type,conclusion) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, r.ID, r.FileName, r.Status, member, r.Review.Title, r.Review.Date, r.Review.Text, r.Review.Notes, r.CreatedAt, r.Failure, r.Review.Organization, r.Review.Department, r.Review.ReportType, r.Review.Conclusion)
 	if err != nil {
 		return storageError(ctx, err)
 	}
@@ -749,7 +758,7 @@ func uniqueSnapshotJSON(d *json.Decoder, depth, arrayLimit int) error {
 				childLimit = document.MaxSources
 			case "Blocks":
 				childLimit = document.MaxBlocks
-			case "Version", "Language", "Reports", "Inbox", "Revision", "Sequence", "ID", "Name", "FileName", "Status", "Review", "CreatedAt", "Failure", "MemberID", "Title", "Date", "Text", "Notes", "Extraction", "Kind", "PageCount", "Engine", "Page", "Bounds", "Confidence", "Method", "X", "Y", "Width", "Height", "Digest", "ByteCount":
+			case "Version", "Language", "Reports", "Inbox", "Revision", "Sequence", "ID", "Name", "FileName", "Status", "Review", "CreatedAt", "Failure", "MemberID", "Title", "Date", "Text", "Notes", "Organization", "Department", "ReportType", "Conclusion", "Extraction", "Kind", "PageCount", "Engine", "Page", "Bounds", "Confidence", "Method", "X", "Y", "Width", "Height", "Digest", "ByteCount":
 			default:
 				return ErrCorrupt
 			}

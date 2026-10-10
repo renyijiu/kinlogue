@@ -6,6 +6,14 @@ import "fmt"
 // Each entry is simplified Chinese followed by English. Wording follows the
 // Swift app's Localizable strings wherever the Go preview has the same control.
 var stringsTable = map[string][2]string{
+	"organization":                {"医院", "Hospital"},
+	"department":                  {"科室", "Department"},
+	"report_type":                 {"报告类型", "Report Type"},
+	"conclusion":                  {"检查结论", "Conclusion"},
+	"conclusion_verbatim":         {"检查结论（逐字）", "Conclusion (Verbatim)"},
+	"no_conclusion":               {"未填写检查结论", "No conclusion entered"},
+	"confirmed_info":              {"已确认信息", "Confirmed Information"},
+	"verbatim_hint":               {"对照原件逐字填写；原报告没有结论时留空。", "Copy it word for word from the original. Leave it empty if the report has no conclusion."},
 	"phone_select_hint":           {"点选原件即可选择，选好后可作为一份报告归档。", "Click originals to select them, then file them as one report."},
 	"find_menu":                   {"搜索记录", "Find Records"},
 	"date_clear":                  {"设为日期未知", "Set Unknown"},
@@ -259,7 +267,7 @@ var stringsTable = map[string][2]string{
 	"saved":                       {"已保存，可稍后继续核对。", "Saved. You can continue reviewing later."},
 	"saving":                      {"正在保存…", "Saving…"},
 	"search":                      {"搜索已确认的记录", "Search Confirmed Records"},
-	"search_placeholder":          {"搜索已确认的记录", "Search confirmed records"},
+	"search_placeholder":          {"搜索已确认的标题、医院或结论", "Search confirmed titles, hospitals, or conclusions"},
 	"select_all":                  {"全选", "Select All"},
 	"select_record":               {"选择一条记录", "Select a Record"},
 	"select_record_detail":        {"这里会显示已确认字段和原件。", "Confirmed fields and originals appear here."},

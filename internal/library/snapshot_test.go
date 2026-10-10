@@ -175,7 +175,7 @@ func TestSnapshotRejectsMalformedArchiveAndGraph(t *testing.T) {
 			return es
 		},
 		"future version": func(es []snapshotEntry) []snapshotEntry {
-			es[0].data = bytes.Replace(es[0].data, []byte(`"Version":2`), []byte(`"Version":9`), 1)
+			es[0].data = bytes.Replace(es[0].data, []byte(`"Version":3`), []byte(`"Version":9`), 1)
 			return es
 		},
 		"report count limit": func(es []snapshotEntry) []snapshotEntry {

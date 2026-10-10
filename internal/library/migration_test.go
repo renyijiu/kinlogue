@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,7 +131,7 @@ func createMigrationV1Fixture(t *testing.T) migrationV1Fixture {
 func assertMigratedV1Fixture(t *testing.T, s *Store, f migrationV1Fixture) {
 	t.Helper()
 	var version, application int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 5 {
 		t.Fatalf("migration version = %d, error %v", version, err)
 	}
 	if err := s.db.QueryRow("PRAGMA application_id").Scan(&application); err != nil || application != 1263290191 {
@@ -381,11 +382,21 @@ func TestMigrationVersionTwoAddsInboxWithoutChangingExistingSchema(t *testing.T)
 		var legacy [][4]string
 		for _, row := range after {
 			if row[2] != "inbox" && row[2] != "sqlite_sequence" {
+				// v5 only appends columns to the reports table.
+				if row[0] == "table" && row[1] == "reports" {
+					for _, column := range []string{"organization", "department", "report_type", "conclusion"} {
+						added := ", " + column + " TEXT NOT NULL DEFAULT ''"
+						if strings.Count(row[3], added) != 1 {
+							t.Fatalf("reports table lacks %s", column)
+						}
+						row[3] = strings.Replace(row[3], added, "", 1)
+					}
+				}
 				legacy = append(legacy, row)
 			}
 		}
 		if !reflect.DeepEqual(before, legacy) {
-			t.Fatal("inbox migration changed existing schema")
+			t.Fatal("migration changed existing schema beyond the added report columns")
 		}
 		s.Close()
 	}
@@ -415,7 +426,7 @@ func TestMigrationVersionTwoRecoversAfterProcessKill(t *testing.T) {
 			}
 			want := 2
 			if stage == "migration_committed" {
-				want = 4
+				want = 5
 			}
 			if version != want {
 				t.Fatal("version escaped migration transaction")

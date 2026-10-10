@@ -40,6 +40,8 @@ var (
 	iconSliders    = lineIcon(`<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>`)
 	iconMore       = lineIcon(`<path d="M6 12h.01M12 12h.01M18 12h.01" stroke-width="3"/>`)
 	iconTick       = lineIcon(`<path d="M5 12.5l4.5 4.5L19 7.5" stroke-width="2.4"/>`)
+	iconBuilding   = lineIcon(`<path d="M5 20.5V4.5h9v16M14 9.5h5v11M3.5 20.5h17"/><path d="M8 8h3M8 11.5h3M8 15h3"/>`)
+	iconQuote      = lineIcon(`<path d="M4.5 6.5h15M4.5 11h15M4.5 15.5h9"/><path d="M16.5 15.5v3.5M19.5 15.5v3.5"/>`)
 	iconSeal       = lineIcon(`<circle cx="12" cy="12" r="8.5"/><path d="M8 12.3l2.7 2.7L16 9.5"/>`)
 )
 

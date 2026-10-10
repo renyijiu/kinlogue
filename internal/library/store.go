@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -39,10 +40,22 @@ type Member struct{ ID, Name string }
 type Edit struct {
 	MemberID, Title, Date, Text, Notes string
 	SourceIDs                          []string
+	// Verbatim fields the user transcribed from the report, added in schema
+	// v5. Empty values stay out of snapshot JSON, so a library that has none
+	// serializes exactly as it did before the fields existed.
+	Organization string `json:",omitempty"`
+	Department   string `json:",omitempty"`
+	ReportType   string `json:",omitempty"`
+	Conclusion   string `json:",omitempty"`
 }
 
 func (e Edit) Equal(other Edit) bool {
-	return e.MemberID == other.MemberID && e.Title == other.Title && e.Date == other.Date && e.Text == other.Text && e.Notes == other.Notes && slices.Equal(e.SourceIDs, other.SourceIDs)
+	return e.MemberID == other.MemberID && e.Title == other.Title && e.Date == other.Date && e.Text == other.Text && e.Notes == other.Notes && slices.Equal(e.SourceIDs, other.SourceIDs) &&
+		e.Organization == other.Organization && e.Department == other.Department && e.ReportType == other.ReportType && e.Conclusion == other.Conclusion
+}
+
+func (e Edit) hasFields() bool {
+	return e.Organization != "" || e.Department != "" || e.ReportType != "" || e.Conclusion != ""
 }
 
 type Source struct {
@@ -56,7 +69,13 @@ type Report struct {
 	Sources              []Source
 	CreatedAt            string
 	Failure              string
+	// Summary is the start of the conclusion in list rows, whose
+	// Review.Conclusion stays empty like the other long text.
+	Summary string `json:"-"`
 }
+
+// SummaryRunes bounds Report.Summary.
+const SummaryRunes = 200
 
 // Store is a single owner of a private library directory. Methods serialize
 // lifecycle and writes; the advisory lock also excludes other app processes.
@@ -78,6 +97,10 @@ type Store struct {
 
 	snapshotRestoreReady bool
 	restoreOwnedFiles    map[string]os.FileInfo
+
+	// fields is false only for a read-only restore candidate that is still
+	// schema v3 or v4 and so has no structured field columns.
+	fields bool
 }
 
 const reportSchema = `
@@ -99,13 +122,23 @@ CREATE TABLE pending_deletions (
  file_identity TEXT NOT NULL
 );`
 
+// reportSchema stays as shipped in v2: old libraries were created from it, so
+// v5 adds its columns to both new and existing libraries with the same
+// statements and they end up with one schema.
+const reportFieldsSchema = `
+ALTER TABLE reports ADD COLUMN organization TEXT NOT NULL DEFAULT '';
+ALTER TABLE reports ADD COLUMN department TEXT NOT NULL DEFAULT '';
+ALTER TABLE reports ADD COLUMN report_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE reports ADD COLUMN conclusion TEXT NOT NULL DEFAULT '';
+`
+
 const schema = `
 CREATE TABLE members (id TEXT PRIMARY KEY, name TEXT NOT NULL);
-` + reportSchema + inboxSchema + `
+` + reportSchema + inboxSchema + reportFieldsSchema + `
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO settings VALUES ('language', 'system');
 PRAGMA application_id=1263290191;
-PRAGMA user_version=4;`
+PRAGMA user_version=5;`
 
 const migrationV2 = `
 ALTER TABLE reports RENAME TO reports_v1;
@@ -278,7 +311,7 @@ func openLibrary(path string, checkpoint func(string)) (_ *Store, err error) {
 		if _, e = emptyPrivateDirectory(r, "originals"); e != nil {
 			return nil, e
 		}
-	} else if (version != 1 && version != 2 && version != 3 && version != 4) || application != 1263290191 {
+	} else if version < 1 || version > 5 || application != 1263290191 {
 		return nil, ErrUnsupported
 	}
 	var check string
@@ -303,12 +336,15 @@ func openLibrary(path string, checkpoint func(string)) (_ *Store, err error) {
 		}
 		reached("schema_committed")
 	}
-	if !needsSchema && version < 4 {
+	if !needsSchema && version < 5 {
 		tx, e := s.db.Begin()
 		if e != nil {
 			return nil, ErrStorage
 		}
-		migration := inboxSchema + "PRAGMA user_version=4;"
+		migration := reportFieldsSchema + "PRAGMA user_version=5;"
+		if version < 4 {
+			migration = inboxSchema + migration
+		}
 		if version == 1 {
 			migration = migrationV2 + migration
 		}
@@ -322,6 +358,7 @@ func openLibrary(path string, checkpoint func(string)) (_ *Store, err error) {
 		}
 		reached("migration_committed")
 	}
+	s.fields = true
 	if initializing {
 		current, e := emptyPrivateDirectory(r, ".initializing")
 		if e != nil || !os.SameFile(current, initializationIdentity) {
@@ -665,13 +702,22 @@ func (s *Store) writeOriginalUsing(ctx context.Context, id string, data []byte, 
 	return syncDirectory(s.originals)
 }
 
-const reportColumns = "id,file_name,status,COALESCE(member_id,''),title,report_date,corrected_text,notes,created_at,failure"
+// reportColumns selects a complete report. conclusion is the full text, or
+// its bounded start for list rows.
+func (s *Store) reportColumns(conclusion string) string {
+	fields := ",organization,department,report_type," + conclusion
+	if !s.fields {
+		fields = ",'','','',''"
+	}
+	return "id,file_name,status,COALESCE(member_id,''),title,report_date,corrected_text,notes,created_at,failure" + fields
+}
 
 type scanner interface{ Scan(...any) error }
 
 func scanReport(row scanner) (Report, error) {
 	var r Report
-	err := row.Scan(&r.ID, &r.FileName, &r.Status, &r.Review.MemberID, &r.Review.Title, &r.Review.Date, &r.Review.Text, &r.Review.Notes, &r.CreatedAt, &r.Failure)
+	err := row.Scan(&r.ID, &r.FileName, &r.Status, &r.Review.MemberID, &r.Review.Title, &r.Review.Date, &r.Review.Text, &r.Review.Notes, &r.CreatedAt, &r.Failure,
+		&r.Review.Organization, &r.Review.Department, &r.Review.ReportType, &r.Review.Conclusion)
 	if err != nil {
 		return Report{}, err
 	}
@@ -685,7 +731,7 @@ func (s *Store) get(ctx context.Context, id string) (Report, error) {
 	if !validID(id) {
 		return Report{}, ErrNotFound
 	}
-	r, err := scanReport(s.db.QueryRowContext(ctx, "SELECT "+reportColumns+" FROM reports WHERE id=?", id))
+	r, err := scanReport(s.db.QueryRowContext(ctx, "SELECT "+s.reportColumns("conclusion")+" FROM reports WHERE id=?", id))
 	if err != nil {
 		if errors.Is(err, ErrCorrupt) {
 			return Report{}, err
@@ -846,7 +892,8 @@ func (s *Store) FailDraft(ctx context.Context, id, code string) error {
 }
 
 func validEdit(e Edit) bool {
-	return (e.MemberID == "" || validID(e.MemberID)) && bounded(e.Title, 1024) && bounded(e.Text, document.MaxTextBytes) && bounded(e.Notes, document.MaxTextBytes) && document.ValidateDate(e.Date) == nil
+	return (e.MemberID == "" || validID(e.MemberID)) && bounded(e.Title, 1024) && bounded(e.Text, document.MaxTextBytes) && bounded(e.Notes, document.MaxTextBytes) && document.ValidateDate(e.Date) == nil &&
+		bounded(e.Organization, 1024) && bounded(e.Department, 1024) && bounded(e.ReportType, 1024) && bounded(e.Conclusion, document.MaxTextBytes)
 }
 
 func (s *Store) saveReview(ctx context.Context, id string, e Edit, expected, status string) (Report, error) {
@@ -886,7 +933,7 @@ func (s *Store) saveReview(ctx context.Context, id string, e Edit, expected, sta
 		return Report{}, storageError(ctx, err)
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, "UPDATE reports SET member_id=?,title=?,report_date=?,corrected_text=?,notes=?,status=? WHERE id=?", member, e.Title, e.Date, e.Text, e.Notes, status, id)
+	_, err = tx.ExecContext(ctx, "UPDATE reports SET member_id=?,title=?,report_date=?,corrected_text=?,notes=?,organization=?,department=?,report_type=?,conclusion=?,status=? WHERE id=?", member, e.Title, e.Date, e.Text, e.Notes, e.Organization, e.Department, e.ReportType, e.Conclusion, status, id)
 	if err == nil {
 		for position, sourceID := range e.SourceIDs {
 			_, err = tx.ExecContext(ctx, "UPDATE sources SET position=? WHERE id=? AND report_id=?", position, sourceID, id)
@@ -935,8 +982,9 @@ func (s *Store) UpdateConfirmed(ctx context.Context, id string, e Edit) (Report,
 
 func (s *Store) list(ctx context.Context, clause string, args ...any) ([]Report, error) {
 	// Lists are metadata projections, even though the public return type is
-	// Report. Get loads the selected report's complete text, notes and OCR.
-	const columns = "id,file_name,status,COALESCE(member_id,''),title,report_date,created_at,failure"
+	// Report. Get loads the selected report's complete text, notes and OCR;
+	// a row carries only the start of the conclusion, as Summary.
+	columns := "id,file_name,status,COALESCE(member_id,''),title,report_date,created_at,failure,organization,department,report_type,substr(conclusion,1," + strconv.Itoa(SummaryRunes) + ")"
 	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM reports "+clause, args...)
 	if err != nil {
 		return nil, storageError(ctx, err)
@@ -945,7 +993,7 @@ func (s *Store) list(ctx context.Context, clause string, args ...any) ([]Report,
 	result := []Report{}
 	for rows.Next() {
 		var r Report
-		err := rows.Scan(&r.ID, &r.FileName, &r.Status, &r.Review.MemberID, &r.Review.Title, &r.Review.Date, &r.CreatedAt, &r.Failure)
+		err := rows.Scan(&r.ID, &r.FileName, &r.Status, &r.Review.MemberID, &r.Review.Title, &r.Review.Date, &r.CreatedAt, &r.Failure, &r.Review.Organization, &r.Review.Department, &r.Review.ReportType, &r.Summary)
 		if err != nil || !validID(r.ID) {
 			return nil, ErrCorrupt
 		}
@@ -954,8 +1002,8 @@ func (s *Store) list(ctx context.Context, clause string, args ...any) ([]Report,
 	return result, storageError(ctx, rows.Err())
 }
 
-// Drafts returns metadata only: Review.Text, Review.Notes and Sources are
-// empty. Call Get to load full detail for a selected row.
+// Drafts returns metadata only: Review.Text, Review.Notes, Review.Conclusion
+// and Sources are empty. Call Get to load full detail for a selected row.
 func (s *Store) Drafts(ctx context.Context) ([]Report, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -965,9 +1013,9 @@ func (s *Store) Drafts(ctx context.Context) ([]Report, error) {
 	return s.list(ctx, "WHERE status <> 'confirmed' ORDER BY created_at DESC,id")
 }
 
-// Search matches confirmed corrected text/notes but returns metadata only.
-// An empty memberID selects confirmed records across all family members.
-// Review.Text, Review.Notes and Sources are loaded through Get, not lists.
+// Search matches the confirmed title, verbatim fields, corrected text and
+// notes but returns metadata only. An empty memberID selects confirmed records
+// across all family members. Long text and Sources are loaded through Get.
 func (s *Store) Search(ctx context.Context, memberID, query string) ([]Report, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -985,8 +1033,16 @@ func (s *Store) Search(ctx context.Context, memberID, query string) ([]Report, e
 		where += " AND member_id=?"
 		args = append(args, memberID)
 	}
-	where += " AND (instr(lower(title),lower(?))>0 OR instr(lower(corrected_text),lower(?))>0 OR instr(lower(notes),lower(?))>0) ORDER BY report_date DESC,created_at DESC,id"
-	return s.list(ctx, where, append(args, query, query, query)...)
+	where += " AND ("
+	for i, column := range []string{"title", "organization", "department", "report_type", "corrected_text", "conclusion", "notes"} {
+		if i > 0 {
+			where += " OR "
+		}
+		where += "instr(lower(" + column + "),lower(?))>0"
+		args = append(args, query)
+	}
+	where += ") ORDER BY report_date DESC,created_at DESC,id"
+	return s.list(ctx, where, args...)
 }
 
 func (s *Store) ReadOriginal(ctx context.Context, reportID, sourceID string) ([]byte, error) {

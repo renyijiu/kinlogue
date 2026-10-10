@@ -450,9 +450,10 @@ func (r *Runtime) verifyCandidate(name string, j *restoreJournal) error {
 		return ErrCorrupt
 	}
 	var version, application int
-	if s.db.QueryRow("PRAGMA user_version").Scan(&version) != nil || (version != 3 && version != 4) || s.db.QueryRow("PRAGMA application_id").Scan(&application) != nil || application != 1263290191 {
+	if s.db.QueryRow("PRAGMA user_version").Scan(&version) != nil || version < 3 || version > 5 || s.db.QueryRow("PRAGMA application_id").Scan(&application) != nil || application != 1263290191 {
 		return ErrCorrupt
 	}
+	s.fields = version >= 5
 	if digest, err := runtimeSchemaDigest(s.db); err != nil || digest != j.Schema {
 		return ErrCorrupt
 	}

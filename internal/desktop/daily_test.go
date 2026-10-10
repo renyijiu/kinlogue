@@ -321,7 +321,7 @@ func TestNativeSaveIncludesTextQueuedBeforeTheFrame(t *testing.T) {
 				}
 				s.view(c)
 			}, 1240, 1100)
-			if err := tt.Click(label); err != nil {
+			if err := clickField(tt, label); err != nil {
 				t.Fatal(err)
 			}
 			tt.Command("selectAll")
@@ -404,7 +404,7 @@ func TestNativeNavigationWaitsForPendingFirstEdit(t *testing.T) {
 					}
 					s.view(c)
 				}, 1240, 1100)
-				if err := tt.Click("My Notes (Optional)"); err != nil {
+				if err := clickField(tt, "My Notes (Optional)"); err != nil {
 					t.Fatal(err)
 				}
 				beforeFrame = true
@@ -450,7 +450,7 @@ func TestNativeShutdownTakesPriorityOverSameFrameImportAndSave(t *testing.T) {
 				}
 				s.view(c)
 			}, 1240, 1100)
-			if err := tt.Click("My Notes (Optional)"); err != nil {
+			if err := clickField(tt, "My Notes (Optional)"); err != nil {
 				t.Fatal(err)
 			}
 			beforeFrame = true
@@ -500,7 +500,7 @@ func TestNativeNavigationDoesNotInterruptOrReplayComposition(t *testing.T) {
 				}
 				s.view(c)
 			}, 1240, 1100)
-			if err := tt.Click("My Notes (Optional)"); err != nil {
+			if err := clickField(tt, "My Notes (Optional)"); err != nil {
 				t.Fatal(err)
 			}
 			beforeFrame = true
@@ -540,7 +540,7 @@ func TestEditorCommandsAndCompositionStayScopedToCurrentReport(t *testing.T) {
 		t.Run(label, func(t *testing.T) {
 			s, _, _ := testScreen(t)
 			tt := ui.NewTester(s.view, 1240, 1100)
-			if err := tt.Click(label); err != nil {
+			if err := clickField(tt, label); err != nil {
 				t.Fatal(err)
 			}
 			tt.Command("selectAll")

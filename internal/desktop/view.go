@@ -398,14 +398,22 @@ func (s *screen) list(c *ui.Context) {
 									chip(c, name)
 								}
 							})
-							if r.FileName != "" {
+							if hospital := strings.TrimSpace(r.Review.Organization); hospital != "" {
+								ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+									icon(c, iconBuilding, 14, c.Theme().TextMuted)
+									ui.Text(c, hospital).FontSize(13).TextColor(c.Theme().TextMuted).SingleLine().MinWidth(0)
+								})
+							}
+							// Like the Swift card, the conclusion is the second line. A
+							// record without one keeps its original's name instead of a
+							// claim about what the report says.
+							if summary := firstLines(r.Summary); summary != "" {
+								ui.Text(c, summary).FontSize(13).MaxLines(2)
+							} else if r.FileName != "" {
 								ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 									icon(c, iconDoc, 14, c.Theme().TextMuted)
 									ui.Text(c, r.FileName).FontSize(13).TextColor(c.Theme().TextMuted).SingleLine().MinWidth(0)
 								})
-							}
-							if summary := firstLines(r.Review.Text); summary != "" {
-								ui.Text(c, summary).FontSize(13).MaxLines(2)
 							}
 						})
 					})
@@ -544,6 +552,33 @@ func (s *screen) summary(c *ui.Context) {
 			}
 			ui.Text(c, text).Label(s.t("transcription")).Selectable()
 		})
+		s.detailCard(c, iconQuote, s.t("conclusion"), func() {
+			conclusion := s.report.Review.Conclusion
+			if strings.TrimSpace(conclusion) == "" {
+				ui.Text(c, s.t("no_conclusion")).TextColor(c.Theme().TextMuted)
+				return
+			}
+			// No label: mygo reads a label instead of the text it is set on.
+			ui.Text(c, conclusion).Selectable()
+		})
+		info := []struct{ key, value string }{
+			{"organization", s.report.Review.Organization},
+			{"department", s.report.Review.Department},
+			{"report_type", s.report.Review.ReportType},
+		}
+		if slices.ContainsFunc(info, func(row struct{ key, value string }) bool { return strings.TrimSpace(row.value) != "" }) {
+			s.detailCard(c, iconSeal, s.t("confirmed_info"), func() {
+				for _, row := range info {
+					if strings.TrimSpace(row.value) == "" {
+						continue
+					}
+					ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Start).Children(func() {
+						ui.Text(c, s.t(row.key)).Width(84).Shrink(0).TextColor(c.Theme().TextMuted)
+						ui.Text(c, row.value).Grow(1).MinWidth(0).Selectable()
+					})
+				}
+			})
+		}
 		if notes := s.report.Review.Notes; strings.TrimSpace(notes) != "" {
 			s.detailCard(c, iconNote, s.t("notes"), func() {
 				ui.Text(c, notes).Label(s.t("notes")).Selectable()
@@ -818,10 +853,23 @@ func (s *screen) review(c *ui.Context) {
 			field := ui.TextInput(c, &s.edit.Title).FillWidth()
 			s.composing = s.composing || field.Composing()
 		}).FillWidth()
+		for _, field := range []struct {
+			key   string
+			value *string
+		}{{"organization", &s.edit.Organization}, {"department", &s.edit.Department}, {"report_type", &s.edit.ReportType}} {
+			ui.Field(c, s.t(field.key), func() {
+				input := ui.TextInput(c, field.value).FillWidth()
+				s.composing = s.composing || input.Composing()
+			}).FillWidth()
+		}
 		ui.Field(c, s.t("transcription"), func() {
 			field := ui.TextArea(c, &s.edit.Text).Height(230).FillWidth().Padding(8)
 			s.composing = s.composing || field.Composing()
 		}).FillWidth()
+		ui.Field(c, s.t("conclusion_verbatim"), func() {
+			field := ui.TextArea(c, &s.edit.Conclusion).Height(120).FillWidth().Padding(8)
+			s.composing = s.composing || field.Composing()
+		}).Description(s.t("verbatim_hint")).FillWidth()
 		ui.Field(c, s.t("notes_optional"), func() {
 			field := ui.TextArea(c, &s.edit.Notes).Height(96).FillWidth().Padding(8)
 			s.composing = s.composing || field.Composing()

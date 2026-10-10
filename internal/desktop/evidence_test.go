@@ -86,6 +86,11 @@ func TestUIEvidence(t *testing.T) {
 		edit := report.Review
 		edit.MemberID, edit.Title, edit.Date = members[r.member], r.title, r.date
 		edit.Text, edit.Notes = "合成示例内容 · 仅用于产品界面展示", "合成备注 · 示例健康中心"
+		// Every fourth record keeps the fields empty to show the fallbacks.
+		if i%4 != 3 {
+			edit.Organization, edit.Department, edit.ReportType = "示例健康中心（合成）", "合成示例科室", r.title
+			edit.Conclusion = "合成示例结论 · 仅用于产品界面展示"
+		}
 		if i < len(rows) {
 			if _, err = service.Confirm(ctx, report.ID, edit); err != nil {
 				t.Fatal(err)

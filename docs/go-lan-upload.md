@@ -45,7 +45,7 @@ Mac 最多选择 20 项可整理原件，调整顺序、填写成员及日期后
 
 ## 资料格式与备份
 
-当前 schema 为 v4，已知 v1/v2/v3 在事务内升级；旧程序拒绝新格式。快照 v2 包含队列原件及有效 OCR，旧快照 v1 仍可恢复为空队列。处理中项恢复为可重试失败；未完成暂存、凭据及接收会话不进入快照。恢复摘要分别展示报告原件数和手机待整理项数。进程强杀、旧备份、旧 journal、队列往返及晚到上传回归见 [inbox_test.go](../internal/library/inbox_test.go)、[inbox_legacy_test.go](../internal/library/inbox_legacy_test.go)。详细恢复边界见 [Go 备份专题](go-backup-and-restore.md)。
+手机队列自 schema v4 起存在；当前 schema 为 v5（为报告追加人工填写字段，见 [Go 预览](go-native-preview.md)），已知 v1–v4 在事务内升级，旧程序拒绝新格式。快照自 v2 起包含队列原件及有效 OCR，当前写出 v3，旧快照 v1 仍可恢复为空队列。处理中项恢复为可重试失败；未完成暂存、凭据及接收会话不进入快照。恢复摘要分别展示报告原件数和手机待整理项数。进程强杀、旧备份、旧 journal、队列往返及晚到上传回归见 [inbox_test.go](../internal/library/inbox_test.go)、[inbox_legacy_test.go](../internal/library/inbox_legacy_test.go)。详细恢复边界见 [Go 备份专题](go-backup-and-restore.md)。
 
 ## 与 Swift 的已知差异
 

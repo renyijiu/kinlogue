@@ -1302,3 +1302,14 @@
 - **收尾修正**：自动打开最新记录会立即渲染原件，`TestAllRecordsSearchAndMemberFilterUseRealLibrary` 原先以无 Processor 的真实 Service 运行，在预览中空指针失败；测试改用合成 Processor，生产组装不变。`TestMemberChipOnlyInAllRecords` 的预期计数漏算侧栏行的无障碍标签，已更正。移除不再使用的 `date_hint`、`awaiting_review` 文案；[Go 预览](go-native-preview.md)和 [Go 手机上传](go-lan-upload.md)中“日期为文本输入”“底部选择归档成员”的旧描述同步为日历选择器与选中后展开的归档表单。
 - **验证**：当前 Mac（Go 1.27.2、arm64）`gofmt`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 go test -count=1 ./...`、六包 `-race -count=1`、签名预览构建与校验、隐私、文档和 `git diff --check` 通过。本轮未改动 `third_party/mygo`，未重跑其嵌套测试。`verify-docs.sh` 在未设置 locale 的 shell 中因 Ruby 按 US-ASCII 读取而失败，设置 UTF-8 locale 后通过。
 - **边界**：易用性调整只有无窗口测试和合成截图依据，未在实际窗口中检查日历选择器、“更多操作”菜单、toast、Cmd+F 与 Cmd+Return；真实输入法、VoiceOver 和完整键盘矩阵仍待验收。未提交、未推送。
+
+## 2026-10-10：Go 报告加入医院、科室、报告类型和检查结论
+
+用户要求继续补齐结构化医学字段。对照 Swift 的 `HealthRecord`、`RecordQuery`、RecordDetailView、RecordEditView 和 TimelineView，本轮只加入由用户对照原件填写的四个字段；从识别结果抽取候选、逐字段来源提示和“报告自带标记”没有实施。
+
+- **资料格式**：schema 升为 v5，`reports` 追加 `organization`、`department`、`report_type`、`conclusion` 四列。`reportSchema` 保持已发布的 v2 形态，新建资料库与已知 v1–v4 升级执行同一组追加语句，结果 schema 相同；升级仍在单个事务内完成。逻辑快照升为 v3，四个字段为空时不写入，因此仍是 v3、v4 的候选库以只读方式核验未退役恢复 journal 时，序列化与原 v1、v2 逐字节一致；标为 v1/v2 却带字段的快照按损坏拒绝。
+- **查询**：已确认记录的搜索加入医院、科室、报告类型和检查结论，仍是字面匹配。列表行返回前三项和检查结论的前 200 个字符，完整结论在打开记录后加载。
+- **界面**：复核与编辑表单、详情的“检查结论”和“已确认信息”卡片、时间线卡片的医院与结论行按 Swift 的位置加入；搜索框文案改为“搜索已确认的标题、医院或结论”。没有结论时显示“未填写检查结论”或回退为文件名，不沿用 Swift 的“原报告未提供结论”。表单变长后在弹窗内滚动，依赖备注位于首屏的既有界面测试改为先滚动再点击。
+- **测试**：新增 [`internal/library/fields_test.go`](../internal/library/fields_test.go)和 [`internal/desktop/fields_test.go`](../internal/desktop/fields_test.go)。临时改坏“只读候选库按版本选列”和“空字段不写入”两处实现时，对应测试均失败，恢复后通过。首轮 race 发现新界面测试按 map 顺序点击字段导致偶发失败，改为固定表单顺序后重复 20 次通过。
+- **验证**：当前 Mac（Go 1.27.2、arm64）`gofmt`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 go test -count=1 ./...`、六包 `-race -count=1`、签名预览构建与校验、隐私、文档（UTF-8 locale）和 `git diff --check` 通过。未改动 `third_party/mygo`，未重跑其嵌套测试。同步 README、PRIVACY、[Go 预览](go-native-preview.md)、[Go 备份](go-backup-and-restore.md)、[Go 手机上传](go-lan-upload.md)、隐私工程页和索引中的格式版本与能力描述。
+- **边界**：只有无窗口测试与合成截图依据，未在实际窗口中填写、滚动或用输入法操作新字段；没有用已安装的旧版预览资料库做 v4→v5 升级验收；VoiceOver 和完整键盘矩阵仍待验收。升级后旧 Go 预览程序不能再打开该资料库。未推送。

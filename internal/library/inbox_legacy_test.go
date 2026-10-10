@@ -105,7 +105,7 @@ func TestInboxLegacyV1BackupAndUnretiredV3Journal(t *testing.T) {
 		t.Fatal("legacy recovery/migration failed", e)
 	}
 	var version int
-	if e = runtime.Store().db.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != 4 {
+	if e = runtime.Store().db.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != 5 {
 		t.Fatal("v3 was not upgraded after journal retired")
 	}
 	if _, e = os.Stat(filepath.Join(filepath.Dir(root), restoreJournalName)); !os.IsNotExist(e) {

@@ -185,7 +185,7 @@ func TestBackupNavigationSeesPendingFirstInputAndComposition(t *testing.T) {
 			}
 			s.view(c)
 		}, 1240, 1100)
-		if err := tt.Click("My Notes (Optional)"); err != nil {
+		if err := clickField(tt, "My Notes (Optional)"); err != nil {
 			t.Fatal(err)
 		}
 		request = true
@@ -330,7 +330,7 @@ func TestBackupSidebarUsesUnsavedGuard(t *testing.T) {
 	s, f, drain := testScreen(t)
 	s.backups = &fakeBackup{}
 	tt := ui.NewTester(s.view, 1240, 1100)
-	if err := tt.Click("My Notes (Optional)"); err != nil {
+	if err := clickField(tt, "My Notes (Optional)"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Type("Synthetic saved before backup")
