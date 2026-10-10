@@ -34,7 +34,7 @@ jobs:
       - name: Set up pinned Go toolchain
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           check-latest: false
           cache-dependency-path: |
             go.sum
@@ -43,7 +43,7 @@ jobs:
       - name: Check toolchain and formatting
         run: |
           test "$(uname -m)" = arm64
-          test "$(go version)" = 'go version go1.27.1 darwin/arm64'
+          test "$(go version)" = 'go version go1.27.2 darwin/arm64'
           test -z "$(gofmt -l cmd internal packaging/go-preview third_party/mygo)"
 
       - name: Verify locked modules and inspect Go code
@@ -62,7 +62,7 @@ jobs:
       - name: Check application concurrency
         env:
           CGO_ENABLED: "1"
-        run: go test -race ./internal/library ./internal/backup ./internal/app ./internal/desktop ./internal/macos
+        run: go test -race ./internal/lan ./internal/library ./internal/backup ./internal/app ./internal/desktop ./internal/macos
 
       - name: Build and verify sandbox preview
         run: |

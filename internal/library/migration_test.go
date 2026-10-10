@@ -130,7 +130,7 @@ func createMigrationV1Fixture(t *testing.T) migrationV1Fixture {
 func assertMigratedV1Fixture(t *testing.T, s *Store, f migrationV1Fixture) {
 	t.Helper()
 	var version, application int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 3 {
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 4 {
 		t.Fatalf("migration version = %d, error %v", version, err)
 	}
 	if err := s.db.QueryRow("PRAGMA application_id").Scan(&application); err != nil || application != 1263290191 {
@@ -363,7 +363,7 @@ func createMigrationV2Fixture(t *testing.T) migrationV1Fixture {
 	return f
 }
 
-func TestMigrationVersionTwoOnlyChangesVersion(t *testing.T) {
+func TestMigrationVersionTwoAddsInboxWithoutChangingExistingSchema(t *testing.T) {
 	f := createMigrationV2Fixture(t)
 	db, err := sql.Open("sqlite", filepath.Join(f.root, "library.sqlite"))
 	if err != nil {
@@ -377,8 +377,15 @@ func TestMigrationVersionTwoOnlyChangesVersion(t *testing.T) {
 			t.Fatal(err)
 		}
 		assertMigratedV1Fixture(t, s, f)
-		if after := migrationSchemaSnapshot(t, s.db); !reflect.DeepEqual(before, after) {
-			t.Fatal("v2 marker migration changed schema")
+		after := migrationSchemaSnapshot(t, s.db)
+		var legacy [][4]string
+		for _, row := range after {
+			if row[2] != "inbox" && row[2] != "sqlite_sequence" {
+				legacy = append(legacy, row)
+			}
+		}
+		if !reflect.DeepEqual(before, legacy) {
+			t.Fatal("inbox migration changed existing schema")
 		}
 		s.Close()
 	}
@@ -408,7 +415,7 @@ func TestMigrationVersionTwoRecoversAfterProcessKill(t *testing.T) {
 			}
 			want := 2
 			if stage == "migration_committed" {
-				want = 3
+				want = 4
 			}
 			if version != want {
 				t.Fatal("version escaped migration transaction")

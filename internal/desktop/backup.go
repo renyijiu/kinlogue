@@ -40,6 +40,9 @@ func RunRecovery(backend BackupBackend) error {
 func (s *screen) showBackup() {
 	s.clearReport()
 	s.backupPage, s.message = true, ""
+	s.phonePage = false
+	s.stopPhoneRefresh()
+	s.phone.generation++
 }
 
 func (s *screen) clearBackupSecrets() {

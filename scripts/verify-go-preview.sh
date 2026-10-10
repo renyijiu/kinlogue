@@ -81,10 +81,15 @@ case "$(/usr/bin/uname -m)" in
   x86_64) HOST_ARCH=amd64 ;;
   *) fail "unsupported build host architecture" ;;
 esac
-[[ "$("$GO_EXECUTABLE" version)" == "go version go1.27.1 darwin/$HOST_ARCH" ]] \
-  || fail "Go 1.27.1 is required"
+[[ "$("$GO_EXECUTABLE" version)" == "go version go1.27.2 darwin/$HOST_ARCH" ]] \
+  || fail "Go 1.27.2 is required"
 BUILD_INFO="$("$GO_EXECUTABLE" version -m "$EXECUTABLE")" || fail "Go build information is unavailable"
-[[ "${BUILD_INFO%%$'\n'*}" == *': go1.27.1' \
+RUNTIME_VERSION='go1.27.2'
+# Earlier verified preview bundles are preserved, never treated as the new build.
+if [[ "$PREVIOUS" -eq 1 && "${BUILD_INFO%%$'\n'*}" == *': go1.27.1' ]]; then
+  RUNTIME_VERSION='go1.27.1'
+fi
+[[ "${BUILD_INFO%%$'\n'*}" == *": $RUNTIME_VERSION" \
     && "$BUILD_INFO" == *$'\n\tpath\tkinlogue/cmd/kinlogue\n'* \
     && "$BUILD_INFO" == *$'\n\tbuild\tCGO_ENABLED=0\n'* \
     && "$BUILD_INFO" == *$'\n\tbuild\t-trimpath=true\n'* \
@@ -113,5 +118,5 @@ while IFS=$'\t' read -r module_path module_version; do
   license_name="${module_path//\//_}@$module_version.txt"
   [[ -s "$RESOURCES/ThirdPartyLicenses/$license_name" ]] || fail "a linked dependency license is missing"
 done < <(print -r -- "$BUILD_INFO" | /usr/bin/awk -F '\t' '$2 == "dep" { print $3 "\t" $4 }')
-[[ -s "$RESOURCES/ThirdPartyLicenses/go1.27.1.txt" ]] || fail "Go runtime license is missing"
+[[ -s "$RESOURCES/ThirdPartyLicenses/$RUNTIME_VERSION.txt" ]] || fail "Go runtime license is missing"
 print -- 'Verified Go preview identity, signature, sandbox, pinned modules, and bundle layout.'

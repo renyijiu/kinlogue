@@ -450,7 +450,7 @@ func (r *Runtime) verifyCandidate(name string, j *restoreJournal) error {
 		return ErrCorrupt
 	}
 	var version, application int
-	if s.db.QueryRow("PRAGMA user_version").Scan(&version) != nil || version != 3 || s.db.QueryRow("PRAGMA application_id").Scan(&application) != nil || application != 1263290191 {
+	if s.db.QueryRow("PRAGMA user_version").Scan(&version) != nil || (version != 3 && version != 4) || s.db.QueryRow("PRAGMA application_id").Scan(&application) != nil || application != 1263290191 {
 		return ErrCorrupt
 	}
 	if digest, err := runtimeSchemaDigest(s.db); err != nil || digest != j.Schema {
@@ -464,6 +464,13 @@ func (r *Runtime) verifyCandidate(name string, j *restoreJournal) error {
 	if s.db.QueryRow("SELECT (SELECT count(*) FROM sources),(SELECT count(*) FROM pending_deletions),(SELECT count(*) FROM settings),(SELECT count(*) FROM reports WHERE status='processing')").Scan(&sources, &pending, &settings, &processing) != nil || sources > maxSnapshotSources || pending != 0 || settings != 1 || processing != 0 {
 		return ErrCorrupt
 	}
+	inbox := 0
+	if version >= 4 {
+		var processingInbox int
+		if s.db.QueryRow("SELECT count(*),COALESCE(sum(status='processing'),0) FROM inbox").Scan(&inbox, &processingInbox) != nil || inbox > MaxInboxItems || processingInbox != 0 {
+			return ErrCorrupt
+		}
+	}
 	foreignKeys, err := s.db.Query("PRAGMA foreign_key_check")
 	if err != nil {
 		return ErrCorrupt
@@ -475,7 +482,7 @@ func (r *Runtime) verifyCandidate(name string, j *restoreJournal) error {
 	}
 	hash := sha256.New()
 	summary, err := s.WriteSnapshot(context.Background(), hash)
-	if err != nil || summary.Sources != sources || hex.EncodeToString(hash.Sum(nil)) != j.Digest {
+	if err != nil || summary.Sources != sources || summary.Inbox != inbox || hex.EncodeToString(hash.Sum(nil)) != j.Digest {
 		return ErrCorrupt
 	}
 	f, err = s.originals.OpenFile(".", os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
@@ -487,7 +494,7 @@ func (r *Runtime) verifyCandidate(name string, j *restoreJournal) error {
 	for {
 		entries, err := f.ReadDir(128)
 		count += len(entries)
-		if count > sources {
+		if count > sources+inbox {
 			return ErrCorrupt
 		}
 		for _, entry := range entries {
@@ -502,7 +509,7 @@ func (r *Runtime) verifyCandidate(name string, j *restoreJournal) error {
 			return ErrCorrupt
 		}
 	}
-	if count != sources {
+	if count != sources+inbox {
 		return ErrCorrupt
 	}
 	if got, err := r.directoryIdentity(name); err != nil || got != j.Candidate {

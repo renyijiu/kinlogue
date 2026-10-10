@@ -190,7 +190,7 @@ func (s *Store) cleanupOriginals(ctx context.Context, items []deletion) bool {
 			continue
 		}
 		var references int
-		if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM sources WHERE id=?", d.id).Scan(&references); err != nil || references != 0 {
+		if err := s.db.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM sources WHERE id=?)+(SELECT count(*) FROM inbox WHERE id=?)", d.id, d.id).Scan(&references); err != nil || references != 0 {
 			pending = true
 			continue
 		}

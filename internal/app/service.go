@@ -40,6 +40,7 @@ type Service struct {
 	ops         sync.WaitGroup
 	closeOnce   sync.Once
 	closeError  error
+	lan         *lanController
 }
 
 func New(s *library.Store, p Processor, readFile func(string) ([]byte, error), writeExport func(context.Context, string, func(io.Writer) error) error) *Service {
@@ -91,6 +92,7 @@ func (s *Service) seal() {
 	s.closing = true
 	s.cancel()
 	s.mu.Unlock()
+	s.StopLAN()
 }
 
 // Import treats one selected file as a separate report. ImportMany is the

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <title>传送资料到 Kinlogue</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <p class="eyebrow">Kinlogue 局域网接收</p>
+    <h1>从手机上传</h1>
+    <p>选择图片或文件传到这台 Mac。可以一次多选，也可以之后继续添加。</p>
+  </header>
+
+  <main>
+    <aside class="warning" aria-label="安全提醒">
+      <strong>仅在可信的私人 Wi-Fi 或局域网使用。</strong>
+      <span>本次连接不保证加密；请勿在公共网络上传资料。</span>
+    </aside>
+
+    <section class="card" aria-labelledby="pair-title" id="pair-section">
+      <h2 id="pair-title">连接这台 Mac</h2>
+      <form id="pair-form" autocomplete="off">
+        <label for="pair-code">在 Mac 上显示的 6 位验证码</label>
+        <div class="inline-controls">
+          <input id="pair-code" name="pair-code" type="text" inputmode="numeric"
+            pattern="[0-9]{6}" maxlength="6" autocapitalize="off" spellcheck="false" required>
+          <button type="submit">连接</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" aria-labelledby="upload-title" id="upload-section" hidden>
+      <div class="section-heading">
+        <div>
+          <h2 id="upload-title">上传文件</h2>
+          <p class="hint">这里只负责选择和上传；报告归属、日期和页序稍后在 Mac 上确认。</p>
+        </div>
+        <label class="picker-button" for="file-picker">添加文件</label>
+        <input id="file-picker" name="files" type="file" multiple>
+      </div>
+      <p id="duplicate-summary" class="hint" hidden></p>
+      <ul id="file-list" class="file-list" aria-label="本次连接的上传文件"></ul>
+      <p id="empty-files" class="empty">尚未选择文件。</p>
+    </section>
+
+    <section class="card" aria-labelledby="session-title" id="session-section" hidden>
+      <h2 id="session-title">本次连接</h2>
+      <p class="hint">已保存的文件由 Mac 端待确认队列统一处理。</p>
+      <button id="clear-page" class="secondary" type="button">清除本页连接</button>
+    </section>
+
+    <p id="status" class="status" role="status" aria-live="polite">请输入 Mac 上的验证码。</p>
+  </main>
+</body>
+</html>

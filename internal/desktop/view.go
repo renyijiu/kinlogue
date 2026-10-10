@@ -37,6 +37,10 @@ func (s *screen) view(c *ui.Context) {
 		}
 		ui.Column(c).Grow(1).MinWidth(0).FillHeight().Children(func() {
 			ui.Column(c).Grow(1).MinHeight(0).Disabled(s.modalOpen()).Children(func() {
+				if s.phonePage && !s.recoveryOnly && !s.restartOnly {
+					s.phoneView(c)
+					return
+				}
 				if s.backupPage || s.recoveryOnly || s.restartOnly {
 					ui.Column(c).Fill().Padding(24).Children(func() { s.backupView(c) })
 					return
@@ -82,6 +86,7 @@ func (s *screen) view(c *ui.Context) {
 		})
 	})
 	s.dialogs(c)
+	s.phoneDialogs(c)
 	if c.Shortcut(ui.Cmd, ui.KeyS) {
 		s.queueSaveShortcut()
 	}
@@ -94,11 +99,14 @@ func (s *screen) view(c *ui.Context) {
 func (s *screen) sidebar(c *ui.Context) {
 	ui.Text(c, s.t("brand")).Padding(4, 10).FontSize(20).Bold().TextColor(c.Theme().Accent)
 	ui.Text(c, s.t("browse")).Padding(0, 10).FontSize(11).TextColor(c.Theme().TextMuted)
-	if s.sidebarButton(c, s.t("all_records"), "◷", s.memberID == allMembers && !s.backupPage) {
+	if s.sidebarButton(c, s.t("all_records"), "◷", s.memberID == allMembers && !s.backupPage && !s.phonePage) {
 		s.selectMember(allMembers)
 	}
-	if s.sidebarButton(c, s.t("inbox"), "▤", s.memberID == "" && !s.backupPage) {
+	if s.sidebarButton(c, s.t("inbox"), "▤", s.memberID == "" && !s.backupPage && !s.phonePage) {
 		s.selectMember("")
+	}
+	if s.phoneBackend != nil && s.sidebarButton(c, s.t("phone_uploads"), "⇩", s.phonePage) {
+		s.queueNavigation(s.showPhone)
 	}
 	ui.Text(c, s.t("members")).Padding(10, 10, 0, 10).FontSize(11).TextColor(c.Theme().TextMuted)
 	ui.Scroll(c).Grow(1).MinHeight(60).Children(func() {
@@ -108,7 +116,7 @@ func (s *screen) sidebar(c *ui.Context) {
 			}
 			for _, member := range s.members {
 				ui.Column(c).Key(member.ID).FillWidth().Children(func() {
-					if s.sidebarButton(c, member.Name, "●", member.ID == s.memberID && !s.backupPage) {
+					if s.sidebarButton(c, member.Name, "●", member.ID == s.memberID && !s.backupPage && !s.phonePage) {
 						s.selectMember(member.ID)
 					}
 				})

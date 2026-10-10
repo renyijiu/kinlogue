@@ -38,6 +38,9 @@ type Backend interface {
 const allMembers = "all"
 
 type screen struct {
+	phoneBackend                     LANBackend
+	phonePage                        bool
+	phone                            phoneFlow
 	backend                          Backend
 	backups                          BackupBackend
 	backup                           backupFlow
@@ -85,7 +88,9 @@ type screen struct {
 
 func newScreen(backend Backend, systemLanguage string) *screen {
 	ctx, stop := context.WithCancel(context.Background())
-	return &screen{backend: backend, ctx: ctx, stop: stop, language: "system", systemLanguage: systemLanguage, memberID: allMembers, page: 1, selectedReport: -1, previewGate: make(chan struct{}, 1)}
+	result := &screen{backend: backend, ctx: ctx, stop: stop, language: "system", systemLanguage: systemLanguage, memberID: allMembers, page: 1, selectedReport: -1, previewGate: make(chan struct{}, 1)}
+	result.phoneBackend, _ = backend.(LANBackend)
+	return result
 }
 
 func Run(backend Backend, backups BackupBackend, startupWarning bool) error {
@@ -104,6 +109,13 @@ func (s *screen) run() error {
 		mygo.Theme.SetSource(mygo.ThemeLight)
 		s.win = mygo.NewWindow(mygo.WindowOptions{Title: s.t("app"), Width: 1240, Height: 880, MinWidth: 1080, MinHeight: 700, Content: ui.View(s.view)})
 		s.post = s.win.Update
+		if s.phoneBackend != nil && macos.LANReceptionReadiness() == nil {
+			remove, err := macos.ObserveLANLifecycle(s.phoneBackend.RevokeLAN)
+			s.phone.lifecycleReady = err == nil
+			if err == nil {
+				s.win.OnClosed(remove)
+			}
+		}
 		s.updateChrome()
 		s.win.OnClose(func(e *mygo.CloseEvent) {
 			if s.allowClose {
@@ -259,7 +271,7 @@ func (s *screen) dirty() bool {
 }
 
 func (s *screen) modalOpen() bool {
-	return s.pending != nil || s.newMember || s.deletePrompt || len(s.importPaths) > 0 || s.shutdown != nil
+	return len(s.phone.deleteSelection) > 0 || s.pending != nil || s.newMember || s.deletePrompt || len(s.importPaths) > 0 || s.shutdown != nil
 }
 
 // Native callbacks run before queued editor events reach their bindings.
@@ -335,6 +347,7 @@ func (s *screen) requestShutdown(next func()) {
 		return
 	}
 	s.shutdown, s.pending = next, nil
+	s.stopPhone()
 	s.clearBackupSecrets()
 	s.newMember, s.deletePrompt = false, false
 	s.importPaths = nil
@@ -377,6 +390,9 @@ func (s *screen) selectMember(id string) {
 	s.queueNavigation(func() {
 		s.clearReport()
 		s.backupPage = false
+		s.phonePage = false
+		s.stopPhoneRefresh()
+		s.phone.generation++
 		s.memberID, s.query, s.message = id, "", ""
 		s.load(false)
 	})
@@ -632,6 +648,11 @@ func (s *screen) chooseFiles() {
 func (s *screen) chooseImport(paths []string) {
 	if s.closed || s.shutdown != nil {
 		return
+	}
+	if len(paths) > 0 {
+		s.phonePage = false
+		s.stopPhoneRefresh()
+		s.phone.generation++
 	}
 	if len(paths) == 1 {
 		s.importFiles(paths)

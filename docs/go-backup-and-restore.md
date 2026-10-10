@@ -10,7 +10,7 @@
 
 恢复先通过系统面板选择文件并输入对应码；密码框不暴露明文 AX value，禁止复制和剪切。完整解密、重建和验证后才显示成员、报告、原件和字节数，并要求明确确认整库替换。取消只退役本次准备令牌；旧回调不能影响新准备。界面仍保留报告未保存修改和输入法组字保护。实现与无窗口交互测试见 [`backup.go`](../internal/desktop/backup.go)、[`backup_view.go`](../internal/desktop/backup_view.go)与 [`backup_test.go`](../internal/desktop/backup_test.go)。
 
-逻辑快照包含成员、语言设置、报告及其创建时间、报告状态、人工修正、初始 OCR 和按保存顺序排列的全部来源及原始字节。成员与来源 ID 保持不变；处理中状态规范化为可重试的 `failed/interrupted`。未确认报告恢复后仍须人工确认才能进入时间线和搜索。已删除报告、未引用原件、待清理队列、进程锁和临时文件不进入备份。
+逻辑快照 v2 另包含手机待整理文件及其有效识别结果，仍支持读取旧 v1 快照；详见 [Go 手机上传](go-lan-upload.md)。逻辑快照包含成员、语言设置、报告及其创建时间、报告状态、人工修正、初始 OCR 和按保存顺序排列的全部来源及原始字节。成员与来源 ID 保持不变；处理中状态规范化为可重试的 `failed/interrupted`。未确认报告恢复后仍须人工确认才能进入时间线和搜索。已删除报告、未引用原件、待清理队列、进程锁和临时文件不进入备份。
 
 恢复不导入任意 SQLite 文件，也不执行归档 SQL。解析器要求精确的条目顺序、路径、普通文件类型和结束位置，拒绝扩展头、链接、重复或未知 JSON 字段、未知格式及无效领域关系。每个原件验证长度和 SHA-256，新库只在完整归档及真正 EOF 均通过后提交。加密层还验证流的最后认证块；不能把 TAR 结束当作密文认证结束。实现与往返、损坏及分配限制回归见 [`snapshot.go`](../internal/library/snapshot.go)、[`snapshot_test.go`](../internal/library/snapshot_test.go)与 [`crypto_test.go`](../internal/backup/crypto_test.go)。
 
@@ -40,7 +40,7 @@
 - journal 退役成功后才能开放正常写入，避免以后误回滚已经修改过的新库。
 - 目录身份、receipt 或预期旧库不明确时保留所有内容并拒绝启动；不猜测哪个目录可以删除。
 
-Go v3 沿用 v2 的 schema，只增加旧程序拒绝打开的版本屏障。已知 v2 事务更新版本号；v1 在同一事务完成已有结构升级后更新为 v3。旧 v1/v2 程序不能打开新的资料库，保留的旧 App 包不是资料回滚方案。迁移和旧 reader 拒绝证据见 [`migration_test.go`](../internal/library/migration_test.go)。
+Go v4 新增手机队列表，已知 v1/v2/v3 在同一事务保留报告与成员后升级；旧程序不能打开新的资料库。历史 v3 恢复事务先按原摘要验证，再升级，保留的旧 App 包不是资料回滚方案。迁移和旧 reader 拒绝证据见 [`migration_test.go`](../internal/library/migration_test.go)。
 
 ## 隐私与保留边界
 

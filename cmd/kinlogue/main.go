@@ -51,6 +51,9 @@ func main() {
 func runLibrary(runtime *library.Runtime, run func(desktop.Backend, desktop.BackupBackend, bool) error, recover func(desktop.BackupBackend) error) (runErr, closeErr error) {
 	if store := runtime.Store(); store != nil {
 		service := app.New(store, appleProcessor{}, macos.ReadImportedFile, macos.WriteExport)
+		if err := service.ConfigureLAN(app.LANConfig{Interfaces: macos.LANInterfaces, Listen: macos.ListenLAN, Watch: macos.WatchLANInterface}); err != nil {
+			return err, service.Close()
+		}
 		controller := app.NewBackupController(runtime, service, macos.WriteBackup, macos.ReadBackup)
 		runErr = run(service, controller, runtime.OpenError() != nil)
 		return runErr, controller.Close()

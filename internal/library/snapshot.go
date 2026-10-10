@@ -29,8 +29,8 @@ const (
 
 // SnapshotSummary is returned only after every record and original is valid.
 type SnapshotSummary struct {
-	Members, Reports, Sources int
-	OriginalBytes             int64
+	Members, Reports, Sources, Inbox int
+	OriginalBytes                    int64
 }
 
 type snapshotHeader struct {
@@ -38,6 +38,7 @@ type snapshotHeader struct {
 	Language string
 	Members  []Member
 	Reports  int
+	Inbox    int
 }
 
 type snapshotOriginal struct {
@@ -51,20 +52,23 @@ type snapshotReport struct {
 }
 
 type snapshotGraph struct {
-	members    map[string]bool
-	sources    map[string]bool
-	lastReport string
-	summary    SnapshotSummary
+	members      map[string]bool
+	sources      map[string]bool
+	lastReport   string
+	lastInbox    string
+	sequences    map[int64]bool
+	inboxDigests map[string]bool
+	summary      SnapshotSummary
 }
 
 func newSnapshotGraph(h snapshotHeader) (*snapshotGraph, error) {
-	if h.Version != 1 {
+	if h.Version != 1 && h.Version != 2 {
 		return nil, ErrUnsupported
 	}
-	if !snapshotLanguage(h.Language) || len(h.Members) > maxSnapshotRecords || h.Reports < 0 || h.Reports > maxSnapshotRecords {
+	if !snapshotLanguage(h.Language) || len(h.Members) > maxSnapshotRecords || h.Reports < 0 || h.Reports > maxSnapshotRecords || h.Inbox < 0 || h.Inbox > MaxInboxItems || h.Version == 1 && h.Inbox != 0 {
 		return nil, ErrCorrupt
 	}
-	g := &snapshotGraph{members: make(map[string]bool), sources: make(map[string]bool)}
+	g := &snapshotGraph{members: make(map[string]bool), sources: make(map[string]bool), sequences: make(map[int64]bool), inboxDigests: make(map[string]bool)}
 	for _, m := range h.Members {
 		if !validID(m.ID) || !bounded(m.Name, 256) || strings.TrimSpace(m.Name) == "" || g.members[m.ID] {
 			return nil, ErrCorrupt
@@ -158,6 +162,39 @@ func (s *Store) WriteSnapshot(ctx context.Context, dst io.Writer) (SnapshotSumma
 		return SnapshotSummary{}, err
 	}
 	h := snapshotHeader{Version: 1, Members: []Member{}}
+	// Preserve the exact v1 serialization when verifying an unfinished restore
+	// journal whose candidate is still schema v3. Never migrate before hashing.
+	var schemaVersion int
+	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schemaVersion); err != nil {
+		return SnapshotSummary{}, storageError(ctx, err)
+	}
+	var inboxIDs []string
+	if schemaVersion >= 4 {
+		h.Version = 2
+		rows, err := s.db.QueryContext(ctx, "SELECT id FROM inbox ORDER BY id")
+		if err != nil {
+			return SnapshotSummary{}, storageError(ctx, err)
+		}
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				break
+			}
+			inboxIDs = append(inboxIDs, id)
+			if len(inboxIDs) > MaxInboxItems {
+				err = ErrCorrupt
+				break
+			}
+		}
+		if err == nil {
+			err = rows.Err()
+		}
+		rows.Close()
+		if err != nil {
+			return SnapshotSummary{}, snapshotError(ctx, err)
+		}
+		h.Inbox = len(inboxIDs)
+	}
 	if err := s.db.QueryRowContext(ctx, "SELECT value FROM settings WHERE key='language'").Scan(&h.Language); err != nil {
 		return SnapshotSummary{}, storageError(ctx, err)
 	}
@@ -248,6 +285,28 @@ func (s *Store) WriteSnapshot(ctx context.Context, dst io.Writer) (SnapshotSumma
 			}
 		}
 	}
+	for _, id := range inboxIDs {
+		item, e := s.getInbox(ctx, id)
+		if e != nil {
+			return SnapshotSummary{}, e
+		}
+		if e = g.inbox(&item); e != nil {
+			return SnapshotSummary{}, e
+		}
+		data, e := json.Marshal(item)
+		if e != nil || len(data) > maxSnapshotReport {
+			return SnapshotSummary{}, ErrCorrupt
+		}
+		if e = writeSnapshotEntry(w, "inbox/"+id+".json", data); e != nil {
+			return SnapshotSummary{}, snapshotError(ctx, e)
+		}
+		if e = w.WriteHeader(snapshotTarHeader("originals/"+id+".blob", item.ByteCount)); e != nil {
+			return SnapshotSummary{}, snapshotError(ctx, e)
+		}
+		if e = s.writeSnapshotOriginal(ctx, w, id, snapshotOriginal{item.Digest, item.ByteCount}); e != nil {
+			return SnapshotSummary{}, e
+		}
+	}
 	if err = w.Close(); err != nil {
 		return SnapshotSummary{}, snapshotError(ctx, err)
 	}
@@ -307,6 +366,11 @@ func marshalSnapshotHeader(h snapshotHeader) ([]byte, error) {
 	count, _ := json.Marshal(h.Reports)
 	b.WriteString(`],"Reports":`)
 	b.Write(count)
+	if h.Version >= 2 {
+		b.WriteString(`,"Inbox":`)
+		count, _ = json.Marshal(h.Inbox)
+		b.Write(count)
+	}
 	b.WriteByte('}')
 	return b.Bytes(), nil
 }
@@ -355,7 +419,7 @@ func (s *Store) writeSnapshotOriginal(ctx context.Context, w io.Writer, id strin
 // VerifySnapshot validates the complete logical graph and every original,
 // including the archive's exact end, without creating a database.
 func VerifySnapshot(ctx context.Context, src io.Reader) (SnapshotSummary, error) {
-	return readSnapshot(ctx, src, nil, nil)
+	return readSnapshot(ctx, src, nil, nil, nil)
 }
 
 // RestoreSnapshot only accepts a newly initialized, empty Store. On failure its
@@ -370,7 +434,7 @@ func (s *Store) RestoreSnapshot(ctx context.Context, src io.Reader) (SnapshotSum
 		return SnapshotSummary{}, ErrState
 	}
 	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM members)+(SELECT count(*) FROM reports)+(SELECT count(*) FROM sources)+(SELECT count(*) FROM pending_deletions)+(SELECT count(*) FROM settings WHERE key!='language' OR value!='system')`).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM members)+(SELECT count(*) FROM reports)+(SELECT count(*) FROM sources)+(SELECT count(*) FROM inbox)+(SELECT count(*) FROM pending_deletions)+(SELECT count(*) FROM settings WHERE key!='language' OR value!='system')`).Scan(&count); err != nil {
 		return SnapshotSummary{}, storageError(ctx, err)
 	}
 	if count != 0 {
@@ -398,6 +462,11 @@ func (s *Store) RestoreSnapshot(ctx context.Context, src io.Reader) (SnapshotSum
 			return insertSnapshotReport(ctx, tx, r)
 		}
 		return s.restoreSnapshotOriginal(ctx, r.Sources[index].ID, r.Originals[index], src)
+	}, func(item inboxRecord, src io.Reader) error {
+		if src == nil {
+			return insertSnapshotInbox(ctx, tx, item)
+		}
+		return s.restoreSnapshotOriginal(ctx, item.ID, snapshotOriginal{item.Digest, item.ByteCount}, src)
 	})
 	if err != nil {
 		return SnapshotSummary{}, err
@@ -465,7 +534,7 @@ func (s *Store) restoreSnapshotOriginal(ctx context.Context, id string, o snapsh
 	return snapshotError(ctx, err)
 }
 
-func readSnapshot(ctx context.Context, src io.Reader, header func(snapshotHeader) error, entry func(snapshotReport, int, io.Reader) error) (SnapshotSummary, error) {
+func readSnapshot(ctx context.Context, src io.Reader, header func(snapshotHeader) error, entry func(snapshotReport, int, io.Reader) error, inbox func(inboxRecord, io.Reader) error) (SnapshotSummary, error) {
 	r := &snapshotReader{ctx: ctx, r: src, left: MaxSnapshotBytes}
 	size, err := readSnapshotHeader(r, "library.json", maxSnapshotHeader)
 	if err != nil {
@@ -528,6 +597,48 @@ func readSnapshot(ctx context.Context, src io.Reader, header func(snapshotHeader
 			if err = readSnapshotZeros(r, (512-size%512)%512); err != nil {
 				return SnapshotSummary{}, snapshotError(ctx, err)
 			}
+		}
+	}
+	for range h.Inbox {
+		name, size, e := readSnapshotTarHeader(r, maxSnapshotReport)
+		if e != nil {
+			return SnapshotSummary{}, snapshotError(ctx, e)
+		}
+		var item inboxRecord
+		if e = readSnapshotJSON(r, size, &item); e != nil {
+			return SnapshotSummary{}, snapshotError(ctx, e)
+		}
+		if e = g.inbox(&item); e != nil {
+			return SnapshotSummary{}, e
+		}
+		if name != "inbox/"+item.ID+".json" {
+			return SnapshotSummary{}, ErrCorrupt
+		}
+		if inbox != nil {
+			if e = inbox(item, nil); e != nil {
+				return SnapshotSummary{}, e
+			}
+		}
+		size, e = readSnapshotHeader(r, "originals/"+item.ID+".blob", document.MaxFileBytes)
+		if e != nil || size != item.ByteCount {
+			return SnapshotSummary{}, ErrCorrupt
+		}
+		hash := sha256.New()
+		limited := &io.LimitedReader{R: r, N: size}
+		body := io.TeeReader(limited, hash)
+		if inbox != nil {
+			e = inbox(item, body)
+		} else {
+			_, e = io.Copy(io.Discard, body)
+		}
+		if e != nil {
+			return SnapshotSummary{}, snapshotError(ctx, e)
+		}
+		if limited.N != 0 || hex.EncodeToString(hash.Sum(nil)) != item.Digest {
+			return SnapshotSummary{}, ErrCorrupt
+		}
+		if e = readSnapshotZeros(r, (512-size%512)%512); e != nil {
+			return SnapshotSummary{}, snapshotError(ctx, e)
 		}
 	}
 	if err = readSnapshotZeros(r, 1024); err != nil {
@@ -638,7 +749,7 @@ func uniqueSnapshotJSON(d *json.Decoder, depth, arrayLimit int) error {
 				childLimit = document.MaxSources
 			case "Blocks":
 				childLimit = document.MaxBlocks
-			case "Version", "Language", "Reports", "ID", "Name", "FileName", "Status", "Review", "CreatedAt", "Failure", "MemberID", "Title", "Date", "Text", "Notes", "Extraction", "Kind", "PageCount", "Engine", "Page", "Bounds", "Confidence", "Method", "X", "Y", "Width", "Height", "Digest", "ByteCount":
+			case "Version", "Language", "Reports", "Inbox", "Revision", "Sequence", "ID", "Name", "FileName", "Status", "Review", "CreatedAt", "Failure", "MemberID", "Title", "Date", "Text", "Notes", "Extraction", "Kind", "PageCount", "Engine", "Page", "Bounds", "Confidence", "Method", "X", "Y", "Width", "Height", "Digest", "ByteCount":
 			default:
 				return ErrCorrupt
 			}
@@ -723,4 +834,35 @@ func snapshotError(ctx context.Context, err error) error {
 		return ErrStorage
 	}
 	return ErrCorrupt
+}
+
+func (g *snapshotGraph) inbox(item *inboxRecord) error {
+	contentKey := inboxContentKey(item.Digest, item.ByteCount)
+	if !validInbox(*item) || item.ID <= g.lastInbox || g.sources[item.ID] || g.sequences[item.Sequence] || g.inboxDigests[contentKey] {
+		return ErrCorrupt
+	}
+	if item.Status == "processing" {
+		item.Status = "failed"
+		item.Failure = "interrupted"
+		item.Revision++
+	}
+	g.lastInbox = item.ID
+	g.sources[item.ID] = true
+	g.sequences[item.Sequence] = true
+	g.inboxDigests[contentKey] = true
+	g.summary.Inbox++
+	g.summary.OriginalBytes += item.ByteCount
+	if g.summary.OriginalBytes > MaxSnapshotBytes || g.summary.Sources+g.summary.Inbox > maxSnapshotSources {
+		return ErrCorrupt
+	}
+	return nil
+}
+func insertSnapshotInbox(ctx context.Context, tx *sql.Tx, item inboxRecord) error {
+	raw := ""
+	if item.Extraction.Engine != "" {
+		b, _ := json.Marshal(item.Extraction)
+		raw = string(b)
+	}
+	_, e := tx.ExecContext(ctx, `INSERT INTO inbox(sequence,id,file_name,status,revision,created_at,failure,extraction,digest,byte_count) VALUES (?,?,?,?,?,?,?,?,?,?)`, item.Sequence, item.ID, item.FileName, item.Status, item.Revision, item.CreatedAt, item.Failure, raw, item.Digest, item.ByteCount)
+	return storageError(ctx, e)
 }

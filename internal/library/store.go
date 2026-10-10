@@ -72,6 +72,10 @@ type Store struct {
 	databaseIdentity os.FileInfo
 	lockIdentity     os.FileInfo
 
+	inboxEpoch   uint64
+	inboxStages  map[*InboxUpload]struct{}
+	inboxRemoved map[string]uint64
+
 	snapshotRestoreReady bool
 	restoreOwnedFiles    map[string]os.FileInfo
 }
@@ -97,11 +101,11 @@ CREATE TABLE pending_deletions (
 
 const schema = `
 CREATE TABLE members (id TEXT PRIMARY KEY, name TEXT NOT NULL);
-` + reportSchema + `
+` + reportSchema + inboxSchema + `
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO settings VALUES ('language', 'system');
 PRAGMA application_id=1263290191;
-PRAGMA user_version=3;`
+PRAGMA user_version=4;`
 
 const migrationV2 = `
 ALTER TABLE reports RENAME TO reports_v1;
@@ -274,7 +278,7 @@ func openLibrary(path string, checkpoint func(string)) (_ *Store, err error) {
 		if _, e = emptyPrivateDirectory(r, "originals"); e != nil {
 			return nil, e
 		}
-	} else if (version != 1 && version != 2 && version != 3) || application != 1263290191 {
+	} else if (version != 1 && version != 2 && version != 3 && version != 4) || application != 1263290191 {
 		return nil, ErrUnsupported
 	}
 	var check string
@@ -299,12 +303,12 @@ func openLibrary(path string, checkpoint func(string)) (_ *Store, err error) {
 		}
 		reached("schema_committed")
 	}
-	if !needsSchema && version < 3 {
+	if !needsSchema && version < 4 {
 		tx, e := s.db.Begin()
 		if e != nil {
 			return nil, ErrStorage
 		}
-		migration := "PRAGMA user_version=3;"
+		migration := inboxSchema + "PRAGMA user_version=4;"
 		if version == 1 {
 			migration = migrationV2 + migration
 		}
@@ -332,6 +336,9 @@ func openLibrary(path string, checkpoint func(string)) (_ *Store, err error) {
 	}
 	// Recovery changes state only; it never restarts recognition.
 	if _, e = s.db.Exec("UPDATE reports SET status='failed', failure='interrupted' WHERE status='processing'"); e != nil {
+		return nil, ErrCorrupt
+	}
+	if _, e = s.db.Exec("UPDATE inbox SET status='failed', failure='interrupted', revision=revision+1 WHERE status='processing'"); e != nil {
 		return nil, ErrCorrupt
 	}
 	// Cleanup failures leave durable queue entries. Opening never scans or

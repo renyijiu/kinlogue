@@ -101,6 +101,7 @@ func (s *screen) backupView(c *ui.Context) {
 					if prepared := s.backup.prepared; prepared != nil {
 						ui.Text(c, s.t("restore_validated")).FontSize(21).Bold()
 						ui.Text(c, s.t("restore_summary", prepared.Summary.Members, prepared.Summary.Reports, prepared.Summary.Sources))
+						ui.Text(c, s.t("restore_inbox", prepared.Summary.Inbox))
 						ui.Text(c, s.t("restore_bytes", prepared.Summary.OriginalBytes))
 						ui.Text(c, s.t("restore_replace_warning")).TextColor(c.Theme().Danger)
 						if ui.Button(c, s.t("restore_replace")).TextColor(c.Theme().Danger).Height(44).Clicked() {

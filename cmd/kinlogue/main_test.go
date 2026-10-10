@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"kinlogue/internal/app"
 	"kinlogue/internal/desktop"
 	"kinlogue/internal/library"
 )
@@ -38,6 +39,10 @@ func TestRuntimeRoutesHealthyAndDegradedStartupAndClosesItsOwner(t *testing.T) {
 		expected := errors.New("synthetic_run_error")
 		runErr, closeErr := runLibrary(runtime, func(backend desktop.Backend, backups desktop.BackupBackend, warning bool) error {
 			ordinary++
+			phone, ok := backend.(interface{ LANStatus() app.LANStatus })
+			if !ok || phone.LANStatus().Active {
+				t.Fatal("phone backend missing or reception auto-started")
+			}
 			if degraded || backups == nil || warning {
 				t.Fatal("incorrect normal startup composition")
 			}
