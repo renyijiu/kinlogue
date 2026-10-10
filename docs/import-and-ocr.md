@@ -68,31 +68,42 @@ OCR 输出预算：最多 4,096 blocks；单 block UTF-8 最多 64 KiB；总文�
 
 ## 候选字段与来源
 
-`ReportCandidateExtractor` 只做可重复的候选抽取，例如成员名、机构、科室、报告类型、标题、日期候选、reported results、conclusion 和 abnormal items。它不生成 OCR 中不存在的 conclusion。当前 extraction version 4 在保留既有标签的基础上，覆盖以下保守别名：
+`ReportCandidateExtractor` 只做可重复的候选抽取，例如成员名、机构、科室、报告类型、标题、日期候选、reported results、conclusion 和 abnormal items。它不生成 OCR 中不存在的 conclusion。当前 extraction version 5 在保留既有标签的基础上，覆盖以下保守别名：
 
 | 候选字段 | 支持的常见标签示例 |
 | --- | --- |
 | 成员名 | 姓名、患者姓名、病人姓名、受检者姓名 |
-| 机构 | 医院/院区抬头，以及医疗机构、医院名称、机构名称、送检单位、检查机构、检验机构 |
+| 机构 | 医疗机构、医院名称、机构名称、送检单位、检查机构、检验机构；没有标签时才接受简短的医院/院区抬头 |
 | 科室 | 科室、申请科室、开单科室、送检科室、就诊科室、临床科室、执行/检查/检验科室 |
-| 报告类型 | 报告类型/类别/种类、检查类型/类别、检验类型，以及独立出现的常见检查或报告类型 |
-| 标题 | 标题、报告标题/名称、检查名称/项目、检验名称/项目、项目名称 |
-| 检查结果 | 检查所见/结果/表现、影像所见/影像学表现/放射学表现、超声/内镜/病理所见、检验结果 |
+| 报告类型 | 报告类型/类别/种类、检查类型/类别、检验类型，独立出现的常见检查或报告类型，以及以“报告单”结尾的表单名称 |
+| 标题 | 标题、报告标题/名称、检查名称/项目、检验名称/项目、项目名称、医疗名称 |
+| 检查结果 | 检查所见/结果/结果描述/表现、影像所见/影像学表现/放射学表现、超声/内镜/病理所见、检验结果 |
 | 检查结论 | 检查结论/诊断、诊断意见/结论/提示/印象、报告结论，以及影像、放射、超声、内镜、病理诊断 |
 | 日期候选 | 报告/检查/检验时间或日期，采样/采集/收样/送检时间或日期，入院/出院/就诊时间或日期 |
 
-带竖线、圆点、横线、半角或全角星号装饰的段落标题仍可识别。带“项目 / 结果 / 参考值”的检验表格优先于叙述型结果；未发现表格时才收集检查所见类段落。段落在下一结果/结论标题、任一受支持日期、审核信息或查看操作前停止，避免把相邻章节和页脚并入来源转录。日期候选按报告、检查、采集、入院、出院或其他日期分类，并保留 OCR 中完整的来源时间文本。
+带竖线、圆点、横线、半角或全角星号装饰的段落标题仍可识别。带“项目 / 结果 / 参考值”的检验表格优先于叙述型结果；未发现表格时才收集检查所见类段落。段落在下一结果/结论标题、任一受支持日期、审核信息，或“查看报告”“查看/下载影像”“查看/下载图像”“下载报告”等查看与下载操作前停止，避免把相邻章节、按钮和页脚并入来源转录。一个标题是另一个标题的前缀时（“检查结果描述”与“检查结果”），先匹配较长者，否则多出的字会被当成段落首行。日期候选按报告、检查、采集、入院、出院或其他日期分类，并保留 OCR 中完整的来源时间文本。
+
+标签与取值按以下保守规则配对：
+
+- **标签后必须有分隔符**：机构、科室、报告类型、标题和成员名的标签后要有冒号或空白才取值，“科室主任”不会被读成名为“主任”的科室。日期标签不受此限，因为日期另由日期格式确认。
+- **标签单独成块**：机构、科室、报告类型和标题的标签独占一个 OCR block 时，取同一行右侧最近的块（与标签右缘的水平间距不超过 0.1），否则取正下方最近的左对齐块（左缘偏差不超过 0.03、下移不超过页高 0.08）。该位置是另一个“标签：值”、段落标题或查看/下载按钮时不取；标签与“结果”类表头同行时视为检验表格的列标题，也不取。候选的来源引用指向取值所在的块。成员名仍只取同一块内的值。
+- **医院抬头兜底**：只接受不超过 40 个字符、含“医院”或“院区”的行，并排除带句读、冒号或“请”“为准”“仅供”“参考”“如有”“咨询”“扫码”字样的说明句，例如“以医院纸质报告为准”。
+- **表单名称**：不超过 24 个字符、以“报告单”结尾且不是“标签：值”形式的行作为报告类型候选。
+
+Vision 常把“查”识别成异体字“査”，使“检査所见”一类标题和标签无法命中。抽取时只在匹配用的副本上把“査”还原为“查”；已保存的 OCR block 不改写。命中的候选把 OCR 实际读到的文字保存在 `originalTranscription`，把还原后的文字作为 `correctedTranscription` 提出，来源引用仍指向同一 block；这只是一条待确认的修正建议，复核表单显示还原后的文字，用户确认或改写后才写入记录。没有异体字的候选不带修正。
+
+这些配对规则移植自 Go 预览依据两份版式整理的规则，回归测试只保留版式坐标和合成文字；在真实样本上的命中率尚未验证。
 
 日期候选使用 UTC 公历构造后再精确核对年、月、日；非闰年的 2 月 29 日、2 月 30 日和 0/13 月等 OCR 错识结果会被忽略，不会被系统日期 API 自动折算成另一天。合法闰日继续作为带来源的候选保留，仍需用户 review。
 
-打开 extraction version 较旧且仍保存 OCR blocks 的待确认 draft 时，App 会用当前规则重新抽取，只填充原先为空的候选字段；已保存的候选、用户修正和 review state 保持不变。该刷新不重新执行 Vision OCR，也不把自动候选直接确认为健康记录。
+打开 extraction version 较旧且仍保存 OCR blocks 的待确认 draft 时，App 会用当前规则重新抽取，只填充原先为空的候选字段；已保存的候选、用户修正和 review state 保持不变。该刷新不重新执行 Vision OCR，也不把自动候选直接确认为健康记录。因此从 version 4 升到 5 时，旧规则留下的候选（例如被当成机构的说明句）不会被移除；需要按当前规则整体重建时由用户使用“重新识别并覆盖”。已确认记录不参与刷新，也不会被重新抽取。
 
 待确认页的“重新识别并覆盖”是另一条仅由用户明确触发的路径：App 从 Vault 中按 source 顺序逐份取得原件快照并运行 PDF text layer / Vision OCR，再用新 blocks 重建候选、来源引用和 review state。每份快照只保留当前原件，并重新核对 draft revision 与来源集合；因此多份合法原件累计超过 128 MiB 时仍可处理，处理中草稿发生变化则停止并拒绝覆盖。该动作会用新候选替换标题、机构、科室、报告类型、检查结果、检查结论、异常标记和日期候选；新 OCR 没有候选的字段也会被清空。成员、手工日期和用户备注保留；已选择的识别日期只有在新候选中找到相同日期、类型和来源转录时才继续选中，否则回到 unknown。识别失败时不保存新 document，当前表单保持不变。
 
 每个 `SourceField` 保存：
 
 - `originalTranscription`：OCR 或原始来源转录；
-- `correctedTranscription`：用户修正，若有；
+- `correctedTranscription`：用户修正，若有；待确认候选中也可以是抽取规则对已知识别异体字的还原，仍须用户确认；
 - `references`：source row、attachment、文件页和可选 OCR block；
 - `entryMethod`：来源转录或明确的 manual entry。
 
@@ -122,7 +133,7 @@ App 层把 Finder 报告导入、失败草稿重试和“重新识别并覆盖�
 
 - `ImportedFileValidatorTests`：类型、锁定 PDF、页/像素/大小边界、坏内容和多帧图片。
 - `TextExtractionTests`：PDF text layer、Vision 路径、页顺序、orientation、预算和 provenance。
-- `ReportCandidateExtractorTests`、`ImportDraftTests`、`ImportWorkflowIntegrationTests`：候选、叙述段落边界、提取版本刷新、状态转移、lease、重试、确认和落盘。
+- `ReportCandidateExtractorTests`、`ImportDraftTests`、`ImportWorkflowIntegrationTests`：候选、标签与取值配对、医院抬头与表单名称、异体字匹配且不改写 OCR、叙述段落边界、提取版本刷新、状态转移、lease、重试、确认和落盘。
 - `LiveAppServiceRecognitionIntegrationTests`、`LANReportArchiveTests`：真实 Vault 的多原件总量超过快照预算、识别中草稿变化，以及目的原件/OCR 损坏时保留完好的 inbox 副本。
 - `DICOMFolderScannerTests`、`DICOMStudyIndexerTests`、`DICOMImportWorkflowIntegrationTests` 与 `CatalogProcessCoordinationTests`：有界目录 intake、staged-byte authority、atomic publication、journal recovery、取消、并发、强制终止和 Vault destroy 竞争。
 - `DICOMSeriesGeometryTests`、`DICOMDisplayTransformTests`、`DICOMSliceServiceTests` 与 `DICOMSliceVaultIntegrationTests`：policy-v2 顺序、stored sample 到 grayscale、进程级预算/cache/scheduler、取消/失效和 verified descriptor/destroy fence。

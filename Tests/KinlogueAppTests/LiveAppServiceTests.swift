@@ -814,6 +814,67 @@ struct LiveAppServiceTests {
     }
 
     @Test
+    func confirmDraftKeepsWhatRecognitionReadBehindARestoredVariantCharacter() async throws {
+        let transaction = try SyntheticDraftTransaction()
+        let heading = try OCRBlock(
+            pageNumber: 1,
+            text: "检査所见：",
+            boundingBox: NormalizedRect(x: 0.05, y: 0.7, width: 0.4, height: 0.04),
+            confidence: 0.5,
+            method: .vision,
+            engineVersion: "synthetic"
+        )
+        let body = try OCRBlock(
+            pageNumber: 1,
+            text: "合成复査所见。",
+            boundingBox: NormalizedRect(x: 0.05, y: 0.6, width: 0.8, height: 0.04),
+            confidence: 0.97,
+            method: .vision,
+            engineVersion: "synthetic"
+        )
+        let previousVersionDocument = ImportDraftDocument(
+            blocks: [heading, body],
+            candidates: ReportCandidates(),
+            candidateExtractionVersion: ReportCandidateExtractor.extractionVersion - 1
+        )
+        let fixture = try LiveAppServiceFixture(
+            state: try readyState(for: transaction.beforeCommit),
+            initializedCatalog: transaction.beforeCommit,
+            catalogReads: [.success(transaction.beforeCommit)],
+            draftDocument: previousVersionDocument,
+            confirmCatalog: transaction.afterCommit,
+            readObjectData: Data([1, 2, 3, 4])
+        )
+
+        let review = try await fixture.service.loadReview(draftID: transaction.draft.id)
+        let proposal = try #require(review.document.candidates.reportedResults)
+        #expect(proposal.transcription == "合成复查所见。")
+        #expect(review.document.blocks.map(\.text) == ["检査所见：", "合成复査所见。"])
+
+        let command = ConfirmDraftCommand(
+            draftID: transaction.draft.id,
+            expectedRevision: transaction.draft.revision,
+            memberID: transaction.member.id,
+            timelineDateSelection: .unknown,
+            title: "",
+            organization: "",
+            department: "",
+            reportType: "",
+            reportedResults: proposal.transcription,
+            conclusion: "",
+            abnormalItems: [],
+            userNote: ""
+        )
+        _ = try await fixture.service.confirmDraft(command)
+
+        let record = try #require(await fixture.draftStore.lastConfirmedRecord)
+        #expect(record.reportedResults?.transcription == "合成复查所见。")
+        #expect(record.reportedResults?.originalTranscription == "合成复査所见。")
+        #expect(record.reportedResults?.entryMethod == nil)
+        #expect(record.reportedResults?.references.map(\.blockID) == [body.id])
+    }
+
+    @Test
     func confirmDraftReextractsStaleMultiSourceOCRWithoutConflatingFileLocalPages() async throws {
         let member = try FamilyMember(displayName: "Synthetic member")
         let firstAttachment = try Attachment(

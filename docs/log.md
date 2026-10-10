@@ -1190,3 +1190,13 @@
 - **证据与判断**：PR #13 的 [macOS 26 失败日志](https://github.com/renyijiu/kinlogue/actions/runs/35070491037/job/104710615643) 在正式 bundle 验证后输出 `KLD_DICOM_XPC_FAILED:helperTimedOut`。控制握手及崩溃错误校验已完成，因此该错误来自随后的恢复 decode；若崩溃请求超时，探针会输出 `unexpectedFailureCode`。本机 `launchd.plist(5)` 说明默认重启节流为 10 秒，与原恢复请求 10 秒超时重合；据此判断恢复预算缺少重启余量，远端日志没有单独记录 launchd 的实际调度时刻。
 - **修正**：只把独立 XPC 探针的恢复请求预算设为 30 秒；崩溃收敛仍要求 2 秒内失败，恢复仍必须返回精确像素，生产 transport 的 10 秒超时、Helper 的 9 秒硬 watchdog 和 hang 探针不变。不增加重试，不修改依赖或系统节流策略。扩展已有包装边界测试，检查恢复预算与原有时限；不新增测试计数。
 - **验证**：恢复预算断言已在旧源码上观察失败；`scripts/test.sh --filter DICOMPackagingBoundaryTests` 的 7 tests / 1 suite 通过。当前 Mac 的 `scripts/verify-dicom-xpc.sh` 通过真实 Release App/Helper 构建、签名、像素夹具、外部崩溃及恢复、hang watchdog、日志 canary 和零运行时 socket；文档、隐私与 diff 检查通过。本次是工作树验证；新提交远端 CI、clean-source bundle、独立系统安装、真实私有样本及人工矩阵尚未验证。
+
+## [2026-10-10] import | 把 Go 预览的字段建议规则移回 Swift
+
+- **背景与依据**：评估后 Swift 版继续作为发布线，Go 预览（分支 `codex/go-native-rewrite`）冻结。本条只移植其 `internal/candidate/candidate.go` 在提交 `cc95d6e` 中按两份版式调整、Swift 尚不具备的规则；参考实现只读，没有新增 Go 代码，也没有改动 Vault 存储格式或备份格式。
+- **规则**：`ReportCandidateExtractor` 的标签后必须有冒号或空白才取值（日期标签除外）；机构、科室、报告类型和标题的标签独占一个 block 时取同行右侧相邻块或正下方左对齐块，遇到另一个标签、段落标题或按钮则不取；医院抬头兜底从 80 个字符收紧到 40 个字符并排除说明句；不超过 24 个字符、以“报告单”结尾的表单名称作为报告类型；标题标签增加“医疗名称”，结果标题增加“检查结果描述”，停止行增加“查看影像/图像”“下载影像/图像/报告”。成员名、检验表格重建、异常标记和日期类别全部保留。完整契约见 [`import-and-ocr.md`](import-and-ocr.md)。
+- **与 Go 的差异**：一是异体字。Go 直接在提案里把“査”写成“查”；Swift 只在匹配副本上还原，`originalTranscription` 保留 OCR 实际读到的文字，还原结果作为待确认的 `correctedTranscription`，OCR block 与来源引用不变，[`domain-and-data-model.md`](domain-and-data-model.md) 同步了这一含义。二是检验表格。标题标签含“检验项目”“项目名称”，它们也常是表格列标题；标签与“结果”类表头同行时不取相邻或下方的值，避免把表头或首行项目读成标题。三是标签后的分隔符接受任意空白，避免全角空格分隔的旧输入失效。
+- **版本**：`extractionVersion` 从 4 升到 5。它只在打开、保存、重新识别或确认 `needsReview` 草稿时触发重新抽取，并且只填充原先为空的候选字段；已保存候选、review state 和已确认记录都不改写，旧规则留下的错误候选也不会因此消失。
+- **未移植**：Go 提交 `c6184a8` 的“低置信度来源提示”与 Swift 复核页已有的逐字段识别置信度说明重复，未移植；两者口径不同，Swift 显示来源 block 的平均置信度，Go 在最低置信度不高于 0.3 时提示。
+- **验证**：先写测试并观察其在旧规则下失败，再改实现。`swift test --disable-sandbox --filter KinlogueCoreTests` 的 142 tests / 2 suites 通过；`LiveAppServiceTests`、报告识别快照、`ImportDraftTests`、导入 workflow 与 LAN 归档的定向运行通过，其中新增一条经真实 `LiveAppService` 的链路：旧版本草稿刷新后提出还原文字，确认后的记录仍保留 OCR 原文与同一来源 block。确定性主测试清单变为 1009 tests / 91 suites，已同步[候选账本](acceptance/current-release.md)。完整门禁在后续交互改进完成后对同一工作树统一执行，结果见下一条。
+- **边界**：测试只使用合成文字，版式坐标沿用 Go 预览的合成夹具。规则依据的真实样本只有两份，真实报告上的命中率、误取率和“査”以外的异体字都没有在本仓库验证；改动未提交、未 push。

@@ -61,7 +61,7 @@ public struct ReportCandidates: Codable, Equatable, Sendable {
 }
 
 public struct ReportCandidateExtractor: Sendable {
-    public static let extractionVersion = 4
+    public static let extractionVersion = 5
 
     private static let memberNameLabels = ["受检者姓名", "患者姓名", "病人姓名", "姓名"]
     private static let organizationLabels = [
@@ -75,14 +75,16 @@ public struct ReportCandidateExtractor: Sendable {
         "报告类型", "报告类别", "报告种类", "检查类型", "检查类别", "检验类型",
     ]
     private static let titleLabels = [
-        "报告标题", "报告名称", "检查名称", "检查项目", "检验名称", "检验项目", "项目名称", "标题",
+        "报告标题", "报告名称", "检查名称", "检查项目", "检验名称", "检验项目", "项目名称", "医疗名称", "标题",
     ]
     private static let conclusionHeadings = [
         "检查结论", "检查诊断", "诊断意见", "诊断结论", "报告结论", "诊断提示", "诊断印象",
         "影像学诊断", "影像诊断", "放射学诊断", "超声诊断", "内镜诊断", "病理诊断",
     ]
+    // A longer heading comes before one it starts with, or its tail would be
+    // read as the first line of the section.
     private static let narrativeResultHeadings = [
-        "检查所见", "检查结果", "检查表现", "影像所见", "影像学表现", "放射学表现",
+        "检查所见", "检查结果描述", "检查结果", "检查表现", "影像所见", "影像学表现", "放射学表现",
         "超声所见", "内镜所见", "病理所见", "检验结果",
     ]
     private static let dateLabelMappings: [(String, ReportDateKind)] = [
@@ -114,13 +116,26 @@ public struct ReportCandidateExtractor: Sendable {
         + dateLabelMappings.map { $0.0 }
         + [
         "备注", "审核时间", "审核日期", "报告医师", "审核医师", "审核者",
-        "查看原始影像", "查看原始图像", "查看报告", "扫码", "扫一扫", "简体中文", "English",
+        "查看原始影像", "查看原始图像", "查看报告", "查看影像", "查看图像",
+        "下载影像", "下载图像", "下载报告", "扫码", "扫一扫", "简体中文", "English",
     ]
     private static let resultTableFooterHeadings = dateLabelMappings.map { $0.0 } + [
         "检验：", "检验:", "核对：", "核对:",
         "备注", "注：", "注:", "**代表",
     ]
     private static let headingDecorations = CharacterSet(charactersIn: "|｜丨│┃¦·•●○■□▪-—_*＊ ")
+    private static let labelSeparators = CharacterSet(charactersIn: " :：")
+    // A line with these is a sentence about the hospital, not its name.
+    private static let organizationNoise = [
+        "请", "为准", "仅供", "参考", "如有", "咨询", "扫码",
+        "。", "，", ",", "；", ";", "！", "!", "？", "?", "：", ":",
+    ]
+    private static let letterheadMaximumLength = 40
+    private static let reportSheetSuffix = "报告单"
+    private static let reportSheetMaximumLength = 24
+    private static let labeledLineMaximumLabelLength = 8
+    // Recognition often reads these simplified characters as a variant form.
+    private static let recognitionVariants: [Character: Character] = ["査": "查"]
     private static let standaloneReportTypes = [
         "CT", "CTA", "MR", "MRI", "MRA", "X线", "DR", "CR", "超声", "B超", "PET-CT", "PET/CT",
         "检验报告", "化验单", "病理报告", "内镜报告", "心电图报告", "体检报告",
@@ -131,6 +146,10 @@ public struct ReportCandidateExtractor: Sendable {
     private static let headerAlignmentTolerance = 0.012
     private static let dateValueMaximumHorizontalGap = 0.1
     private static let dateValueMaximumBlockCount = 4
+    // A value printed under its label starts at the same left edge, within a
+    // few lines of it.
+    private static let valueBelowMaximumDrop = 0.08
+    private static let valueBelowMaximumShift = 0.03
 
     public init() {}
 
@@ -148,36 +167,42 @@ public struct ReportCandidateExtractor: Sendable {
             let text = block.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
             let reference = sourceReference(for: block)
+            let matchText = restoringVariants(text)
+            let pageBlocks = blocksByPage[block.pageNumber, default: []]
 
             if result.memberName == nil,
                let value = labeledValue(in: text, labels: Self.memberNameLabels) {
                 result.memberName = sourceField(value, reference: reference)
             }
-            if result.organization == nil,
-               let value = labeledValue(in: text, labels: Self.organizationLabels) {
-                result.organization = sourceField(value, reference: reference)
+            if result.organization == nil {
+                result.organization = labeledField(
+                    for: block, text: text, labels: Self.organizationLabels, pageBlocks: pageBlocks
+                )
             }
-            if result.department == nil,
-               let value = labeledValue(in: text, labels: Self.departmentLabels) {
-                result.department = sourceField(value, reference: reference)
+            if result.department == nil {
+                result.department = labeledField(
+                    for: block, text: text, labels: Self.departmentLabels, pageBlocks: pageBlocks
+                )
             }
-            if result.reportType == nil,
-               let value = labeledValue(in: text, labels: Self.reportTypeLabels) {
-                result.reportType = sourceField(value, reference: reference)
+            if result.reportType == nil {
+                result.reportType = labeledField(
+                    for: block, text: text, labels: Self.reportTypeLabels, pageBlocks: pageBlocks
+                )
             }
+            // A line that is only a modality, or the form's own name such as
+            // "MRI检查报告单", says what kind of report this is.
             if result.reportType == nil,
                Self.standaloneReportTypes.contains(where: {
-                   text.compare($0, options: .caseInsensitive) == .orderedSame
-               }) {
+                   matchText.compare($0, options: .caseInsensitive) == .orderedSame
+               }) || isReportSheetName(matchText) {
                 result.reportType = sourceField(text, reference: reference)
             }
-            if result.title == nil,
-               let value = labeledValue(in: text, labels: Self.titleLabels) {
-                result.title = sourceField(value, reference: reference)
+            if result.title == nil {
+                result.title = labeledField(
+                    for: block, text: text, labels: Self.titleLabels, pageBlocks: pageBlocks
+                )
             }
-            if result.organization == nil,
-               text.count <= 80,
-               (text.contains("医院") || text.contains("院区")) {
+            if result.organization == nil, isLetterhead(matchText) {
                 result.organization = sourceField(text, reference: reference)
             }
 
@@ -218,15 +243,16 @@ public struct ReportCandidateExtractor: Sendable {
             let text = block.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
             let headingText = textDroppingHeadingDecorations(text)
-            if let heading = headings.first(where: { headingText.hasPrefix($0) }) {
+            let matchText = restoringVariants(headingText)
+            if let heading = headings.first(where: { matchText.hasPrefix($0) }) {
                 isCollecting = true
                 let remainder = String(headingText.dropFirst(heading.count))
-                    .trimmingCharacters(in: CharacterSet(charactersIn: " :："))
+                    .trimmingCharacters(in: Self.labelSeparators)
                 if !remainder.isEmpty, !excludedBlockIDs.contains(block.id) {
                     collectedBlocks.append(blockReplacingText(block, text: remainder))
                 }
             } else if isCollecting {
-                if stopHeadings.contains(where: { headingText.hasPrefix($0) }) {
+                if stopHeadings.contains(where: { matchText.hasPrefix($0) }) {
                     isCollecting = false
                 } else if !excludedBlockIDs.contains(block.id) {
                     collectedBlocks.append(block)
@@ -235,8 +261,8 @@ public struct ReportCandidateExtractor: Sendable {
         }
 
         guard !collectedBlocks.isEmpty else { return nil }
-        return try? SourceField(
-            originalTranscription: collectedBlocks.map(\.text).joined(separator: "\n"),
+        return sourceField(
+            collectedBlocks.map(\.text).joined(separator: "\n"),
             references: collectedBlocks.compactMap(sourceReference(for:))
         )
     }
@@ -344,8 +370,8 @@ public struct ReportCandidateExtractor: Sendable {
         }
 
         guard !lines.isEmpty else { return nil }
-        return try? SourceField(
-            originalTranscription: lines.joined(separator: "\n"),
+        return sourceField(
+            lines.joined(separator: "\n"),
             references: referencedBlocks.compactMap(sourceReference(for:))
         )
     }
@@ -388,7 +414,9 @@ public struct ReportCandidateExtractor: Sendable {
         let footerY = pageBlocks
             .filter { block in
                 guard block.boundingBox.y < header.y else { return false }
-                let rawText = block.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let rawText = restoringVariants(
+                    block.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
                 let headingText = textDroppingHeadingDecorations(rawText)
                 return Self.resultTableFooterHeadings.contains(where: {
                     rawText.hasPrefix($0) || headingText.hasPrefix($0)
@@ -525,13 +553,110 @@ public struct ReportCandidateExtractor: Sendable {
         return left.id.uuidString < right.id.uuidString
     }
 
-    private func labeledValue(in text: String, labels: [String]) -> String? {
-        for label in labels where text.hasPrefix(label) {
-            let remainder = String(text.dropFirst(label.count))
-                .trimmingCharacters(in: CharacterSet(charactersIn: " :："))
-            if !remainder.isEmpty { return remainder }
+    /// Reads the value a label introduces: after it in the same block, or,
+    /// when the block holds the label alone, in the block beside or under it.
+    private func labeledField(
+        for block: OCRBlock,
+        text: String,
+        labels: [String],
+        pageBlocks: [OCRBlock]
+    ) -> SourceField? {
+        if let value = labeledValue(in: text, labels: labels) {
+            return sourceField(value, reference: sourceReference(for: block))
+        }
+        let bare = String(restoringVariants(text).filter { !$0.isWhitespace })
+            .trimmingCharacters(in: Self.labelSeparators)
+        guard labels.contains(bare) else { return nil }
+        // A label that heads a column of a results table has no value of its own.
+        guard !pageBlocks.contains(where: { other in
+            other.id != block.id
+                && abs(other.boundingBox.y - block.boundingBox.y) <= Self.headerAlignmentTolerance
+                && normalizedHeaderCell(other.text).hasSuffix("结果")
+        }) else { return nil }
+
+        var beside: OCRBlock?
+        var under: OCRBlock?
+        for other in pageBlocks where other.id != block.id {
+            guard !other.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                continue
+            }
+            let drop = block.boundingBox.y - other.boundingBox.y
+            if abs(drop) <= Self.rowAlignmentTolerance {
+                if other.boundingBox.x > block.boundingBox.x,
+                   other.boundingBox.x - (block.boundingBox.x + block.boundingBox.width)
+                    <= Self.dateValueMaximumHorizontalGap,
+                   beside.map({ other.boundingBox.x < $0.boundingBox.x }) ?? true {
+                    beside = other
+                }
+            } else if drop > 0,
+                      drop <= Self.valueBelowMaximumDrop,
+                      abs(other.boundingBox.x - block.boundingBox.x) <= Self.valueBelowMaximumShift,
+                      under.map({ other.boundingBox.y > $0.boundingBox.y }) ?? true {
+                under = other
+            }
+        }
+        for candidate in [beside, under] {
+            guard let candidate else { continue }
+            let value = candidate.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Another label, heading or button there means this label has no value.
+            guard !isLabeledLine(value), !isStopHeading(value) else { continue }
+            return sourceField(value, reference: sourceReference(for: candidate))
         }
         return nil
+    }
+
+    /// Needs a separator after the label: "科室主任" is not a department named
+    /// "主任".
+    private func labeledValue(in text: String, labels: [String]) -> String? {
+        for label in labels {
+            guard let remainder = remainder(of: text, after: label),
+                  let first = remainder.unicodeScalars.first,
+                  Self.labelSeparators.contains(first)
+                    || CharacterSet.whitespaces.contains(first) else { continue }
+            let value = remainder.trimmingCharacters(in: Self.labelSeparators)
+            if !value.isEmpty { return value }
+        }
+        return nil
+    }
+
+    /// The text recognition read after `label`. The label is matched with
+    /// variants restored, which never changes how many characters it spans.
+    private func remainder(of text: String, after label: String) -> Substring? {
+        guard restoringVariants(text).hasPrefix(label) else { return nil }
+        return text.dropFirst(label.count)
+    }
+
+    /// A short label and its separator, as in "姓名：".
+    private func isLabeledLine(_ text: String) -> Bool {
+        guard let separator = text.firstIndex(where: { $0 == "：" || $0 == ":" }) else {
+            return false
+        }
+        return (1...Self.labeledLineMaximumLabelLength)
+            .contains(text.distance(from: text.startIndex, to: separator))
+    }
+
+    private func isStopHeading(_ text: String) -> Bool {
+        let headingText = restoringVariants(textDroppingHeadingDecorations(text))
+        return Self.stopHeadings.contains(where: { headingText.hasPrefix($0) })
+    }
+
+    /// A short line that names a hospital. A sentence that merely mentions
+    /// one, such as a notice to rely on the paper report, is not a name.
+    private func isLetterhead(_ text: String) -> Bool {
+        guard text.count <= Self.letterheadMaximumLength,
+              text.contains("医院") || text.contains("院区") else { return false }
+        return !Self.organizationNoise.contains(where: { text.contains($0) })
+    }
+
+    private func isReportSheetName(_ text: String) -> Bool {
+        text.hasSuffix(Self.reportSheetSuffix)
+            && text.count <= Self.reportSheetMaximumLength
+            && !isLabeledLine(text)
+    }
+
+    private func restoringVariants(_ text: String) -> String {
+        guard text.contains(where: { Self.recognitionVariants[$0] != nil }) else { return text }
+        return String(text.map { Self.recognitionVariants[$0] ?? $0 })
     }
 
     private func dateCandidate(
@@ -541,9 +666,11 @@ public struct ReportCandidateExtractor: Sendable {
     ) -> ReportDateCandidate? {
         guard let (label, kind) = dateLabel(in: text),
               let date = parseDate(text) else { return nil }
-        let sourceText = labeledValue(in: text, labels: [label]) ?? text
-        guard let field = try? SourceField(
-            originalTranscription: sourceText,
+        // A date is recognized by its pattern, so its label needs no separator.
+        let value = remainder(of: text, after: label)?
+            .trimmingCharacters(in: Self.labelSeparators) ?? ""
+        guard let field = sourceField(
+            value.isEmpty ? text : value,
             references: references
         ) else { return nil }
         return ReportDateCandidate(
@@ -555,7 +682,8 @@ public struct ReportCandidateExtractor: Sendable {
     }
 
     private func dateLabel(in text: String) -> (String, ReportDateKind)? {
-        Self.dateLabelMappings.first(where: { text.hasPrefix($0.0) })
+        let matchText = restoringVariants(text)
+        return Self.dateLabelMappings.first(where: { matchText.hasPrefix($0.0) })
     }
 
     private func parseDate(_ text: String) -> Date? {
@@ -615,9 +743,21 @@ public struct ReportCandidateExtractor: Sendable {
         _ text: String,
         reference: SourceReference?
     ) -> SourceField? {
-        try? SourceField(
+        sourceField(text, references: reference.map { [$0] } ?? [])
+    }
+
+    /// Proposes text with recognition variants restored. What recognition read
+    /// stays as the original transcription, so the restored form is a
+    /// correction the user still confirms, never a rewrite of the saved OCR.
+    private func sourceField(
+        _ text: String,
+        references: [SourceReference]
+    ) -> SourceField? {
+        let restored = restoringVariants(text)
+        return try? SourceField(
             originalTranscription: text,
-            references: reference.map { [$0] } ?? []
+            correctedTranscription: restored == text ? nil : restored,
+            references: references
         )
     }
 
