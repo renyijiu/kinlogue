@@ -77,6 +77,8 @@ type screen struct {
 	reportList                       ui.ListState
 	reportListScope                  [2]string
 	newMember, deletePrompt, showRaw bool
+	deleteTarget                     string
+	inboxCount                       int
 	memberName                       string
 	editingConfirmed                 bool
 	selectedReport                   int
@@ -157,11 +159,14 @@ func (s *screen) run() error {
 }
 
 func (s *screen) t(key string, args ...any) string {
-	lang := s.language
-	if lang == "system" {
-		lang = s.systemLanguage
+	return translate(s.lang(), key, args...)
+}
+
+func (s *screen) lang() string {
+	if s.language == "system" {
+		return s.systemLanguage
 	}
-	return translate(lang, key, args...)
+	return s.language
 }
 
 func (s *screen) updateChrome() {
@@ -221,6 +226,7 @@ type snapshot struct {
 	members         []library.Member
 	drafts, records []library.Report
 	language        string
+	inboxCount      int
 }
 
 func (s *screen) read(ctx context.Context, member, query string, language bool) (snapshot, error) {
@@ -240,6 +246,14 @@ func (s *screen) read(ctx context.Context, member, query string, language bool) 
 			return result, err
 		}
 	}
+	// The sidebar shows the pending phone count like the Swift app. It is a
+	// hint only; a failed read leaves the previous count.
+	result.inboxCount = -1
+	if phone, ok := s.backend.(LANBackend); ok {
+		if items, inboxErr := phone.Inbox(ctx); inboxErr == nil {
+			result.inboxCount = len(items)
+		}
+	}
 	if language {
 		result.language, err = s.backend.Language(ctx)
 	}
@@ -248,6 +262,9 @@ func (s *screen) read(ctx context.Context, member, query string, language bool) 
 
 func (s *screen) apply(data snapshot) {
 	s.members, s.drafts, s.records = data.members, data.drafts, data.records
+	if data.inboxCount >= 0 {
+		s.inboxCount = data.inboxCount
+	}
 	if data.language != "" {
 		s.language = data.language
 		s.updateChrome()
@@ -308,7 +325,8 @@ func (s *screen) consumeRequests() bool {
 	case shutdown != nil:
 		s.requestShutdown(shutdown)
 	case navigation != nil:
-		if !s.modalOpen() {
+		// Like a Swift sheet, the review and receiver sheets block navigation.
+		if !s.modalOpen() && !s.reviewOpen() && !s.phone.receiverOpen {
 			s.leave(navigation)
 		}
 	case save:
@@ -354,7 +372,8 @@ func (s *screen) requestShutdown(next func()) {
 	s.shutdown, s.pending = next, nil
 	s.stopPhone()
 	s.clearBackupSecrets()
-	s.newMember, s.deletePrompt = false, false
+	s.newMember, s.deletePrompt, s.deleteTarget = false, false, ""
+	s.phone.receiverOpen = false
 	s.importPaths = nil
 	s.previewGeneration++
 	s.previewPaused = s.previewPaused || s.previewBusy
@@ -733,8 +752,15 @@ func (s *screen) importFiles(paths []string) {
 	})
 }
 
-func (s *screen) retry() {
-	id, member, query := s.report.ID, s.memberID, s.query
+func (s *screen) retry() { s.retryDraft(s.report.ID) }
+
+// retryDraft reruns recognition for a failed draft, from the sidebar's
+// import status or from an open failed draft.
+func (s *screen) retryDraft(id string) {
+	if id == "" {
+		return
+	}
+	member, query := s.memberID, s.query
 	s.job("processing", true, func(ctx context.Context) func() {
 		report, err := s.backend.Retry(ctx, id)
 		data, loadErr := s.read(s.ctx, member, query, false)
@@ -743,7 +769,11 @@ func (s *screen) retry() {
 				s.apply(data)
 			}
 			s.message = errorKey(err, "recognition_failed")
-			if report.ID != "" {
+			// A retried draft that is now reviewable opens in the review sheet.
+			if report.ID != "" && (report.ID == s.report.ID || report.Status == "review") {
+				if report.ID != s.report.ID {
+					s.clearReport()
+				}
 				s.accept(report)
 				s.preview(1)
 			}
@@ -781,8 +811,37 @@ func (s *screen) addMember() {
 	})
 }
 
+// promptDelete asks before deleting a confirmed record or discarding a draft.
+func (s *screen) promptDelete(id string) {
+	if id == "" || s.busy != "" {
+		return
+	}
+	s.deleteTarget, s.deletePrompt = id, true
+}
+
+func (s *screen) cancelDelete() { s.deletePrompt, s.deleteTarget = false, "" }
+
+func (s *screen) deleteTargetStatus() string {
+	target := s.deleteTarget
+	if target == "" {
+		target = s.report.ID
+	}
+	if target == s.report.ID {
+		return s.report.Status
+	}
+	for _, r := range s.drafts {
+		if r.ID == target {
+			return r.Status
+		}
+	}
+	return "confirmed"
+}
+
 func (s *screen) deleteReport() {
-	id, member, query := s.report.ID, s.memberID, s.query
+	id, member, query := s.deleteTarget, s.memberID, s.query
+	if id == "" {
+		id = s.report.ID
+	}
 	s.job("deleting", false, func(ctx context.Context) func() {
 		result, err := s.backend.DeleteReport(ctx, id)
 		var data snapshot
@@ -795,7 +854,9 @@ func (s *screen) deleteReport() {
 				s.message = "delete_failed"
 				return
 			}
-			s.clearReport()
+			if s.report.ID == id {
+				s.clearReport()
+			}
 			if loadErr == nil {
 				s.apply(data)
 			}
@@ -803,7 +864,7 @@ func (s *screen) deleteReport() {
 			// leave a stale row that could be mistaken for the retained record.
 			s.drafts = slices.DeleteFunc(s.drafts, func(r library.Report) bool { return r.ID == id })
 			s.records = slices.DeleteFunc(s.records, func(r library.Report) bool { return r.ID == id })
-			s.deletePrompt = false
+			s.deletePrompt, s.deleteTarget = false, ""
 			s.message = ""
 			if loadErr != nil {
 				s.message = "load_failed"

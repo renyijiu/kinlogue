@@ -9,7 +9,7 @@ import (
 
 func (s *screen) backupView(c *ui.Context) {
 	ui.Scroll(c).Fill().Children(func() {
-		ui.Column(c).FillWidth().Gap(18).Padding(4).Children(func() {
+		ui.Column(c).FillWidth().MaxWidth(760).Gap(28).Padding(4).Children(func() {
 			title := "settings"
 			if s.recoveryOnly {
 				title = "recovery_title"
@@ -17,7 +17,12 @@ func (s *screen) backupView(c *ui.Context) {
 			if s.restartOnly {
 				title = "restore_restart_title"
 			}
-			ui.Text(c, s.t(title)).FontSize(28).Bold().TextColor(c.Theme().Accent)
+			ui.Column(c).Gap(8).Children(func() {
+				ui.Text(c, s.t(title)).FontSize(30).Bold()
+				if title == "settings" && s.backup.step == "" && !s.activating {
+					ui.Text(c, s.t("settings_subtitle")).FontSize(17).TextColor(c.Theme().TextMuted)
+				}
+			})
 			if s.restartOnly {
 				ui.Text(c, s.t("restore_restart_detail"))
 				s.quitButton(c)
@@ -34,37 +39,46 @@ func (s *screen) backupView(c *ui.Context) {
 				switch s.backup.step {
 				case "":
 					if !s.recoveryOnly {
-						ui.Row(c).FillWidth().Padding(18).Gap(20).AlignItems(ui.Center).Radius(12).Background(c.Theme().SurfacePressed).Border(1, c.Theme().Border).Children(func() {
-							ui.Text(c, s.t("language")).Bold().Grow(1)
-							ui.Column(c).Width(240).Children(func() {
-								value := s.language
-								picker(c, &value, []choice{{"system", s.t("system")}, {"zh-Hans", s.t("chinese")}, {"en", s.t("english")}}, s.t("language"), s.busy != "")
-								if value != s.language {
-									s.changeLanguage(value)
-								}
+						s.settingsSection(c, iconSliders, s.t("general"), func() {
+							ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Center).Children(func() {
+								ui.Column(c).Grow(1).MinWidth(0).Gap(5).Children(func() {
+									ui.Text(c, s.t("language")).Bold()
+									ui.Text(c, s.t("language_hint")).TextColor(c.Theme().TextMuted)
+								})
+								ui.Column(c).Width(220).Shrink(0).Children(func() {
+									value := s.language
+									picker(c, &value, []choice{{"system", s.t("system")}, {"zh-Hans", s.t("chinese")}, {"en", s.t("english")}}, s.t("language_hint"), s.busy != "")
+									if value != s.language {
+										s.changeLanguage(value)
+									}
+								})
 							})
 						})
 					}
 					if s.backups != nil {
-						ui.Row(c).FillWidth().Padding(18).Gap(24).Radius(12).Background(c.Theme().SurfacePressed).Border(1, c.Theme().Border).Children(func() {
-							ui.Column(c).Grow(1).MinWidth(0).Gap(10).Children(func() {
-								ui.Text(c, s.t("backup_home")).FontSize(18).Bold().TextColor(c.Theme().Accent)
-								ui.Text(c, s.t("backup_help")).TextColor(c.Theme().TextMuted)
-							})
-							ui.Column(c).Width(240).Gap(10).Children(func() {
-								if !s.recoveryOnly && ui.PrimaryButton(c, s.t("backup_create")).FillWidth().Height(42).Clicked() {
-									s.startBackup()
-									c.Invalidate()
-								}
-								if ui.Button(c, s.t("restore_choose")).FillWidth().Height(42).Clicked() {
-									s.chooseRestoreFile()
-								}
+						s.settingsSection(c, iconDrive, s.t("data_backup"), func() {
+							ui.Row(c).FillWidth().Gap(24).Children(func() {
+								ui.Column(c).Grow(1).MinWidth(0).Gap(6).Children(func() {
+									ui.Text(c, s.t("backup_home")).Bold()
+									ui.Text(c, s.t("backup_help")).TextColor(c.Theme().TextMuted)
+								})
+								ui.Column(c).Width(220).Shrink(0).Gap(10).Children(func() {
+									if !s.recoveryOnly && ui.PrimaryButton(c, s.t("backup_create")).FillWidth().Clicked() {
+										s.startBackup()
+										c.Invalidate()
+									}
+									if ui.Button(c, s.t("restore_choose")).FillWidth().Clicked() {
+										s.chooseRestoreFile()
+									}
+								})
 							})
 						})
 					}
 					if !s.recoveryOnly {
-						ui.Text(c, s.t("privacy")).FontSize(12).TextColor(c.Theme().TextMuted)
-						ui.Text(c, s.t("preview_scope")).FontSize(12).TextColor(c.Theme().TextMuted)
+						ui.Column(c).Gap(4).Children(func() {
+							ui.Text(c, s.t("privacy")).FontSize(12).TextColor(c.Theme().TextMuted)
+							ui.Text(c, s.t("preview_scope")).FontSize(12).TextColor(c.Theme().TextMuted)
+						})
 					}
 				case "generated":
 					ui.Text(c, s.t("backup_code_title")).FontSize(21).Bold()
@@ -135,4 +149,16 @@ func (s *screen) quitButton(c *ui.Context) {
 	if ui.Button(c, s.t("quit")).Clicked() {
 		s.queueShutdown(func() { s.allowClose = true; s.stop(); mygo.App.Quit() })
 	}
+}
+
+// settingsSection is a Swift settings group: a Primary section label above a
+// white card with an outline.
+func (s *screen) settingsSection(c *ui.Context, glyph *ui.SVG, title string, content func()) {
+	ui.Column(c).FillWidth().Gap(12).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			icon(c, glyph, 20, c.Theme().Accent)
+			ui.Text(c, title).FontSize(21).Bold().TextColor(c.Theme().Accent)
+		})
+		ui.Column(c).FillWidth().Padding(22).Background(c.Theme().Surface).Border(1, c.Theme().Border).Radius(14).Children(content)
+	})
 }

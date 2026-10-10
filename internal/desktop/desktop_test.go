@@ -115,7 +115,7 @@ func testScreen(t *testing.T) (*screen, *fakeBackend, func()) {
 func TestReviewEditingAndExplicitConfirmation(t *testing.T) {
 	s, f, drain := testScreen(t)
 	tt := ui.NewTester(s.view, 1240, 900)
-	if err := tt.Click("Corrected transcription"); err != nil {
+	if err := tt.Click("Findings (Verbatim)"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Key(ui.Cmd, ui.KeyA)
@@ -123,15 +123,13 @@ func TestReviewEditingAndExplicitConfirmation(t *testing.T) {
 	if !s.dirty() {
 		t.Fatal("editing did not mark the draft dirty")
 	}
-	if err := tt.Click("Save for later"); err != nil {
-		t.Fatal(err)
-	}
+	tt.Key(ui.Cmd, ui.KeyS)
 	drain()
 	if f.saved.Text != "Synthetic corrected text" || f.confirmed || s.dirty() {
 		t.Fatal("save did not preserve an unconfirmed correction")
 	}
 	tt.Frame()
-	if err := tt.Click("Confirm record"); err != nil {
+	if err := tt.Click("Confirm and Add to Timeline"); err != nil {
 		t.Fatal(err)
 	}
 	drain()
@@ -146,10 +144,10 @@ func TestDirtyNavigationSaveFailureKeepsEditsAndCancelStays(t *testing.T) {
 	moved := false
 	s.leave(func() { moved = true })
 	tt := ui.NewTester(s.view, 1240, 900)
-	if !tt.HasText("Unsaved changes") || moved {
+	if !tt.HasText("Unsaved Changes") || moved {
 		t.Fatal("navigation did not wait for a choice")
 	}
-	if err := tt.Click("Cancel"); err != nil {
+	if err := tt.Click("Keep Editing"); err != nil {
 		t.Fatal(err)
 	}
 	if moved || s.pending != nil || !s.dirty() {
@@ -195,14 +193,14 @@ func TestConfirmDisabledUntilMemberChosenAndRecognitionComplete(t *testing.T) {
 	s, f, _ := testScreen(t)
 	s.edit.MemberID = ""
 	tt := ui.NewTester(s.view, 1240, 900)
-	_ = tt.Click("Confirm record")
+	_ = tt.Click("Confirm and Add to Timeline")
 	if f.confirmed || s.busy != "" {
 		t.Fatal("confirmation ran without member")
 	}
 	s.edit.MemberID = "member-a"
 	s.report.Status = "processing"
 	tt.Frame()
-	_ = tt.Click("Confirm record")
+	_ = tt.Click("Confirm and Add to Timeline")
 	if f.confirmed || s.busy != "" {
 		t.Fatal("confirmation ran while processing")
 	}
@@ -268,6 +266,22 @@ func TestInitialRecognitionStaysReadableAfterCorrectionAndConfirmation(t *testin
 	s.report.Review.Text = "Synthetic corrected transcription"
 	s.edit.Text = s.report.Review.Text
 	tt := ui.NewTester(s.view, 1240, 900)
+	// The confirmed detail shows the findings read-only and copyable.
+	if err := tt.Click("Findings (Verbatim)"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(ui.Cmd, ui.KeyC)
+	if tt.Clipboard() != "Synthetic corrected transcription" {
+		t.Fatal("confirmed correction is not readable")
+	}
+	tt.Type("Should not replace confirmed text")
+	if s.edit.Text != "Synthetic corrected transcription" || s.report.Review.Text != "Synthetic corrected transcription" {
+		t.Fatal("confirmed transcription was editable")
+	}
+	// The initial recognition stays available beside the original when editing.
+	s.startEditing()
+	tt.Frame()
 	if err := tt.Click("Show initial recognition"); err != nil {
 		t.Fatal(err)
 	}
@@ -278,17 +292,6 @@ func TestInitialRecognitionStaysReadableAfterCorrectionAndConfirmation(t *testin
 	tt.Key(ui.Cmd, ui.KeyC)
 	if tt.Clipboard() != "Synthetic initial OCR" {
 		t.Fatal("initial recognition cannot be read independently of correction")
-	}
-	before := s.edit.Text
-	_ = tt.Click("Corrected transcription")
-	tt.Key(ui.Cmd, ui.KeyA)
-	tt.Key(ui.Cmd, ui.KeyC)
-	if tt.Clipboard() != before {
-		t.Fatal("confirmed correction is not readable")
-	}
-	tt.Type("Should not replace confirmed text")
-	if s.edit.Text != before {
-		t.Fatal("confirmed transcription was editable")
 	}
 }
 
@@ -490,7 +493,7 @@ func TestShutdownAfterFailedSavePreservesEditsAndCancelStaysOpen(t *testing.T) {
 		t.Fatal("failed save lost edits or did not resume the dirty close guard")
 	}
 	tt := ui.NewTester(s.view, 1240, 900)
-	if err := tt.Click("Cancel"); err != nil {
+	if err := tt.Click("Keep Editing"); err != nil {
 		t.Fatal(err)
 	}
 	if exited || s.pending != nil || !s.dirty() {
@@ -515,7 +518,7 @@ func TestLargeTimelineBuildsVisibleRowsAndCanReachLastRecord(t *testing.T) {
 		t.Fatal("timeline eagerly constructed off-screen rows")
 	}
 	// Scroll through the container rather than loading another API page.
-	bounds, ok := tt.Find("Confirmed records")
+	bounds, ok := tt.Find("Timeline records")
 	if !ok {
 		t.Fatal("timeline is unavailable")
 	}
@@ -547,7 +550,7 @@ func TestCancellingShutdownRestartsInterruptedPreview(t *testing.T) {
 	exited := false
 	s.requestShutdown(func() { exited = true })
 	tt := ui.NewTester(s.view, 1240, 900)
-	if err := tt.Click("Cancel"); err != nil {
+	if err := tt.Click("Keep Editing"); err != nil {
 		t.Fatal(err)
 	}
 	close(backend.release)

@@ -26,10 +26,10 @@ func TestConfirmedEditingIsExplicitAndUpdatesInsteadOfReconfirming(t *testing.T)
 	f.report.Status = "confirmed"
 	s.accept(f.report)
 	tt := ui.NewTester(s.view, 1240, 1000)
-	if err := tt.Click("Edit record"); err != nil {
+	if err := tt.Click("Edit"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.Click("Report title"); err != nil {
+	if err := tt.Click("Report Title"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Key(ui.Cmd, ui.KeyA)
@@ -49,35 +49,23 @@ func TestConfirmedCancelAndFailedSavePreserveCorrectBaseline(t *testing.T) {
 	f.report.Status = "confirmed"
 	s.accept(f.report)
 	tt := ui.NewTester(s.view, 1240, 1000)
-	if err := tt.Click("Edit record"); err != nil {
+	if err := tt.Click("Edit"); err != nil {
 		t.Fatal(err)
 	}
 	s.edit.Notes = "Synthetic unsaved note"
-	tt.Frame()
-	if err := tt.Click("Cancel editing"); err != nil {
-		t.Fatal(err)
-	}
-	if s.pending == nil || !s.dirty() {
-		t.Fatal("cancel editing lost dirty guard")
-	}
-	if err := tt.Click("Cancel"); err != nil {
-		t.Fatal(err)
-	}
 	f.saveError = errors.New("synthetic_save_failure")
 	s.save(false, nil)
 	drain()
 	tt.Frame()
-	if !s.editingConfirmed || s.edit.Notes != "Synthetic unsaved note" {
-		t.Fatal("save failure lost confirmed edit session")
+	if !s.editingConfirmed || s.edit.Notes != "Synthetic unsaved note" || !tt.HasText("Could not save. Your edits are still on this page.") {
+		t.Fatal("save failure lost confirmed edit session or hid the error")
 	}
-	if err := tt.Click("Cancel editing"); err != nil {
+	// Like the Swift edit sheet, Cancel is an explicit choice to discard.
+	if err := tt.Click("Cancel"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.Click("Discard changes"); err != nil {
-		t.Fatal(err)
-	}
-	if s.editingConfirmed || s.dirty() || s.edit.Notes != "" || f.report.Review.Notes != "" {
-		t.Fatal("discard mutated the saved baseline")
+	if s.editingConfirmed || s.dirty() || s.edit.Notes != "" || f.report.Review.Notes != "" || s.pending != nil {
+		t.Fatal("cancel did not restore the saved baseline")
 	}
 }
 
@@ -139,10 +127,10 @@ func TestCommittedDeletionClearsConfirmedDetailAndReportsPendingCleanup(t *testi
 	f.cleanupPending = true
 	s.deletePrompt = true
 	tt := ui.NewTester(s.view, 1240, 1000)
-	if !tt.HasText("Deletes this report and its original copies managed by the app. Source files you selected and exported copies are not removed.") {
+	if !tt.HasText("The record and originals it no longer shares will no longer be viewable in Kinlogue. Source files you originally selected and exported copies are not deleted.") {
 		t.Fatal("delete scope is inaccurate")
 	}
-	if err := tt.Click("Confirm deletion"); err != nil {
+	if err := tt.Click("Delete from Kinlogue"); err != nil {
 		t.Fatal(err)
 	}
 	drain()
@@ -158,7 +146,7 @@ func TestReportListKeyboardSelectsAndOpensMetadataRecord(t *testing.T) {
 	s.records = []library.Report{{ID: "report-a", Review: library.Edit{Title: "Synthetic first"}}, {ID: "report-b", Review: library.Edit{Title: "Synthetic second"}}}
 	f.report.ID = "report-b"
 	tt := ui.NewTester(func(c *ui.Context) { s.list(c); s.consumeRequests() }, 800, 600)
-	tt.Key(0, ui.KeyTab)
+	// Search field, then the timeline list.
 	tt.Key(0, ui.KeyTab)
 	tt.Key(0, ui.KeyTab)
 	tt.Key(0, ui.KeyDown)
@@ -320,7 +308,7 @@ func TestExportCancelIsNormalAndOnlyConfirmedSnapshotCanExport(t *testing.T) {
 }
 
 func TestNativeSaveIncludesTextQueuedBeforeTheFrame(t *testing.T) {
-	for _, label := range []string{"Report title", "Corrected transcription", "My notes"} {
+	for _, label := range []string{"Report Title", "Findings (Verbatim)", "My Notes (Optional)"} {
 		t.Run(label, func(t *testing.T) {
 			s, f, drain := testScreen(t)
 			saveBeforeFrame := false
@@ -342,11 +330,11 @@ func TestNativeSaveIncludesTextQueuedBeforeTheFrame(t *testing.T) {
 			drain()
 			var got string
 			switch label {
-			case "Report title":
+			case "Report Title":
 				got = f.saved.Title
-			case "Corrected transcription":
+			case "Findings (Verbatim)":
 				got = f.saved.Text
-			case "My notes":
+			case "My Notes (Optional)":
 				got = f.saved.Notes
 			}
 			if got != "Synthetic newest input" {
@@ -366,7 +354,7 @@ func TestNativeSaveWaitsForPendingComposition(t *testing.T) {
 		}
 		s.view(c)
 	}, 1240, 1100)
-	if err := tt.Click("Report title"); err != nil {
+	if err := tt.Click("Report Title"); err != nil {
 		t.Fatal(err)
 	}
 	saveBeforeFrame = true
@@ -390,7 +378,9 @@ func TestNativeNavigationWaitsForPendingFirstEdit(t *testing.T) {
 		if confirmed {
 			status = "confirmed"
 		}
-		for _, action := range []string{"close", "quit", "import"} {
+		// Import is blocked while the review sheet is open, like a Swift sheet;
+		// TestImportIsBlockedWhileReviewSheetIsOpen covers it.
+		for _, action := range []string{"close", "quit"} {
 			t.Run(status+"/"+action, func(t *testing.T) {
 				s, f, drain := testScreen(t)
 				if confirmed {
@@ -414,7 +404,7 @@ func TestNativeNavigationWaitsForPendingFirstEdit(t *testing.T) {
 					}
 					s.view(c)
 				}, 1240, 1100)
-				if err := tt.Click("My notes"); err != nil {
+				if err := tt.Click("My Notes (Optional)"); err != nil {
 					t.Fatal(err)
 				}
 				beforeFrame = true
@@ -422,7 +412,7 @@ func TestNativeNavigationWaitsForPendingFirstEdit(t *testing.T) {
 				if advanced || s.allowClose || s.pending == nil || s.edit.Notes != "X" || !s.dirty() {
 					t.Fatal("native action bypassed the first pending edit's dirty guard")
 				}
-				if !tt.HasText("Unsaved changes") {
+				if !tt.HasText("Unsaved Changes") {
 					t.Fatal("native dirty guard was not rendered")
 				}
 				if err := tt.Click("Save and continue"); err != nil {
@@ -460,7 +450,7 @@ func TestNativeShutdownTakesPriorityOverSameFrameImportAndSave(t *testing.T) {
 				}
 				s.view(c)
 			}, 1240, 1100)
-			if err := tt.Click("My notes"); err != nil {
+			if err := tt.Click("My Notes (Optional)"); err != nil {
 				t.Fatal(err)
 			}
 			beforeFrame = true
@@ -471,7 +461,7 @@ func TestNativeShutdownTakesPriorityOverSameFrameImportAndSave(t *testing.T) {
 			if exited || imported || f.saved.Notes != "" || s.pending == nil || s.edit.Notes != "X" {
 				t.Fatal("same-frame import/save bypassed shutdown's dirty guard")
 			}
-			if err := tt.Click("Cancel"); err != nil {
+			if err := tt.Click("Keep Editing"); err != nil {
 				t.Fatal(err)
 			}
 			tt.Frame()
@@ -489,7 +479,7 @@ func TestNativeNavigationRendersGuardWithoutAnotherInputEvent(t *testing.T) {
 	advanced := false
 	s.queueShutdown(func() { advanced = true })
 	tt.Frame()
-	if advanced || s.pending == nil || !tt.HasText("Unsaved changes") {
+	if advanced || s.pending == nil || !tt.HasText("Unsaved Changes") {
 		t.Fatal("native request did not render its dirty guard without another input")
 	}
 }
@@ -510,7 +500,7 @@ func TestNativeNavigationDoesNotInterruptOrReplayComposition(t *testing.T) {
 				}
 				s.view(c)
 			}, 1240, 1100)
-			if err := tt.Click("My notes"); err != nil {
+			if err := tt.Click("My Notes (Optional)"); err != nil {
 				t.Fatal(err)
 			}
 			beforeFrame = true
@@ -546,7 +536,7 @@ func TestSaveCapturesSourceOrderBeforeBackgroundWrite(t *testing.T) {
 }
 
 func TestEditorCommandsAndCompositionStayScopedToCurrentReport(t *testing.T) {
-	for _, label := range []string{"Report title", "Corrected transcription", "My notes"} {
+	for _, label := range []string{"Report Title", "Findings (Verbatim)", "My Notes (Optional)"} {
 		t.Run(label, func(t *testing.T) {
 			s, _, _ := testScreen(t)
 			tt := ui.NewTester(s.view, 1240, 1100)
@@ -586,8 +576,8 @@ func TestDiscardedConfirmedEditDoesNotLeakIntoNextUndoHistory(t *testing.T) {
 	f.report.Status = "confirmed"
 	s.accept(f.report)
 	tt := ui.NewTester(s.view, 1240, 1100)
-	_ = tt.Click("Edit record")
-	_ = tt.Click("Report title")
+	_ = tt.Click("Edit")
+	_ = tt.Click("Report Title")
 	tt.Command("selectAll")
 	tt.Type("Synthetic discarded title")
 	tt.Command("selectAll")
@@ -595,8 +585,8 @@ func TestDiscardedConfirmedEditDoesNotLeakIntoNextUndoHistory(t *testing.T) {
 	s.cancelEditing()
 	tt.Frame()
 	_ = tt.Click("Discard changes")
-	_ = tt.Click("Edit record")
-	_ = tt.Click("Report title")
+	_ = tt.Click("Edit")
+	_ = tt.Click("Report Title")
 	tt.Command("undo")
 	if s.edit.Title != "Synthetic report" || s.dirty() {
 		t.Fatal("new editing session inherited discarded undo history")
@@ -639,5 +629,34 @@ func TestLargeImportChoiceBuildsOnlyVisibleRows(t *testing.T) {
 	}
 	if len(s.importPaths) != 0 || len(f.imports) != 0 || len(f.grouped) != 0 {
 		t.Fatal("cancel submitted or retained the large file selection")
+	}
+}
+
+func TestImportIsBlockedWhileReviewSheetIsOpen(t *testing.T) {
+	s, f, _ := testScreen(t)
+	tt := ui.NewTester(s.view, 1240, 1000)
+	s.edit.Notes = "Synthetic unsaved note"
+	imported := false
+	s.queueNavigation(func() { imported = true })
+	tt.Frame()
+	if imported || s.pending != nil || s.edit.Notes != "Synthetic unsaved note" || len(f.imports) != 0 {
+		t.Fatal("navigation passed an open review sheet")
+	}
+	if !tt.HasText("Confirm Report Information") {
+		t.Fatal("review sheet closed by blocked navigation")
+	}
+}
+
+func TestReviewLaterSavesAndClosesSheet(t *testing.T) {
+	s, f, drain := testScreen(t)
+	tt := ui.NewTester(s.view, 1240, 1000)
+	s.edit.Text = "Synthetic deferred correction"
+	if err := tt.Click("Review Later"); err != nil {
+		t.Fatal(err)
+	}
+	drain()
+	tt.Frame()
+	if f.saved.Text != "Synthetic deferred correction" || f.confirmed || s.report.ID != "" || tt.HasText("Confirm Report Information") {
+		t.Fatal("Review Later must save the draft and close the sheet")
 	}
 }

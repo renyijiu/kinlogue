@@ -18,10 +18,10 @@ func TestConfirmedReportKeepsTimelineAndOriginalBelowSummary(t *testing.T) {
 	s.memberID = "member-a"
 	s.records = []library.Report{f.report, {ID: "report-b", Review: library.Edit{Title: "Another synthetic record"}}}
 	tt := ui.NewTester(s.view, 1240, 880)
-	if !tt.HasText("Another synthetic record") || !tt.HasText("All records") {
+	if !tt.HasText("Another synthetic record") || !tt.HasText("All Records") {
 		t.Fatal("opening a report hid the timeline or all-records navigation")
 	}
-	summary, ok := tt.Find("Confirmed transcription")
+	summary, ok := tt.Find("Findings")
 	if !ok {
 		t.Fatal("confirmed content is still an editing form")
 	}
@@ -37,23 +37,18 @@ func TestConfirmedReportKeepsTimelineAndOriginalBelowSummary(t *testing.T) {
 	}
 }
 
-func TestTimelineSwitchWaitsForDirtyReview(t *testing.T) {
+// The review sheet blocks the timeline like a Swift sheet: clicking behind it
+// neither switches records nor discards the edits.
+func TestReviewSheetBlocksTimelineAndKeepsEdits(t *testing.T) {
 	s, _, _ := testScreen(t)
 	s.memberID = "member-a"
 	s.records = []library.Report{{ID: "report-b", Review: library.Edit{Title: "Another synthetic record"}}}
 	s.edit.Notes = "Unsaved synthetic note"
 	tt := ui.NewTester(s.view, 1240, 880)
-	if err := tt.Click("Another synthetic record"); err != nil {
-		t.Fatal(err)
-	}
-	if s.pending == nil || s.report.ID != "report-a" || !tt.HasText("Unsaved changes") {
-		t.Fatal("record switch bypassed dirty guard")
-	}
-	if err := tt.Click("Cancel"); err != nil {
-		t.Fatal(err)
-	}
-	if s.edit.Notes != "Unsaved synthetic note" || s.report.ID != "report-a" {
-		t.Fatal("cancel lost the review")
+	_ = tt.Click("Another synthetic record")
+	tt.Frame()
+	if s.pending != nil || s.report.ID != "report-a" || s.edit.Notes != "Unsaved synthetic note" || !tt.HasText("Confirm Report Information") {
+		t.Fatal("record switch passed the open review sheet")
 	}
 }
 
@@ -63,13 +58,14 @@ func TestInitialRecognitionIsReachableAtMinimumWindowHeight(t *testing.T) {
 	f.report.Sources = append(f.report.Sources, library.Source{ID: "source-b", FileName: "second-synthetic.pdf"})
 	f.report.Review.SourceIDs = append(f.report.Review.SourceIDs, "source-b")
 	s.accept(f.report)
+	s.startEditing()
 	s.showRaw = true
 	tt := ui.NewTester(s.view, 1080, 700)
-	original, ok := tt.Find("Original")
+	toggle, ok := tt.Find("Show initial recognition")
 	if !ok {
-		t.Fatal("original pane missing")
+		t.Fatal("initial recognition toggle missing from the edit sheet")
 	}
-	tt.Scroll(original.X+30, original.Y+80, 0, 1000)
+	tt.Scroll(toggle.X+30, toggle.Y-40, 0, 1000)
 	raw, ok := tt.Find("Source page 1")
 	if !ok || raw.Y < 0 || raw.Y+raw.H > 700 {
 		t.Fatal("initial recognition is clipped and cannot be scrolled into view")
@@ -114,13 +110,11 @@ func TestAllRecordsSearchAndMemberFilterUseRealLibrary(t *testing.T) {
 	s.load(true)
 	drain()
 	tt := ui.NewTester(s.view, 1240, 880)
-	if err := tt.Click("Search confirmed transcription"); err != nil {
+	if err := tt.Click("Search Confirmed Records"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Type("needle")
-	if err := tt.Click("Search"); err != nil {
-		t.Fatal(err)
-	}
+	tt.Key(0, ui.KeyEnter)
 	drain()
 	tt.Frame()
 	if !tt.HasText("Synthetic A record") || !tt.HasText("Synthetic B record") || tt.HasText("Synthetic draft record") {
@@ -134,7 +128,7 @@ func TestAllRecordsSearchAndMemberFilterUseRealLibrary(t *testing.T) {
 	if !tt.HasText("Synthetic A record") || tt.HasText("Synthetic B record") {
 		t.Fatal("member navigation lost member isolation")
 	}
-	if err := tt.Click("All records"); err != nil {
+	if err := tt.Click("All Records"); err != nil {
 		t.Fatal(err)
 	}
 	drain()

@@ -185,7 +185,7 @@ func TestBackupNavigationSeesPendingFirstInputAndComposition(t *testing.T) {
 			}
 			s.view(c)
 		}, 1240, 1100)
-		if err := tt.Click("My notes"); err != nil {
+		if err := tt.Click("My Notes (Optional)"); err != nil {
 			t.Fatal(err)
 		}
 		request = true
@@ -194,8 +194,9 @@ func TestBackupNavigationSeesPendingFirstInputAndComposition(t *testing.T) {
 		} else {
 			tt.Type("X")
 		}
-		if s.backupPage || (!composing && (s.pending == nil || s.edit.Notes != "X")) || (composing && s.pending != nil) {
-			t.Fatal("backup bypassed pending input guard")
+		// The open review sheet blocks navigation and keeps the first input.
+		if s.backupPage || s.pending != nil || (!composing && s.edit.Notes != "X") {
+			t.Fatal("backup navigation passed the open review sheet")
 		}
 		if composing {
 			tt.Compose("", 0)
@@ -326,26 +327,29 @@ func TestRestorePasswordReopenUsesNewUndoHistory(t *testing.T) {
 }
 
 func TestBackupSidebarUsesUnsavedGuard(t *testing.T) {
-	s, _, drain := testScreen(t)
+	s, f, drain := testScreen(t)
 	s.backups = &fakeBackup{}
 	tt := ui.NewTester(s.view, 1240, 1100)
-	if err := tt.Click("My notes"); err != nil {
+	if err := tt.Click("My Notes (Optional)"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Type("Synthetic saved before backup")
-	if err := tt.Click("Settings"); err != nil {
-		t.Fatal(err)
+	_ = tt.Click("Settings")
+	tt.Frame()
+	if s.backupPage || s.pending != nil || s.edit.Notes != "Synthetic saved before backup" {
+		t.Fatal("settings passed the open review sheet")
 	}
-	if s.backupPage || s.pending == nil {
-		t.Fatal("sidebar skipped unsaved guard")
-	}
-	if err := tt.Click("Save and continue"); err != nil {
+	if err := tt.Click("Review Later"); err != nil {
 		t.Fatal(err)
 	}
 	drain()
 	tt.Frame()
-	if !s.backupPage || !tt.HasText("Create encrypted backup") || s.report.ID != "" {
-		t.Fatal("saving did not continue to backup")
+	if err := tt.Click("Settings"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !s.backupPage || !tt.HasText("Create encrypted backup") || s.report.ID != "" || f.saved.Notes != "Synthetic saved before backup" {
+		t.Fatal("saving the review did not allow continuing to settings")
 	}
 }
 

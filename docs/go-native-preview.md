@@ -27,7 +27,18 @@ Kinlogue 在同一仓库内开发独立的 Go 预览版。报告整理闭环已�
 
 侧栏使用暖白底、浅暖色选中行和深绿文字，设置固定于底部；导入放在内容顶部。时间线按日期分组、显示成员标签和选中卡片；“全部记录”默认汇总本机所有成员的已确认报告，成员入口仍限定范围。`Store.Search` 的空成员 ID 表示全部成员，非空 ID 继续校验并使用成员条件；草稿和初始 OCR 不进入任一确认搜索。设置页集中语言和现有备份恢复，以说明卡片和右侧等宽控件排列。
 
-这是已实现报告流程的视觉与导航对齐；当时未增加 Swift 的 LAN、DICOM、比较或结构化医学字段，手机上传随后单独接入，见 [Go 手机上传](go-lan-upload.md)。控件由 mygo 绘制，不宣称逐像素或完整无障碍等价。行为覆盖见 [`layout_test.go`](../internal/desktop/layout_test.go)、[`desktop_test.go`](../internal/desktop/desktop_test.go) 和 [`store_test.go`](../internal/library/store_test.go)。
+这是已实现报告流程的视觉与导航对齐；当时未增加 Swift 的 LAN、DICOM、比较或结构化医学字段，手机上传随后单独接入，见 [Go 手机上传](go-lan-upload.md)。
+
+2026-10-10 第二轮逐屏对照 Swift 的 AppShellView、MemberSidebarView、TimelineView、RecordDetailView、ImportReviewView、RecordEditView、SettingsView 及手机上传各视图，并在已实现范围内改为相同结构：
+
+- 侧栏按“浏览 / 家人 / 待确认 / 导入状态”分区，底部是设置；草稿不再作为单独页面，而是在“待确认”中逐条列出、点开即复核；识别中或失败的草稿在“导入状态”中重试或放弃。顶部一行代替 Swift 窗口工具栏，放导航标题、“导入报告”和“手机上传”。
+- 中栏顶部始终是胶囊搜索；时间线卡片使用 12pt 绿点与淡绿竖线、白色 16pt 圆角卡片、右侧成员标签，日期分组按“2025年11月22日”格式。
+- 详情为标题加成员，右侧“编辑 / 导出原件… / 删除记录”和日期标签，下方 Container 信息卡（检查结果、我的备注）与带标题的原件区。
+- 复核和确认后编辑改为与 Swift 相同的弹出窗口（左侧原件、右侧表单），底部分别为“放弃导入… / 稍后处理 / 确认并加入时间线”和“取消 / 保存”；窗口外点击不会关闭。弹窗打开时其他导航被阻止，关闭窗口或退出仍经过未保存修改保护。
+- 设置按“通用”“数据备份”分区，白色卡片与右侧 220pt 控件列。
+- 中英文文案按 Swift 本地化原文更新；图标为项目自绘线条图标，不复制 SF Symbols。
+
+与 Swift 的已知差异：Go 没有医院、科室、结论等结构化字段，因此卡片只展示检查结果转录与备注，时间线第二行显示原件文件名；搜索只覆盖标题、转录和备注，搜索框文案相应写为“搜索已确认的记录”；日期用 `YYYY-MM-DD` 文本输入；没有独立的“查看原图”缩放窗口、医学影像和比较入口。合成截图由 `KINLOGUE_UI_EVIDENCE` 驱动的 [`evidence_test.go`](../internal/desktop/evidence_test.go) 生成，默认跳过，不代表实际窗口或 VoiceOver 验收。控件由 mygo 绘制，不宣称逐像素或完整无障碍等价。行为覆盖见 [`layout_test.go`](../internal/desktop/layout_test.go)、[`desktop_test.go`](../internal/desktop/desktop_test.go) 和 [`store_test.go`](../internal/library/store_test.go)。
 
 ## 模块与运行时
 

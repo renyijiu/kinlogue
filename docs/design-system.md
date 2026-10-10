@@ -5,7 +5,7 @@ Kinlogue（续页）的视觉语言以 **Warm Sanctuary** 为核心：减少传�
 本文是配色、组件状态和无障碍取舍的单一产品规范。实现位置：
 
 - macOS SwiftUI 令牌与组件样式：`Sources/KinlogueApp/Views/KinlogueTheme.swift`
-- Go 预览的主题、三栏、时间线与详情：[`internal/desktop/view.go`](../internal/desktop/view.go)；设置卡片：[`backup_view.go`](../internal/desktop/backup_view.go)。该版本的实现范围与验收见 [Go 界面对齐](go-native-preview.md#与-swift-基线的界面对齐)。
+- Go 预览的主题、三栏、时间线、详情与复核弹窗：[`internal/desktop/view.go`](../internal/desktop/view.go)；手机上传：[`lan_view.go`](../internal/desktop/lan_view.go)；设置卡片：[`backup_view.go`](../internal/desktop/backup_view.go)；线条图标：[`icons.go`](../internal/desktop/icons.go)（自绘，不复制 SF Symbols）。该版本的实现范围与验收见 [Go 界面对齐](go-native-preview.md#与-swift-基线的界面对齐)。
 - 手机浏览器上传页：`Sources/KinloguePlatform/Resources/LANUpload/styles.css`
 
 仓库当前包含原生 macOS App，以及由 Mac 在局域网临时提供的手机浏览器上传页；不包含原生 iOS 或 Android App。

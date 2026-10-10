@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,6 +27,8 @@ type phoneBackend struct {
 	archiveEdit   library.Edit
 	starts, stops int
 	deleted       []library.InboxSelection
+	statusMu      sync.Mutex
+	status        app.LANStatus
 }
 
 func (f *phoneBackend) LANInterfaces(context.Context) ([]macos.LANInterface, error) {
@@ -33,11 +36,21 @@ func (f *phoneBackend) LANInterfaces(context.Context) ([]macos.LANInterface, err
 }
 func (f *phoneBackend) StartLAN(context.Context, macos.LANInterface) (app.LANStatus, error) {
 	f.starts++
-	return app.LANStatus{Active: true, Address: "http://192.0.2.2:1234/", Code: "123456"}, nil
+	f.setStatus(app.LANStatus{Active: true, Address: "http://192.0.2.2:1234/", Code: "123456"})
+	return f.LANStatus(), nil
 }
-func (f *phoneBackend) RevokeLAN()               { f.stops++ }
-func (f *phoneBackend) StopLAN()                 { f.stops++ }
-func (f *phoneBackend) LANStatus() app.LANStatus { return app.LANStatus{} }
+func (f *phoneBackend) setStatus(v app.LANStatus) {
+	f.statusMu.Lock()
+	f.status = v
+	f.statusMu.Unlock()
+}
+func (f *phoneBackend) RevokeLAN() { f.stops++; f.setStatus(app.LANStatus{}) }
+func (f *phoneBackend) StopLAN()   { f.stops++; f.setStatus(app.LANStatus{}) }
+func (f *phoneBackend) LANStatus() app.LANStatus {
+	f.statusMu.Lock()
+	defer f.statusMu.Unlock()
+	return f.status
+}
 func (f *phoneBackend) Inbox(context.Context) ([]library.InboxItem, error) {
 	return append([]library.InboxItem(nil), f.items...), nil
 }
@@ -101,12 +114,11 @@ func TestPhoneNavigationPreservesDirtyReport(t *testing.T) {
 	s.accept(f.report)
 	s.edit.Text = "Unsaved synthetic text"
 	tt := ui.NewTester(s.view, 1240, 900)
-	if err := tt.Click("Phone uploads"); err != nil {
-		t.Fatal(err)
-	}
+	// The open review sheet blocks the sidebar, like a Swift sheet.
+	_ = tt.Click("Phone Uploads")
 	tt.Frame()
-	if s.phonePage || s.pending == nil || s.edit.Text != "Unsaved synthetic text" {
-		t.Fatal("phone navigation discarded unsaved report")
+	if s.phonePage || s.pending != nil || s.edit.Text != "Unsaved synthetic text" || !tt.HasText("Confirm Report Information") {
+		t.Fatal("phone navigation passed the open review sheet")
 	}
 }
 func TestPhoneSelectionOrderAndRevisionFreeze(t *testing.T) {
@@ -136,11 +148,17 @@ func TestPhoneArchiveFailureKeepsSelection(t *testing.T) {
 	f.archiveError = nil
 	s.archivePhone()
 	drain()
-	if s.phonePage || s.report.ID != f.report.ID || len(s.phone.selected) != 0 || f.confirmed {
-		t.Fatal("archive did not open unconfirmed report")
+	// Like Swift, the queue stays open with a notice; the new draft waits in
+	// the sidebar's Awaiting Review section.
+	if !s.phonePage || s.report.ID != "" || len(s.phone.selected) != 0 || f.confirmed || s.phone.notice == nil || s.phone.notice.duplicate {
+		t.Fatal("archive did not add one report for review and keep the queue")
 	}
-	if f.archiveEdit.MemberID != "member-a" || f.archived[0].Revision != 1 {
+	if f.archiveEdit.MemberID != "member-a" || f.archiveEdit.Title != "synthetic-a.pdf" || f.archived[0].Revision != 1 {
 		t.Fatal("archive did not freeze selection and metadata")
+	}
+	tt := ui.NewTester(s.view, 1240, 900)
+	if !tt.HasText(s.t("phone_notice_added")) {
+		t.Fatal("archive notice hidden")
 	}
 }
 func TestPhoneStartRequiresExplicitTrust(t *testing.T) {
@@ -168,7 +186,7 @@ func TestPhoneMinimumWindowLayout(t *testing.T) {
 		s.togglePhoneItem(s.phone.items[0])
 		s.language = lang
 		tt := ui.NewTester(s.view, 1080, 700)
-		for _, key := range []string{"phone_uploads", "phone_start", "phone_refresh", "phone_archive"} {
+		for _, key := range []string{"phone_uploads", "phone_receive", "phone_queue_title", "phone_delete_selected", "phone_archive", "phone_as_one_report", "phone_page_order"} {
 			box, ok := tt.Find(s.t(key))
 			if !ok || box.X < 0 || box.Y < 0 || box.X+box.W > 1081 || box.Y+box.H > 701 {
 				t.Fatalf("minimum window control clipped: %s", key)
@@ -221,8 +239,17 @@ func TestPhoneDuplicateConfirmedOpensExistingMember(t *testing.T) {
 	s.togglePhoneItem(s.phone.items[0])
 	s.archivePhone()
 	drain()
-	if s.memberID != "member-existing" || s.report.Status != "confirmed" || s.message != "phone_existing_confirmed" || f.confirmed {
-		t.Fatal("confirmed duplicate must open existing timeline without reconfirmation")
+	if s.phone.notice == nil || !s.phone.notice.duplicate || !s.phonePage {
+		t.Fatal("confirmed duplicate must report the existing record")
+	}
+	tt := ui.NewTester(s.view, 1240, 900)
+	if err := tt.Click(s.t("phone_view_existing")); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	drain()
+	if s.phonePage || s.memberID != "member-existing" || s.report.Status != "confirmed" || s.message != "phone_existing_confirmed" || f.confirmed {
+		t.Fatal("View Existing Record must open the existing timeline without reconfirmation")
 	}
 }
 
@@ -238,6 +265,7 @@ func TestPhoneUnavailableLifecyclePreservesInbox(t *testing.T) {
 	if f.starts != 0 {
 		t.Fatal("missing lifecycle observer must block receiving")
 	}
+	s.phone.receiverOpen = true
 	tt := ui.NewTester(s.view, 1080, 700)
 	for _, lang := range []string{"en", "zh-Hans"} {
 		s.language = lang
@@ -249,10 +277,11 @@ func TestPhoneUnavailableLifecyclePreservesInbox(t *testing.T) {
 			t.Fatal("saved inbox hidden")
 		}
 	}
+	s.phone.receiverOpen = false
 	s.togglePhoneItem(s.phone.items[0])
 	s.archivePhone()
 	drain()
-	if len(f.archived) != 1 || s.report.ID != f.report.ID {
+	if len(f.archived) != 1 || s.phone.notice == nil {
 		t.Fatal("blocking reception must retain archive workflow")
 	}
 }
@@ -268,6 +297,7 @@ func TestPhoneActivePanelShowsQRCodeAddressAndCode(t *testing.T) {
 		s.phone.trusted = true
 		s.phone.interfaces, _ = f.LANInterfaces(context.Background())
 		s.phone.interfaceID = phoneInterfaceID(s.phone.interfaces[0])
+		s.phone.receiverOpen = true
 		s.startPhone()
 		drain()
 		tt := ui.NewTester(s.view, 1080, 700)
@@ -324,7 +354,7 @@ func TestPhoneDeleteSelectedRemovesOnlySelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if len(s.phone.deleteSelection) != 2 || !tt.HasText(s.t("phone_delete_title", 2)) {
+	if len(s.phone.deleteSelection) != 2 || !tt.HasText(s.t("phone_delete_title")) {
 		t.Fatal("delete prompt must freeze the whole selection")
 	}
 	s.deletePhone()
@@ -334,5 +364,44 @@ func TestPhoneDeleteSelectedRemovesOnlySelection(t *testing.T) {
 	}
 	if len(s.phone.selected) != 0 || len(s.phone.items) != 1 || s.phone.items[0].ID != "inbox-b" || s.message != "phone_deleted" {
 		t.Fatal("unselected item must remain and selection must clear")
+	}
+}
+
+// The receiver sheet follows Swift: trust confirmation before Start, and
+// Close only dismisses the sheet while receiving continues.
+func TestPhoneReceiverSheetStartsAndClosesWithoutStopping(t *testing.T) {
+	s, f, drain := phoneScreen(t)
+	s.phone.interfaces, _ = f.LANInterfaces(context.Background())
+	s.phone.interfaceID = phoneInterfaceID(s.phone.interfaces[0])
+	tt := ui.NewTester(s.view, 1240, 900)
+	if err := tt.Click(s.t("phone_receive")); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !s.phone.receiverOpen || !tt.HasText(s.t("phone_receive_title")) || !tt.HasText(s.t("phone_plain_http")) {
+		t.Fatal("receive action did not present the receiver sheet")
+	}
+	_ = tt.Click(s.t("phone_start"))
+	if f.starts != 0 {
+		t.Fatal("started before the trusted network confirmation")
+	}
+	if err := tt.Click(s.t("phone_trusted")); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click(s.t("phone_start")); err != nil {
+		t.Fatal(err)
+	}
+	drain()
+	tt.Frame()
+	if f.starts != 1 || !s.phone.status.Active || !tt.HasText("http://192.0.2.2:1234/") {
+		t.Fatal("receiver did not start from the sheet")
+	}
+	if err := tt.Click(s.t("close")); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if s.phone.receiverOpen || !s.phone.status.Active || f.stops != 0 || !tt.HasText(s.t("phone_receiving")) {
+		t.Fatal("closing the sheet must keep receiving, like Swift")
 	}
 }

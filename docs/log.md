@@ -1284,3 +1284,13 @@
 - **测试**：receiver 新增无绝对期限、无活动超时、未配对过期、上传进度刷新活动，以及经真实 `Serve`/`net.Pipe` 的持续上传越过请求期限和停滞上传被中断；macOS 监听测试改为无效/取消/未知接口在 socket 前拒绝；desktop 新增接收面板二维码/地址/复制/验证码（中英最小窗口）、二维码缓存与多选删除；app 断言广告地址为根 URL；打包验证要求当前包精确含三项权限，仅 `--previous` 接受旧版两项权限。二维码另用 zbar 与 OpenCV 独立解码核对版本 1–10 与全部 8 种掩码（zbar 112/112）。
 - **验证**：当前 Mac（Go 1.27.2、macOS 27.0.1、arm64）`gofmt`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 go test -count=1 ./...`（含新 `internal/qr` 与打包测试）、六包 `-race -count=1`、嵌套 mygo 测试/vet、签名预览构建与校验（精确三项权限）、隐私、文档和 `git diff --check` 全部通过。首轮发现 mygo 中元素设置无障碍标签后会替代可见文字：验证码改为按逐位朗读标签断言，“复制地址”按钮去掉多余标签，以可见文字作为无障碍名称，复跑通过。
 - **边界**：没有在测试中打开真实网卡监听；真实 iPhone/Android、防火墙提示、睡眠/屏幕睡眠/切换用户/Wi-Fi 切换、慢速上传和 VoiceOver 仍待验收。Go 与 Swift 的剩余差异（文本日期输入、无独立原图缩放窗口、不显示队列占用）记录在 [Go 手机上传](go-lan-upload.md)。
+
+## 2026-10-10：逐屏对齐 Swift 界面
+
+用户要求对照 Swift 版，先保持与原来一致。逐个阅读 Swift 的 AppShellView、MemberSidebarView、TimelineView、RecordDetailView、ImportReviewView、RecordEditView、SettingsView、LANInboxView、LANInboxItemRow、LANPendingSelectionDetailView、LANReceiverSheet 与 KinlogueTheme，并以合成截图逐屏核对。
+
+- **结构**：侧栏改为“浏览 / 家人 / 待确认 / 导入状态”分区，移除品牌标题和独立的待确认页面；草稿从侧栏打开复核弹窗，失败草稿在侧栏重试或放弃。中栏常驻胶囊搜索，时间线卡片、日期分组、详情信息卡和原件区按 Swift 的尺寸与令牌绘制。复核与确认后编辑改为与 Swift 相同的弹窗及底部按钮，窗口外点击不关闭；弹窗打开时阻止其他导航，关闭/退出仍经过未保存修改保护；“稍后处理”保存并关闭，编辑页“取消”与 Swift 一样直接放弃修改。手机上传改为队列—页序预览三栏和独立接收弹窗，归档后停留在队列并显示结果。设置按“通用”“数据备份”分区。
+- **文案与图标**：中英文按 Swift 本地化原文更新（Go 没有的能力不照搬，例如搜索框不声称可搜成员或医院）。新增自绘线条图标，不复制 SF Symbols。
+- **修正**：手机删除结果使用了不存在的文案键，清理待完成时会触发缺失键 panic，已改为既有 `cleanup_pending`。弹窗内 Cmd+S 原本收不到（mygo 只把快捷键送到最上层弹窗），复核弹窗现在自行注册。
+- **测试**：更新界面测试以覆盖弹窗阻止导航、稍后处理关闭弹窗、编辑取消恢复基线、接收弹窗开始后关闭不停止接收、归档停留队列及“查看已有资料”；新增默认跳过的 `TestUIEvidence` 合成截图。desktop 包 vet 与测试在当前 Mac 通过；合成截图只用于对照，不代表实际窗口、键盘或 VoiceOver 验收。
+- **已知差异**：没有结构化医学字段、医学影像、比较和独立原图窗口；日期仍为文本输入。详见 [Go 预览界面对齐](go-native-preview.md#与-swift-基线的界面对齐)。
