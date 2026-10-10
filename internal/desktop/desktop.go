@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -95,7 +96,18 @@ type screen struct {
 	// where each field's current text appears in the originals.
 	found   candidate.Candidates
 	located map[string]locatedText
+
+	// progressIndex of progressTotal names the file a job is on; slow turns
+	// true when a job has run long enough to need an explanation.
+	progressIndex, progressTotal int
+	slow                         bool
+	slowTimer                    *time.Timer
 }
+
+// slowAfter is how long a job runs before the screen explains the wait. The
+// system prepares its recognition model on first use, which takes far longer
+// than any later recognition.
+var slowAfter = 4 * time.Second
 
 func newScreen(backend Backend, systemLanguage string) *screen {
 	ctx, stop := context.WithCancel(context.Background())
@@ -216,6 +228,17 @@ func (s *screen) job(key string, cancellable bool, work func(context.Context) fu
 	generation := s.jobGeneration
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.jobCancel, s.busy, s.cancellable, s.cancelling = cancel, key, cancellable, false
+	s.progressIndex, s.progressTotal, s.slow = 0, 0, false
+	if s.slowTimer != nil {
+		s.slowTimer.Stop()
+	}
+	s.slowTimer = time.AfterFunc(slowAfter, func() {
+		s.post(func() {
+			if !s.closed && generation == s.jobGeneration && s.busy != "" {
+				s.slow = true
+			}
+		})
+	})
 	go func() {
 		complete := work(ctx)
 		cancel()
@@ -223,6 +246,8 @@ func (s *screen) job(key string, cancellable bool, work func(context.Context) fu
 			if s.closed || generation != s.jobGeneration {
 				return
 			}
+			s.slowTimer.Stop()
+			s.progressIndex, s.progressTotal, s.slow = 0, 0, false
 			s.busy, s.cancellable, s.jobCancel = "", false, nil
 			complete()
 			if s.busy == "" {
@@ -850,13 +875,21 @@ func (s *screen) importSelection(combined bool) {
 
 func (s *screen) importFiles(paths []string) {
 	member, query := s.memberID, s.query
+	generation := s.jobGeneration + 1
 	s.job("importing", true, func(ctx context.Context) func() {
 		var latest library.Report
 		var failure error
-		for _, path := range paths {
+		for i, path := range paths {
 			if ctx.Err() != nil {
 				failure = ctx.Err()
 				break
+			}
+			if len(paths) > 1 {
+				s.post(func() {
+					if generation == s.jobGeneration && s.busy != "" {
+						s.progressIndex, s.progressTotal = i+1, len(paths)
+					}
+				})
 			}
 			report, err := s.backend.Import(ctx, path)
 			if report.ID != "" {

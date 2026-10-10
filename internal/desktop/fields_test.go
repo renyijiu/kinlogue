@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"kinlogue/internal/app"
@@ -295,5 +296,64 @@ func TestConfirmedDetailNamesSourcePages(t *testing.T) {
 	// A confirmed record is not offered a fill until the user starts editing.
 	if tt.HasText(s.t("fill_available")) {
 		t.Fatal("fill offered outside the edit sheet")
+	}
+}
+
+// gatedBackend holds each import until the test lets it through.
+type gatedBackend struct {
+	*fakeBackend
+	started, release chan struct{}
+}
+
+func (g gatedBackend) Import(ctx context.Context, path string) (library.Report, error) {
+	g.started <- struct{}{}
+	<-g.release
+	return g.fakeBackend.Import(ctx, path)
+}
+
+func TestLongImportShowsProgressAndExplainsTheWait(t *testing.T) {
+	previous := slowAfter
+	slowAfter = 20 * time.Millisecond
+	t.Cleanup(func() { slowAfter = previous })
+	s, f, _ := testScreen(t)
+	s.clearReport()
+	gate := gatedBackend{f, make(chan struct{}), make(chan struct{})}
+	s.backend = gate
+	updates := make(chan func(), 16)
+	s.post = func(fn func()) { updates <- fn }
+	tt := ui.NewTester(s.view, 1240, 900)
+	// pump runs posted updates until the screen reaches the wanted state.
+	pump := func(reached func() bool) {
+		t.Helper()
+		deadline := time.After(3 * time.Second)
+		for !reached() {
+			select {
+			case fn := <-updates:
+				fn()
+			case <-deadline:
+				t.Fatal("screen did not reach the expected state")
+			}
+		}
+		tt.Frame()
+	}
+	s.importFiles([]string{"/synthetic/a.pdf", "/synthetic/b.pdf"})
+	<-gate.started
+	pump(func() bool { return s.progressIndex == 1 && s.slow })
+	if !tt.HasText(s.t("importing")+s.t("progress_count", 1, 2)) || !tt.HasText(s.t("slow_recognition")) {
+		t.Fatal("a long import must name the file it is on and explain the wait")
+	}
+	if _, ok := tt.Find(s.t("cancel_task")); !ok {
+		t.Fatal("a long import must stay cancellable")
+	}
+	gate.release <- struct{}{}
+	<-gate.started
+	pump(func() bool { return s.progressIndex == 2 })
+	if !tt.HasText(s.t("importing") + s.t("progress_count", 2, 2)) {
+		t.Fatal("progress did not advance to the second file")
+	}
+	gate.release <- struct{}{}
+	pump(func() bool { return s.busy == "" })
+	if s.slow || s.progressTotal != 0 || tt.HasText(s.t("slow_recognition")) || len(f.imports) != 2 {
+		t.Fatal("the explanation or progress outlived the import")
 	}
 }

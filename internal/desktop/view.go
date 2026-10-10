@@ -93,15 +93,27 @@ func (s *screen) view(c *ui.Context) {
 				})
 			}
 			if s.busy != "" {
-				ui.Row(c).Padding(8, 18).Gap(12).AlignItems(ui.Center).Children(func() {
-					key := s.busy
-					if s.cancelling {
-						key = "cancelling"
-					}
-					ui.Text(c, s.t(key)).TextColor(c.Theme().Accent)
-					if s.cancellable && ui.Button(c, s.t("cancel_task")).Disabled(s.cancelling).Clicked() {
-						s.cancelling = true
-						s.jobCancel()
+				ui.Column(c).FillWidth().Padding(8, 18).Gap(6).Children(func() {
+					ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+						key := s.busy
+						if s.cancelling {
+							key = "cancelling"
+						}
+						text := s.t(key)
+						if s.progressTotal > 1 && !s.cancelling {
+							text += s.t("progress_count", s.progressIndex, s.progressTotal)
+						}
+						// The rest of the window is disabled while a job runs, so a
+						// moving indicator shows that the app has not stopped.
+						ui.Spinner(c).Label(text)
+						ui.Text(c, text).TextColor(c.Theme().Accent)
+						if s.cancellable && ui.Button(c, s.t("cancel_task")).Disabled(s.cancelling).Clicked() {
+							s.cancelling = true
+							s.jobCancel()
+						}
+					})
+					if s.slow && !s.cancelling && (s.busy == "importing" || s.busy == "processing" || s.busy == "phone_processing") {
+						ui.Text(c, s.t("slow_recognition")).FontSize(12).TextColor(c.Theme().TextMuted).MaxLines(3)
 					}
 				})
 			}

@@ -20,6 +20,8 @@ var stringsTable = map[string][2]string{
 	"source_parts":                {"来源：%s", "Source: %s"},
 	"list_separator":              {"、", ", "},
 	"part_separator":              {"；", "; "},
+	"progress_count":              {"（第 %d/%d 个）", " (%d of %d)"},
+	"slow_recognition":            {"识别仍在进行，应用没有停止响应。系统首次识别需要准备识别模型，可能要等半分钟，之后会快很多；页数多的文件也需要更久。", "Recognition is still running; the app has not stopped responding. The first recognition prepares the system's recognition model and can take half a minute, and later ones are much faster. Files with many pages also take longer."},
 	"organization":                {"医院", "Hospital"},
 	"department":                  {"科室", "Department"},
 	"report_type":                 {"报告类型", "Report Type"},
