@@ -248,3 +248,149 @@ func TestLocateFindsEveryLineOrNothing(t *testing.T) {
 		}
 	}
 }
+
+// The two layouts below copy the geometry of real recognitions, with every
+// text replaced by synthetic wording.
+
+// A phone screenshot of a report page: the exam name sits under its label,
+// a notice mentions the hospital, and viewer buttons follow the findings.
+func TestPhoneScreenshotLayout(t *testing.T) {
+	c := extract(1,
+		line("18:27", 1, 0.949, at(0.123, 0.120), sized(0.025, 1)),
+		line("：！今85", 1, 0.948, at(0.700, 0.221), sized(0.026, 0.3)),
+		line("检查报告", 1, 0.897, at(0.407, 0.180), sized(0.023, 0.5)),
+		line("●••", 1, 0.904, at(0.792, 0.057), sized(0.013, 0.3)),
+		line("医疗名称", 1, 0.839, at(0.041, 0.152), sized(0.021, 0.5)),
+		line("合成部位CTA", 1, 0.799, at(0.038, 0.259), sized(0.027, 1)),
+		line("姓名：合成成员", 1, 0.732, at(0.038, 0.243), sized(0.021, 0.5)),
+		line("送检医生：合成医生", 1, 0.732, at(0.498, 0.303), sized(0.020, 0.5)),
+		line("检查日期：2026-07-31 08:46:43", 1, 0.622, at(0.041, 0.562), sized(0.020, 1)),
+		line("具体报告信息请以医院纸质报告为准。", 1, 0.576, at(0.041, 0.496), sized(0.018, 1)),
+		line("检查结果", 1, 0.491, at(0.041, 0.170), sized(0.019, 0.5)),
+		line("合成检查结果一句。", 1, 0.450, at(0.040, 0.474), sized(0.025, 1)),
+		line("检查结果描述", 1, 0.366, at(0.041, 0.256), sized(0.021, 0.5)),
+		line("合成描述第一行，", 1, 0.325, at(0.041, 0.896), sized(0.023, 0.5)),
+		line("合成描述第二行。", 1, 0.299, at(0.041, 0.884), sized(0.028, 1)),
+		line("查看影像", 1, 0.107, at(0.413, 0.171), sized(0.021, 0.5)),
+		line("下载影像", 1, 0.036, at(0.413, 0.170), sized(0.022, 1)),
+	)
+	want := Candidates{
+		Title:   "合成部位CTA",
+		Results: "合成检查结果一句。\n合成描述第一行，\n合成描述第二行。",
+		Dates:   []Date{{"2026-07-31", KindExamination}},
+	}
+	if !reflect.DeepEqual(c, want) {
+		t.Fatalf("candidates = %+v", c)
+	}
+}
+
+// A photographed paper report: a letterhead, the form's name, fields in
+// columns, and a findings heading that recognition read with a variant
+// character.
+func TestPaperReportLayout(t *testing.T) {
+	c := extract(1,
+		line("合成市第一附属医院", 1, 0.906, at(0.282, 0.375), sized(0.058, 1)),
+		line("MRI检査报告单", 1, 0.822, at(0.360, 0.206), sized(0.060, 0.5)),
+		line("检查号：SYNTHETIC0001", 1, 0.739, at(0.579, 0.254), sized(0.045, 0.5)),
+		line("扫码查看报告及影像", 1, 0.632, at(0.078, 0.177), sized(0.037, 1)),
+		line("姓名：合成成员", 1, 0.551, at(0.071, 0.115), sized(0.040, 0.5)),
+		line("登记号：", 1, 0.551, at(0.641, 0.078), sized(0.039, 0.5)),
+		line("0000000001", 1, 0.554, at(0.751, 0.108), sized(0.032, 1)),
+		line("8/6/2026 3:36:47", 1, 0.506, at(0.724, 0.124), sized(0.034, 1)),
+		line("科室：合成内科门诊", 1, 0.473, at(0.070, 0.249), sized(0.063, 0.3)),
+		line("检查日期：PM", 1, 0.477, at(0.637, 0.125), sized(0.053, 0.3)),
+		line("合成成像，合成平扫", 1, 0.337, at(0.276, 0.353), sized(0.057, 0.5)),
+		line("检査所见：", 1, 0.252, at(0.073, 0.112), sized(0.049, 0.5)),
+		line("合成所见第一行，", 1, 0.179, at(0.133, 0.696), sized(0.052, 0.5)),
+		line("合成所见第二行。", 1, 0.127, at(0.096, 0.575), sized(0.053, 1)),
+	)
+	want := Candidates{
+		Organization: "合成市第一附属医院",
+		Department:   "合成内科门诊",
+		ReportType:   "MRI检查报告单",
+		Results:      "合成所见第一行，\n合成所见第二行。",
+	}
+	if !reflect.DeepEqual(c, want) {
+		t.Fatalf("candidates = %+v", c)
+	}
+}
+
+func TestASentenceMentioningAHospitalIsNotItsName(t *testing.T) {
+	for _, text := range []string{
+		"具体报告信息请以医院纸质报告为准。", "本报告仅供本院医师参考", "如有疑问请到医院咨询", "医院地址：合成路 1 号", "扫码关注医院公众号",
+		strings.Repeat("合成", 20) + "医院",
+	} {
+		if c := extract(1, line(text, 1, 0.9)); c.Organization != "" {
+			t.Fatalf("%q read as a hospital name", text)
+		}
+	}
+	for _, text := range []string{"合成市测试医院", "合成大学附属医院东院区", "合成市测试医院检验报告单"} {
+		if c := extract(1, line(text, 1, 0.9)); c.Organization != text {
+			t.Fatalf("%q not read as a hospital name: %+v", text, c)
+		}
+	}
+}
+
+func TestALabelAloneTakesTheValueBesideOrUnderIt(t *testing.T) {
+	label := func(text string) document.Block { return line(text, 1, 0.8, at(0.05, 0.15)) }
+	for name, test := range map[string]struct {
+		blocks []document.Block
+		want   string
+	}{
+		"under":            {[]document.Block{label("检查名称"), line("合成检查", 1, 0.76, at(0.05, 0.3))}, "合成检查"},
+		"under, spaced":    {[]document.Block{label("检 查 名 称："), line("合成检查", 1, 0.76, at(0.06, 0.3))}, "合成检查"},
+		"beside":           {[]document.Block{label("检查名称："), line("合成检查", 1, 0.801, at(0.25, 0.3))}, "合成检查"},
+		"beside wins":      {[]document.Block{label("检查名称"), line("合成旁边", 1, 0.8, at(0.25, 0.3)), line("合成下方", 1, 0.76, at(0.05, 0.3))}, "合成旁边"},
+		"nearest under":    {[]document.Block{label("检查名称"), line("合成较远", 1, 0.73, at(0.05, 0.3)), line("合成较近", 1, 0.77, at(0.05, 0.3))}, "合成较近"},
+		"too far under":    {[]document.Block{label("检查名称"), line("合成检查", 1, 0.6, at(0.05, 0.3))}, ""},
+		"another column":   {[]document.Block{label("检查名称"), line("合成检查", 1, 0.76, at(0.5, 0.3))}, ""},
+		"another page":     {[]document.Block{label("检查名称"), line("合成检查", 2, 0.76, at(0.05, 0.3))}, ""},
+		"another label":    {[]document.Block{label("检查名称"), line("姓名：合成成员", 1, 0.76, at(0.05, 0.3))}, ""},
+		"a heading":        {[]document.Block{label("检查名称"), line("检查所见", 1, 0.76, at(0.05, 0.3))}, ""},
+		"not only a label": {[]document.Block{label("检查名称及说明"), line("合成检查", 1, 0.76, at(0.05, 0.3))}, ""},
+	} {
+		if c := extract(2, test.blocks...); c.Title != test.want {
+			t.Fatalf("%s: title = %q, want %q", name, c.Title, test.want)
+		}
+	}
+}
+
+func TestFindingsSectionsStopAtConclusionsAndButtons(t *testing.T) {
+	c := extract(1,
+		line("检查所见：合成所见同行。", 1, 0.9),
+		line("合成所见续行。", 1, 0.85),
+		line("诊断意见", 1, 0.8),
+		line("合成诊断。", 1, 0.75),
+		line("检查结果描述：合成描述。", 1, 0.7),
+		line("下载报告", 1, 0.65),
+		line("合成按钮之后的文字", 1, 0.6),
+	)
+	if c.Results != "合成所见同行。\n合成所见续行。\n合成描述。" || c.Conclusion != "合成诊断。" {
+		t.Fatalf("candidates = %+v", c)
+	}
+}
+
+func TestVariantCharactersMatchAndLocate(t *testing.T) {
+	sources := []document.Extraction{{Kind: "png", PageCount: 1, Engine: "synthetic", Blocks: []document.Block{
+		line("检査结论", 1, 0.8), line("合成复査结论。", 1, 0.7),
+	}}}
+	c := Extract(sources)
+	if c.Conclusion != "合成复查结论。" {
+		t.Fatalf("conclusion = %q", c.Conclusion)
+	}
+	// The corrected proposal is still found where recognition read the variant.
+	if got := Locate(sources, c.Conclusion); !reflect.DeepEqual(got, []Location{{1, 1}}) {
+		t.Fatalf("Locate = %+v", got)
+	}
+}
+
+func TestALabelNeedsASeparatorBeforeItsValue(t *testing.T) {
+	c := extract(1, line("科室主任：合成主任", 1, 0.9), line("报告类型说明", 1, 0.8), line("标题栏", 1, 0.7))
+	if !reflect.DeepEqual(c, Candidates{}) {
+		t.Fatalf("a longer word was split at a label: %+v", c)
+	}
+	c = extract(1, line("科室 合成科室", 1, 0.9), line("报告类型:合成类型", 1, 0.8))
+	if c.Department != "合成科室" || c.ReportType != "合成类型" {
+		t.Fatalf("candidates = %+v", c)
+	}
+}

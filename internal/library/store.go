@@ -863,8 +863,9 @@ func (s *Store) SaveSourceExtraction(ctx context.Context, id, sourceID string, e
 		// The draft becomes reviewable together with its proposals, so review
 		// never opens on a draft that is still waiting for them.
 		review := r.Review
+		review.Text = text
 		proposeFields(&review, extractions)
-		_, err = tx.ExecContext(ctx, "UPDATE reports SET corrected_text=?,title=?,organization=?,department=?,report_type=?,conclusion=?,status='review',failure='' WHERE id=?", text, review.Title, review.Organization, review.Department, review.ReportType, review.Conclusion, id)
+		_, err = tx.ExecContext(ctx, "UPDATE reports SET corrected_text=?,title=?,organization=?,department=?,report_type=?,conclusion=?,status='review',failure='' WHERE id=?", review.Text, review.Title, review.Organization, review.Department, review.ReportType, review.Conclusion, id)
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -876,10 +877,15 @@ func (s *Store) SaveSourceExtraction(ctx context.Context, id, sourceID string, e
 }
 
 // proposeFields copies what recognition found under known labels into the
-// fields that are still empty. The date stays unknown until the user picks
-// one, and nothing here confirms the report.
+// fields that are still empty. The findings, which the caller starts as the
+// whole recognized text, become the section the report prints them under
+// when it has one. The date stays unknown until the user picks one, and
+// nothing here confirms the report.
 func proposeFields(e *Edit, sources []document.Extraction) {
 	found := candidate.Extract(sources)
+	if found.Results != "" && bounded(found.Results, document.MaxTextBytes) {
+		e.Text = found.Results
+	}
 	for _, field := range []struct {
 		value    *string
 		proposal string

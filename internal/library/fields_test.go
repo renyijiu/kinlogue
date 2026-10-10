@@ -458,8 +458,8 @@ func TestRecognitionProposesFieldsWhenTheDraftBecomesReviewable(t *testing.T) {
 	if !strings.HasPrefix(got.Conclusion, "合成第一结论。\n合成第二结论。") {
 		t.Fatalf("conclusion did not follow source order: %q", got.Conclusion)
 	}
-	// A printed date is offered in review, never chosen, and the findings
-	// still start from the whole recognized text.
+	// A printed date is offered in review, never chosen, and without a
+	// findings heading the findings start from the whole recognized text.
 	if got.Date != "" || got.MemberID != "" || !strings.Contains(got.Text, "医院名称：合成第一医院") {
 		t.Fatalf("proposals went beyond the labeled fields: %+v", got)
 	}
@@ -508,5 +508,42 @@ func TestInboxArchiveProposesFieldsButKeepsTheGivenTitle(t *testing.T) {
 	e := got.Review
 	if e.Title != "synthetic.pdf" || e.Date != "2026-10-09" || e.Organization != "合成手机医院" || e.Department != "合成科室" || e.ReportType != "合成影像" || e.Conclusion != "合成手机结论。" {
 		t.Fatalf("archive proposals = %+v", e)
+	}
+}
+
+func TestFindingsStartFromThePrintedSectionWhenThereIsOne(t *testing.T) {
+	s, _ := openTest(t)
+	e := labeledExtraction("合成医院", "合成结论。")
+	e.Blocks = append(e.Blocks,
+		document.Block{Page: 1, Text: "18:27", Method: "synthetic", Confidence: 1, Bounds: document.Rect{X: .1, Y: .95, Width: .1, Height: .02}},
+		document.Block{Page: 1, Text: "检査所见：", Method: "synthetic", Confidence: 1, Bounds: document.Rect{X: .05, Y: .4, Width: .2, Height: .04}},
+		document.Block{Page: 1, Text: "合成所见正文。", Method: "synthetic", Confidence: 1, Bounds: document.Rect{X: .05, Y: .35, Width: .8, Height: .04}},
+		document.Block{Page: 1, Text: "下载影像", Method: "synthetic", Confidence: 1, Bounds: document.Rect{X: .4, Y: .1, Width: .2, Height: .04}},
+	)
+	r, err := createSingle(s, ctx, "synthetic.png", []byte("synthetic-original"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err = s.SaveSourceExtraction(ctx, r.ID, r.Sources[0].ID, e)
+	if err != nil || r.Review.Text != "合成所见正文。" || r.Review.Conclusion != "合成结论。" {
+		t.Fatalf("findings = %q, conclusion = %q, error %v", r.Review.Text, r.Review.Conclusion, err)
+	}
+	// Recognition itself is kept whole for the user to consult.
+	if raw := r.Sources[0].Extraction.Text(); !strings.Contains(raw, "18:27") || !strings.Contains(raw, "下载影像") || !strings.Contains(raw, "检査所见") {
+		t.Fatal("saved recognition was changed")
+	}
+
+	member, _ := s.AddMember(ctx, "Synthetic member")
+	item := receiveTest(t, s, "synthetic-findings")
+	item, err = s.BeginInboxProcessing(ctx, item.ID, item.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item, err = s.SaveInboxExtraction(ctx, item.ID, item.Revision, e); err != nil {
+		t.Fatal(err)
+	}
+	archived, err := s.ArchiveInbox(ctx, []InboxSelection{{item.ID, item.Revision}}, Edit{MemberID: member.ID, Title: "synthetic.png"})
+	if err != nil || archived.Review.Text != "合成所见正文。" {
+		t.Fatalf("archived findings = %q, error %v", archived.Review.Text, err)
 	}
 }
