@@ -1211,3 +1211,13 @@
 - **未执行**：实际窗口中的操作（自动打开、识别状态出现与消失、侧边栏文件名截断、Command-Return 与输入法、错误图标）没有人工走查；VoiceOver 朗读没有检查；首次识别的实际耗时没有在 Swift 上计时；字段规则在真实报告样本上的命中率没有验证。`scripts/verify-app.sh`、安装验收和 macOS 26 独立机器没有执行，候选状态保持 `not-verified` / `pendingManual`。
 - **合并提示**：两部分留在同一工作树，未提交、未 push。第一部分单独提交时账本应为 1009 tests / 91 suites，两部分合计为 1030 / 93。主检出的 `docs/log.md` 和 `docs/index.md` 有未提交改动，合并本分支时这两个文件需要人工对照。
 - **交付整理**：之后按用户要求把两部分整理为两个提交并推送以发起 PR，没有新增行为修改。上面两条里的“未提交、未 push”描述的是验证发生时的工作树；提交和 PR 不提升候选状态，远端 CI 结果以实际运行为准。
+
+## [2026-10-11] brand/docs | 定位改为以人为单位、一人管全家，并从矢量母版重画应用图标
+
+- **依据**：用户 2026-10-11 决策：产品按“个人维度，但可以管理整个家庭”定位，并计划延伸为健康助手（运动数据、模型问答）。助手能力未实现，本次只调整品牌表述和图标，取舍见 [`decisions.md`](decisions.md)。
+- **文档**：README 的标语、简介、核心体验首条和“品牌”一节改为以人为单位的表述，`Kin` 的释义改为“自己和家人”；项目总览同步一句话定位。新增 [`brand.md`](brand.md) 维护名称、定位、标语、文案规则、图标母版与生成方式，并把健康助手写成明确标注为未实现的方向；索引与设计系统增加入口。`PRIVACY.md`、App 内文案、本地化资源和 Info.plist 未改。
+- **图标**：新增 `packaging/AppIcon.svg` 与小尺寸母版 `packaging/AppIcon-small.svg`，由 `scripts/render-app-icon.swift` 渲染 `AppIcon.png` 和 iconset 的 10 个表示；16、32 像素使用小尺寸母版。底板、纸页和节点使用精确的品牌母色。旧图标只有位图，颜色偏离母色，线条在底板右下角被裁掉。
+- **历史隐私门禁**：`scripts/privacy-history-guard.sh` 原先每个路径只接受一条摘要，而被替换的图标仍在可达历史中，新旧位图无法同时通过。现改为同一路径可登记多条已审查摘要，每个历史版本必须命中其中一条；完全重复的行、未知路径和缺少摘要的路径仍然失败。摘要清单为 11 个图标路径各追加一条新摘要，旧摘要保留。当前树门禁未改。
+- **验证**：当前 Mac（macOS 27.0.1 / Xcode 27.0）未提交工作树上，完整 `scripts/test.sh` 通过，主测试清单经脚本核对为 995 tests / 91 suites，新增 1 项历史门禁回归；`scripts/lint.sh`、`scripts/verify-docs.sh`、当前树 `scripts/privacy-guard.sh` 和 `git diff --check` 通过。连续两次渲染的 11 个位图摘要一致，PNG 只含像素尺寸元数据；新 iconset 经 `scripts/generate-icns.swift` 打包后由 `iconutil` 展开为 10 个尺寸正确的表示。在一次性克隆中把新图标提交到真实历史之上：旧门禁失败，新门禁配新清单通过，新门禁配只含新摘要的清单失败。
+- **未执行**：`scripts/verify-app.sh` 要求干净的已提交工作树，替换图标后的 Release bundle 未构建或验证；新提交的远端 CI 未运行。图标在 macOS 26/27 的 Dock、Finder 中的实际显示，以及深色或着色外观，未人工核对。
+- **合并 main**：首次推送的 `9d99f9b` 上，远端 CI 的 lint、隐私、完整测试和 clean-source bundle 验证在 macOS 26 与 Xcode 27 两个环境均通过；macOS 26 基线任务随后在 DICOM XPC 步骤达到 30 分钟任务上限被取消，Xcode 27 的同一步骤通过。之后合并 `main` 的 `12dbc93`，账本与日志的冲突按保留两边内容解决，主测试清单为 1031 tests / 93 suites。合并后的工作树在当前 Mac 上重新通过完整 `scripts/test.sh`、`scripts/lint.sh`、`scripts/verify-docs.sh` 和当前树 `scripts/privacy-guard.sh`；合并提交的远端 CI 尚未运行。

@@ -116,8 +116,10 @@ is_reviewable_repository_media_asset() {
 [[ -f "$APPROVED_MEDIA_MANIFEST" && ! -L "$APPROVED_MEDIA_MANIFEST" ]] \
   || fail "the approved media digest manifest is missing or is not a regular file"
 
-typeset -A APPROVED_MEDIA_DIGESTS
-APPROVED_MEDIA_COUNT=0
+# A replaced asset stays in reachable history, so a path may list every digest
+# that was reviewed for it. Each entry is still one explicit digest/path pair.
+typeset -A APPROVED_MEDIA_ENTRIES
+typeset -A APPROVED_MEDIA_REVIEWED_PATHS
 while IFS= read -r manifest_line || [[ -n "$manifest_line" ]]; do
   if [[ "$manifest_line" =~ '^([0-9a-f]{64})  ([^[:cntrl:]]+)$' ]]; then
     approved_digest="${match[1]}"
@@ -127,21 +129,20 @@ while IFS= read -r manifest_line || [[ -n "$manifest_line" ]]; do
   fi
   is_reviewable_repository_media_asset "$approved_path" \
     || fail "the approved media digest manifest contains an unexpected path"
-  [[ -z "${APPROVED_MEDIA_DIGESTS[$approved_path]:-}" ]] \
-    || fail "the approved media digest manifest contains a duplicate path"
-  APPROVED_MEDIA_DIGESTS[$approved_path]="$approved_digest"
-  (( APPROVED_MEDIA_COUNT += 1 ))
+  approved_entry="$approved_digest  $approved_path"
+  [[ -z "${APPROVED_MEDIA_ENTRIES[$approved_entry]:-}" ]] \
+    || fail "the approved media digest manifest contains a duplicate entry"
+  APPROVED_MEDIA_ENTRIES[$approved_entry]=1
+  APPROVED_MEDIA_REVIEWED_PATHS[$approved_path]=1
 done <"$APPROVED_MEDIA_MANIFEST"
 
-[[ "$APPROVED_MEDIA_COUNT" -eq "${#APPROVED_MEDIA_PATHS[@]}" ]] \
-  || fail "the approved media digest manifest is incomplete"
 for approved_path in "${APPROVED_MEDIA_PATHS[@]}"; do
-  [[ -n "${APPROVED_MEDIA_DIGESTS[$approved_path]:-}" ]] \
+  [[ -n "${APPROVED_MEDIA_REVIEWED_PATHS[$approved_path]:-}" ]] \
     || fail "the approved media digest manifest is incomplete"
 done
 
 is_allowed_repository_media_asset() {
-  [[ -n "${APPROVED_MEDIA_DIGESTS[$1]:-}" ]]
+  [[ -n "${APPROVED_MEDIA_REVIEWED_PATHS[$1]:-}" ]]
 }
 
 /usr/bin/git log --format= --name-only -z "${PUBLIC_REFS[@]}" -- >"$PATH_LIST" \
@@ -196,7 +197,7 @@ while IFS= read -r -d '' media_entry; do
       && "${media_fields[1]}" == 100644 \
       && "${media_fields[2]}" == blob \
       && "${media_fields[3]}" =~ '^[0-9a-f]{40,64}$' \
-      && -n "${APPROVED_MEDIA_DIGESTS[$media_path]:-}" ]] \
+      && -n "${APPROVED_MEDIA_REVIEWED_PATHS[$media_path]:-}" ]] \
     || fail "reachable repository media metadata is invalid"
   media_object="${media_fields[3]}"
   media_digest="${MEDIA_DIGEST_CACHE[$media_object]:-}"
@@ -210,7 +211,8 @@ while IFS= read -r -d '' media_entry; do
       || fail "reachable repository media returned an invalid digest"
     MEDIA_DIGEST_CACHE[$media_object]="$media_digest"
   fi
-  [[ "$media_digest" == "${APPROVED_MEDIA_DIGESTS[$media_path]}" ]] \
+  historical_entry="$media_digest  $media_path"
+  [[ -n "${APPROVED_MEDIA_ENTRIES[$historical_entry]:-}" ]] \
     || fail "unapproved repository media exists in reachable history"
 done <"$MEDIA_ENTRY_LIST"
 
