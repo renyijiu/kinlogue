@@ -78,7 +78,10 @@ struct DICOMStudyReviewView: View {
                     .accessibilityIdentifier("dicom-review-delete")
                     Spacer()
                     if model.operationFailed {
-                        Text(AppLocalization.string("操作未完成，可以稍后重试"))
+                        Label(
+                            AppLocalization.string("操作未完成，可以稍后重试"),
+                            systemImage: "exclamationmark.triangle"
+                        )
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
@@ -155,7 +158,10 @@ struct DICOMStudyReviewView: View {
                     .accessibilityHint(AppLocalization.string("请选择报告或影像资料中可核实的检查日期"))
 
                     if model.hasValidationError {
-                        Text(AppLocalization.string("请先选择有效的家庭成员和检查日期"))
+                        Label(
+                            AppLocalization.string("请先选择有效的家庭成员和检查日期"),
+                            systemImage: "exclamationmark.triangle"
+                        )
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
