@@ -67,6 +67,30 @@ struct DICOMAppModelTests {
     }
 
     @Test
+    func enteringTheTimelineKeepsASelectedImagingStudyAndOpensNoRecordUnderTheImagingFilter() async throws {
+        let fixture = try TimelineImagingFixture()
+        let model = fixture.makeModel()
+        await model.start()
+
+        model.selectDICOMStudy(fixture.study.id)
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.dicomLibraryModel.selectedStudyID == fixture.study.id)
+        #expect(model.selectedRecordID == nil)
+
+        model.timelineFilter = .imaging
+        model.selectedMemberID = fixture.member.id
+        #expect(model.dicomLibraryModel.selectedStudyID == nil)
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecordID == nil)
+        #expect(model.timelineFilter == .imaging)
+
+        model.timelineFilter = .all
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecord?.id == fixture.record.id)
+        #expect(model.dicomLibraryModel.selectedStudyID == nil)
+    }
+
+    @Test
     func timelineFilterNarrowsEntriesAndSearchAndClearsTheHiddenSelection() async throws {
         let fixture = try TimelineImagingFixture()
         let model = fixture.makeModel()

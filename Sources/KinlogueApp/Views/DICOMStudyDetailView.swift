@@ -20,7 +20,7 @@ struct DICOMStudyDetailView: View {
                 ))
             }
             Text(AppLocalization.string("只显示受支持的本机二维 MR 切片；影像不会进入 OCR、搜索或比较。"))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KinlogueTheme.onVariant)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button(AppLocalization.string("查看影像")) { onViewImages(study.id) }

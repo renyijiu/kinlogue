@@ -46,8 +46,11 @@ struct MemberSidebarViewSourceTests {
         let source = try String(contentsOf: memberSidebarURL, encoding: .utf8)
 
         #expect(source.contains("private struct SidebarActionButton<Label: View>: View"))
-        #expect(source.components(separatedBy: "SidebarActionButton").count - 1 == 4)
+        // Declaration plus add member, report review, imaging review and failed-import retry.
+        #expect(source.components(separatedBy: "SidebarActionButton").count - 1 == 5)
         #expect(source.contains("label\n                .sidebarRowHitTarget()"))
+        #expect(source.contains(".buttonStyle(.kinlogueRow { isPressed = $0 })"))
+        #expect(source.contains(".stroke(isFocused ? KinlogueTheme.primary : .clear, lineWidth: 2)"))
         #expect(source.contains(".contentShape(Rectangle())"))
         #expect(source.components(separatedBy: ".selectionDisabled()").count - 1 == 2)
     }
@@ -60,6 +63,43 @@ struct MemberSidebarViewSourceTests {
         #expect(source.contains("func sidebarRowHitTarget()"))
         #expect(source.contains("minHeight: 44"))
         #expect(source.components(separatedBy: ".sidebarRowHitTarget()").count - 1 == 5)
+    }
+
+    @Test
+    func waitingDraftsAreCountedAndNamedAfterTheirFirstOriginal() throws {
+        let source = try String(contentsOf: memberSidebarURL, encoding: .utf8)
+
+        #expect(source.contains("Section(AppLocalization.string(\"待确认（\\(reviewQueue.count)）\"))"))
+        #expect(source.contains("draft.displayName ?? draftLabel(draft)"))
+        #expect(source.contains(".truncationMode(.middle)"))
+        #expect(source.contains(
+            "draft.displayName.map { AppLocalization.string(\"等待确认：\\($0)\") }"
+        ))
+        #expect(source.contains(".accessibilityHint(AppLocalization.string(\"打开原件并确认识别字段\"))"))
+    }
+
+    @Test
+    func recognitionStatusStaysVisibleOutsideTheScrollingList() throws {
+        let sidebar = try String(contentsOf: memberSidebarURL, encoding: .utf8)
+        let shell = try String(contentsOf: appShellURL, encoding: .utf8)
+        let status = try String(
+            contentsOf: repositoryURL.appendingPathComponent(
+                "Sources/KinlogueApp/Views/ReportRecognitionStatusView.swift"
+            ),
+            encoding: .utf8
+        )
+
+        let listEnd = try #require(sidebar.range(of: ".listStyle(.sidebar)"))
+        let statusStart = try #require(sidebar.range(of: "if let reportRecognitionActivity {"))
+        let settings = try #require(sidebar.range(of: "selectSidebar(.settings)\n            } label:"))
+        #expect(listEnd.upperBound < statusStart.lowerBound)
+        #expect(statusStart.upperBound < settings.lowerBound)
+        #expect(shell.contains("reportRecognitionActivity: model.reportRecognitionActivity"))
+        #expect(shell.contains("isReportRecognitionSlow: model.isReportRecognitionSlow"))
+        #expect(status.contains("ProgressView()"))
+        #expect(status.contains("if isSlow {\n                SlowRecognitionNotice()"))
+        #expect(status.contains("activity.total > 1"))
+        #expect(status.contains(".accessibilityElement(children: .combine)"))
     }
 
     @Test

@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="packaging/AppIcon.png" width="152" alt="续页图标：翻开的纸页延伸为带有三个节点的连续轨迹">
+  <img src="packaging/AppIcon.png" width="152" alt="续页图标：纸页翻起一角，一条连续的线从页下延伸出来，串起三个节点">
 </p>
 
 <h1 align="center">续页 · Kinlogue</h1>
 
 <p align="center">
-  <strong>家人的健康记录，前后相续。</strong><br>
-  <em>Your family’s health history, continued.</em>
+  <strong>你和家人的健康记录，前后相续。</strong><br>
+  <em>Your health history and your family’s, continued.</em>
 </p>
 
 <p align="center">
@@ -14,16 +14,16 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/kinlogue-overview.jpg" width="1180" alt="续页应用界面：使用合成示例家庭成员展示健康记录时间线、已确认信息与原件预览">
+  <img src="docs/assets/kinlogue-overview-2026-10.jpg" width="1180" alt="续页应用界面：使用合成示例家庭成员展示健康记录时间线、已确认信息与原件预览">
 </p>
 
 <p align="center">
   <sub>产品界面预览 · 仅使用合成示例数据，不包含真实健康资料</sub>
 </p>
 
-续页（英文名 **Kinlogue**，读作 **KIN-log**）是一款 Mac 优先、隐私优先的家庭健康记录应用。它把散落在 PDF 与图片里的检查报告、化验单和门诊记录，按家人与时间串联起来，让历史资料在下一次复诊时随手可查。
+续页（英文名 **Kinlogue**，读作 **KIN-log**）是一款 Mac 优先、隐私优先的健康记录应用。它以人为单位整理资料：一位使用者可以在同一台 Mac 上为自己和每位家人各建一条时间线，把散落在 PDF 与图片里的检查报告、化验单和门诊记录按人与时间串联起来，让历史资料在下一次复诊时随手可查。
 
-*Kinlogue turns your family’s medical reports into one continuous history, ready for every follow-up.*
+*Kinlogue keeps a continuous health history for you and each person in your family, ready for every follow-up.*
 
 > [!IMPORTANT]
 > 当前源码仍是发布前开发候选，不是已完成公共发布的产品。候选身份、自动化状态和人工门禁以 [当前候选证据](docs/acceptance/current-release.md) 为准。
@@ -38,7 +38,7 @@
 
 ## 核心体验
 
-- **按家人整理**：在同一台 Mac 上管理多位家庭成员的资料与时间线。
+- **一人一条线，一人管全家**：每位家庭成员都有自己的资料与时间线，由同一位使用者在一台 Mac 上统一管理。
 - **保留可信原件**：导入 PDF 和报告图片，记录转录内容对应的来源页。
 - **本机 OCR**：使用 macOS Vision / PDFKit 在设备上提取文字，不把报告发送到云端。
 - **先确认，再入档**：OCR 只生成候选；用户确认后，记录才进入时间线、搜索和比较。
@@ -123,12 +123,13 @@ scripts/run-acceptance.sh
 
 ## 品牌
 
-- **续页**：强调家人的健康资料一页页延续，并在需要时接上过去。
-- **Kinlogue**：`Kin` 代表家人，`-logue` 联想到记录、档案与对话。
-- **图标意象**：一张翻开的纸页延伸为连续轨迹，三个节点代表不同时间的检查与复查。
+- **续页**：每个人的健康资料一页页延续，新的一页总能接上过去。
+- **Kinlogue**：`Kin` 指自己和家人，`-logue` 联想到记录、档案与对话。
+- **定位**：以人为单位，一人管全家。每位成员一条健康线索，由一位使用者统一照看。
+- **图标意象**：纸页翻起一角，一条连续的线从页下延伸出来。纸页是有来源的原件，线是一个人前后相续的健康线索，三个节点是这条线上不同时间的记录。
 - **图标文案**：**翻开一页，接上过去。**
 
-品牌以深玉绿 `#1E6254`、暖象牙白 `#F7F1E4` 和柔和杏色 `#DF8A4A` 为母色，避免医疗十字、心电图、盾牌、云端或 AI 星光等符号。界面令牌、交互状态和无障碍取舍见 [Warm Sanctuary 设计系统](docs/design-system.md)。
+品牌以深玉绿 `#1E6254`、暖象牙白 `#F7F1E4` 和柔和杏色 `#DF8A4A` 为母色，避免医疗十字、心电图、盾牌、云端或 AI 星光等符号。名称释义、图标母版与重新生成方式、文案规则，以及尚未实现的产品方向见 [品牌说明](docs/brand.md)；界面令牌、交互状态和无障碍取舍见 [Warm Sanctuary 设计系统](docs/design-system.md)。
 
 ## CI/CD 与候选分发
 
@@ -151,6 +152,7 @@ SwiftPM manifest 是 App 的构建与测试入口；当前只发布 `Kinlogue` e
 
 - [项目知识库索引](docs/index.md)：产品、架构、数据、存储、OCR、LAN、隐私和验收导航。
 - [项目总览](docs/project-overview.md)：当前能力、用户流程、非目标和发布状态。
+- [品牌说明](docs/brand.md)：名称、定位、标语、应用图标和尚未实现的产品方向。
 - [Agent 工作约束](AGENTS.md)：事实优先级、安全边界、修改流程和验证要求。
 - [架构说明](docs/architecture.md)：SwiftPM 分层、运行时组装和主要数据流。
 - [贡献指南](CONTRIBUTING.md)：开发流程、合成数据规则和 PR 要求。

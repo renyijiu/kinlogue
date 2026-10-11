@@ -20,7 +20,7 @@ struct BackupSetupView: View {
                     .textSelection(.enabled)
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(KinlogueTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                    .kinloguePanel(.card)
                     .accessibilityHidden(true)
                 Text(AppLocalization.string("恢复码显示在屏幕上。为避免旁人通过辅助功能听到，续页不会朗读这段敏感内容。"))
                     .font(.caption)
@@ -43,8 +43,7 @@ struct BackupSetupView: View {
             .accessibilityIdentifier("backup-recovery-code-reentry")
 
             if let failure = model.failureText {
-                Label(failure, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
+                KinlogueStatusLabel(failure, tone: .danger)
                     .accessibilityIdentifier("backup-setup-error")
             }
 
@@ -52,6 +51,7 @@ struct BackupSetupView: View {
                 Button(AppLocalization.string("取消"), role: .cancel) {
                     model.cancelSetup()
                 }
+                .buttonStyle(.kinlogueSecondary)
                 Spacer()
                 Button(AppLocalization.string("验证并启用备份")) {
                     Task { await model.completeSetup() }
@@ -64,6 +64,7 @@ struct BackupSetupView: View {
         }
         .padding(28)
         .frame(width: 540)
+        .kinlogueSheetCanvas()
         .interactiveDismissDisabled()
         .accessibilityIdentifier("backup-setup-sheet")
     }
@@ -89,8 +90,7 @@ struct PendingBackupEnrollmentView: View {
             .accessibilityIdentifier("backup-pending-recovery-code")
 
             if let failure = model.failureText {
-                Label(failure, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
+                KinlogueStatusLabel(failure, tone: .danger)
                     .accessibilityIdentifier("backup-pending-error")
             }
 
@@ -98,6 +98,7 @@ struct PendingBackupEnrollmentView: View {
                 Button(AppLocalization.string("取消"), role: .cancel) {
                     model.cancelPendingEnrollmentRecovery()
                 }
+                .buttonStyle(.kinlogueSecondary)
                 .disabled(model.isPendingEnrollmentOperation)
                 Spacer()
                 Button {
@@ -122,6 +123,7 @@ struct PendingBackupEnrollmentView: View {
         }
         .padding(28)
         .frame(width: 540)
+        .kinlogueSheetCanvas()
         .interactiveDismissDisabled(model.isPendingEnrollmentOperation)
         .accessibilityIdentifier("backup-pending-enrollment-sheet")
     }
@@ -143,12 +145,14 @@ struct RestoreBackupView: View {
                     Button(AppLocalization.string("取消"), role: .cancel) {
                         Task { await model.cancel() }
                     }
+                    .buttonStyle(.kinlogueSecondary)
                     .keyboardShortcut(.cancelAction)
                 }
             }
         }
         .padding(28)
         .frame(width: 540)
+        .kinlogueSheetCanvas()
         .interactiveDismissDisabled(model.isDismissDisabled)
         .accessibilityIdentifier("restore-backup-sheet")
         .fileImporter(
@@ -193,15 +197,13 @@ struct RestoreBackupView: View {
                 .foregroundStyle(KinlogueTheme.onVariant)
         case .awaitingReplaceConfirmation(let summary):
             restoreSummary(summary)
-            Label(
-                AppLocalization.string("这会替换而不是合并当前资料库，并移除本机备份设置。外部恢复点会保留。"),
-                systemImage: "exclamationmark.triangle"
+            KinlogueWarningNotice(
+                AppLocalization.string("这会替换而不是合并当前资料库，并移除本机备份设置。外部恢复点会保留。")
             )
-            .foregroundStyle(.orange)
-            .fixedSize(horizontal: false, vertical: true)
             Button(AppLocalization.string("确认替换本机资料库"), role: .destructive) {
                 Task { await model.confirmReplacement() }
             }
+            .buttonStyle(.kinlogueDestructive)
             .accessibilityIdentifier("restore-confirm-replacement")
         case .activating:
             ProgressView(AppLocalization.string("正在替换本机资料库…"))
@@ -209,8 +211,10 @@ struct RestoreBackupView: View {
                 .foregroundStyle(KinlogueTheme.onVariant)
         case .restartRequired(let summary):
             restoreSummary(summary)
-            Label(AppLocalization.string("恢复已完成。请退出并重新打开续页。"), systemImage: "checkmark.circle")
-                .foregroundStyle(.green)
+            KinlogueStatusLabel(
+                AppLocalization.string("恢复已完成。请退出并重新打开续页。"),
+                tone: .success
+            )
             Button(AppLocalization.string("退出续页")) {
                 NSApplication.shared.terminate(nil)
             }
@@ -218,11 +222,10 @@ struct RestoreBackupView: View {
             .keyboardShortcut(.defaultAction)
             .accessibilityIdentifier("restore-quit")
         case .failed(.activation):
-            Label(
+            KinlogueStatusLabel(
                 model.failureText ?? AppLocalization.string("资料库替换未完成，请重新启动续页以安全收敛。"),
-                systemImage: "exclamationmark.triangle"
+                tone: .danger
             )
-            .foregroundStyle(.red)
             .fixedSize(horizontal: false, vertical: true)
             Text(AppLocalization.string("资料库替换已进入收敛阶段。请退出并重新打开续页；在重新启动前不要继续使用当前窗口。"))
                 .foregroundStyle(KinlogueTheme.onVariant)
@@ -233,11 +236,10 @@ struct RestoreBackupView: View {
             .keyboardShortcut(.defaultAction)
             .accessibilityIdentifier("restore-failure-quit")
         case .failed:
-            Label(
+            KinlogueStatusLabel(
                 model.failureText ?? AppLocalization.string("恢复未完成。"),
-                systemImage: "exclamationmark.triangle"
+                tone: .danger
             )
-            .foregroundStyle(.red)
             .fixedSize(horizontal: false, vertical: true)
             Text(AppLocalization.string("当前资料库不会因验证失败而被替换。你可以取消后重新选择恢复点。"))
                 .foregroundStyle(KinlogueTheme.onVariant)
@@ -269,7 +271,7 @@ struct RestoreBackupView: View {
             )
         }
         .padding(14)
-        .background(KinlogueTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+        .kinloguePanel()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(AppLocalization.string("不包含健康内容的恢复点概要"))
     }

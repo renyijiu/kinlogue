@@ -75,12 +75,15 @@ struct DraftSummary: Identifiable, Equatable, Sendable {
     let state: ImportState
     let revision: UInt64
     let failureCode: ImportFailureCode?
+    /// The first original's file name, which tells waiting drafts apart.
+    let displayName: String?
 
     init(draft: ImportDraft) {
         id = draft.id
         state = draft.state
         revision = draft.revision
         failureCode = draft.failureCode
+        displayName = draft.sources.first.displayName
     }
 }
 

@@ -36,6 +36,7 @@ struct DICOMStudyViewerContainer: View {
             Task { await model.close() }
         }
         .frame(minWidth: 760, minHeight: 620)
+        .kinlogueAppearance()
     }
 }
 
@@ -91,7 +92,7 @@ struct DICOMStudyViewer: View {
                     .font(.title2.weight(.semibold))
                 Text(AppLocalization.string("仅供查看本机原始影像，不提供诊断、测量或医学解释。"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KinlogueTheme.onVariant)
                 HStack(spacing: 8) {
                     if let memberLabel = model.memberLabel {
                         Text(memberLabel)
@@ -107,7 +108,7 @@ struct DICOMStudyViewer: View {
                     }
                 }
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KinlogueTheme.onVariant)
             }
             Spacer()
             if model.inertObjectCount > 0 {
@@ -116,7 +117,7 @@ struct DICOMStudyViewer: View {
                     systemImage: "archivebox"
                 )
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KinlogueTheme.onVariant)
             }
             Button(AppLocalization.string("关闭"), action: onClose)
                 .keyboardShortcut(.cancelAction)
@@ -152,48 +153,58 @@ struct DICOMStudyViewer: View {
                     }
                 )
 
-                switch model.phase {
-                case .idle, .loading:
-                    ProgressView(AppLocalization.string("正在加载影像切片…"))
-                        .padding(18)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-                        .accessibilityLabel(AppLocalization.string("正在加载影像切片"))
-                case .empty:
-                    ContentUnavailableView(
-                        AppLocalization.string("这项检查没有可查看的影像序列"),
-                        systemImage: "rectangle.slash"
-                    )
-                case .failed:
-                    VStack(spacing: 12) {
-                        Label(
-                            model.errorMessage ?? AppLocalization.string("无法显示当前影像切片"),
-                            systemImage: "exclamationmark.triangle"
+                // Status overlays sit on the black image canvas, so they use
+                // the dark material and light text regardless of the window.
+                Group {
+                    switch model.phase {
+                    case .idle, .loading:
+                        ProgressView(AppLocalization.string("正在加载影像切片…"))
+                            .padding(18)
+                            .background(
+                                .ultraThinMaterial,
+                                in: RoundedRectangle(cornerRadius: KinlogueTheme.Radius.card)
+                            )
+                            .accessibilityLabel(AppLocalization.string("正在加载影像切片"))
+                    case .empty:
+                        ContentUnavailableView(
+                            AppLocalization.string("这项检查没有可查看的影像序列"),
+                            systemImage: "rectangle.slash"
                         )
-                        if model.canRetry {
-                            Button(AppLocalization.string("重试当前切片")) {
-                                Task { await model.retry() }
+                    case .failed:
+                        VStack(spacing: 12) {
+                            Label(
+                                model.errorMessage ?? AppLocalization.string("无法显示当前影像切片"),
+                                systemImage: KinlogueStatusTone.danger.systemImage
+                            )
+                            if model.canRetry {
+                                Button(AppLocalization.string("重试当前切片")) {
+                                    Task { await model.retry() }
+                                }
+                                .buttonStyle(.kinloguePrimary)
+                                .accessibilityIdentifier("dicom-viewer-retry")
+                                .accessibilityFocused($retryIsFocused)
                             }
-                            .buttonStyle(.kinloguePrimary)
-                            .accessibilityIdentifier("dicom-viewer-retry")
-                            .accessibilityFocused($retryIsFocused)
                         }
+                        .padding(20)
+                        .background(
+                            .ultraThinMaterial,
+                            in: RoundedRectangle(cornerRadius: KinlogueTheme.Radius.card)
+                        )
+                    case .ready, .closed:
+                        EmptyView()
                     }
-                    .padding(20)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                case .ready, .closed:
-                    EmptyView()
                 }
+                .environment(\.colorScheme, .dark)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black)
 
             if model.hasFallbackOrderingWarning {
-                Label(
+                KinlogueStatusLabel(
                     AppLocalization.string("此序列缺少完整空间几何，当前使用持久化的回退顺序。"),
-                    systemImage: "exclamationmark.triangle"
+                    tone: .warning
                 )
                 .font(.caption)
-                .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)

@@ -7,7 +7,7 @@ struct SearchFieldView: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KinlogueTheme.onVariant)
             TextField(AppLocalization.string("搜索已确认的成员、日期、医院或结论"), text: $text)
                 .textFieldStyle(.plain)
                 .focused(isFocused)
@@ -17,6 +17,7 @@ struct SearchFieldView: View {
                     text = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(KinlogueTheme.onVariant)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(AppLocalization.string("清除搜索"))

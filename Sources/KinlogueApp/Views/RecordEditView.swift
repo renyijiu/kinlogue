@@ -104,7 +104,7 @@ struct RecordEditView: View {
                 Text(AppLocalization.string("编辑已确认记录"))
                     .font(.title2.weight(.semibold))
                 Text(AppLocalization.string("这里只校正原文转录或重新分配成员，原件不会改变。"))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KinlogueTheme.onVariant)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 26)
@@ -135,13 +135,13 @@ struct RecordEditView: View {
             VStack(spacing: 8) {
                 HStack {
                     if let errorMessage {
-                        Text(errorMessage)
+                        KinlogueStatusLabel(errorMessage, tone: .danger)
                             .font(.caption)
-                            .foregroundStyle(.red)
                             .accessibilityLabel(AppLocalization.string("错误：\(errorMessage)"))
                     }
                     Spacer()
                     Button(AppLocalization.string("取消")) { dismiss() }
+                        .buttonStyle(.kinlogueSecondary)
                         .keyboardShortcut(.cancelAction)
                         .disabled(isSaving)
                         .accessibilityIdentifier("record-edit-cancel")
@@ -179,6 +179,7 @@ struct RecordEditView: View {
                             hasRecordConflict = false
                             errorMessage = nil
                         }
+                        .buttonStyle(.kinlogueSecondary)
                         .disabled(isSaving)
                         .accessibilityIdentifier("record-edit-reload-latest")
                     }
@@ -188,6 +189,7 @@ struct RecordEditView: View {
             .padding(.vertical, 18)
         }
         .frame(minWidth: 960, idealWidth: 1_180, minHeight: 680, idealHeight: 760)
+        .kinlogueSheetCanvas()
         .interactiveDismissDisabled(isSaving)
     }
 
@@ -242,7 +244,7 @@ struct RecordEditView: View {
                         }
                         Text(AppLocalization.string("只校正原报告印出的高低或箭头标记，不会按数值推断。"))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(KinlogueTheme.onVariant)
                     }
                 }
                 VStack(alignment: .leading) {
@@ -256,7 +258,7 @@ struct RecordEditView: View {
                         .accessibilityLabel(AppLocalization.string("我的备注"))
                         .accessibilityHint(AppLocalization.string("填写仅供自己查看的备注，不会作为原报告内容"))
                     Text(AppLocalization.string("备注不会进入搜索比较中的原文结论。"))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(KinlogueTheme.onVariant)
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -315,8 +317,7 @@ struct RecordEditView: View {
             accessibilityHelp: accessibilityHelp
         )
             .frame(minHeight: minimumHeight)
-            .background(KinlogueTheme.card, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(KinlogueTheme.outline))
+            .kinlogueInputFrame()
     }
 
     private func sourceHint(_ source: SourceField?) -> some View {
@@ -325,7 +326,7 @@ struct RecordEditView: View {
                 ?? AppLocalization.string("原报告未提供或未识别；可对照原件手动填写")
         )
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(KinlogueTheme.onVariant)
     }
 }
 

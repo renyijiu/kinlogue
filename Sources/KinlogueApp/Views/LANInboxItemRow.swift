@@ -35,26 +35,23 @@ struct LANInboxItemRow: View {
             if item.isReviewable {
                 Button(action: onPreview) {
                     Image(systemName: "eye")
-                        .foregroundStyle(KinlogueTheme.primary)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.kinlogueGhost)
                 .disabled(isBusy)
                 .accessibilityLabel(AppLocalization.string("查看 \(item.displayName.rawValue) 原件"))
             }
             if canRetry {
                 Button(action: onRetry) {
                     Image(systemName: "arrow.clockwise")
-                        .foregroundStyle(KinlogueTheme.primary)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.kinlogueGhost)
                 .disabled(isBusy)
                 .accessibilityLabel(AppLocalization.string("重试处理 \(item.displayName.rawValue)"))
             }
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
-                    .foregroundStyle(.red)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.kinlogueGhost(.danger))
             .disabled(isBusy)
             .accessibilityLabel(AppLocalization.string("删除待确认项 \(item.displayName.rawValue)"))
         }
@@ -93,9 +90,9 @@ struct LANInboxItemRow: View {
     private var stateColor: Color {
         switch item.state {
         case .reviewable: KinlogueTheme.primary
-        case .failed, .integrityFailed: .red
-        case .unsupported: .orange
-        default: .secondary
+        case .failed, .integrityFailed: KinlogueTheme.danger
+        case .unsupported: KinlogueTheme.warning
+        default: KinlogueTheme.onVariant
         }
     }
 }

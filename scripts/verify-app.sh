@@ -8,6 +8,7 @@ APP_BUNDLE="$DIST_DIRECTORY/Kinlogue.app"
 INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
 EXECUTABLE="$APP_BUNDLE/Contents/MacOS/Kinlogue"
 ICON_FILE="$APP_BUNDLE/Contents/Resources/Kinlogue.icns"
+ASSET_ARCHIVE_FILE="$APP_BUNDLE/Contents/Resources/Assets.car"
 THIRD_PARTY_NOTICE_SOURCE="$REPO_DIR/THIRD_PARTY_NOTICES.md"
 THIRD_PARTY_NOTICE_FILE="$APP_BUNDLE/Contents/Resources/THIRD_PARTY_NOTICES.md"
 PHONE_ASSET_SOURCE_DIRECTORY="$REPO_DIR/Sources/KinloguePlatform/Resources/LANUpload"
@@ -30,6 +31,9 @@ EXPECTED_SHORT_VERSION="0.5.0"
 EXPECTED_BUILD_VERSION="5"
 EXPECTED_MINIMUM_SYSTEM_VERSION="26.0"
 EXPECTED_ICON_FILE="Kinlogue.icns"
+EXPECTED_ASSET_ARCHIVE_FILE="Assets.car"
+EXPECTED_ACCENT_COLOR_NAME="AccentColor"
+EXPECTED_ACCENT_COLOR_RGB="30 98 84"
 EXPECTED_PLATFORM_RESOURCE_BUNDLE="Kinlogue_KinloguePlatform.bundle"
 EXPECTED_ZIP_FOUNDATION_RESOURCE_BUNDLE="ZIPFoundation_ZIPFoundation.bundle"
 EXPECTED_LOCALIZATIONS='["zh-Hans","en"]'
@@ -396,6 +400,9 @@ verify_release_prerequisites() {
   [[ "$(/usr/bin/plutil -extract NSLocalNetworkUsageDescription raw \
       -expect string "$info")" == "$EXPECTED_LAN_PURPOSE" ]] \
     || fail "the production local-network purpose string is missing or unexpected"
+  [[ "$(/usr/bin/plutil -extract NSAccentColorName raw \
+      -expect string "$info")" == "$EXPECTED_ACCENT_COLOR_NAME" ]] \
+    || fail "the production source Info.plist must name the packaged accent color"
   require_plist_key_absent NSBonjourServices "$info" \
     "the production source Info.plist"
   require_plist_key_absent NSAppTransportSecurity "$info" \
@@ -466,6 +473,15 @@ create_isolated_swiftpm_root
 
 plist_string() {
   /usr/bin/plutil -extract "$1" raw -expect string "$INFO_PLIST"
+}
+
+asset_archive_value() {
+  /usr/bin/plutil -extract "$1" raw "$ASSET_ARCHIVE_INFO_FILE" 2>/dev/null
+}
+
+asset_archive_channel() {
+  asset_archive_value "1.Color components.$1" \
+    | /usr/bin/awk '{ printf "%d", $1 * 255 + 0.5 }'
 }
 
 signature_value() {
@@ -590,6 +606,9 @@ fi
   || fail "the main executable is missing, linked, or not executable"
 [[ -f "$ICON_FILE" && ! -L "$ICON_FILE" && -s "$ICON_FILE" ]] \
   || fail "the application icon is missing, linked, or empty"
+[[ -f "$ASSET_ARCHIVE_FILE" && ! -L "$ASSET_ARCHIVE_FILE" \
+    && -s "$ASSET_ARCHIVE_FILE" ]] \
+  || fail "the accent color asset archive is missing, linked, or empty"
 [[ -z "$(/usr/bin/find "$APP_BUNDLE" -type l -print -quit)" ]] \
   || fail "symbolic links are not allowed in the release bundle"
 if LC_ALL=C /usr/bin/grep -r -a -F -q \
@@ -650,7 +669,8 @@ RESOURCE_FILES="$(
   cd "$APP_BUNDLE/Contents/Resources"
   /usr/bin/find . -type f -print | LC_ALL=C /usr/bin/sort
 )"
-EXPECTED_RESOURCE_FILES="./$EXPECTED_ICON_FILE
+EXPECTED_RESOURCE_FILES="./$EXPECTED_ASSET_ARCHIVE_FILE
+./$EXPECTED_ICON_FILE
 ./$EXPECTED_PLATFORM_RESOURCE_BUNDLE/Info.plist
 ./$EXPECTED_PLATFORM_RESOURCE_BUNDLE/LANUpload/app.js
 ./$EXPECTED_PLATFORM_RESOURCE_BUNDLE/LANUpload/index.html
@@ -722,6 +742,8 @@ require_plist_key_absent NSAppTransportSecurity "$INFO_PLIST" \
   || fail "CFBundleExecutable must be Kinlogue"
 [[ "$(plist_string CFBundleIconFile)" == "$EXPECTED_ICON_FILE" ]] \
   || fail "CFBundleIconFile must name the packaged application icon"
+[[ "$(plist_string NSAccentColorName)" == "$EXPECTED_ACCENT_COLOR_NAME" ]] \
+  || fail "NSAccentColorName must name the packaged accent color"
 BUNDLE_IDENTIFIER="$(plist_string CFBundleIdentifier)"
 SHORT_VERSION="$(plist_string CFBundleShortVersionString)"
 BUILD_VERSION="$(plist_string CFBundleVersion)"
@@ -841,6 +863,24 @@ BUNDLE_MANIFEST_FILE="$TEMP_DIRECTORY/bundle-manifest.txt"
 RESOURCE_MANIFEST_FILE="$TEMP_DIRECTORY/resource-manifest.txt"
 REPORT_TEMP_FILE="$TEMP_DIRECTORY/report.plist"
 ICONSET_PROBE="$TEMP_DIRECTORY/Kinlogue.iconset"
+ASSET_ARCHIVE_INFO_FILE="$TEMP_DIRECTORY/asset-archive-info.json"
+
+# The archive may hold exactly one asset: the opaque sRGB accent color. Its
+# bytes embed a build timestamp, so the content is checked instead of a hash.
+"$XCRUN_EXECUTABLE" assetutil --info "$ASSET_ARCHIVE_FILE" \
+    >"$ASSET_ARCHIVE_INFO_FILE" \
+  || fail "the accent color asset archive could not be inspected"
+if asset_archive_value 2 >/dev/null \
+    || asset_archive_value "1.Color components.4" >/dev/null; then
+  fail "the accent color asset archive contains unexpected entries"
+fi
+[[ "$(asset_archive_value 1.AssetType)" == "Color" \
+    && "$(asset_archive_value 1.Name)" == "$EXPECTED_ACCENT_COLOR_NAME" \
+    && "$(asset_archive_value 1.Colorspace)" == "srgb" \
+    && "$(asset_archive_value "1.Color components.3")" == "1" \
+    && "$(asset_archive_channel 0) $(asset_archive_channel 1) $(asset_archive_channel 2)" \
+      == "$EXPECTED_ACCENT_COLOR_RGB" ]] \
+  || fail "the asset archive must contain only the Warm Sanctuary accent color"
 
 /usr/bin/iconutil -c iconset "$ICON_FILE" -o "$ICONSET_PROBE" \
   || fail "the application icon could not be expanded into standard representations"

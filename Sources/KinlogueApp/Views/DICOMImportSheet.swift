@@ -19,7 +19,7 @@ struct DICOMImportSheet: View {
                         Text(AppLocalization.string("正在本机扫描、复制并验证影像…"))
                         Text(AppLocalization.string("源文件不会被修改；取消时会清理未发布的本机暂存。"))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(KinlogueTheme.onVariant)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case .cancelling:
@@ -37,6 +37,7 @@ struct DICOMImportSheet: View {
                         Text(model.userErrorMessage ?? AppLocalization.string("影像导入未完成，可以稍后重试"))
                     } actions: {
                         Button(AppLocalization.string("重新选择文件夹…"), action: onChooseFolder)
+                            .buttonStyle(.kinloguePrimary)
                     }
                 case .succeeded:
                     importSummary
@@ -50,10 +51,12 @@ struct DICOMImportSheet: View {
                     Button(AppLocalization.string("取消")) {
                         Task { await model.cancel() }
                     }
+                    .buttonStyle(.kinlogueSecondary)
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("dicom-import-cancel")
                 } else if model.phase != .cancelling {
                     Button(AppLocalization.string("关闭"), action: onClose)
+                        .buttonStyle(.kinlogueSecondary)
                         .keyboardShortcut(.cancelAction)
                 }
                 Spacer()
@@ -69,19 +72,19 @@ struct DICOMImportSheet: View {
         }
         .padding(28)
         .frame(width: 560, height: 430)
+        .kinlogueSheetCanvas()
         .interactiveDismissDisabled(model.phase == .importing || model.phase == .cancelling)
     }
 
     private var importSummary: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label(
+            KinlogueStatusLabel(
                 model.result?.wasExisting == true
                     ? AppLocalization.string("这项检查已在时间线中")
                     : AppLocalization.string("影像已安全导入本机资料库"),
-                systemImage: "checkmark.circle.fill"
+                tone: .success
             )
             .font(.headline)
-            .foregroundStyle(KinlogueTheme.primary)
 
             DICOMImportCountRow(
                 title: AppLocalization.string("可查看影像"),

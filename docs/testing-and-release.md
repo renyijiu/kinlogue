@@ -9,6 +9,7 @@
 - `swift build` / `swift test` 可使用 SwiftPM 和 Command Line Tools。
 - 完整 App bundle、签名、XPC 和安装验收要求 `/Applications/Xcode.app/Contents/Developer`。
 - Xcode 27 使用默认 Swift Build 引擎；DICOM 资源需要可调用的 Metal Toolchain。缺失时运行 `xcodebuild -downloadComponent MetalToolchain`，并用 `xcrun --sdk macosx metal --version` 验证；组件安装后定位缓存陈旧时可执行 `xcrun --kill-cache`。`build-app.sh` 在构建前检查组件，不自动下载或安装。 打包脚本接受旧引擎平铺资源与 Swift Build 的 `Contents/Resources` 两种布局，拒绝符号链接，并统一整理为现有最终包布局；Platform metadata、手机页面、ZIPFoundation 隐私清单和 App 本地化继续受原有精确资源白名单约束。
+- `build-app.sh` 用 Xcode 自带的 `actool` 把 [`packaging/Assets.xcassets`](../packaging/Assets.xcassets) 编译为主包的 `Contents/Resources/Assets.car`，并要求编译结果与 `Info.plist` 的 `NSAccentColorName` 一致后才复制和签名。`verify-app.sh` 的精确资源清单包含这个文件，并用 `assetutil --info` 确认归档里只有一个与 Primary 同值的不透明 sRGB 强调色；归档内嵌构建时间戳，因此按内容而不是固定哈希校验。
 - CI 在工具链准备阶段探测 Metal；缺失时显式下载官方 Metal Toolchain、清理 xcrun 定位缓存并再次验证。下载或复验失败会终止该 job，本机 `build-app.sh` 仍只检查组件。
 - 当前 CI 工具链和锁定依赖不证明 macOS 26/27 的独立机器兼容性。
 - `Package.resolved`、SwiftNIO、ZIPFoundation 和 DICOM-Swift 的精确版本由 package graph 与 bundle 门禁验证。

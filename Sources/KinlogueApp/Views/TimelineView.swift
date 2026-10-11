@@ -73,6 +73,9 @@ struct TimelineView: View {
     let isSearching: Bool
     let filter: AppTimelineFilter
     let selectedRecordID: HealthRecord.ID?
+    /// False on one member's timeline, where every card would repeat the
+    /// member the window title already names.
+    let showsMemberLabels: Bool
     let memberLabel: (HealthRecord) -> String
     let onSelect: (HealthRecord.ID) -> Void
     let onSelectDICOM: (DICOMStudy.ID) -> Void
@@ -99,6 +102,7 @@ struct TimelineView: View {
                             TimelineCard(
                                 record: record,
                                 memberLabel: memberLabel(record),
+                                showsMemberLabel: showsMemberLabels,
                                 isSelected: record.id == selectedRecordID,
                                 comparisonModel: comparisonModel,
                                 onSelect: onSelect
@@ -117,6 +121,7 @@ struct TimelineView: View {
                                     TimelineCard(
                                         record: record,
                                         memberLabel: memberLabel(record),
+                                        showsMemberLabel: showsMemberLabels,
                                         isSelected: record.id == selectedRecordID,
                                         comparisonModel: comparisonModel,
                                         onSelect: onSelect
@@ -125,6 +130,7 @@ struct TimelineView: View {
                                     DICOMTimelineCard(
                                         study: study,
                                         memberLabel: dicomLibraryModel.memberLabel(for: study),
+                                        showsMemberLabel: showsMemberLabels,
                                         isSelected: study.id == dicomLibraryModel.selectedStudyID,
                                         isSelectingComparison: comparisonModel.isSelecting,
                                         onSelect: onSelectDICOM
@@ -182,6 +188,7 @@ struct TimelineView: View {
 private struct DICOMTimelineCard: View {
     let study: DICOMStudySummary
     let memberLabel: String
+    let showsMemberLabel: Bool
     let isSelected: Bool
     let isSelectingComparison: Bool
     let onSelect: (DICOMStudy.ID) -> Void
@@ -207,15 +214,17 @@ private struct DICOMTimelineCard: View {
                         )
                         .font(.headline)
                         Spacer()
-                        Text(memberLabel)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .kinlogueChip()
+                        if showsMemberLabel {
+                            Text(memberLabel)
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .kinlogueChip()
+                        }
                     }
                     Text(AppLocalization.string("保留 \(study.retainedObjectCount) 个对象"))
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KinlogueTheme.onVariant)
                 }
             }
             .buttonStyle(.kinlogueCard(isHighlighted: isSelected))
@@ -231,6 +240,7 @@ private struct DICOMTimelineCard: View {
 private struct TimelineCard: View {
     let record: HealthRecord
     let memberLabel: String
+    let showsMemberLabel: Bool
     let isSelected: Bool
     @ObservedObject var comparisonModel: ComparisonModel
     let onSelect: (HealthRecord.ID) -> Void
@@ -262,16 +272,18 @@ private struct TimelineCard: View {
                         Text(record.title?.transcription ?? record.reportType?.transcription ?? AppLocalization.string("健康记录"))
                             .font(.headline)
                         Spacer()
-                        Text(memberLabel)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .kinlogueChip()
+                        if showsMemberLabel {
+                            Text(memberLabel)
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .kinlogueChip()
+                        }
                     }
                     if let organization = record.organization?.transcription {
                         Label(organization, systemImage: "building.2")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(KinlogueTheme.onVariant)
                             .lineLimit(1)
                     }
                     Text(record.conclusion?.transcription ?? AppLocalization.string("原报告未提供结论"))
