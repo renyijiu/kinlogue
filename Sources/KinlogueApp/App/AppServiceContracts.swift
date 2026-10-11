@@ -147,6 +147,12 @@ enum AppTimelineEntry: Identifiable, Equatable, Sendable {
     }
 }
 
+enum AppTimelineFilter: Hashable, CaseIterable, Sendable {
+    case all
+    case reports
+    case imaging
+}
+
 struct AppTimelineSection: Equatable, Sendable {
     let group: TimelineDateGroup
     let entries: [AppTimelineEntry]
@@ -201,7 +207,7 @@ struct AppSnapshot: Equatable, Sendable {
 
 enum DICOMStudyDestination: Equatable, Sendable {
     case review
-    case library
+    case timeline
 }
 
 struct DICOMAppImportOutcome: Equatable, Sendable {

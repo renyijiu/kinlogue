@@ -27,7 +27,6 @@ struct MemberSidebarViewSourceTests {
         #expect(source.contains("List {"))
         #expect(!source.contains("List(selection: sidebarSelection)"))
         #expect(source.contains("selectSidebar(.allRecords)"))
-        #expect(source.contains("selectSidebar(.imaging)"))
         #expect(source.contains("selectSidebar(.lanInbox)"))
         #expect(source.contains("let selection = MemberSidebarSelection.member(member.id)"))
         #expect(source.contains("selectSidebar(selection)"))
@@ -60,16 +59,25 @@ struct MemberSidebarViewSourceTests {
         #expect(source.contains("private extension View"))
         #expect(source.contains("func sidebarRowHitTarget()"))
         #expect(source.contains("minHeight: 44"))
-        #expect(source.components(separatedBy: ".sidebarRowHitTarget()").count - 1 == 6)
+        #expect(source.components(separatedBy: ".sidebarRowHitTarget()").count - 1 == 5)
     }
 
     @Test
-    func imagingNavigationDoesNotShowAConfirmedStudyCount() throws {
+    func imagingIsReachedThroughTheTimelineInsteadOfAPrimaryDestination() throws {
         let sidebar = try String(contentsOf: memberSidebarURL, encoding: .utf8)
         let shell = try String(contentsOf: appShellURL, encoding: .utf8)
 
+        #expect(!sidebar.contains(".imaging"))
+        #expect(!sidebar.contains("AppLocalization.string(\"医学影像\")"))
         #expect(!sidebar.contains("confirmedDICOMStudyCount"))
+        #expect(!shell.contains(".imaging"))
         #expect(!shell.contains("confirmedDICOMStudyCount:"))
+        #expect(shell.contains("onSelectDICOM: { id in model.selectDICOMStudy(id) }"))
+        #expect(shell.contains(
+            "if destination?.destination == .timeline {\n"
+                + "                        selectedSidebarSection = .records"
+        ))
+        #expect(sidebar.contains("Section(AppLocalization.string(\"待确认影像\"))"))
     }
 
     @Test
@@ -82,8 +90,6 @@ struct MemberSidebarViewSourceTests {
         #expect(MemberSidebarSelection.member(memberID).memberID == memberID)
         #expect(MemberSidebarSelection(memberID: nil, section: .lanInbox) == .lanInbox)
         #expect(MemberSidebarSelection.lanInbox.section == .lanInbox)
-        #expect(MemberSidebarSelection(memberID: nil, section: .imaging) == .imaging)
-        #expect(MemberSidebarSelection.imaging.section == .imaging)
         #expect(MemberSidebarSelection(memberID: nil, section: .settings) == .settings)
         #expect(MemberSidebarSelection.settings.section == .settings)
     }
@@ -95,8 +101,8 @@ struct MemberSidebarViewSourceTests {
         let memberIDs = [firstMemberID, secondMemberID]
 
         #expect(MemberSidebarSelection.allRecords.moving(.previous, memberIDs: memberIDs) == nil)
-        #expect(MemberSidebarSelection.allRecords.moving(.next, memberIDs: memberIDs) == .imaging)
-        #expect(MemberSidebarSelection.imaging.moving(.next, memberIDs: memberIDs) == .lanInbox)
+        #expect(MemberSidebarSelection.allRecords.moving(.next, memberIDs: memberIDs) == .lanInbox)
+        #expect(MemberSidebarSelection.lanInbox.moving(.previous, memberIDs: memberIDs) == .allRecords)
         #expect(MemberSidebarSelection.lanInbox.moving(.next, memberIDs: memberIDs) == .member(firstMemberID))
         #expect(MemberSidebarSelection.member(firstMemberID).moving(.next, memberIDs: memberIDs) == .member(secondMemberID))
         #expect(MemberSidebarSelection.member(secondMemberID).moving(.next, memberIDs: memberIDs) == .settings)

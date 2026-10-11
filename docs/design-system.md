@@ -23,9 +23,9 @@ Kinlogue（续页）的视觉语言以 **Warm Sanctuary** 为核心：减少传�
 | On Variant | `#3F4946` | 玉灰色 | 辅助说明和次要图标 |
 | Outline | `#BFC9C4` | 浅玉灰 | 次要按钮、输入框和容器边界 |
 | Chip | `#E9E1DC` | 浅暖灰 | 中性功能标签 |
-| Selection | `#F5ECE7` | 温润象牙 | 侧边栏与影像库检查选中行的自定义背景 |
-| Selection Foreground | `#1E6254` | 深玉绿 | 侧边栏与影像库检查选中行的文字和图标 |
-| Selection Hover | `#1E6254` at 8% | 淡深玉绿 | 侧边栏与影像库检查未选中行的悬停底色 |
+| Selection | `#F5ECE7` | 温润象牙 | 侧边栏选中行的自定义背景 |
+| Selection Foreground | `#1E6254` | 深玉绿 | 侧边栏选中行的文字和图标 |
+| Selection Hover | `#1E6254` at 8% | 淡深玉绿 | 侧边栏未选中行的悬停底色 |
 | Card | `#FFFFFF` | 白纸 | 可交互卡片常规状态 |
 | Card Hover | `#FBF2ED` | 极浅象牙 | 可交互卡片悬停状态 |
 
@@ -80,10 +80,10 @@ SwiftUI 独立次要操作可使用 `.buttonStyle(.kinlogueSecondary)`。取消�
 5. `Increase Contrast` 开启时增加组件描边，并提高辅助文字对比度。
 6. 不使用颜色作为唯一状态信号；状态应同时包含文本或 SF Symbol。
 7. 当前色板是明确的亮色 Warm Sanctuary 方案。手机上传页声明 `color-scheme: light`，macOS 根视图明确采用亮色外观，避免系统自适应文字与固定浅色背景产生低对比度。后续若完整支持深色外观，应先补齐经过对比度验证的深色色板，不能只反转颜色。
-8. 侧边栏只使用原生 `List` 承担分区、滚动和布局，不把导航状态交给 `List(selection:)`。全部记录、医学影像、手机上传、成员和设置使用可键盘激活的 plain Button 更新专用选择模型，并显式附加 `.isSelected` 无障碍 trait；上下方向键按可见顺序移动焦点和选择。主要导航、成员、添加成员、待确认动作和设置行的标签命中区域必须撑满可用行宽且至少 44pt 高；视觉选中/悬停背景与实际命中区域保持一致，成员尾部管理菜单仍是独立按钮。医学影像主导航不显示已确认检查总数，避免与“待确认”状态混淆；待确认影像继续只在待确认分区逐项显示。导航按钮关闭系统蓝色 focus effect 后必须显示 2pt Primary 自定义焦点描边，不能留下不可见焦点。选中 Tab 使用 `#F5ECE7` Container 背景与 `#1E6254` Primary 文字/图标；未选中 Tab 使用透明背景与 `#3F4946` 文字，悬停只显示 Primary 8% 底色。完整 Tab/方向键/VoiceOver 行为仍需人工矩阵复核，不能用源码 trait 或纯函数断言代替。
+8. 侧边栏只使用原生 `List` 承担分区、滚动和布局，不把导航状态交给 `List(selection:)`。全部记录、手机上传、成员和设置使用可键盘激活的 plain Button 更新专用选择模型，并显式附加 `.isSelected` 无障碍 trait；上下方向键按可见顺序移动焦点和选择。主要导航、成员、添加成员、待确认动作和设置行的标签命中区域必须撑满可用行宽且至少 44pt 高；视觉选中/悬停背景与实际命中区域保持一致，成员尾部管理菜单仍是独立按钮。已确认医学影像不占用侧边栏导航项，只经成员时间线进入；待确认影像继续只在待确认分区逐项显示。导航按钮关闭系统蓝色 focus effect 后必须显示 2pt Primary 自定义焦点描边，不能留下不可见焦点。选中 Tab 使用 `#F5ECE7` Container 背景与 `#1E6254` Primary 文字/图标；未选中 Tab 使用透明背景与 `#3F4946` 文字，悬停只显示 Primary 8% 底色。完整 Tab/方向键/VoiceOver 行为仍需人工矩阵复核，不能用源码 trait 或纯函数断言代替。
 9. 手机上传待确认列表继续使用原生 `List(selection:)` 支持单选和多选，但不能把固定浅色行背景与系统选中白字混用。选中行背景使用 Container，文件名使用 On Surface，状态/大小/日期使用 On Variant，预览与重试使用 Primary，删除保留 destructive red；这些前景色必须显式设置，避免窗口焦点变化后被系统选中前景覆盖。
 10. 侧边栏中的“添加家庭成员”“待确认”和“待确认影像”属于命令，不属于导航选择。它们使用独立的全宽 plain Button 与矩形命中区域，不附加 `.selectionDisabled()`；文字、行内空白和尾随箭头都必须触发同一个动作。
-11. 医学影像库的检查列表只使用原生 `List` 承担滚动与布局，不把检查选择交给 `List(selection:)`，避免 macOS 系统蓝色覆盖 Warm Sanctuary 色板。检查行使用全宽 plain Button 更新专用选择模型：选中为 Selection 背景与 Selection Foreground，悬停为 Selection Hover；关闭系统蓝色 focus effect 后显示 2pt Primary 焦点描边，并保留上下方向键相邻选择和 `.isSelected` 无障碍 trait。中栏列表与右侧详情必须分别直接观察同一个影像库选择模型；首次选择检查后，右侧摘要和操作立即替换空状态，不能等待父级导航或其他无关状态刷新。完整 Tab/方向键/VoiceOver 行为仍需人工矩阵复核。
+11. 已确认医学影像检查作为时间线卡片与报告同列，不另设列表。检查卡片使用与报告相同的 Interactive Card：选中时为 2pt Primary 组件内描边并附加 `.isSelected` 无障碍 trait，比较选择进行中禁用。时间线顶部的“全部 / 报告 / 影像”筛选使用功能标签而不是系统分段控件，避免系统强调色覆盖 Warm Sanctuary 色板：当前项为 Selected 标签并带对勾，其他项为 Neutral 标签；状态不只靠颜色表达。资料库中没有已确认检查时不显示筛选。中栏时间线与右侧详情必须分别直接观察同一个影像选择模型；选中检查后右侧摘要和操作立即替换报告详情，不能等待父级导航或其他无关状态刷新。实现与门禁见 [`TimelineView`](../Sources/KinlogueApp/Views/TimelineView.swift)、[`KinlogueThemeSourceTests`](../Tests/KinlogueAppTests/KinlogueThemeSourceTests.swift) 和 [`DICOMStudyDetailViewTests`](../Tests/KinlogueAppTests/DICOMStudyDetailViewTests.swift)。筛选标签与卡片的 Tab/VoiceOver 行为仍需人工矩阵复核。
 12. 整个本机资料库的删除不放在主窗口工具栏。入口只位于“设置 → 数据管理”的普通 Card 内，按钮保留系统 destructive 语义，并显式使用红色前景与 tint；设置卡片右侧的语言选择器、备份目录、原始文件导出和删除操作使用同宽、右对齐的控制列，备份与恢复动作行也沿卡片右内边距对齐。进入删除弹窗后还必须输入当前界面展示的精确短语才能启用最终操作，中文为“彻底删除”，英文为“Permanently Delete”。
 13. 窗口工具栏中的纯图标操作必须提供随 App 语言解析的原生悬停帮助文本。提示应描述点击后的操作，而不是复述 SF Symbol 外观；当按钮行为随状态变化时，提示也必须同步更新。现有菜单快捷键继续由系统菜单公开，不在帮助文本中维护第二份快捷键映射。
 14. 已确认记录编辑页的“检查结果”“检查结论”和“我的备注”使用同一原生多行文本组件。文本容器四周至少保留 8pt 内容边距，并使用 Card + Outline 明确输入范围；不能只增加外层留白或最小高度，因为那不会把首行字形移出 `NSTextView` 的裁切边界。
@@ -100,7 +100,7 @@ SwiftUI 独立次要操作可使用 `.buttonStyle(.kinlogueSecondary)`。取消�
 | App、时间线、收件箱主背景 | Surface |
 | 窗口标题栏与工具栏背景 | Surface；控件保留 macOS 系统外观；纯图标操作提供本地化原生悬停帮助 |
 | 侧边栏大背景 | Surface；选中 Tab 使用 Container |
-| 医学影像库检查行 | 常规 Surface；选中 Selection + Selection Foreground；悬停 Selection Hover；焦点使用 Primary 描边 |
+| 时间线类型筛选 | Selected / Neutral 功能标签；当前项带对勾；仅在存在已确认医学影像时显示 |
 | 手机上传待确认行 | 常规 Surface；选中 Container；正文 On Surface、辅助信息 On Variant、操作使用 Primary/destructive |
 | 收件箱底部操作区 | Container |
 | 设置中的本机数据管理 | 导出与删除使用独立普通 Card + Outline；右侧控件固定 intrinsic 尺寸后使用同宽右对齐列，操作的右边缘与卡片右内边距一致。导出使用普通操作语义，删除使用系统 destructive/red 语义；主工具栏不提供这两个整库入口 |
@@ -108,11 +108,11 @@ SwiftUI 独立次要操作可使用 `.buttonStyle(.kinlogueSecondary)`。取消�
 | 详情信息块、搜索框 | Container + Outline |
 | 已确认记录多行编辑器 | 原生 `NSTextView`；文本容器 8pt 内容边距；Card + Outline；三个多行字段保持一致 |
 | 内嵌原件预览 | 报告详情、导入确认、已确认记录编辑、报告对比和手机上传页序统一按预览区宽度等比显示；超出区域可独立滚动；工具栏提供 60%–240% 缩放，图片额外提供左右 90° 旋转；旋转只属于当前查看状态，不修改原件、来源顺序或 OCR；只有宿主提供独立查看器时才显示“查看原图”入口。图片解码与 PDF 文档打开、所选页元数据读取、当前页栅格化都在各自的串行 actor 中完成；PDF open 只发布页数，不预扫全部页面。主线程只发布不可变图像；页码或渲染尺寸变化会取消旧请求并拒绝晚到结果。 |
-| DICOM Viewer 窗口 | 从确认页、家庭时间线或医学影像库统一打开标准 macOS 独立窗口；保留原生关闭、最小化、缩放/全屏控件和拖边调整大小，不使用无标题栏的 sheet 承载 Viewer |
+| DICOM Viewer 窗口 | 从确认页或时间线的检查详情统一打开标准 macOS 独立窗口；保留原生关闭、最小化、缩放/全屏控件和拖边调整大小，不使用无标题栏的 sheet 承载 Viewer |
 | DICOM Series 选择 | Viewer 在所有窗口宽度使用原生菜单式 Picker；选项显示序列序号和切片数，切换后由现有加载状态反馈结果；前后序列按钮只作为相邻导航快捷入口，不另设宽窗口侧栏列表 |
 | “从手机接收资料”弹窗及安全说明卡 | Card；说明卡增加 Outline |
 | 保存、比较、开始接收、确认归档 | Primary Button |
-| 时间线记录 | Interactive Card |
+| 时间线记录与医学影像检查 | Interactive Card |
 | 成员、来源等标签 | Neutral Chip |
 | 时间轴和成功/可归档状态 | Primary |
 | 警告和关键提醒 | Accent，并配合文本或图标 |

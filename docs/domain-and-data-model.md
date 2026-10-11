@@ -104,7 +104,7 @@ DICOM 使用独立的 `DICOMStudyFingerprint`：对 exact duplicate 折叠后的
 
 - 持久化只有 `needsReview` 和 `confirmed`；扫描、校验、staging 和 commit 进度属于未持久的导入状态，不塞进 study header。
 - 确认/重新分配只能改成员和用户确认日期，不改 study ID、fingerprint、index 或原件集合。
-- DICOM 原件、自由文本和像素不进入报告 OCR、搜索或比较。U3 Platform service 从一个目录原子发布完整 `needsReview` study，U4 Platform service 可从已验证 Vault object 按需生成一个可失效的 8-bit slice；App snapshot 只投影 study 摘要，`confirmed` 检查按成员和日期进入对应成员时间线与独立医学影像导航域，`needsReview` 检查不会进入这些已确认入口。用户必须明确确认成员与日期。
+- DICOM 原件、自由文本和像素不进入报告 OCR、搜索或比较。U3 Platform service 从一个目录原子发布完整 `needsReview` study，U4 Platform service 可从已验证 Vault object 按需生成一个可失效的 8-bit slice；App snapshot 只投影 study 摘要，`confirmed` 检查按成员和日期进入对应成员时间线，与报告共用同一条时间线和右栏详情，不再有独立的医学影像导航域；`needsReview` 检查不会进入时间线。时间线的“全部 / 报告 / 影像”筛选和当前选中项都是 App 层查看态，不进入 catalog。用户必须明确确认成员与日期。
 
 ## LAN inbox 领域状态
 

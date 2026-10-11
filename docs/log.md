@@ -2,6 +2,18 @@
 
 本文件是项目知识库的追加式日志。每个条目记录一次可复核的 ingest、query、lint 或重大文档维护；不要改写历史条目来伪造当前状态。最新状态以专题页和代码/测试为准。
 
+## [2026-10-11] feat(ux/dicom) | 已确认医学影像合入成员时间线
+
+- **决策与变化**：用户决定去掉侧边栏“医学影像”顶级入口。已确认检查此前已经按日期进入成员时间线，独立影像库只是把同一批检查再平铺一遍；点击时间线卡片还会跳到影像库并丢失时间线位置。现在检查卡片原地选中，右栏由直接观察影像选择模型的 `TimelineDetailContainer` 显示检查摘要、“查看影像”和“编辑归属与日期”；选中报告与选中检查互斥，切换家庭成员清除两者。
+- **类型筛选**：时间线新增“全部 / 报告 / 影像”功能标签筛选，只在资料库存在已确认检查时显示，否则回到“全部”。筛选会清除被隐藏类型的选中项；搜索仍只覆盖已确认报告，筛选为“影像”时结果恒为空并提示切换。比较选择进行中检查卡片禁用。精确重复导入命中已确认检查时回到时间线并选中该检查，必要时先解除成员、筛选和搜索词的遮挡。
+- **顺带消除的状态**：从源码读出（未运行复现），旧影像库入口不会清除上一次选中的家庭成员，列表按该成员隐性过滤而侧边栏只高亮“医学影像”；入口移除后这一状态不再存在。
+- **命名与文案**：删除 `DICOMLibraryView` 列表与 `DICOMLibrarySelectionNavigation`，详情更名为 `DICOMStudyDetailView`；`DICOMStudyDestination.library` 改为 `.timeline`。“确认并加入医学影像库”“这项检查已在医学影像库中”改为时间线措辞；移除只服务旧界面的 `医学影像`、`选择一项医学影像检查` 两个 catalog key，新增筛选与搜索提示共五个中英 key，并重新生成英文运行时资源。
+- **未改变的边界**：catalog、Vault 布局、fingerprint、导入 workflow、XPC 解码和 Viewer 生命周期均未改动；影像仍不进入 OCR、搜索或比较，`needsReview` 检查仍只出现在“待确认影像”。筛选和选中项是 App 层查看态，不持久化。
+- **回归**：[`DICOMAppModelTests`](../Tests/KinlogueAppTests/DICOMAppModelTests.swift) 新增选中互斥与成员切换、筛选对时间线/搜索/选中的影响、无已确认检查时回退“全部”、重复导入后的定位共 4 项；[`DICOMStudyDetailViewTests`](../Tests/KinlogueAppTests/DICOMStudyDetailViewTests.swift) 用离屏渲染证明右栏随影像选择即时切换，并锁定 AppShell 必须把同一选择模型交给时间线与详情容器；[`MemberSidebarViewSourceTests`](../Tests/KinlogueAppTests/MemberSidebarViewSourceTests.swift) 与 [`KinlogueThemeSourceTests`](../Tests/KinlogueAppTests/KinlogueThemeSourceTests.swift) 锁定侧边栏不再含影像导航项、键盘顺序为全部记录 → 手机上传，以及筛选使用功能标签而非系统分段控件。随列表删除的 `DICOMLibrarySelectionNavigationTests` 不再存在。测试与实现在同一轮完成，没有单独记录先失败的运行。
+- **目检**：按合成数据在离屏 `NSHostingView` 渲染时间线三种筛选、检查选中态、“影像”筛选下的搜索空状态和右栏详情并逐张查看，未启动 App、未读取真实资料库，截图只写入会话临时目录后未进入仓库。离屏渲染不呈现悬停、按压和焦点状态。
+- **验证**：当前 Mac（macOS 27.0.1 / Xcode 27 / Swift 6.4）未提交工作树上，`scripts/lint.sh`（warnings-as-errors 构建、依赖图和文档）与完整 `scripts/test.sh --quiet` 均以 0 退出，日志中没有失败项；主测试清单经 `primary-test-shards.rb --inventory-summary` 核对为 997 tests / 90 suites 并已同步[候选账本](acceptance/current-release.md)，derived XCTest 13/13、验收扫描 14/1、storage process 33/1、DICOM 导入集成 18/1、安装 LAN 生产 HTTP 1/1 与真实双流 LAN RSS/背压 1/1 通过。`scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。这是 dirty-source 本机结果，不绑定不可变 source ref。
+- **仍未执行**：README 预览图 [`docs/assets/kinlogue-overview.jpg`](assets/kinlogue-overview.jpg) 仍显示旧侧边栏的“医学影像”项；该文件受固定 SHA-256 的媒体门禁约束，本次没有替换，需用合成数据重新截图并经媒体审查后更新。clean-source bundle、安装后验收、真实 MRI，以及筛选标签与检查卡片的键盘/VoiceOver 人工矩阵均未执行。
+
 ## [2026-09-06] fix/review | 修复公开 main 的上传队列与备份恢复交互
 
 - **基线**：以公开 `main` 的 `b33383d025556d662e371a50252102e00a6f70f6` 为起点；本次不包含旧私有分支历史。

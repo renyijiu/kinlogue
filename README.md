@@ -76,7 +76,7 @@ Mac App 界面当前支持简体中文和英文。默认跟随 macOS 的 App 语
 
 ## 医学影像文件夹
 
-当前源码提供独立的 DICOM 文件夹导入、人工确认、成员时间线入口、医学影像库和受限的本机二维 Viewer。DICOM 原件、自由文本和像素不进入报告 OCR、搜索或比较；该能力不提供诊断、测量或通用影像工作站功能。准确的格式、交互和未验证边界见 [DICOM 专题](docs/dicom.md) 与 [验收矩阵](docs/acceptance/dicom-mri-viewer-matrix.md)。
+当前源码提供独立的 DICOM 文件夹导入、人工确认、与报告同列的成员时间线入口（可按“全部 / 报告 / 影像”筛选）和受限的本机二维 Viewer。DICOM 原件、自由文本和像素不进入报告 OCR、搜索或比较；该能力不提供诊断、测量或通用影像工作站功能。准确的格式、交互和未验证边界见 [DICOM 专题](docs/dicom.md) 与 [验收矩阵](docs/acceptance/dicom-mri-viewer-matrix.md)。
 
 ## 导出全部原始文件
 

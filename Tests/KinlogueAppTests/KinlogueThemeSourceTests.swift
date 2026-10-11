@@ -81,7 +81,6 @@ struct KinlogueThemeSourceTests {
         #expect(!sidebar.contains(".tint(KinlogueTheme.primary)"))
         #expect(!sidebar.contains(".listItemTint(.fixed(KinlogueTheme.primary))"))
         #expect(sidebar.contains(".foregroundStyle(sidebarRowForeground(for: .allRecords))"))
-        #expect(sidebar.contains(".foregroundStyle(sidebarRowForeground(for: .imaging))"))
         #expect(sidebar.contains(".foregroundStyle(sidebarRowForeground(for: .lanInbox))"))
         #expect(sidebar.contains(".foregroundStyle(sidebarRowForeground(for: selection))"))
         #expect(sidebar.contains(".foregroundStyle(sidebarRowForeground(for: .settings))"))
@@ -91,47 +90,28 @@ struct KinlogueThemeSourceTests {
         #expect(sidebar.contains("KinlogueTheme.selectionHover"))
         #expect(sidebar.components(separatedBy: ".focusEffectDisabled()").count - 1 >= 4)
         #expect(sidebar.contains("@FocusState private var focusedSidebarSelection"))
-        #expect(sidebar.components(separatedBy: ".overlay(sidebarRowFocusOverlay(for:").count - 1 >= 5)
-        #expect(sidebar.components(separatedBy: ".onMoveCommand").count - 1 >= 5)
+        #expect(sidebar.components(separatedBy: ".overlay(sidebarRowFocusOverlay(for:").count - 1 >= 4)
+        #expect(sidebar.components(separatedBy: ".onMoveCommand").count - 1 >= 4)
         #expect(sidebar.contains("minHeight: 44"))
-        #expect(sidebar.components(separatedBy: ".sidebarRowHitTarget()").count - 1 == 6)
+        #expect(sidebar.components(separatedBy: ".sidebarRowHitTarget()").count - 1 == 5)
     }
 
     @Test
-    func dicomLibrarySelectionUsesTheWarmPaletteWithoutSystemBlue() throws {
-        let library = try read("Sources/KinlogueApp/Views/DICOMLibraryView.swift")
+    func timelineImagingSelectionAndFilterUseTheWarmPaletteWithoutSystemControls() throws {
+        let timeline = try read("Sources/KinlogueApp/Views/TimelineView.swift")
 
-        #expect(library.contains("List {"))
-        #expect(!library.contains("List(selection:"))
-        #expect(!library.contains("List(studies, selection:"))
-        #expect(library.contains(".buttonStyle(.plain)"))
-        #expect(library.contains(".background(studyRowBackground(for: study.id))"))
-        #expect(library.contains(".overlay(studyRowFocusOverlay(for: study.id))"))
-        #expect(library.contains(".listRowBackground(Color.clear)"))
-        #expect(library.contains("minHeight: 64"))
-        #expect(library.contains("model.selectedStudyID == studyID"))
-        #expect(library.contains(
-            "? KinlogueTheme.selection\n"
-                + "                    : hoveredStudyID == studyID"
-        ))
-        #expect(library.contains(
-            "isSelected\n"
-                + "                                            ? KinlogueTheme.selectionForeground"
-        ))
-        #expect(library.contains(
-            "hoveredStudyID == studyID\n"
-                + "                        ? KinlogueTheme.selectionHover"
-        ))
-        #expect(library.contains("focusedStudyID == studyID"))
-        #expect(library.contains(
-            "? KinlogueTheme.primary\n"
-                + "                    : .clear,\n"
-                + "                lineWidth: 2"
-        ))
-        #expect(library.contains(".accessibilityAddTraits(isSelected ? .isSelected : [])"))
-        #expect(library.contains(".focusEffectDisabled()"))
-        #expect(library.contains(".onMoveCommand"))
-        #expect(library.contains("DICOMLibrarySelectionNavigation.destination"))
+        #expect(!timeline.contains("List(selection:"))
+        #expect(!timeline.contains(".pickerStyle(.segmented)"))
+        #expect(timeline.contains(".buttonStyle(.kinlogueCard(isHighlighted: isSelected))"))
+        #expect(timeline.contains("isSelected: study.id == dicomLibraryModel.selectedStudyID"))
+        #expect(timeline.contains(".disabled(isSelectingComparison)"))
+        #expect(timeline.contains(".kinlogueChip(isSelected ? .selected : .neutral)"))
+        #expect(timeline.contains("Image(systemName: \"checkmark\")"))
+        #expect(
+            timeline.components(
+                separatedBy: ".accessibilityAddTraits(isSelected ? .isSelected : [])"
+            ).count - 1 == 2
+        )
     }
 
     @Test

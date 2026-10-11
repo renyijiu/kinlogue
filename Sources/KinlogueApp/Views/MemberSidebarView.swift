@@ -3,7 +3,6 @@ import SwiftUI
 
 enum AppSidebarSection: Hashable {
     case records
-    case imaging
     case lanInbox
     case settings
 }
@@ -11,7 +10,6 @@ enum AppSidebarSection: Hashable {
 enum MemberSidebarSelection: Hashable {
     case allRecords
     case member(FamilyMember.ID)
-    case imaging
     case lanInbox
     case settings
 
@@ -24,8 +22,6 @@ enum MemberSidebarSelection: Hashable {
             self = .settings
         case .lanInbox:
             self = .lanInbox
-        case .imaging:
-            self = .imaging
         case .records:
             self = memberID.map(Self.member) ?? .allRecords
         }
@@ -40,8 +36,6 @@ enum MemberSidebarSelection: Hashable {
         switch self {
         case .allRecords, .member:
             .records
-        case .imaging:
-            .imaging
         case .lanInbox:
             .lanInbox
         case .settings:
@@ -53,7 +47,7 @@ enum MemberSidebarSelection: Hashable {
         _ step: SidebarNavigationStep,
         memberIDs: [FamilyMember.ID]
     ) -> Self? {
-        let order: [Self] = [.allRecords, .imaging, .lanInbox]
+        let order: [Self] = [.allRecords, .lanInbox]
             + memberIDs.map(Self.member)
             + [.settings]
         guard let index = order.firstIndex(of: self) else { return nil }
@@ -118,31 +112,6 @@ struct MemberSidebarView: View {
                     }
                     .onMoveCommand { direction in
                         moveSidebarSelection(from: .allRecords, direction: direction)
-                    }
-                    Button {
-                        selectSidebar(.imaging)
-                    } label: {
-                        Label(
-                            AppLocalization.string("医学影像"),
-                            systemImage: "waveform.path.ecg.rectangle"
-                        )
-                        .sidebarRowHitTarget()
-                        .foregroundStyle(sidebarRowForeground(for: .imaging))
-                    }
-                    .buttonStyle(.plain)
-                    .focusEffectDisabled()
-                    .focused($focusedSidebarSelection, equals: .imaging)
-                    .background(sidebarRowBackground(for: .imaging))
-                    .overlay(sidebarRowFocusOverlay(for: .imaging))
-                    .listRowBackground(Color.clear)
-                    .accessibilityAddTraits(
-                        currentSidebarSelection == .imaging ? .isSelected : []
-                    )
-                    .onHover { isHovering in
-                        updateHoveredSidebarSelection(.imaging, isHovering: isHovering)
-                    }
-                    .onMoveCommand { direction in
-                        moveSidebarSelection(from: .imaging, direction: direction)
                     }
                     Button {
                         selectSidebar(.lanInbox)

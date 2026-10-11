@@ -35,7 +35,7 @@ struct DICOMImportModelTests {
         let service = DICOMAppServiceSpy()
         await service.setImportOutcome(dicomImportOutcome(
             studyID: studyID,
-            destination: .library,
+            destination: .timeline,
             wasExisting: true
         ))
         let model = DICOMImportModel(service: service)
@@ -45,7 +45,7 @@ struct DICOMImportModelTests {
         ]))
 
         #expect(model.result?.wasExisting == true)
-        #expect(model.takeResult()?.destination == .library)
+        #expect(model.takeResult()?.destination == .timeline)
         #expect(model.takeResult() == nil)
     }
 
