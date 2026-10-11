@@ -19,6 +19,7 @@
 | private-repo ad-hoc candidate | 版本 tag 可在 private GitHub 仓库发布未经 Developer ID 签名或 notarization 的 arm64 ad-hoc Pre-release，只供有仓库读取权限的授权测试者下载；面向公众的分发、Developer ID 和 notarization 均未执行。 | [release workflow](../.github/workflows/release.yml)、[`adhoc-candidate-install.md`](adhoc-candidate-install.md)、验收矩阵 |
 | DICOM exact 包的进程隔离 | DICOM-Swift 1.5.0 只链接进单独签名、无网络 entitlement、无 Vault-root 权限的 XPC Helper；主 App/Core/Platform 不 import/link `DicomCore`，只通过有界 Foundation IPC contract 交换一个只读 descriptor 与最小 DTO。 | [`2026-08-06-001`](plans/2026-08-06-001-feat-dicom-mri-viewer-plan.md) KTD1–KTD2、[`release 边界探针`](sources/2026-08-07-dicom-swift-1.3.3-release-boundary.md)、[1.5.0 依赖核对](sources/dicom-swift-1.5.0-dependency-review-2026-09-16.md) |
 | DICOM 是受限辅助能力 | DICOM 只帮助保存检查原件和查看明确支持的二维灰度 MR；不扩张为诊断、测量、PACS 或通用影像工作站。 | [`dicom.md`](dicom.md)、[`project-overview.md`](project-overview.md) |
+| 已确认影像只经时间线进入 | 已确认检查与报告共用成员时间线和右栏详情，侧边栏不设“医学影像”导航项；“只看影像”由时间线类型筛选承担。数据层隔离不变：影像仍不进入 OCR、搜索或比较。 | 用户 2026-10-11 决策、[`dicom.md`](dicom.md)、[`design-system.md`](design-system.md) |
 | 首发前 current-only | 项目未公开发布，只支持 catalog v3 与 ordering policy v2；开发期 v1/v2 reader/migrator、policy v1 和 predecessor/rollback 路径已删除。除恢复先前由用户明确发起、且已写入有效 durable deletion receipt 的整库删除外，旧开发 Vault、未知版本、未知非空目录和损坏布局继续非破坏性 fail closed；App 不自动迁移、覆盖或删除其字节，用户可在仓库外导出后手工重置。 | 用户 2026-08-12 决策、[`storage.md`](storage.md)、[`dicom.md`](dicom.md) |
 
 ## [2026-09-16] 最低系统调整为 macOS 26

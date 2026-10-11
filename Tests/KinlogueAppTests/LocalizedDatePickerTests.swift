@@ -103,7 +103,7 @@ struct LocalizedDatePickerTests {
     func productionDateLabelsDoNotFallBackToSwiftUIOrSystemLocale() throws {
         let viewNames = [
             "ComparisonView.swift",
-            "DICOMLibraryView.swift",
+            "DICOMStudyDetailView.swift",
             "DICOMStudyViewer.swift",
             "ImportReviewView.swift",
             "RecordDetailView.swift",

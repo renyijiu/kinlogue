@@ -1263,6 +1263,36 @@
 - **验证**：当前 Mac（macOS 27.0 / Xcode 27.0）。合并后的树上完整 `scripts/test.sh` 退出码 0；`scripts/lint.sh`、`scripts/verify-docs.sh`、`scripts/privacy-guard.sh` 通过。
 - **边界**：README 预览图在合并前渲染，没有重新生成；`main` 的界面改动不影响图中展示的状态（“全部记录”下仍显示成员标签，图中没有待确认草稿和识别状态）。完整 `verify-app.sh`、远端 CI 和人工矩阵仍未执行；候选状态保持 `not-verified` / `pendingManual`。
 
+## [2026-10-11] feat(ux/dicom) | 已确认医学影像合入成员时间线
+
+- **决策与变化**：用户决定去掉侧边栏“医学影像”顶级入口。已确认检查此前已经按日期进入成员时间线，独立影像库只是把同一批检查再平铺一遍；点击时间线卡片还会跳到影像库并丢失时间线位置。现在检查卡片原地选中，右栏由直接观察影像选择模型的 `TimelineDetailContainer` 显示检查摘要、“查看影像”和“编辑归属与日期”；选中报告与选中检查互斥，切换家庭成员清除两者。
+- **类型筛选**：时间线新增“全部 / 报告 / 影像”功能标签筛选，只在资料库存在已确认检查时显示，否则回到“全部”。筛选会清除被隐藏类型的选中项；搜索仍只覆盖已确认报告，筛选为“影像”时结果恒为空并提示切换。比较选择进行中检查卡片禁用。精确重复导入命中已确认检查时回到时间线并选中该检查，必要时先解除成员、筛选和搜索词的遮挡。
+- **顺带消除的状态**：从源码读出（未运行复现），旧影像库入口不会清除上一次选中的家庭成员，列表按该成员隐性过滤而侧边栏只高亮“医学影像”；入口移除后这一状态不再存在。
+- **命名与文案**：删除 `DICOMLibraryView` 列表与 `DICOMLibrarySelectionNavigation`，详情更名为 `DICOMStudyDetailView`；`DICOMStudyDestination.library` 改为 `.timeline`。“确认并加入医学影像库”“这项检查已在医学影像库中”改为时间线措辞；移除只服务旧界面的 `医学影像`、`选择一项医学影像检查` 两个 catalog key，新增筛选与搜索提示共五个中英 key，并重新生成英文运行时资源。
+- **未改变的边界**：catalog、Vault 布局、fingerprint、导入 workflow、XPC 解码和 Viewer 生命周期均未改动；影像仍不进入 OCR、搜索或比较，`needsReview` 检查仍只出现在“待确认影像”。筛选和选中项是 App 层查看态，不持久化。
+- **回归**：[`DICOMAppModelTests`](../Tests/KinlogueAppTests/DICOMAppModelTests.swift) 新增选中互斥与成员切换、筛选对时间线/搜索/选中的影响、无已确认检查时回退“全部”、重复导入后的定位共 4 项；[`DICOMStudyDetailViewTests`](../Tests/KinlogueAppTests/DICOMStudyDetailViewTests.swift) 用离屏渲染证明右栏随影像选择即时切换，并锁定 AppShell 必须把同一选择模型交给时间线与详情容器；[`MemberSidebarViewSourceTests`](../Tests/KinlogueAppTests/MemberSidebarViewSourceTests.swift) 与 [`KinlogueThemeSourceTests`](../Tests/KinlogueAppTests/KinlogueThemeSourceTests.swift) 锁定侧边栏不再含影像导航项、键盘顺序为全部记录 → 手机上传，以及筛选使用功能标签而非系统分段控件。随列表删除的 `DICOMLibrarySelectionNavigationTests` 不再存在。测试与实现在同一轮完成，没有单独记录先失败的运行。
+- **目检**：按合成数据在离屏 `NSHostingView` 渲染时间线三种筛选、检查选中态、“影像”筛选下的搜索空状态和右栏详情并逐张查看，未启动 App、未读取真实资料库，截图只写入会话临时目录后未进入仓库。离屏渲染不呈现悬停、按压和焦点状态。
+- **验证**：当前 Mac（macOS 27.0.1 / Xcode 27 / Swift 6.4）未提交工作树上，`scripts/lint.sh`（warnings-as-errors 构建、依赖图和文档）与完整 `scripts/test.sh --quiet` 均以 0 退出，日志中没有失败项；当时的主测试清单经 `primary-test-shards.rb --inventory-summary` 核对为 997 tests / 90 suites（并入 `main` 之前的数字，当前数字见下一条与[候选账本](acceptance/current-release.md)），derived XCTest 13/13、验收扫描 14/1、storage process 33/1、DICOM 导入集成 18/1、安装 LAN 生产 HTTP 1/1 与真实双流 LAN RSS/背压 1/1 通过。`scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。这是 dirty-source 本机结果，不绑定不可变 source ref。
+- **仍未执行**：README 预览图 [`docs/assets/kinlogue-overview-2026-10.jpg`](assets/kinlogue-overview-2026-10.jpg) 仍显示旧侧边栏的“医学影像”项；该文件受固定 SHA-256 的媒体门禁约束，本次没有替换，需用合成数据重新截图并经媒体审查后更新。clean-source bundle、安装后验收、真实 MRI，以及筛选标签与检查卡片的键盘/VoiceOver 人工矩阵均未执行。
+
+## [2026-10-11] merge | 把 main 的配色统一、品牌更新与字段建议并入影像时间线分支
+
+- **来源**：`main` 新增 #16（字段建议与交互改进）、#17（定位与应用图标）、#18（配色令牌、按钮与列表行交互状态）。七个文件冲突：`DICOMLibraryView.swift`、`MemberSidebarView.swift`、`TimelineView.swift`、两份源码契约测试、`design-system.md` 和候选账本。
+- **取舍**：影像库列表在本分支已删除，`main` 对它的行交互改动随之不保留；`main` 对同文件详情文字的 On Variant 配色移到 `DICOMStudyDetailView`。侧边栏保留 `main` 的 `SidebarRowLabel` 与行交互，只去掉“医学影像”一行。时间线同时保留 `main` 的“单成员时间线不重复成员标签”和本分支的选中、筛选。`design-system.md` 取 `main` 的色板与规则文字，再去掉对影像库的引用并保留第 11 条的时间线写法。
+- **语义冲突**：`main` 新增“进入时间线且没有打开任何内容时自动打开最新报告”，它只检查报告选中。文本上不冲突，但从其他分区回到时间线时会在已选中影像检查的情况下再打开一份报告，破坏两者互斥。`openNewestRecordIfNothingIsOpen` 现在把选中的影像检查也算作“已打开”；筛选为“影像”时时间线没有报告，本来就不会自动打开。回归见 [`DICOMAppModelTests`](../Tests/KinlogueAppTests/DICOMAppModelTests.swift)。
+- **随合并修正的断言**：`KinlogueThemeSourceTests` 中四个按侧边栏行数计数的断言各减一；本分支日志里的 README 预览图链接改指 `main` 更新后的文件名。
+- **账本**：`main` 为 1036 tests / 93 suites；本分支净增 4 项并删除一个随列表消失的 suite，合并后实测为 1040 tests / 92 suites。`current-release.md` 的其余措辞取 `main`。
+- **验证**：当前 Mac（macOS 27.0.1 / Xcode 27 / Swift 6.4）。在已解决冲突、尚未提交的合并树上，`scripts/lint.sh` 与完整 `scripts/test.sh --quiet` 均以 0 退出，日志中没有失败项；derived XCTest 13/13、验收扫描 14/1、storage process 33/1、DICOM 导入集成 18/1、安装 LAN 生产 HTTP 1/1 与真实双流 LAN RSS/背压 1/1 通过。`scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。没有重新做离屏目检，也没有启动 App。
+- **仍未执行**：`main` 更新后的 README 预览图同样显示旧侧边栏的“医学影像”项，本次没有重新生成。筛选标签沿用静态的 Selected / Neutral 功能标签，没有悬停与按下反馈，是否纳入 `main` 的统一交互状态留待后续决定。
+
+## [2026-10-11] ui | 时间线类型筛选标签补齐悬停与按下状态
+
+- **变化**：上一条合并记录里留待决定的筛选标签交互状态，用户决定在同一个 PR 内补上。`KinlogueTheme` 新增 `chipHover`（Primary 10%）与 `chipPressed`（Primary 20%）两个令牌、纯函数 `chipFill` / `chipLayer` 和 `.buttonStyle(.kinlogueChip(isSelected:))`。未选中项在 Chip 上叠加悬停或按下层，选中项沿用主按钮的悬停与按下色；静止外观不变，仍带对勾。样式遵循 `Reduce Motion`、`Increase Contrast` 和禁用态。`TimelineFilterBar` 不再使用 `.buttonStyle(.plain)`。
+- **回归**：[`KinlogueThemeSourceTests`](../Tests/KinlogueAppTests/KinlogueThemeSourceTests.swift) 新增一项，断言中性标签从静止到悬停再到按下逐级变深、按下时 On Variant 文字对比度不低于 4.5、选中项三种底色上的白字对比度不低于 4.5，以及两个纯函数的状态优先级；色板契约和时间线源码契约同步。这项测试先于实现写入，首次运行因缺少令牌与函数编译失败，实现后通过。
+- **目检**：离屏渲染真实筛选条的静止态（与改动前一致），并用同一组主题函数渲染未选中与选中各三种状态的色样逐一查看。离屏渲染无法触发真实悬停与按下，所以没有在运行中的 App 里看到这两个状态。
+- **账本**：主测试清单经脚本核对为 1041 tests / 92 suites。
+- **验证**：当前 Mac（macOS 27.0.1 / Xcode 27 / Swift 6.4）未提交工作树上，`scripts/lint.sh` 与完整 `scripts/test.sh --quiet` 均以 0 退出，日志中没有失败项；derived XCTest 13/13、验收扫描 14/1、storage process 33/1、DICOM 导入集成 18/1、安装 LAN 生产 HTTP 1/1 与真实双流 LAN RSS/背压 1/1 通过。`scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。
+
 ## [2026-10-11] ci | PR 只跑 macOS 26 基线，bundle 验证独立并行，CodeQL 只追踪第一方源码
 
 - **依据**：用 `gh` 读取最近 30 次 CI 与 12 次 CodeQL 运行的 job 与 step 时间。加入 Xcode 27 矩阵后的 17 次 CI 运行里，原质量 job 在 macOS 26 上成功时中位 24.5 分钟、最长 27.5 分钟，另有 5 次撞到 30 分钟 job 上限被取消（macOS 26 三次、Xcode 27 两次）；每次触发启动 7 个 macOS job，96 个 job 中 43 个排队超过 5 分钟，最长 31 分钟。CodeQL 成功运行中位 31.4 分钟，其中 tracer 下的 `swift build` 中位 28.8 分钟；抽样运行 38115425342 里同一命令在 lint 中不带 tracer 只用 165 秒，tracer 下的时间主要花在 JXLSwift、J2KCodec、DicomCore 和 SwiftNIO 等第三方模块。
