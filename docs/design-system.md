@@ -23,6 +23,8 @@ Kinlogue（续页）的视觉语言以 **Warm Sanctuary** 为核心：减少传�
 | On Variant | `#3F4946` | 玉灰色 | 辅助说明和次要图标 |
 | Outline | `#BFC9C4` | 浅玉灰 | 次要按钮、输入框和容器边界 |
 | Chip | `#E9E1DC` | 浅暖灰 | 中性功能标签 |
+| Chip Hover | `#1E6254` at 10% | 淡玉绿 | 可点选的中性功能标签悬停时叠在 Chip 上的一层 |
+| Chip Pressed | `#1E6254` at 20% | 玉绿 | 可点选的中性功能标签按下期间叠在 Chip 上的一层 |
 | Selection | `#1E6254` at 13% | 淡玉绿 | 列表行选中背景：侧边栏、手机上传待确认列表与报告页序 |
 | Selection Foreground | `#1E6254` | 深玉绿 | 选中行的文字和图标 |
 | Selection Hover | `#1E6254` at 5% | 极淡玉绿 | 未选中行的悬停底色 |
@@ -97,6 +99,8 @@ SwiftUI 主操作统一使用 `.buttonStyle(.kinloguePrimary)`。手机页面的
 
 原始提案中的 Accent 白字与 `#DF8A4A` 对比度不足，因此实现使用深炭灰文字。SwiftUI 使用 `.kinlogueChip()`，选中和强调状态分别传入 `.selected` 或 `.accent`。
 
+可点选的功能标签（当前只有时间线类型筛选）不直接用 `.kinlogueChip()`，改用 `.buttonStyle(.kinlogueChip(isSelected:))`，静止外观与上面的 Neutral / Selected 相同，并补齐交互状态：未选中项悬停叠加 Chip Hover、按下叠加 Chip Pressed，文字保持 On Variant；选中项与主按钮一致，悬停 `#15453B`、按下 `#0F322B`，文字保持白色。只换颜色，不缩放也不位移；`Increase Contrast` 开启时增加与文字同色的描边，禁用时整体降低透明度。
+
 ### 卡片与列表
 
 - 可交互卡片常规背景为 `#FFFFFF`，悬停切换到 `#FBF2ED`，阴影由小提升到中等。
@@ -120,7 +124,7 @@ SwiftUI 主操作统一使用 `.buttonStyle(.kinloguePrimary)`。手机页面的
 8. 侧边栏只使用原生 `List` 承担分区、滚动和布局，不把导航状态交给 `List(selection:)`。全部记录、手机上传、成员和设置使用可键盘激活的 plain Button 更新专用选择模型，并显式附加 `.isSelected` 无障碍 trait；上下方向键按可见顺序移动焦点和选择。主要导航、成员、添加成员、待确认动作和设置行的标签命中区域必须撑满可用行宽且至少 44pt 高；视觉选中/悬停背景与实际命中区域保持一致，成员尾部管理菜单仍是独立按钮。已确认医学影像不占用侧边栏导航项，只经成员时间线进入；待确认影像继续只在待确认分区逐项显示。导航按钮关闭系统蓝色 focus effect 后必须显示 2pt Primary 自定义焦点描边，不能留下不可见焦点。侧边栏样式的 `List` 会把普通 `Label` 的图标染成强调色，并在窗口不活跃时置灰，不跟随行的前景色；因此导航行和命令行都通过 `SidebarRowLabel` 在符号上显式设置颜色，使图标与文字始终同色。选中 Tab 使用 Selection 背景与 `#1E6254` Primary 文字/图标；未选中 Tab 使用透明背景与 `#3F4946` 文字，悬停显示 Selection Hover，按下期间显示 Selection Pressed。完整 Tab/方向键/VoiceOver 行为仍需人工矩阵复核，不能用源码 trait 或纯函数断言代替。
 9. 手机上传待确认列表继续使用原生 `List(selection:)` 支持单选和多选，但不能把固定浅色行背景与系统选中白字混用。选中行背景使用叠在 Surface 上的 Selection（保持不透明，系统选中高亮不能透出），文件名使用 On Surface，状态/大小/日期使用 On Variant，预览与重试使用 Primary，删除使用 Danger；这些前景色由行内文本和 `.kinlogueGhost` 按钮显式设置，避免窗口焦点变化后被系统选中前景覆盖。
 10. 侧边栏中的“添加家庭成员”“待确认”和“待确认影像”属于命令，不属于导航选择。它们使用独立的全宽行按钮与矩形命中区域，不附加 `.selectionDisabled()`；文字、行内空白和尾随箭头都必须触发同一个动作。命令行与导航行使用相同的 On Variant 前景、悬停与按下底色和 2pt Primary 焦点描边，但没有选中态；“识别失败，点按重试”同样是命令行，尾部的放弃按钮是独立的 Danger 图标按钮。
-11. 已确认医学影像检查作为时间线卡片与报告同列，不另设列表。检查卡片使用与报告相同的 Interactive Card：选中时为 2pt Primary 组件内描边并附加 `.isSelected` 无障碍 trait，比较选择进行中禁用。时间线顶部的“全部 / 报告 / 影像”筛选使用功能标签而不是系统分段控件，避免系统强调色覆盖 Warm Sanctuary 色板：当前项为 Selected 标签并带对勾，其他项为 Neutral 标签；状态不只靠颜色表达。资料库中没有已确认检查时不显示筛选。中栏时间线与右侧详情必须分别直接观察同一个影像选择模型；选中检查后右侧摘要和操作立即替换报告详情，不能等待父级导航或其他无关状态刷新。实现与门禁见 [`TimelineView`](../Sources/KinlogueApp/Views/TimelineView.swift)、[`KinlogueThemeSourceTests`](../Tests/KinlogueAppTests/KinlogueThemeSourceTests.swift) 和 [`DICOMStudyDetailViewTests`](../Tests/KinlogueAppTests/DICOMStudyDetailViewTests.swift)。筛选标签与卡片的 Tab/VoiceOver 行为仍需人工矩阵复核。
+11. 已确认医学影像检查作为时间线卡片与报告同列，不另设列表。检查卡片使用与报告相同的 Interactive Card：选中时为 2pt Primary 组件内描边并附加 `.isSelected` 无障碍 trait，比较选择进行中禁用。时间线顶部的“全部 / 报告 / 影像”筛选使用可点选的功能标签而不是系统分段控件，避免系统强调色覆盖 Warm Sanctuary 色板：当前项为 Selected 标签并带对勾，其他项为 Neutral 标签，悬停与按下状态见“功能标签”；状态不只靠颜色表达。资料库中没有已确认检查时不显示筛选。中栏时间线与右侧详情必须分别直接观察同一个影像选择模型；选中检查后右侧摘要和操作立即替换报告详情，不能等待父级导航或其他无关状态刷新。实现与门禁见 [`TimelineView`](../Sources/KinlogueApp/Views/TimelineView.swift)、[`KinlogueThemeSourceTests`](../Tests/KinlogueAppTests/KinlogueThemeSourceTests.swift) 和 [`DICOMStudyDetailViewTests`](../Tests/KinlogueAppTests/DICOMStudyDetailViewTests.swift)。筛选标签的悬停与按下反馈，以及筛选标签与卡片的 Tab/VoiceOver 行为仍需人工矩阵复核。
 12. 整个本机资料库的删除不放在主窗口工具栏。入口只位于“设置 → 数据管理”的普通 Card 内，按钮保留 `role: .destructive` 语义并使用破坏性按钮样式；设置卡片右侧的语言选择器、备份目录、原始文件导出和删除操作使用同宽、右对齐的控制列，备份与恢复动作行也沿卡片右内边距对齐。进入删除弹窗后还必须输入当前界面展示的精确短语才能启用最终操作，中文为“彻底删除”，英文为“Permanently Delete”。
 13. 窗口工具栏中的纯图标操作必须提供随 App 语言解析的原生悬停帮助文本。提示应描述点击后的操作，而不是复述 SF Symbol 外观；当按钮行为随状态变化时，提示也必须同步更新。现有菜单快捷键继续由系统菜单公开，不在帮助文本中维护第二份快捷键映射。
 14. 已确认记录编辑页的“检查结果”“检查结论”和“我的备注”使用同一原生多行文本组件。文本容器四周至少保留 8pt 内容边距，并使用 Card + Outline 明确输入范围；不能只增加外层留白或最小高度，因为那不会把首行字形移出 `NSTextView` 的裁切边界。
@@ -145,7 +149,7 @@ SwiftUI 主操作统一使用 `.buttonStyle(.kinloguePrimary)`。手机页面的
 | App、时间线、收件箱主背景 | Surface |
 | 窗口标题栏与工具栏背景 | Surface；控件保留 macOS 系统外观；纯图标操作提供本地化原生悬停帮助 |
 | 侧边栏大背景 | Surface；选中 Tab 使用 Selection |
-| 时间线类型筛选 | Selected / Neutral 功能标签；当前项带对勾；仅在存在已确认医学影像时显示 |
+| 时间线类型筛选 | 可点选的 Selected / Neutral 功能标签，带悬停与按下状态；当前项带对勾；仅在存在已确认医学影像时显示 |
 | 手机上传待确认行 | 常规 Surface；选中 Selection；正文 On Surface、辅助信息 On Variant、操作使用 Primary/Danger 图标按钮 |
 | 收件箱底部操作区 | Container |
 | 所有 sheet 画布 | Surface；页眉、表单和页脚不再分色 |

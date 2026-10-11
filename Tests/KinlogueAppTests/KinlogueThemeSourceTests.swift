@@ -21,6 +21,8 @@ struct KinlogueThemeSourceTests {
             "onVariant = Color(hex: 0x3F4946)",
             "outline = Color(hex: 0xBFC9C4)",
             "chip = Color(hex: 0xE9E1DC)",
+            "chipHover = primary.opacity(0.10)",
+            "chipPressed = primary.opacity(0.20)",
             "selection = primary.opacity(0.13)",
             "selectionForeground = primary",
             "selectionHover = primary.opacity(0.05)",
@@ -360,13 +362,67 @@ struct KinlogueThemeSourceTests {
         #expect(timeline.contains(".buttonStyle(.kinlogueCard(isHighlighted: isSelected))"))
         #expect(timeline.contains("isSelected: study.id == dicomLibraryModel.selectedStudyID"))
         #expect(timeline.contains(".disabled(isSelectingComparison)"))
-        #expect(timeline.contains(".kinlogueChip(isSelected ? .selected : .neutral)"))
+        #expect(timeline.contains(".buttonStyle(.kinlogueChip(isSelected: isSelected))"))
+        #expect(!timeline.contains(".buttonStyle(.plain)"))
         #expect(timeline.contains("Image(systemName: \"checkmark\")"))
         #expect(
             timeline.components(
                 separatedBy: ".accessibilityAddTraits(isSelected ? .isSelected : [])"
             ).count - 1 == 2
         )
+    }
+
+    @Test
+    func selectableChipsGrowHeavierFromHoverToPressedAndKeepTheirTextReadable() {
+        // A neutral chip layers its interaction state over the Chip fill.
+        let resting = luminance(of: KinlogueTheme.chip)
+        let hover = luminance(of: KinlogueTheme.chipHover, over: KinlogueTheme.chip)
+        let pressed = luminance(of: KinlogueTheme.chipPressed, over: KinlogueTheme.chip)
+        #expect(resting > hover)
+        #expect(hover > pressed)
+        #expect(contrast(luminance(of: KinlogueTheme.onVariant), pressed) >= 4.5)
+
+        #expect(
+            KinlogueTheme.chipFill(isSelected: false, isHovering: true, isPressed: true)
+                == KinlogueTheme.chip
+        )
+        #expect(
+            KinlogueTheme.chipLayer(isSelected: false, isHovering: true, isPressed: true)
+                == KinlogueTheme.chipPressed
+        )
+        #expect(
+            KinlogueTheme.chipLayer(isSelected: false, isHovering: true, isPressed: false)
+                == KinlogueTheme.chipHover
+        )
+        #expect(
+            KinlogueTheme.chipLayer(isSelected: false, isHovering: false, isPressed: false)
+                == Color.clear
+        )
+
+        // A selected chip follows the primary button and never takes the layer.
+        #expect(
+            KinlogueTheme.chipFill(isSelected: true, isHovering: true, isPressed: true)
+                == KinlogueTheme.primaryPressed
+        )
+        #expect(
+            KinlogueTheme.chipFill(isSelected: true, isHovering: true, isPressed: false)
+                == KinlogueTheme.primaryHover
+        )
+        #expect(
+            KinlogueTheme.chipFill(isSelected: true, isHovering: false, isPressed: false)
+                == KinlogueTheme.primary
+        )
+        #expect(
+            KinlogueTheme.chipLayer(isSelected: true, isHovering: true, isPressed: true)
+                == Color.clear
+        )
+        for fill in [
+            KinlogueTheme.primary,
+            KinlogueTheme.primaryHover,
+            KinlogueTheme.primaryPressed,
+        ] {
+            #expect(contrast(luminance(of: .white), luminance(of: fill)) >= 4.5)
+        }
     }
 
     @Test

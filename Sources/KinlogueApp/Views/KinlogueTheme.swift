@@ -13,6 +13,9 @@ enum KinlogueTheme {
     static let onVariantSubtle = onVariant.opacity(0.6)
     static let outline = Color(hex: 0xBFC9C4)
     static let chip = Color(hex: 0xE9E1DC)
+    // A selectable neutral chip layers these over Chip, like a secondary button.
+    static let chipHover = primary.opacity(0.10)
+    static let chipPressed = primary.opacity(0.20)
     static let card = Color.white
     static let cardHover = Color(hex: 0xFBF2ED)
 
@@ -41,6 +44,20 @@ enum KinlogueTheme {
         if isPressed { return selectionPressed }
         if isSelected { return selection }
         if isHovering { return selectionHover }
+        return .clear
+    }
+
+    static func chipFill(isSelected: Bool, isHovering: Bool, isPressed: Bool) -> Color {
+        guard isSelected else { return chip }
+        if isPressed { return primaryPressed }
+        if isHovering { return primaryHover }
+        return primary
+    }
+
+    static func chipLayer(isSelected: Bool, isHovering: Bool, isPressed: Bool) -> Color {
+        guard !isSelected else { return .clear }
+        if isPressed { return chipPressed }
+        if isHovering { return chipHover }
         return .clear
     }
 }
@@ -315,6 +332,56 @@ struct KinlogueRowButtonStyle: ButtonStyle {
     }
 }
 
+/// Selectable chip, such as one option of a filter.
+struct KinlogueChipButtonStyle: ButtonStyle {
+    let isSelected: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        let showsHover = isHovering && isEnabled
+        return configuration.label
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                KinlogueTheme.chipLayer(
+                    isSelected: isSelected,
+                    isHovering: showsHover,
+                    isPressed: configuration.isPressed
+                ),
+                in: Capsule()
+            )
+            .background(
+                KinlogueTheme.chipFill(
+                    isSelected: isSelected,
+                    isHovering: showsHover,
+                    isPressed: configuration.isPressed
+                ),
+                in: Capsule()
+            )
+            .overlay {
+                if contrast == .increased {
+                    Capsule().stroke(foreground.opacity(0.85), lineWidth: 1)
+                }
+            }
+            .contentShape(Capsule())
+            .opacity(isEnabled ? 1 : 0.48)
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.12),
+                value: showsHover
+            )
+            .onHover { isHovering = $0 }
+    }
+
+    private var foreground: Color {
+        isSelected ? .white : KinlogueTheme.onVariant
+    }
+}
+
 struct KinlogueCardButtonStyle: ButtonStyle {
     let isHighlighted: Bool
 
@@ -480,6 +547,12 @@ extension ButtonStyle where Self == KinlogueRowButtonStyle {
         onPressedChange: @escaping (Bool) -> Void
     ) -> KinlogueRowButtonStyle {
         .init(onPressedChange: onPressedChange)
+    }
+}
+
+extension ButtonStyle where Self == KinlogueChipButtonStyle {
+    static func kinlogueChip(isSelected: Bool) -> KinlogueChipButtonStyle {
+        .init(isSelected: isSelected)
     }
 }
 

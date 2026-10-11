@@ -20,12 +20,8 @@ struct TimelineFilterBar: View {
                         Text(title(for: option))
                     }
                     .font(.subheadline.weight(.medium))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .kinlogueChip(isSelected ? .selected : .neutral)
-                    .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.kinlogueChip(isSelected: isSelected))
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
             Spacer(minLength: 0)

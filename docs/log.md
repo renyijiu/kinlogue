@@ -1284,3 +1284,11 @@
 - **账本**：`main` 为 1036 tests / 93 suites；本分支净增 4 项并删除一个随列表消失的 suite，合并后实测为 1040 tests / 92 suites。`current-release.md` 的其余措辞取 `main`。
 - **验证**：当前 Mac（macOS 27.0.1 / Xcode 27 / Swift 6.4）。在已解决冲突、尚未提交的合并树上，`scripts/lint.sh` 与完整 `scripts/test.sh --quiet` 均以 0 退出，日志中没有失败项；derived XCTest 13/13、验收扫描 14/1、storage process 33/1、DICOM 导入集成 18/1、安装 LAN 生产 HTTP 1/1 与真实双流 LAN RSS/背压 1/1 通过。`scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。没有重新做离屏目检，也没有启动 App。
 - **仍未执行**：`main` 更新后的 README 预览图同样显示旧侧边栏的“医学影像”项，本次没有重新生成。筛选标签沿用静态的 Selected / Neutral 功能标签，没有悬停与按下反馈，是否纳入 `main` 的统一交互状态留待后续决定。
+
+## [2026-10-11] ui | 时间线类型筛选标签补齐悬停与按下状态
+
+- **变化**：上一条合并记录里留待决定的筛选标签交互状态，用户决定在同一个 PR 内补上。`KinlogueTheme` 新增 `chipHover`（Primary 10%）与 `chipPressed`（Primary 20%）两个令牌、纯函数 `chipFill` / `chipLayer` 和 `.buttonStyle(.kinlogueChip(isSelected:))`。未选中项在 Chip 上叠加悬停或按下层，选中项沿用主按钮的悬停与按下色；静止外观不变，仍带对勾。样式遵循 `Reduce Motion`、`Increase Contrast` 和禁用态。`TimelineFilterBar` 不再使用 `.buttonStyle(.plain)`。
+- **回归**：[`KinlogueThemeSourceTests`](../Tests/KinlogueAppTests/KinlogueThemeSourceTests.swift) 新增一项，断言中性标签从静止到悬停再到按下逐级变深、按下时 On Variant 文字对比度不低于 4.5、选中项三种底色上的白字对比度不低于 4.5，以及两个纯函数的状态优先级；色板契约和时间线源码契约同步。这项测试先于实现写入，首次运行因缺少令牌与函数编译失败，实现后通过。
+- **目检**：离屏渲染真实筛选条的静止态（与改动前一致），并用同一组主题函数渲染未选中与选中各三种状态的色样逐一查看。离屏渲染无法触发真实悬停与按下，所以没有在运行中的 App 里看到这两个状态。
+- **账本**：主测试清单经脚本核对为 1041 tests / 92 suites。
+- **验证**：当前 Mac（macOS 27.0.1 / Xcode 27 / Swift 6.4）未提交工作树上，`scripts/lint.sh` 与完整 `scripts/test.sh --quiet` 均以 0 退出，日志中没有失败项；derived XCTest 13/13、验收扫描 14/1、storage process 33/1、DICOM 导入集成 18/1、安装 LAN 生产 HTTP 1/1 与真实双流 LAN RSS/背压 1/1 通过。`scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。
