@@ -80,7 +80,7 @@ struct DICOMImportSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             KinlogueStatusLabel(
                 model.result?.wasExisting == true
-                    ? AppLocalization.string("这项检查已在医学影像库中")
+                    ? AppLocalization.string("这项检查已在时间线中")
                     : AppLocalization.string("影像已安全导入本机资料库"),
                 tone: .success
             )

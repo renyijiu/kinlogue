@@ -91,7 +91,7 @@ struct DICOMStudyReviewView: View {
                             .buttonStyle(.kinlogueSecondary)
                             .disabled(isBusy)
                     }
-                    Button(AppLocalization.string("确认并加入医学影像库")) {
+                    Button(AppLocalization.string("确认并加入时间线")) {
                         Task {
                             if await model.save() { onDismiss() }
                         }

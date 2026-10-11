@@ -95,6 +95,15 @@ final class AppModel: ObservableObject {
             clearSelection()
         }
     }
+    @Published var timelineFilter: AppTimelineFilter = .all {
+        didSet {
+            guard timelineFilter != oldValue else { return }
+            rebuildTimeline()
+            rebuildSearch()
+            clearSelectionHiddenByTimelineFilter()
+        }
+    }
+    @Published private(set) var isTimelineFilterAvailable = false
     @Published private(set) var timelineSections: [AppTimelineSection] = []
     @Published private(set) var searchResults: [HealthRecord] = []
     @Published var searchText = "" { didSet { rebuildSearch() } }
@@ -378,10 +387,34 @@ final class AppModel: ObservableObject {
         switch result.destination {
         case .review:
             presentDICOMReview(result.studyID)
-        case .library:
-            dicomLibraryModel.select(result.studyID)
+        case .timeline:
+            revealDICOMStudy(result.studyID)
         }
         return result
+    }
+
+    func selectDICOMStudy(_ id: DICOMStudy.ID) {
+        guard dicomLibraryModel.studies.contains(where: {
+            $0.id == id && $0.state == .confirmed
+        }) else { return }
+        clearSelection()
+        dicomLibraryModel.select(id)
+    }
+
+    private func revealDICOMStudy(_ id: DICOMStudy.ID) {
+        guard let study = dicomLibraryModel.studies.first(where: {
+            $0.id == id && $0.state == .confirmed
+        }) else { return }
+        if let selectedMemberID, study.confirmedMemberID != selectedMemberID {
+            self.selectedMemberID = nil
+        }
+        if timelineFilter == .reports {
+            timelineFilter = .all
+        }
+        if !searchText.isEmpty {
+            searchText = ""
+        }
+        selectDICOMStudy(id)
     }
 
     func presentReviewDraft(_ id: ImportDraft.ID) {
@@ -568,6 +601,10 @@ final class AppModel: ObservableObject {
         guard let record = allRecords.first(where: {
             $0.id == id && $0.importState == .confirmed
         }) else { return }
+        dicomLibraryModel.select(nil)
+        if timelineFilter == .imaging {
+            timelineFilter = .all
+        }
         await loadOriginal(
             for: record,
             sourceID: record.sources.first.id,
@@ -576,11 +613,12 @@ final class AppModel: ObservableObject {
     }
 
     /// Opens the newest record of the visible timeline when it is entered with
-    /// nothing open. An open record, a search, a comparison selection or a
-    /// presented sheet is never disturbed.
+    /// nothing open. An open record, a selected imaging study, a search, a
+    /// comparison selection or a presented sheet is never disturbed.
     func openNewestRecordIfNothingIsOpen() async {
         guard phase == .ready,
               selectedRecordID == nil,
+              dicomLibraryModel.selectedStudyID == nil,
               !hasBlockingPresentation,
               !comparisonModel.isSelecting,
               searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -671,6 +709,20 @@ final class AppModel: ObservableObject {
         recordDetailState = .empty
         editingRecord = nil
         viewingOriginal = nil
+        dicomLibraryModel.select(nil)
+    }
+
+    private func clearSelectionHiddenByTimelineFilter() {
+        switch timelineFilter {
+        case .all:
+            break
+        case .reports:
+            dicomLibraryModel.select(nil)
+        case .imaging:
+            if selectedRecordID != nil {
+                clearSelection()
+            }
+        }
     }
 
     func requestDeleteRecord(_ record: HealthRecord) {
@@ -852,6 +904,10 @@ final class AppModel: ObservableObject {
         reviewQueue = snapshot.drafts.filter { $0.state == .needsReview }
         backgroundDrafts = snapshot.drafts.filter { $0.state != .needsReview }
         dicomLibraryModel.update(studies: snapshot.dicomStudies, members: snapshot.members)
+        isTimelineFilterAvailable = !dicomLibraryModel.confirmedStudies(memberID: nil).isEmpty
+        if !isTimelineFilterAvailable {
+            timelineFilter = .all
+        }
         if let pendingAutomaticReviewID,
            !reviewQueue.contains(where: { $0.id == pendingAutomaticReviewID }) {
             self.pendingAutomaticReviewID = nil
@@ -936,6 +992,8 @@ final class AppModel: ObservableObject {
         backgroundDrafts = []
         selectedMemberID = nil
         searchText = ""
+        timelineFilter = .all
+        isTimelineFilterAvailable = false
         isImporterPresented = false
         isDICOMFolderPickerPresented = false
         isDICOMImportPresented = false
@@ -968,11 +1026,13 @@ final class AppModel: ObservableObject {
     }
 
     private func rebuildTimeline() {
-        let confirmedRecords = allRecords.filter { record in
+        let confirmedRecords = timelineFilter == .imaging ? [] : allRecords.filter { record in
             record.importState == .confirmed
                 && (selectedMemberID == nil || record.memberID == selectedMemberID)
         }
-        let confirmedStudies = dicomLibraryModel.confirmedStudies(memberID: selectedMemberID)
+        let confirmedStudies = timelineFilter == .reports
+            ? []
+            : dicomLibraryModel.confirmedStudies(memberID: selectedMemberID)
         let entries = confirmedRecords.map(AppTimelineEntry.record)
             + confirmedStudies.map(AppTimelineEntry.dicomStudy)
         let orderedEntries = entries
@@ -1005,7 +1065,7 @@ final class AppModel: ObservableObject {
 
     private func rebuildSearch() {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else {
+        guard !query.isEmpty, timelineFilter != .imaging else {
             searchResults = []
             return
         }

@@ -795,7 +795,7 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
         }
         return DICOMAppImportOutcome(
             studyID: result.studyID,
-            destination: study.state == .needsReview ? .review : .library,
+            destination: study.state == .needsReview ? .review : .timeline,
             wasExisting: result.wasExisting,
             viewableInstanceCount: result.viewableInstanceCount,
             inertObjectCount: result.inertObjectCount,

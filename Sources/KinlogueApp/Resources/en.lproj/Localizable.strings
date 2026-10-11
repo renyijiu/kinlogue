@@ -110,6 +110,8 @@
 	<string>Health Record</string>
 	<key>入院日期</key>
 	<string>Admission Date</string>
+	<key>全部</key>
+	<string>All</string>
 	<key>全部记录</key>
 	<string>All Records</string>
 	<key>共 %lld 个序列，%lld 张可查看影像</key>
@@ -158,8 +160,8 @@
 	<string>Add to Review Queue</string>
 	<key>加密目录备份</key>
 	<string>Encrypted Folder Backup</string>
-	<key>医学影像</key>
-	<string>Medical Imaging</string>
+	<key>医学影像不进入搜索。切换到“全部”或“报告”后再搜索。</key>
+	<string>Medical images are not searchable. Switch to All or Reports to search.</string>
 	<key>医学影像切片画布</key>
 	<string>Medical image slice canvas</string>
 	<key>医学影像检查</key>
@@ -446,6 +448,8 @@
 	<string>The current version does not provide slice viewing. You can manage confirmed studies, and unsupported objects are not rendered automatically.</string>
 	<key>当前资料库不会因验证失败而被替换。你可以取消后重新选择恢复点。</key>
 	<string>A verification failure will not replace the current library. Cancel and choose a restore point again.</string>
+	<key>影像</key>
+	<string>Imaging</string>
 	<key>影像导入已取消</key>
 	<string>Imaging Import Cancelled</string>
 	<key>影像导入未完成</key>
@@ -550,6 +554,8 @@
 	<string>Open confirmed fields and originals</string>
 	<key>扩大窗宽</key>
 	<string>Widen Window Width</string>
+	<key>报告</key>
+	<string>Reports</string>
 	<key>报告日期</key>
 	<string>Report Date</string>
 	<key>报告类型</key>
@@ -662,6 +668,8 @@
 	<string>This Imaging Study Could Not Be Read</string>
 	<key>日期未知</key>
 	<string>Unknown Date</string>
+	<key>时间线内容</key>
+	<string>Timeline Content</string>
 	<key>时间线日期</key>
 	<string>Timeline Date</string>
 	<key>显示名</key>
@@ -874,8 +882,6 @@
 	<string>Originals from confirmed reports and medical images will appear here.</string>
 	<key>确认家庭成员与检查日期</key>
 	<string>Confirm the family member and study date</string>
-	<key>确认并加入医学影像库</key>
-	<string>Confirm and Add to Imaging Library</string>
 	<key>确认并加入时间线</key>
 	<string>Confirm and Add to Timeline</string>
 	<key>确认报告信息</key>
@@ -1072,8 +1078,8 @@
 	<string>Confirmed fields and originals appear here.</string>
 	<key>这里只校正原文转录或重新分配成员，原件不会改变。</key>
 	<string>Only correct source transcriptions or reassign the family member here. Originals do not change.</string>
-	<key>这项检查已在医学影像库中</key>
-	<string>This Study Is Already in the Imaging Library</string>
+	<key>这项检查已在时间线中</key>
+	<string>This Study Is Already on the Timeline</string>
 	<key>这项检查没有可查看的影像序列</key>
 	<string>This study has no viewable image series</string>
 	<key>连续播放</key>
@@ -1094,8 +1100,6 @@
 	<string>Choose a .kinloguebackup restore point downloaded to this Mac. Kinlogue verifies it fully and will not change the current library before confirmation.</string>
 	<key>选择一条记录</key>
 	<string>Select a Record</string>
-	<key>选择一项医学影像检查</key>
-	<string>Select an Imaging Study</string>
 	<key>选择两条已确认记录进行比较</key>
 	<string>Select two confirmed records to compare</string>
 	<key>选择两条记录比较</key>

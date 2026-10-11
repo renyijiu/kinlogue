@@ -105,8 +105,8 @@ struct AppShellView: View {
                 onChooseFolder: { model.retryDICOMImportSelection() },
                 onComplete: {
                     let destination = await model.finishDICOMImport()
-                    if destination?.destination == .library {
-                        selectedSidebarSection = .imaging
+                    if destination?.destination == .timeline {
+                        selectedSidebarSection = .records
                     }
                 },
                 onClose: {
@@ -446,14 +446,12 @@ struct AppShellView: View {
                         members: model.members,
                         onOpenDuplicate: openDuplicateDestination
                     )
-                } else if selectedSidebarSection == .imaging {
-                    DICOMLibraryView(
-                        model: model.dicomLibraryModel,
-                        selectedMemberID: model.selectedMemberID
-                    )
                 } else {
                     VStack(spacing: 0) {
                         SearchFieldView(text: $model.searchText, isFocused: $isSearchFocused)
+                        if model.isTimelineFilterAvailable {
+                            TimelineFilterBar(filter: $model.timelineFilter)
+                        }
                         ComparisonSelectionBar(
                             model: model.comparisonModel,
                             onCompare: { Task { await model.openComparison() } }
@@ -461,18 +459,16 @@ struct AppShellView: View {
                         Divider()
                         TimelineView(
                             comparisonModel: model.comparisonModel,
+                            dicomLibraryModel: model.dicomLibraryModel,
                             sections: model.timelineSections,
                             searchResults: model.searchResults,
                             isSearching: !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                            filter: model.timelineFilter,
                             selectedRecordID: model.selectedRecordID,
                             showsMemberLabels: model.selectedMemberID == nil,
                             memberLabel: model.memberLabel(for:),
-                            dicomMemberLabel: model.dicomLibraryModel.memberLabel(for:),
                             onSelect: { id in Task { await model.selectRecord(id) } },
-                            onSelectDICOM: { id in
-                                model.dicomLibraryModel.select(id)
-                                selectedSidebarSection = .imaging
-                            },
+                            onSelectDICOM: { id in model.selectDICOMStudy(id) },
                             onImport: { presentImporterIfAvailable() }
                         )
                     }
@@ -491,32 +487,32 @@ struct AppShellView: View {
         } detail: {
             if selectedSidebarSection == .lanInbox {
                 LANPendingSelectionDetailView(model: lanInboxModel)
-            } else if selectedSidebarSection == .imaging {
-                DICOMLibraryDetailContainer(
-                    model: model.dicomLibraryModel,
-                    onReview: { model.presentDICOMReview($0) },
-                    onViewImages: openDICOMViewer
-                )
             } else {
-                RecordDetailView(
-                    record: model.selectedRecord,
-                    memberLabel: model.selectedRecord.map(model.memberLabel(for:)),
-                    original: model.originalDocument,
-                    isOriginalLoading: model.isOriginalLoading,
-                    originalSources: model.originalSources,
-                    selectedOriginalSourceID: model.selectedOriginalSourceID,
-                    onSelectOriginalSource: { sourceID in
-                        Task { await model.selectOriginalSource(sourceID) }
-                    },
-                    onOpenOriginal: { model.presentOriginalViewer() },
-                    onEdit: { model.presentRecordEditor() },
-                    onDelete: {
-                        if let record = model.selectedRecord {
-                            model.requestDeleteRecord(record)
+                TimelineDetailContainer(
+                    dicomLibraryModel: model.dicomLibraryModel,
+                    onReviewDICOM: { model.presentDICOMReview($0) },
+                    onViewDICOMImages: openDICOMViewer
+                ) {
+                    RecordDetailView(
+                        record: model.selectedRecord,
+                        memberLabel: model.selectedRecord.map(model.memberLabel(for:)),
+                        original: model.originalDocument,
+                        isOriginalLoading: model.isOriginalLoading,
+                        originalSources: model.originalSources,
+                        selectedOriginalSourceID: model.selectedOriginalSourceID,
+                        onSelectOriginalSource: { sourceID in
+                            Task { await model.selectOriginalSource(sourceID) }
+                        },
+                        onOpenOriginal: { model.presentOriginalViewer() },
+                        onEdit: { model.presentRecordEditor() },
+                        onDelete: {
+                            if let record = model.selectedRecord {
+                                model.requestDeleteRecord(record)
+                            }
                         }
-                    }
-                )
-                .background(KinlogueTheme.surface)
+                    )
+                    .background(KinlogueTheme.surface)
+                }
             }
         }
         .toolbar {

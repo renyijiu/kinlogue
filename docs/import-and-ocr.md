@@ -142,7 +142,7 @@ App 层把 Finder 报告导入、失败草稿重试和“重新识别并覆盖�
 - `LiveAppServiceRecognitionIntegrationTests`、`LANReportArchiveTests`：真实 Vault 的多原件总量超过快照预算、识别中草稿变化，以及目的原件/OCR 损坏时保留完好的 inbox 副本。
 - `DICOMFolderScannerTests`、`DICOMStudyIndexerTests`、`DICOMImportWorkflowIntegrationTests` 与 `CatalogProcessCoordinationTests`：有界目录 intake、staged-byte authority、atomic publication、journal recovery、取消、并发、强制终止和 Vault destroy 竞争。
 - `DICOMSeriesGeometryTests`、`DICOMDisplayTransformTests`、`DICOMSliceServiceTests` 与 `DICOMSliceVaultIntegrationTests`：policy-v2 顺序、stored sample 到 grayscale、进程级预算/cache/scheduler、取消/失效和 verified descriptor/destroy fence。
-- `DICOMImportModelTests`、`DICOMStudyReviewModelTests`、`DICOMAppModelTests`、`DICOMViewSafetyTests` 与 `LiveDICOMAppServiceIntegrationTests`：文件夹入口、晚到结果 fence、明确确认/删除、独立导航域、报告查询隔离和生成式真实 Vault 链路。
+- `DICOMImportModelTests`、`DICOMStudyReviewModelTests`、`DICOMAppModelTests`、`DICOMViewSafetyTests` 与 `LiveDICOMAppServiceIntegrationTests`：文件夹入口、晚到结果 fence、明确确认/删除、时间线内选中与类型筛选、报告查询隔离和生成式真实 Vault 链路。
 - `LiveAppServiceTests`、`RecordDetailViewLayoutTests`、`ComparisonModelTests`：真实 App service 链路、原件展示和 verbatim comparison。
 
 Vision 输出可能随 macOS 版本变化；测试应优先断言 anchor、顺序、方法和来源引用，不使用对整段 OCR 字节的脆弱快照。真实样本 OCR 抽检必须在仓库外完成。

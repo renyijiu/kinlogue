@@ -21,6 +21,8 @@ struct KinlogueThemeSourceTests {
             "onVariant = Color(hex: 0x3F4946)",
             "outline = Color(hex: 0xBFC9C4)",
             "chip = Color(hex: 0xE9E1DC)",
+            "chipHover = primary.opacity(0.10)",
+            "chipPressed = primary.opacity(0.20)",
             "selection = primary.opacity(0.13)",
             "selectionForeground = primary",
             "selectionHover = primary.opacity(0.05)",
@@ -322,7 +324,6 @@ struct KinlogueThemeSourceTests {
         #expect(!sidebar.contains(".tint(KinlogueTheme.primary)"))
         #expect(!sidebar.contains(".listItemTint(.fixed(KinlogueTheme.primary))"))
         #expect(sidebar.contains(".foregroundStyle(sidebarRowForeground(for: .allRecords))"))
-        #expect(sidebar.contains(".foregroundStyle(sidebarRowForeground(for: .imaging))"))
         #expect(sidebar.contains(".foregroundStyle(sidebarRowForeground(for: .lanInbox))"))
         #expect(sidebar.contains(".foregroundStyle(sidebarRowForeground(for: selection))"))
         #expect(sidebar.contains(".foregroundStyle(sidebarRowForeground(for: .settings))"))
@@ -335,58 +336,93 @@ struct KinlogueThemeSourceTests {
                 + "                for: selection,\n"
                 + "                isSelected: currentSidebarSelection == selection"
         ))
-        #expect(sidebar.components(separatedBy: ".buttonStyle(.kinlogueRow {").count - 1 == 6)
-        #expect(sidebar.components(separatedBy: "rowInteraction.setHovering(isHovering, for:").count - 1 == 5)
+        #expect(sidebar.components(separatedBy: ".buttonStyle(.kinlogueRow {").count - 1 == 5)
+        #expect(sidebar.components(separatedBy: "rowInteraction.setHovering(isHovering, for:").count - 1 == 4)
         #expect(!sidebar.contains(".buttonStyle(.plain)"))
         // A bare Label icon follows the accent tint and the window's active
         // state in a sidebar list, so every row styles its symbol explicitly.
         #expect(sidebar.contains("private struct SidebarRowLabel: View"))
         #expect(!sidebar.contains(" Label("))
-        #expect(sidebar.components(separatedBy: "SidebarRowLabel(").count - 1 == 9)
-        #expect(sidebar.components(separatedBy: "color: sidebarRowForeground(for:").count - 1 == 4)
+        #expect(sidebar.components(separatedBy: "SidebarRowLabel(").count - 1 == 8)
+        #expect(sidebar.components(separatedBy: "color: sidebarRowForeground(for:").count - 1 == 3)
         #expect(sidebar.components(separatedBy: ".focusEffectDisabled()").count - 1 >= 4)
         #expect(sidebar.contains("@FocusState private var focusedSidebarSelection"))
-        #expect(sidebar.components(separatedBy: ".overlay(sidebarRowFocusOverlay(for:").count - 1 >= 5)
-        #expect(sidebar.components(separatedBy: ".onMoveCommand").count - 1 >= 5)
+        #expect(sidebar.components(separatedBy: ".overlay(sidebarRowFocusOverlay(for:").count - 1 >= 4)
+        #expect(sidebar.components(separatedBy: ".onMoveCommand").count - 1 >= 4)
         #expect(sidebar.contains("minHeight: 44"))
-        #expect(sidebar.components(separatedBy: ".sidebarRowHitTarget()").count - 1 == 6)
+        #expect(sidebar.components(separatedBy: ".sidebarRowHitTarget()").count - 1 == 5)
     }
 
     @Test
-    func dicomLibrarySelectionUsesTheWarmPaletteWithoutSystemBlue() throws {
-        let library = try read("Sources/KinlogueApp/Views/DICOMLibraryView.swift")
+    func timelineImagingSelectionAndFilterUseTheWarmPaletteWithoutSystemControls() throws {
+        let timeline = try read("Sources/KinlogueApp/Views/TimelineView.swift")
 
-        #expect(library.contains("List {"))
-        #expect(!library.contains("List(selection:"))
-        #expect(!library.contains("List(studies, selection:"))
-        #expect(library.contains(
-            ".buttonStyle(.kinlogueRow { rowInteraction.setPressed($0, for: study.id) })"
-        ))
-        #expect(library.contains(".background(studyRowBackground(for: study.id))"))
-        #expect(library.contains(".overlay(studyRowFocusOverlay(for: study.id))"))
-        #expect(library.contains(".listRowBackground(Color.clear)"))
-        #expect(library.contains("minHeight: 64"))
-        #expect(library.contains("model.selectedStudyID == studyID"))
-        #expect(library.contains(
-            "rowInteraction.fill(\n"
-                + "                for: studyID,\n"
-                + "                isSelected: model.selectedStudyID == studyID"
-        ))
-        #expect(library.contains(
-            "isSelected\n"
-                + "                                            ? KinlogueTheme.selectionForeground"
-        ))
-        #expect(library.contains("rowInteraction.setHovering(isHovering, for: study.id)"))
-        #expect(library.contains("focusedStudyID == studyID"))
-        #expect(library.contains(
-            "? KinlogueTheme.primary\n"
-                + "                    : .clear,\n"
-                + "                lineWidth: 2"
-        ))
-        #expect(library.contains(".accessibilityAddTraits(isSelected ? .isSelected : [])"))
-        #expect(library.contains(".focusEffectDisabled()"))
-        #expect(library.contains(".onMoveCommand"))
-        #expect(library.contains("DICOMLibrarySelectionNavigation.destination"))
+        #expect(!timeline.contains("List(selection:"))
+        #expect(!timeline.contains(".pickerStyle(.segmented)"))
+        #expect(timeline.contains(".buttonStyle(.kinlogueCard(isHighlighted: isSelected))"))
+        #expect(timeline.contains("isSelected: study.id == dicomLibraryModel.selectedStudyID"))
+        #expect(timeline.contains(".disabled(isSelectingComparison)"))
+        #expect(timeline.contains(".buttonStyle(.kinlogueChip(isSelected: isSelected))"))
+        #expect(!timeline.contains(".buttonStyle(.plain)"))
+        #expect(timeline.contains("Image(systemName: \"checkmark\")"))
+        #expect(
+            timeline.components(
+                separatedBy: ".accessibilityAddTraits(isSelected ? .isSelected : [])"
+            ).count - 1 == 2
+        )
+    }
+
+    @Test
+    func selectableChipsGrowHeavierFromHoverToPressedAndKeepTheirTextReadable() {
+        // A neutral chip layers its interaction state over the Chip fill.
+        let resting = luminance(of: KinlogueTheme.chip)
+        let hover = luminance(of: KinlogueTheme.chipHover, over: KinlogueTheme.chip)
+        let pressed = luminance(of: KinlogueTheme.chipPressed, over: KinlogueTheme.chip)
+        #expect(resting > hover)
+        #expect(hover > pressed)
+        #expect(contrast(luminance(of: KinlogueTheme.onVariant), pressed) >= 4.5)
+
+        #expect(
+            KinlogueTheme.chipFill(isSelected: false, isHovering: true, isPressed: true)
+                == KinlogueTheme.chip
+        )
+        #expect(
+            KinlogueTheme.chipLayer(isSelected: false, isHovering: true, isPressed: true)
+                == KinlogueTheme.chipPressed
+        )
+        #expect(
+            KinlogueTheme.chipLayer(isSelected: false, isHovering: true, isPressed: false)
+                == KinlogueTheme.chipHover
+        )
+        #expect(
+            KinlogueTheme.chipLayer(isSelected: false, isHovering: false, isPressed: false)
+                == Color.clear
+        )
+
+        // A selected chip follows the primary button and never takes the layer.
+        #expect(
+            KinlogueTheme.chipFill(isSelected: true, isHovering: true, isPressed: true)
+                == KinlogueTheme.primaryPressed
+        )
+        #expect(
+            KinlogueTheme.chipFill(isSelected: true, isHovering: true, isPressed: false)
+                == KinlogueTheme.primaryHover
+        )
+        #expect(
+            KinlogueTheme.chipFill(isSelected: true, isHovering: false, isPressed: false)
+                == KinlogueTheme.primary
+        )
+        #expect(
+            KinlogueTheme.chipLayer(isSelected: true, isHovering: true, isPressed: true)
+                == Color.clear
+        )
+        for fill in [
+            KinlogueTheme.primary,
+            KinlogueTheme.primaryHover,
+            KinlogueTheme.primaryPressed,
+        ] {
+            #expect(contrast(luminance(of: .white), luminance(of: fill)) >= 4.5)
+        }
     }
 
     @Test
