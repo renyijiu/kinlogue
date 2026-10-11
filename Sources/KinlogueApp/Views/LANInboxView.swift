@@ -42,10 +42,13 @@ struct LANInboxView: View {
                             model.requestDelete([item.id])
                         }
                     )
+                    // Opaque so the system selection highlight can never show through.
                     .listRowBackground(
-                        model.selectedItemIDs.contains(item.id)
-                            ? KinlogueTheme.container
-                            : KinlogueTheme.surface
+                        KinlogueTheme.surface.overlay(
+                            model.selectedItemIDs.contains(item.id)
+                                ? KinlogueTheme.selection
+                                : Color.clear
+                        )
                     )
                     .tag(item.id)
                     .selectionDisabled(!item.isReviewable)
@@ -109,7 +112,7 @@ struct LANInboxView: View {
                     if let storage = model.storage {
                         Text(AppLocalization.string("\(model.items.count) 个唯一原件 · 实际占用 \(ByteCountFormatter.string(fromByteCount: Int64(storage.totalPhysicalByteCount), countStyle: .file))"))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(KinlogueTheme.onVariant)
                     }
                 }
                 Spacer()
@@ -138,9 +141,8 @@ struct LANInboxView: View {
             }
             if let notice = model.archiveNotice { archiveNotice(notice) }
             if let error = model.userErrorMessage {
-                Label(error, systemImage: "exclamationmark.triangle")
+                KinlogueStatusLabel(error, tone: .danger)
                     .font(.caption)
-                    .foregroundStyle(.red)
             }
         }
         .padding(16)
@@ -150,11 +152,12 @@ struct LANInboxView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 Text(AppLocalization.string("已选 \(model.archiveOrder.count) 个原件，作为 1 份报告"))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KinlogueTheme.onVariant)
                 Spacer(minLength: 0)
                 Button(AppLocalization.string("删除所选…"), role: .destructive) {
                     model.requestDelete(model.selectedItemIDs)
                 }
+                .buttonStyle(.kinlogueDestructive)
                 .disabled(
                     model.selectedItemIDs.isEmpty
                         || model.selectedItemIDs.contains(where: model.busyItemIDs.contains)
@@ -210,8 +213,10 @@ struct LANInboxView: View {
     }
 
     private func archiveNotice(_ notice: LANInboxArchiveNotice) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "checkmark.circle")
+        // Centered: the icon-only close button has no text baseline to align to.
+        HStack(spacing: 8) {
+            Image(systemName: KinlogueStatusTone.success.systemImage)
+                .foregroundStyle(KinlogueTheme.success)
             if notice.draftID != nil {
                 Text(AppLocalization.string("已作为 1 份报告加入待确认。"))
             } else {
@@ -221,6 +226,7 @@ struct LANInboxView: View {
                 Button(AppLocalization.string("查看已有资料")) {
                     onOpenDuplicate(destination)
                 }
+                .buttonStyle(.kinlogueGhost)
             }
             Spacer()
             Button {
@@ -228,12 +234,14 @@ struct LANInboxView: View {
             } label: {
                 Image(systemName: "xmark")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.kinlogueGhost(.neutral))
             .accessibilityLabel(AppLocalization.string("关闭归档结果"))
         }
         .font(.callout)
-        .padding(10)
-        .background(KinlogueTheme.container, in: RoundedRectangle(cornerRadius: 9))
+        .foregroundStyle(KinlogueTheme.onSurface)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .kinloguePanel(.container, cornerRadius: KinlogueTheme.Radius.control)
     }
 
     private var memberPickerOptions: [MemberPickerOption] {

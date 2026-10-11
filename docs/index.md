@@ -38,6 +38,8 @@
 
 当前设置页支持对原备份目录重新授权，并保持手动备份忙碌状态；恢复 ViewModel 的迟到权限回调不会清理新恢复点。手机批量上传的本地排队状态也不会被 reservation 轮询覆盖。实现与回归入口分别见 [`backup-and-restore.md`](backup-and-restore.md) 和 [`lan-upload.md`](lan-upload.md)。
 
+界面配色统一由 `KinlogueTheme` 的语义令牌、共享按钮/列表行/信息卡样式和逐窗口亮色外观声明承担；页面文件不直接使用系统灰、系统状态色或圆角数值。规则、例外与源码门禁见 [`design-system.md`](design-system.md)。
+
 ## 当前专题
 
 ### 产品与架构

@@ -985,6 +985,7 @@ struct LANPhoneAssetSafetyTests {
             "EXPECTED_PLATFORM_RESOURCE_BUNDLE=\"Kinlogue_KinloguePlatform.bundle\""
         ))
         for resource in [
+            "./$EXPECTED_ASSET_ARCHIVE_FILE",
             "./$EXPECTED_ICON_FILE",
             "./$EXPECTED_PLATFORM_RESOURCE_BUNDLE/Info.plist",
             "./$EXPECTED_PLATFORM_RESOURCE_BUNDLE/LANUpload/app.js",

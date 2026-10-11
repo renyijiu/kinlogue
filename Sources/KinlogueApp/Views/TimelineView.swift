@@ -120,7 +120,7 @@ private struct DICOMTimelineCard: View {
                     }
                     Text(AppLocalization.string("保留 \(study.retainedObjectCount) 个对象"))
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KinlogueTheme.onVariant)
                 }
             }
             .buttonStyle(.kinlogueCard(isHighlighted: false))
@@ -174,7 +174,7 @@ private struct TimelineCard: View {
                     if let organization = record.organization?.transcription {
                         Label(organization, systemImage: "building.2")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(KinlogueTheme.onVariant)
                             .lineLimit(1)
                     }
                     Text(record.conclusion?.transcription ?? AppLocalization.string("原报告未提供结论"))

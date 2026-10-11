@@ -28,21 +28,22 @@ struct LANReceiverSheet: View {
             }
 
             if let error = model.userErrorMessage {
-                Label(error, systemImage: "exclamationmark.triangle")
+                KinlogueStatusLabel(error, tone: .danger)
                     .font(.callout)
-                    .foregroundStyle(.red)
                     .accessibilityLabel(AppLocalization.string("错误：\(error)"))
             }
 
             Divider()
             HStack {
                 Button(AppLocalization.string("关闭")) { dismiss() }
+                    .buttonStyle(.kinlogueSecondary)
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 if model.receiverPhase == .active {
                     Button(AppLocalization.string("停止接收"), role: .destructive) {
                         Task { await model.stopReceiving() }
                     }
+                    .buttonStyle(.kinlogueDestructive)
                     .accessibilityHint(AppLocalization.string("立即使地址和验证码失效，已完成上传的待确认项会保留"))
                 } else {
                     Button(AppLocalization.string("开始接收")) {
@@ -60,7 +61,7 @@ struct LANReceiverSheet: View {
         }
         .padding(26)
         .frame(width: 620)
-        .background(KinlogueTheme.card)
+        .kinlogueSheetCanvas()
         .interactiveDismissDisabled(model.receiverPhase == .starting || model.receiverPhase == .stopping)
         .accessibilityIdentifier("lan-receiver-sheet")
     }
@@ -97,22 +98,20 @@ struct LANReceiverSheet: View {
             .disabled(model.selectedAddress == nil)
         }
         .padding(16)
-        .background(KinlogueTheme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(KinlogueTheme.outline, lineWidth: 1)
-        }
+        .kinloguePanel(.card)
     }
 
     private func activeContent(_ details: LANReceiverDetails) -> some View {
         HStack(alignment: .top, spacing: 22) {
             QRCodeView(value: details.url.absoluteString)
+                .padding(10)
                 .frame(width: 190, height: 190)
+                .kinloguePanel(.card)
                 .accessibilityLabel(AppLocalization.string("局域网上传地址二维码，不包含验证码"))
 
             VStack(alignment: .leading, spacing: 14) {
                 Text(AppLocalization.string("在同一局域网内，用手机浏览器打开："))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KinlogueTheme.onVariant)
                 Text(details.url.absoluteString)
                     .font(.system(.body, design: .monospaced).weight(.semibold))
                     .textSelection(.enabled)
@@ -125,13 +124,13 @@ struct LANReceiverSheet: View {
 
                 Divider()
                 Text(AppLocalization.string("验证码"))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KinlogueTheme.onVariant)
                 Text(details.pairingCode)
                     .font(.system(size: 32, weight: .bold, design: .monospaced))
                     .accessibilityLabel(AppLocalization.string("验证码 \(details.pairingCode.map(String.init).joined(separator: " "))"))
                 Text(AppLocalization.string("验证码约 \(details.pairingExpiresInSeconds / 60) 分钟内有效，首次验证成功后即失效。"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KinlogueTheme.onVariant)
                 Text(AppLocalization.string("若手机无法打开，请确认两台设备没有使用访客网络隔离，并检查 macOS 防火墙是否允许续页接收入站连接。"))
                     .font(.caption)
                     .fixedSize(horizontal: false, vertical: true)

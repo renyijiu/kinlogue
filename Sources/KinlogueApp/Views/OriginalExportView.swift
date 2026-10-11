@@ -57,6 +57,7 @@ struct OriginalExportView: View {
         }
         .padding(28)
         .frame(minWidth: 480, idealWidth: 600, minHeight: 480)
+        .kinlogueSheetCanvas()
         .interactiveDismissDisabled(isDismissDisabled)
         .accessibilityIdentifier("original-export-sheet")
     }
@@ -68,7 +69,7 @@ struct OriginalExportView: View {
                 systemImage: "exclamationmark.shield"
             )
             .font(.headline)
-            .foregroundStyle(.orange)
+            .foregroundStyle(KinlogueTheme.warning)
 
             Text(AppLocalization.string("只会导出已确认报告和医学影像的原始文件，并按家庭成员和日期排列。"))
             VStack(alignment: .leading, spacing: 10) {
@@ -76,7 +77,7 @@ struct OriginalExportView: View {
                 warningRow(AppLocalization.string("这是提供给医生查看的副本，不是资料库备份，不能用于恢复续页。"))
                 warningRow(AppLocalization.string("导出后文件由您保管；删除续页资料库不会删除已导出的副本。"))
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(KinlogueTheme.onVariant)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -95,13 +96,13 @@ struct OriginalExportView: View {
                 let totalFiles = AppLocalization.string("\(progress.totalEntryCount) 个文件")
                 Text(AppLocalization.string("已处理 \(progress.completedEntryCount) / \(totalFiles)"))
                 .monospacedDigit()
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KinlogueTheme.onVariant)
                 Text(AppLocalization.string(
                     "\(formattedByteCount(progress.completedByteCount)) / \(formattedByteCount(progress.totalByteCount))"
                 ))
                 .monospacedDigit()
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KinlogueTheme.onVariant)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -112,7 +113,7 @@ struct OriginalExportView: View {
         VStack(spacing: 14) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 42))
-                .foregroundStyle(KinlogueTheme.primary)
+                .foregroundStyle(KinlogueTheme.success)
                 .accessibilityHidden(true)
             Text(AppLocalization.string("原始文件已导出"))
                 .font(.title3.weight(.semibold))
@@ -121,11 +122,11 @@ struct OriginalExportView: View {
                     .lineLimit(2)
                     .truncationMode(.middle)
                 Text(AppLocalization.string("共 \(result.entryCount) 个文件，\(formattedByteCount(result.totalByteCount))"))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KinlogueTheme.onVariant)
             }
             Text(AppLocalization.string("压缩包位于续页资料库之外，请妥善保管。"))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KinlogueTheme.onVariant)
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -137,6 +138,7 @@ struct OriginalExportView: View {
             switch model.phase {
             case .warning:
                 Button(AppLocalization.string("取消"), action: onClose)
+                    .buttonStyle(.kinlogueSecondary)
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("original-export-close")
                 Spacer()
@@ -158,10 +160,12 @@ struct OriginalExportView: View {
                 Spacer()
             case .cancelled, .empty:
                 Button(AppLocalization.string("关闭"), action: onClose)
+                    .buttonStyle(.kinlogueSecondary)
                     .keyboardShortcut(.cancelAction)
                 Spacer()
             case .failed:
                 Button(AppLocalization.string("关闭"), action: onClose)
+                    .buttonStyle(.kinlogueSecondary)
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(AppLocalization.string("重试…")) {
@@ -175,6 +179,7 @@ struct OriginalExportView: View {
                     Button(AppLocalization.string("在访达中显示")) {
                         onShowInFinder(destinationURL)
                     }
+                    .buttonStyle(.kinlogueSecondary)
                     .accessibilityIdentifier("original-export-show-in-finder")
                 }
                 Spacer()
@@ -190,6 +195,7 @@ struct OriginalExportView: View {
         Button(AppLocalization.string("取消")) {
             Task { await model.cancel() }
         }
+        .buttonStyle(.kinlogueSecondary)
         .keyboardShortcut(.cancelAction)
         .accessibilityIdentifier("original-export-cancel")
     }

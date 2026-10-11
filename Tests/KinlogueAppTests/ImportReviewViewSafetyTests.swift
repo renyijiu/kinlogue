@@ -137,8 +137,8 @@ struct DeleteVaultViewSafetyTests {
         #expect(restoreButton.contains(
             ".frame(maxWidth: .infinity, alignment: .trailing)"
         ))
-        #expect(settings.contains(".tint(.red)"))
-        #expect(settings.contains(".foregroundStyle(.red)"))
+        #expect(settings.components(separatedBy: ".buttonStyle(.kinlogueDestructive)").count - 1 == 2)
+        #expect(!settings.contains(".tint(.red)"))
         #expect(settings.contains("\"settings-export-originals\""))
         #expect(settings.contains(".focused(exportButtonFocus)"))
         #expect(settings.contains("\"settings-delete-local-data\""))
