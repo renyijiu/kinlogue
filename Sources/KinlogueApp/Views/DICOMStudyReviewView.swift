@@ -36,7 +36,7 @@ struct DICOMStudyReviewView: View {
                         .font(.title2.weight(.semibold))
                     Text(AppLocalization.string("只确认归属成员与检查日期；续页不会从影像推断诊断或结论。"))
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KinlogueTheme.onVariant)
                 }
                 Spacer()
             }
@@ -63,6 +63,7 @@ struct DICOMStudyReviewView: View {
                 if model.content == nil {
                     Spacer()
                     Button(AppLocalization.string("关闭"), action: onDismiss)
+                        .buttonStyle(.kinlogueSecondary)
                         .disabled(isBusy || !model.allowsDismissal)
                 } else {
                     if (model.content?.viewableInstanceCount ?? 0) > 0 {
@@ -74,19 +75,20 @@ struct DICOMStudyReviewView: View {
                     Button(AppLocalization.string("删除这项影像检查…"), role: .destructive) {
                         isDeleteConfirmationPresented = true
                     }
+                    .buttonStyle(.kinlogueDestructive)
                     .disabled(isBusy)
                     .accessibilityIdentifier("dicom-review-delete")
                     Spacer()
                     if model.operationFailed {
-                        Label(
+                        KinlogueStatusLabel(
                             AppLocalization.string("操作未完成，可以稍后重试"),
-                            systemImage: "exclamationmark.triangle"
+                            tone: .danger
                         )
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                        .font(.caption)
                     }
                     if model.content?.study.state == .confirmed {
                         Button(AppLocalization.string("取消"), action: onDismiss)
+                            .buttonStyle(.kinlogueSecondary)
                             .disabled(isBusy)
                     }
                     Button(AppLocalization.string("确认并加入医学影像库")) {
@@ -102,6 +104,7 @@ struct DICOMStudyReviewView: View {
             .padding(20)
         }
         .frame(width: 600, height: 540)
+        .kinlogueSheetCanvas()
         .confirmationDialog(
             AppLocalization.string("删除这项医学影像检查？"),
             isPresented: $isDeleteConfirmationPresented
@@ -124,23 +127,26 @@ struct DICOMStudyReviewView: View {
                     let selectionLabels = RecordQuery.selectionLabels(
                         for: content.selectableMembers
                     )
-                    GroupBox(AppLocalization.string("检查内容")) {
-                        VStack(spacing: 10) {
-                            DICOMReviewCountRow(
-                                title: AppLocalization.string("可查看影像"),
-                                value: content.viewableInstanceCount
-                            )
-                            DICOMReviewCountRow(
-                                title: AppLocalization.string("影像序列"),
-                                value: content.seriesCount
-                            )
-                            DICOMReviewCountRow(
-                                title: AppLocalization.string("保留但暂不可查看的对象"),
-                                value: content.inertObjectCount
-                            )
-                        }
-                        .padding(.top, 6)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(AppLocalization.string("检查内容"))
+                            .font(.headline)
+                            .foregroundStyle(KinlogueTheme.primary)
+                        DICOMReviewCountRow(
+                            title: AppLocalization.string("可查看影像"),
+                            value: content.viewableInstanceCount
+                        )
+                        DICOMReviewCountRow(
+                            title: AppLocalization.string("影像序列"),
+                            value: content.seriesCount
+                        )
+                        DICOMReviewCountRow(
+                            title: AppLocalization.string("保留但暂不可查看的对象"),
+                            value: content.inertObjectCount
+                        )
                     }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .kinloguePanel()
 
                     Picker(AppLocalization.string("家庭成员"), selection: $model.selectedMemberID) {
                         Text(AppLocalization.string("请选择")).tag(Optional<FamilyMember.ID>.none)
@@ -158,12 +164,11 @@ struct DICOMStudyReviewView: View {
                     .accessibilityHint(AppLocalization.string("请选择报告或影像资料中可核实的检查日期"))
 
                     if model.hasValidationError {
-                        Label(
+                        KinlogueStatusLabel(
                             AppLocalization.string("请先选择有效的家庭成员和检查日期"),
-                            systemImage: "exclamationmark.triangle"
+                            tone: .danger
                         )
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                        .font(.caption)
                     }
                 }
             }

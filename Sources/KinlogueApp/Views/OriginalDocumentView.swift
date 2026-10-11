@@ -159,6 +159,7 @@ struct OrderedOriginalDocumentView: View {
             }
             .id(selectedSourceID)
         }
+        .background(KinlogueTheme.container)
     }
 
     private var sourceNavigation: some View {
@@ -176,7 +177,7 @@ struct OrderedOriginalDocumentView: View {
                     .lineLimit(1)
                 Text(AppLocalization.string("第 \(selectedIndex + 1) 个，共 \(sources.count) 个"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KinlogueTheme.onVariant)
             }
             .frame(maxWidth: .infinity)
             .accessibilityElement(children: .combine)
@@ -190,10 +191,9 @@ struct OrderedOriginalDocumentView: View {
             .disabled(selectedIndex >= sources.count - 1 || isLoading)
             .accessibilityLabel(AppLocalization.string("下一个原件"))
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.kinlogueGhost)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.regularMaterial)
         .accessibilityIdentifier("ordered-original-navigation")
     }
 
@@ -231,6 +231,7 @@ struct OrderedOriginalDocumentViewer: View {
                     .font(.headline)
                 Spacer()
                 Button(AppLocalization.string("关闭")) { dismiss() }
+                    .buttonStyle(.kinlogueSecondary)
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("record-original-viewer-close")
             }
@@ -246,6 +247,7 @@ struct OrderedOriginalDocumentViewer: View {
             )
         }
         .frame(minWidth: 860, idealWidth: 1_120, minHeight: 620, idealHeight: 780)
+        .kinlogueSheetCanvas()
         .accessibilityIdentifier("record-original-viewer")
     }
 }
@@ -255,17 +257,23 @@ private struct OriginalDocumentContent: View {
     let presentation: OriginalDocumentPresentation
 
     var body: some View {
-        if UTType(payload.contentTypeIdentifier)?.conforms(to: .pdf) == true {
-            PrivatePDFDocumentView(
-                data: payload.data,
-                presentation: presentation
-            )
-        } else {
-            PrivateImageDocumentView(
-                data: payload.data,
-                presentation: presentation
-            )
+        Group {
+            if UTType(payload.contentTypeIdentifier)?.conforms(to: .pdf) == true {
+                PrivatePDFDocumentView(
+                    data: payload.data,
+                    presentation: presentation
+                )
+            } else {
+                PrivateImageDocumentView(
+                    data: payload.data,
+                    presentation: presentation
+                )
+            }
         }
+        // One fill for loading, failed and loaded states, so the preview
+        // never changes color when the document arrives.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(KinlogueTheme.container)
     }
 }
 
@@ -337,6 +345,7 @@ struct OriginalDocumentViewer: View {
                     .font(.headline)
                 Spacer()
                 Button(AppLocalization.string("关闭")) { dismiss() }
+                    .buttonStyle(.kinlogueSecondary)
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("record-original-viewer-close")
             }
@@ -345,6 +354,7 @@ struct OriginalDocumentViewer: View {
             OriginalDocumentView(payload: payload)
         }
         .frame(minWidth: 860, idealWidth: 1_120, minHeight: 620, idealHeight: 780)
+        .kinlogueSheetCanvas()
         .accessibilityIdentifier("record-original-viewer")
     }
 }
@@ -390,8 +400,9 @@ private struct PrivatePDFPagesView: View {
                 .accessibilityLabel(AppLocalization.string("放大原件"))
                 .accessibilityValue(AppLocalization.string("当前 \(Int(zoom * 100))%"))
             }
-            .buttonStyle(.borderless)
-            .padding(10)
+            .buttonStyle(.kinlogueGhost)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             Divider()
             GeometryReader { proxy in
                 ScrollView([.horizontal, .vertical]) {
@@ -427,7 +438,6 @@ private struct PrivatePDFPagesView: View {
                             .frame(width: proxy.size.width, height: proxy.size.height)
                     }
                 }
-                .background(Color(nsColor: .windowBackgroundColor))
                 .onAppear { viewportSize = proxy.size }
                 .onChange(of: proxy.size) { _, size in
                     viewportSize = size
@@ -450,8 +460,9 @@ private struct PrivatePDFPagesView: View {
                         .accessibilityHint(AppLocalization.string("在独立窗口中查看和缩放原件"))
                 }
             }
-            .buttonStyle(.borderless)
-            .padding(10)
+            .buttonStyle(.kinlogueGhost)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             Divider()
             if let pageSize {
                 FittedPDFPage(
@@ -475,7 +486,6 @@ private struct PrivatePDFPagesView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var pageNavigation: some View {
@@ -731,7 +741,7 @@ private struct PrivateImageView: View {
             HStack {
                 Text(AppLocalization.string("原始图片"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KinlogueTheme.onVariant)
                 Spacer()
                 ImageRotationControls(rotation: $rotation)
                 Button { zoom = max(0.4, zoom - 0.2) } label: {
@@ -745,8 +755,9 @@ private struct PrivateImageView: View {
                 .accessibilityLabel(AppLocalization.string("放大原件"))
                 .accessibilityValue(AppLocalization.string("当前 \(Int(zoom * 100))%"))
             }
-            .buttonStyle(.borderless)
-            .padding(10)
+            .buttonStyle(.kinlogueGhost)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             Divider()
             GeometryReader { proxy in
                 ScrollView([.horizontal, .vertical]) {
@@ -766,7 +777,6 @@ private struct PrivateImageView: View {
                         height: max(displaySize.height, proxy.size.height)
                     )
                 }
-                .background(Color(nsColor: .windowBackgroundColor))
                 .onAppear { viewportSize = proxy.size }
                 .onChange(of: proxy.size) { _, size in
                     viewportSize = size
@@ -782,7 +792,7 @@ private struct PrivateImageView: View {
             HStack {
                 Text(AppLocalization.string("完整预览"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KinlogueTheme.onVariant)
                 Spacer()
                 ImageRotationControls(rotation: $rotation)
                 PreviewZoomControls(zoomPercent: $fitZoomPercent)
@@ -792,8 +802,9 @@ private struct PrivateImageView: View {
                         .accessibilityHint(AppLocalization.string("在独立窗口中查看和缩放原件"))
                 }
             }
-            .buttonStyle(.borderless)
-            .padding(10)
+            .buttonStyle(.kinlogueGhost)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             Divider()
             FittedOriginalImage(
                 image: image,
@@ -805,7 +816,6 @@ private struct PrivateImageView: View {
                 onOpenOriginal: onOpenOriginal
             )
         }
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var maximumZoom: Double {
@@ -901,7 +911,7 @@ private struct ImageRotationControls: View {
             .accessibilityIdentifier("record-original-rotate-right")
             .accessibilityLabel(AppLocalization.string("向右旋转"))
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.kinlogueGhost)
     }
 }
 
@@ -944,6 +954,6 @@ private struct PreviewZoomControls: View {
             .accessibilityLabel(AppLocalization.string("放大原件"))
             .accessibilityValue(AppLocalization.string("当前 \(zoomPercent)%"))
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.kinlogueGhost)
     }
 }

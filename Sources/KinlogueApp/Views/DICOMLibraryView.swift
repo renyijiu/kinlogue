@@ -27,7 +27,7 @@ enum DICOMLibrarySelectionNavigation {
 struct DICOMLibraryView: View {
     @ObservedObject var model: DICOMLibraryModel
     let selectedMemberID: FamilyMember.ID?
-    @State private var hoveredStudyID: DICOMStudy.ID?
+    @State private var rowInteraction = KinlogueRowInteraction<DICOMStudy.ID>()
     @FocusState private var focusedStudyID: DICOMStudy.ID?
 
     var body: some View {
@@ -77,7 +77,7 @@ struct DICOMLibraryView: View {
                             .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.kinlogueRow { rowInteraction.setPressed($0, for: study.id) })
                         .focused($focusedStudyID, equals: study.id)
                         .focusEffectDisabled()
                         .background(studyRowBackground(for: study.id))
@@ -88,7 +88,7 @@ struct DICOMLibraryView: View {
                         .accessibilityAddTraits(isSelected ? .isSelected : [])
                         .accessibilityHint(AppLocalization.string("选择后可查看检查摘要"))
                         .onHover { isHovering in
-                            updateHoveredStudy(study.id, isHovering: isHovering)
+                            rowInteraction.setHovering(isHovering, for: study.id)
                         }
                         .onMoveCommand { direction in
                             moveStudySelection(
@@ -108,35 +108,21 @@ struct DICOMLibraryView: View {
     }
 
     private func studyRowBackground(for studyID: DICOMStudy.ID) -> some View {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(
-                model.selectedStudyID == studyID
-                    ? KinlogueTheme.selection
-                    : hoveredStudyID == studyID
-                        ? KinlogueTheme.selectionHover
-                        : .clear
-            )
+        RoundedRectangle(cornerRadius: KinlogueTheme.Radius.control)
+            .fill(rowInteraction.fill(
+                for: studyID,
+                isSelected: model.selectedStudyID == studyID
+            ))
     }
 
     private func studyRowFocusOverlay(for studyID: DICOMStudy.ID) -> some View {
-        RoundedRectangle(cornerRadius: 8)
+        RoundedRectangle(cornerRadius: KinlogueTheme.Radius.control)
             .stroke(
                 focusedStudyID == studyID
                     ? KinlogueTheme.primary
                     : .clear,
                 lineWidth: 2
             )
-    }
-
-    private func updateHoveredStudy(
-        _ studyID: DICOMStudy.ID,
-        isHovering: Bool
-    ) {
-        if isHovering {
-            hoveredStudyID = studyID
-        } else if hoveredStudyID == studyID {
-            hoveredStudyID = nil
-        }
     }
 
     private func moveStudySelection(
@@ -197,7 +183,7 @@ struct DICOMLibraryDetailView: View {
                         ))
                     }
                     Text(AppLocalization.string("只显示受支持的本机二维 MR 切片；影像不会进入 OCR、搜索或比较。"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KinlogueTheme.onVariant)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack {
                         Button(AppLocalization.string("查看影像")) { onViewImages(study.id) }

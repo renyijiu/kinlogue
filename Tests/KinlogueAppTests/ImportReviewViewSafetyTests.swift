@@ -94,15 +94,24 @@ struct ImportReviewViewSafetyTests {
             "ComparisonView.swift", "DICOMStudyReviewView.swift",
         ] {
             let source = try source(named: filename)
-            // Red is reserved for an error message, which is always a Label
-            // with a symbol, or for a destructive control.
+            // An error message is always the shared status label, which pairs
+            // the danger color with a symbol. The danger color never appears on
+            // bare text, and system red is not used at all.
             #expect(!source.contains("Text(error)"), "\(filename)")
             #expect(!source.contains("Text(errorMessage)"), "\(filename)")
-            let redCount = source.components(separatedBy: ".foregroundStyle(.red)").count - 1
-            let warningCount = source.components(separatedBy: "systemImage: \"exclamationmark.triangle\"").count - 1
-            #expect(redCount > 0, "\(filename)")
-            #expect(warningCount >= redCount, "\(filename)")
+            #expect(!source.contains(".foregroundStyle(.red)"), "\(filename)")
+            #expect(!source.contains(".foregroundStyle(KinlogueTheme.danger)"), "\(filename)")
+            let errorLabelCount = source.components(separatedBy: "tone: .danger").count - 1
+            #expect(errorLabelCount > 0, "\(filename)")
+            #expect(
+                source.components(separatedBy: "KinlogueStatusLabel(").count - 1 >= errorLabelCount,
+                "\(filename)"
+            )
         }
+
+        let theme = try source(named: "KinlogueTheme.swift")
+        #expect(theme.contains("Label(text, systemImage: tone.systemImage)"))
+        #expect(theme.contains("case .danger: \"exclamationmark.octagon\""))
     }
 
     private var sourceURL: URL {
@@ -184,8 +193,8 @@ struct DeleteVaultViewSafetyTests {
         #expect(restoreButton.contains(
             ".frame(maxWidth: .infinity, alignment: .trailing)"
         ))
-        #expect(settings.contains(".tint(.red)"))
-        #expect(settings.contains(".foregroundStyle(.red)"))
+        #expect(settings.components(separatedBy: ".buttonStyle(.kinlogueDestructive)").count - 1 == 2)
+        #expect(!settings.contains(".tint(.red)"))
         #expect(settings.contains("\"settings-export-originals\""))
         #expect(settings.contains(".focused(exportButtonFocus)"))
         #expect(settings.contains("\"settings-delete-local-data\""))

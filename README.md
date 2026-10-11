@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/kinlogue-overview.jpg" width="1180" alt="续页应用界面：使用合成示例家庭成员展示健康记录时间线、已确认信息与原件预览">
+  <img src="docs/assets/kinlogue-overview-2026-10.jpg" width="1180" alt="续页应用界面：使用合成示例家庭成员展示健康记录时间线、已确认信息与原件预览">
 </p>
 
 <p align="center">

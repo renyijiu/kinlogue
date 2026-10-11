@@ -91,6 +91,7 @@ OBJECT_STREAM="$TEMP_DIR/object-stream"
 
 typeset -a APPROVED_MEDIA_PATHS=(
   docs/assets/kinlogue-overview.jpg
+  docs/assets/kinlogue-overview-2026-10.jpg
   packaging/AppIcon.png
   packaging/Kinlogue.iconset/icon_16x16.png
   packaging/Kinlogue.iconset/icon_16x16@2x.png

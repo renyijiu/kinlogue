@@ -90,7 +90,7 @@ struct MemberSidebarView: View {
     let onOpenDICOMStudy: (DICOMStudy.ID) -> Void
     let onEdit: (FamilyMember) -> Void
     let onDelete: (FamilyMember) -> Void
-    @State private var hoveredSidebarSelection: MemberSidebarSelection?
+    @State private var rowInteraction = KinlogueRowInteraction<MemberSidebarSelection>()
     @FocusState private var focusedSidebarSelection: MemberSidebarSelection?
 
     var body: some View {
@@ -102,11 +102,15 @@ struct MemberSidebarView: View {
                     Button {
                         selectSidebar(.allRecords)
                     } label: {
-                        Label(AppLocalization.string("全部记录"), systemImage: "clock.arrow.circlepath")
+                        SidebarRowLabel(
+                            AppLocalization.string("全部记录"),
+                            systemImage: "clock.arrow.circlepath",
+                            color: sidebarRowForeground(for: .allRecords)
+                        )
                             .sidebarRowHitTarget()
                             .foregroundStyle(sidebarRowForeground(for: .allRecords))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.kinlogueRow { rowInteraction.setPressed($0, for: .allRecords) })
                     .focusEffectDisabled()
                     .focused($focusedSidebarSelection, equals: .allRecords)
                     .background(sidebarRowBackground(for: .allRecords))
@@ -116,7 +120,7 @@ struct MemberSidebarView: View {
                         currentSidebarSelection == .allRecords ? .isSelected : []
                     )
                     .onHover { isHovering in
-                        updateHoveredSidebarSelection(.allRecords, isHovering: isHovering)
+                        rowInteraction.setHovering(isHovering, for: .allRecords)
                     }
                     .onMoveCommand { direction in
                         moveSidebarSelection(from: .allRecords, direction: direction)
@@ -124,14 +128,15 @@ struct MemberSidebarView: View {
                     Button {
                         selectSidebar(.imaging)
                     } label: {
-                        Label(
+                        SidebarRowLabel(
                             AppLocalization.string("医学影像"),
-                            systemImage: "waveform.path.ecg.rectangle"
+                            systemImage: "waveform.path.ecg.rectangle",
+                            color: sidebarRowForeground(for: .imaging)
                         )
                         .sidebarRowHitTarget()
                         .foregroundStyle(sidebarRowForeground(for: .imaging))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.kinlogueRow { rowInteraction.setPressed($0, for: .imaging) })
                     .focusEffectDisabled()
                     .focused($focusedSidebarSelection, equals: .imaging)
                     .background(sidebarRowBackground(for: .imaging))
@@ -141,7 +146,7 @@ struct MemberSidebarView: View {
                         currentSidebarSelection == .imaging ? .isSelected : []
                     )
                     .onHover { isHovering in
-                        updateHoveredSidebarSelection(.imaging, isHovering: isHovering)
+                        rowInteraction.setHovering(isHovering, for: .imaging)
                     }
                     .onMoveCommand { direction in
                         moveSidebarSelection(from: .imaging, direction: direction)
@@ -150,11 +155,12 @@ struct MemberSidebarView: View {
                         selectSidebar(.lanInbox)
                     } label: {
                         HStack {
-                            Label(
+                            SidebarRowLabel(
                                 isLANReceiverActive ? AppLocalization.string("手机上传（接收中）") : AppLocalization.string("手机上传"),
                                 systemImage: isLANReceiverActive
                                     ? "dot.radiowaves.left.and.right"
-                                    : "tray.and.arrow.down"
+                                    : "iphone.and.arrow.forward.inward",
+                                color: sidebarRowForeground(for: .lanInbox)
                             )
                             Spacer()
                             if lanInboxItemCount > 0 {
@@ -166,7 +172,7 @@ struct MemberSidebarView: View {
                         .sidebarRowHitTarget()
                         .foregroundStyle(sidebarRowForeground(for: .lanInbox))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.kinlogueRow { rowInteraction.setPressed($0, for: .lanInbox) })
                     .focusEffectDisabled()
                     .focused($focusedSidebarSelection, equals: .lanInbox)
                     .background(sidebarRowBackground(for: .lanInbox))
@@ -181,7 +187,7 @@ struct MemberSidebarView: View {
                     )
                     .listRowBackground(Color.clear)
                     .onHover { isHovering in
-                        updateHoveredSidebarSelection(.lanInbox, isHovering: isHovering)
+                        rowInteraction.setHovering(isHovering, for: .lanInbox)
                     }
                     .onMoveCommand { direction in
                         moveSidebarSelection(from: .lanInbox, direction: direction)
@@ -212,7 +218,7 @@ struct MemberSidebarView: View {
                                 }
                                 .sidebarRowHitTarget()
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.kinlogueRow { rowInteraction.setPressed($0, for: selection) })
                             .focusEffectDisabled()
                             .focused($focusedSidebarSelection, equals: selection)
                             .onMoveCommand { direction in
@@ -238,7 +244,7 @@ struct MemberSidebarView: View {
                         .overlay(sidebarRowFocusOverlay(for: selection))
                         .listRowBackground(Color.clear)
                         .onHover { isHovering in
-                            updateHoveredSidebarSelection(selection, isHovering: isHovering)
+                            rowInteraction.setHovering(isHovering, for: selection)
                         }
                         .contextMenu {
                             Button(AppLocalization.string("编辑")) { onEdit(member) }
@@ -247,7 +253,11 @@ struct MemberSidebarView: View {
                         }
                     }
                     SidebarActionButton(action: onAdd) {
-                        Label(AppLocalization.string("添加家庭成员"), systemImage: "person.badge.plus")
+                        SidebarRowLabel(
+                            AppLocalization.string("添加家庭成员"),
+                            systemImage: "person.badge.plus",
+                            color: KinlogueTheme.onVariant
+                        )
                     }
                 }
 
@@ -259,16 +269,17 @@ struct MemberSidebarView: View {
                             } label: {
                                 HStack {
                                     // The file name is the user's own; it is shown as it is.
-                                    Label(
+                                    SidebarRowLabel(
                                         draft.displayName ?? draftLabel(draft),
-                                        systemImage: "doc.badge.clock"
+                                        systemImage: "doc.badge.clock",
+                                        color: KinlogueTheme.onVariant
                                     )
                                     .lineLimit(1)
                                     .truncationMode(.middle)
                                     Spacer()
                                     Image(systemName: "chevron.right")
                                         .font(.caption)
-                                        .foregroundStyle(.tertiary)
+                                        .foregroundStyle(KinlogueTheme.onVariantSubtle)
                                 }
                             }
                             .help(draft.displayName ?? "")
@@ -288,14 +299,17 @@ struct MemberSidebarView: View {
                                 onOpenDICOMStudy(study.id)
                             } label: {
                                 HStack {
-                                    Label(AppLocalization.string("医学影像检查"), systemImage: "waveform.path.ecg.rectangle")
+                                    SidebarRowLabel(
+                                        AppLocalization.string("医学影像检查"),
+                                        systemImage: "waveform.path.ecg.rectangle",
+                                        color: KinlogueTheme.onVariant
+                                    )
                                     Spacer()
                                     Text("\(study.retainedObjectCount)")
                                         .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.secondary)
                                     Image(systemName: "chevron.right")
                                         .font(.caption)
-                                        .foregroundStyle(.tertiary)
+                                        .foregroundStyle(KinlogueTheme.onVariantSubtle)
                                 }
                             }
                             .accessibilityHint(AppLocalization.string("确认家庭成员与检查日期"))
@@ -308,23 +322,31 @@ struct MemberSidebarView: View {
                         ForEach(backgroundDrafts) { draft in
                             if draft.state == .failed {
                                 HStack {
-                                    Button { onRetryDraft(draft.id) } label: {
-                                        Label(AppLocalization.string("识别失败，点按重试"), systemImage: "arrow.clockwise.circle")
+                                    SidebarActionButton {
+                                        onRetryDraft(draft.id)
+                                    } label: {
+                                        SidebarRowLabel(
+                                            AppLocalization.string("识别失败，点按重试"),
+                                            systemImage: "arrow.clockwise",
+                                            color: KinlogueTheme.onVariant
+                                        )
                                     }
-                                    .buttonStyle(.plain)
                                     .disabled(busyDraftIDs.contains(draft.id))
-                                    Spacer()
                                     Button(role: .destructive) { onDiscardDraft(draft.id) } label: {
                                         Image(systemName: "trash")
                                     }
-                                    .buttonStyle(.borderless)
+                                    .buttonStyle(.kinlogueGhost(.danger))
                                     .accessibilityLabel(AppLocalization.string("放弃这份失败的导入"))
                                     .disabled(busyDraftIDs.contains(draft.id))
                                 }
                                 .selectionDisabled()
                             } else {
-                                Label(draftLabel(draft), systemImage: "hourglass")
-                                    .foregroundStyle(.secondary)
+                                SidebarRowLabel(
+                                    draftLabel(draft),
+                                    systemImage: "hourglass",
+                                    color: KinlogueTheme.onVariant
+                                )
+                                    .foregroundStyle(KinlogueTheme.onVariant)
                                     .selectionDisabled()
                             }
                         }
@@ -348,14 +370,18 @@ struct MemberSidebarView: View {
                 selectSidebar(.settings)
             } label: {
                 HStack {
-                    Label(AppLocalization.string("设置"), systemImage: "gearshape")
+                    SidebarRowLabel(
+                        AppLocalization.string("设置"),
+                        systemImage: "gearshape",
+                        color: sidebarRowForeground(for: .settings)
+                    )
                     Spacer()
                 }
                 .padding(.horizontal, 12)
                 .sidebarRowHitTarget()
                 .foregroundStyle(sidebarRowForeground(for: .settings))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.kinlogueRow { rowInteraction.setPressed($0, for: .settings) })
             .focusEffectDisabled()
             .focused($focusedSidebarSelection, equals: .settings)
             .background(sidebarRowBackground(for: .settings))
@@ -363,7 +389,7 @@ struct MemberSidebarView: View {
             .padding(10)
             .accessibilityAddTraits(selectedSection == .settings ? .isSelected : [])
             .onHover { isHovering in
-                updateHoveredSidebarSelection(.settings, isHovering: isHovering)
+                rowInteraction.setHovering(isHovering, for: .settings)
             }
             .onMoveCommand { direction in
                 moveSidebarSelection(from: .settings, direction: direction)
@@ -389,14 +415,11 @@ struct MemberSidebarView: View {
     private func sidebarRowBackground(
         for selection: MemberSidebarSelection
     ) -> some View {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(
-                currentSidebarSelection == selection
-                    ? KinlogueTheme.selection
-                    : hoveredSidebarSelection == selection
-                        ? KinlogueTheme.selectionHover
-                        : .clear
-            )
+        RoundedRectangle(cornerRadius: KinlogueTheme.Radius.control)
+            .fill(rowInteraction.fill(
+                for: selection,
+                isSelected: currentSidebarSelection == selection
+            ))
     }
 
     private func sidebarRowForeground(for selection: MemberSidebarSelection) -> Color {
@@ -412,7 +435,7 @@ struct MemberSidebarView: View {
     private func sidebarRowFocusOverlay(
         for selection: MemberSidebarSelection
     ) -> some View {
-        RoundedRectangle(cornerRadius: 8)
+        RoundedRectangle(cornerRadius: KinlogueTheme.Radius.control)
             .stroke(
                 focusedSidebarSelection == selection
                     ? KinlogueTheme.primary
@@ -436,17 +459,6 @@ struct MemberSidebarView: View {
         selectSidebar(next)
     }
 
-    private func updateHoveredSidebarSelection(
-        _ selection: MemberSidebarSelection,
-        isHovering: Bool
-    ) {
-        if isHovering {
-            hoveredSidebarSelection = selection
-        } else if hoveredSidebarSelection == selection {
-            hoveredSidebarSelection = nil
-        }
-    }
-
     private func draftLabel(_ draft: DraftSummary) -> String {
         switch draft.state {
         case .needsReview: AppLocalization.string("等待确认")
@@ -465,9 +477,37 @@ private extension View {
     }
 }
 
+/// A sidebar-style list tints a bare `Label` icon with the accent color and
+/// grays it while the window is inactive, ignoring the row's foreground. Only
+/// a style on the symbol itself keeps icon and title on the same row color.
+private struct SidebarRowLabel: View {
+    let title: String
+    let systemImage: String
+    let color: Color
+
+    init(_ title: String, systemImage: String, color: Color) {
+        self.title = title
+        self.systemImage = systemImage
+        self.color = color
+    }
+
+    var body: some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: systemImage)
+                .foregroundStyle(color)
+        }
+    }
+}
+
 private struct SidebarActionButton<Label: View>: View {
     let action: () -> Void
     let label: Label
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+    @State private var isPressed = false
+    @FocusState private var isFocused: Bool
 
     init(
         action: @escaping () -> Void,
@@ -482,7 +522,23 @@ private struct SidebarActionButton<Label: View>: View {
             label
                 .sidebarRowHitTarget()
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.kinlogueRow { isPressed = $0 })
+        .focusEffectDisabled()
+        .focused($isFocused)
+        .foregroundStyle(KinlogueTheme.onVariant)
+        .background(
+            RoundedRectangle(cornerRadius: KinlogueTheme.Radius.control)
+                .fill(KinlogueTheme.rowFill(
+                    isSelected: false,
+                    isHovering: isHovering && isEnabled,
+                    isPressed: isPressed
+                ))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: KinlogueTheme.Radius.control)
+                .stroke(isFocused ? KinlogueTheme.primary : .clear, lineWidth: 2)
+        )
+        .onHover { isHovering = $0 }
     }
 }
 
@@ -512,16 +568,16 @@ struct MemberEditorView: View {
                 .disabled(isSaving)
             Text(AppLocalization.string("同名时会自动显示区分标签或本地短标识。"))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KinlogueTheme.onVariant)
             if let errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle")
+                KinlogueStatusLabel(errorMessage, tone: .danger)
                     .font(.caption)
-                    .foregroundStyle(.red)
                     .accessibilityLabel(AppLocalization.string("错误：\(errorMessage)"))
             }
             HStack {
                 Spacer()
                 Button(AppLocalization.string("取消")) { dismiss() }
+                    .buttonStyle(.kinlogueSecondary)
                     .keyboardShortcut(.cancelAction)
                     .disabled(isSaving)
                     .accessibilityIdentifier("member-edit-cancel")
@@ -544,6 +600,7 @@ struct MemberEditorView: View {
         }
         .padding(28)
         .frame(width: 430)
+        .kinlogueSheetCanvas()
         .interactiveDismissDisabled(isSaving)
     }
 }

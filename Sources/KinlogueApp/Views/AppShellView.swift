@@ -48,8 +48,7 @@ struct AppShellView: View {
         .background(KinlogueTheme.surface)
         .toolbarBackground(KinlogueTheme.surface, for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
-        .tint(KinlogueTheme.primary)
-        .preferredColorScheme(.light)
+        .kinlogueAppearance()
         .background(PrimaryWindowReader { window in
             lanInboxModel.configurePrimaryWindow(window)
         })
@@ -537,7 +536,7 @@ struct AppShellView: View {
                 Button {
                     model.presentDICOMImport()
                 } label: {
-                    Label(AppLocalization.string("导入医学影像"), systemImage: "waveform.path.ecg.rectangle")
+                    Label(AppLocalization.string("导入医学影像"), systemImage: "square.and.arrow.down.on.square")
                 }
                 .help(AppLocalization.string("导入医学影像"))
                 ComparisonToolbarItem(
@@ -636,6 +635,7 @@ struct AppShellView: View {
             Button(AppLocalization.string("从数据备份恢复…")) {
                 restoreModel.present()
             }
+            .buttonStyle(.kinloguePrimary)
         }
     }
 
@@ -648,9 +648,11 @@ struct AppShellView: View {
             Button(AppLocalization.string("重试")) {
                 Task { hasCompletedStartup = await startupCoordinator.start() }
             }
+            .buttonStyle(.kinloguePrimary)
             Button(AppLocalization.string("从数据备份恢复…")) {
                 restoreModel.present()
             }
+            .buttonStyle(.kinlogueSecondary)
         }
     }
 

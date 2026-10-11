@@ -39,7 +39,7 @@ struct SlowRecognitionNotice: View {
     var body: some View {
         Text(AppLocalization.string("识别仍在进行。系统首次识别需要准备识别模型，可能要等半分钟左右，之后会快很多；页数多的文件也需要更久。"))
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(KinlogueTheme.onVariant)
             .fixedSize(horizontal: false, vertical: true)
     }
 }

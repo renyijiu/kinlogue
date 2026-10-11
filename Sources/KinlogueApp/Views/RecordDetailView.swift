@@ -91,8 +91,7 @@ struct RecordDetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .padding(12)
-            .background(KinlogueTheme.container, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(KinlogueTheme.outline))
+            .kinloguePanel()
             .accessibilityIdentifier("record-original-pane")
             .padding(.horizontal, 24)
             .padding(.bottom, 24)
@@ -107,11 +106,13 @@ struct RecordDetailView: View {
                     Text(record.title?.transcription ?? record.reportType?.transcription ?? AppLocalization.string("健康记录"))
                         .font(.title2.weight(.semibold))
                     Text(memberLabel ?? AppLocalization.string("家庭成员"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KinlogueTheme.onVariant)
                 }
                 Spacer()
                 Button(AppLocalization.string("编辑"), action: onEdit)
+                    .buttonStyle(.kinlogueSecondary)
                 Button(AppLocalization.string("删除记录"), role: .destructive, action: onDelete)
+                    .buttonStyle(.kinlogueDestructive)
                 Text(record.timelineDate.map {
                     ReportDateSemantics.formatted($0, style: .medium)
                 } ?? AppLocalization.string("日期未知"))
@@ -136,7 +137,7 @@ struct RecordDetailView: View {
                     SourcePages(field: conclusion, sources: record.sources)
                 } else {
                     Text(AppLocalization.string("原报告未提供结论"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KinlogueTheme.onVariant)
                 }
             }
 
@@ -180,8 +181,7 @@ private struct DetailCard<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
-        .background(KinlogueTheme.container, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(KinlogueTheme.outline))
+        .kinloguePanel()
     }
 }
 
@@ -194,7 +194,7 @@ private struct MetadataRow: View {
         if let field, !field.transcription.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(label).foregroundStyle(.secondary).frame(width: 72, alignment: .leading)
+                    Text(label).foregroundStyle(KinlogueTheme.onVariant).frame(width: 72, alignment: .leading)
                     Text(field.transcription)
                 }
                 SourcePages(field: field, sources: sources)
@@ -210,7 +210,7 @@ private struct SourcePages: View {
     var body: some View {
         Text(field.sourceDescription(for: sources))
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(KinlogueTheme.onVariant)
             .accessibilityLabel(field.sourceAccessibilityLabel(for: sources))
     }
 }

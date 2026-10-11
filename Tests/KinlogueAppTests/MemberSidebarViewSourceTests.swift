@@ -47,8 +47,11 @@ struct MemberSidebarViewSourceTests {
         let source = try String(contentsOf: memberSidebarURL, encoding: .utf8)
 
         #expect(source.contains("private struct SidebarActionButton<Label: View>: View"))
-        #expect(source.components(separatedBy: "SidebarActionButton").count - 1 == 4)
+        // Declaration plus add member, report review, imaging review and failed-import retry.
+        #expect(source.components(separatedBy: "SidebarActionButton").count - 1 == 5)
         #expect(source.contains("label\n                .sidebarRowHitTarget()"))
+        #expect(source.contains(".buttonStyle(.kinlogueRow { isPressed = $0 })"))
+        #expect(source.contains(".stroke(isFocused ? KinlogueTheme.primary : .clear, lineWidth: 2)"))
         #expect(source.contains(".contentShape(Rectangle())"))
         #expect(source.components(separatedBy: ".selectionDisabled()").count - 1 == 2)
     }

@@ -1221,3 +1221,44 @@
 - **验证**：当前 Mac（macOS 27.0.1 / Xcode 27.0）未提交工作树上，完整 `scripts/test.sh` 通过，主测试清单经脚本核对为 995 tests / 91 suites，新增 1 项历史门禁回归；`scripts/lint.sh`、`scripts/verify-docs.sh`、当前树 `scripts/privacy-guard.sh` 和 `git diff --check` 通过。连续两次渲染的 11 个位图摘要一致，PNG 只含像素尺寸元数据；新 iconset 经 `scripts/generate-icns.swift` 打包后由 `iconutil` 展开为 10 个尺寸正确的表示。在一次性克隆中把新图标提交到真实历史之上：旧门禁失败，新门禁配新清单通过，新门禁配只含新摘要的清单失败。
 - **未执行**：`scripts/verify-app.sh` 要求干净的已提交工作树，替换图标后的 Release bundle 未构建或验证；新提交的远端 CI 未运行。图标在 macOS 26/27 的 Dock、Finder 中的实际显示，以及深色或着色外观，未人工核对。
 - **合并 main**：首次推送的 `9d99f9b` 上，远端 CI 的 lint、隐私、完整测试和 clean-source bundle 验证在 macOS 26 与 Xcode 27 两个环境均通过；macOS 26 基线任务随后在 DICOM XPC 步骤达到 30 分钟任务上限被取消，Xcode 27 的同一步骤通过。之后合并 `main` 的 `12dbc93`，账本与日志的冲突按保留两边内容解决，主测试清单为 1031 tests / 93 suites。合并后的工作树在当前 Mac 上重新通过完整 `scripts/test.sh`、`scripts/lint.sh`、`scripts/verify-docs.sh` 和当前树 `scripts/privacy-guard.sh`；合并提交的远端 CI 尚未运行。
+
+## [2026-10-11] ui | 统一配色令牌、按钮与列表行交互状态
+
+- **范围**：按用户确认的三项决定处理全 App 的配色与交互状态不一致：内容区和 sheet 的取消、关闭与普通操作改用自定义次要按钮，系统样式只留给窗口工具栏、系统确认框、菜单和原生表单控件；列表行使用选中 13% / 悬停 5% / 按下 18% 的 Primary 交互层；继续只支持亮色，并让每个窗口与 sheet 各自声明。改动限于 `Sources/KinlogueApp/Views`，不涉及 ViewModel、服务、存储、LAN 或手机上传页，也没有新增或删除用户可见文案。
+- **修正**：[`KinlogueTheme`](../Sources/KinlogueApp/Views/KinlogueTheme.swift) 新增 Selection Pressed、Success/Warning/Danger 及其容器色、三档圆角，以及破坏性按钮、Ghost 图标按钮、上报按下状态的行按钮、`KinlogueRowInteraction`、`kinloguePanel`、`kinlogueInputFrame`、`KinlogueStatusLabel`、`KinlogueWarningNotice`、`kinlogueAppearance` 和 `kinlogueSheetCanvas`。Warning 与 Danger 取自手机上传页已有的 `.warning` 和 `button.destructive` 配色。23 个页面文件替换了系统 `.secondary` / `.tertiary`、`.red` / `.orange` / `.green`、`.borderless`、`Color(nsColor:)`、`regularMaterial` 和圆角数值；14 个 sheet 根视图统一为 Surface 画布；DICOM Viewer 窗口声明亮色与 Primary，叠在黑色影像画布上的状态浮层固定为深色；侧边栏命令行补齐悬停、按下与焦点描边；删除资料库弹窗由 grouped Form 改为与其他 sheet 相同的布局，取消在左、破坏性操作在右；原件预览在加载、失败和已加载状态使用同一个 Container 底色。图标调整三处：工具栏“导入医学影像”改用 `square.and.arrow.down.on.square`，不再与“医学影像”导航共用符号；侧边栏“手机上传”与工具栏、收件箱页眉同用 `iphone.and.arrow.forward.inward`；重试统一为 `arrow.clockwise`。
+- **规范变更**：[`design-system.md`](design-system.md) 已同步。其中两条是对旧规范的有意修改：原“取消、删除、工具栏按钮继续使用系统样式”收窄为上述范围；原“手机接收弹窗使用白色画布”改为 Surface 画布，说明卡与二维码使用 Card + Outline。DICOM Viewer 的页眉与控制条包含无法套用自定义按钮样式的 Menu 和 Picker，整条保留系统控件，作为明确例外记录。
+- **测试**：改写 `KinlogueThemeSourceTests`、`MemberSidebarViewSourceTests` 和 `ImportReviewViewSafetyTests` 中锁定旧写法的断言，并新增 4 项：窗口、sheet 与 popover 的外观声明覆盖；`Views` 目录的令牌门禁；行交互层的优先级与明度顺序；文字和状态前景在各画布上的对比度不低于 4.5。主测试清单由 994 变为 998 tests / 91 suites，[`acceptance/current-release.md`](acceptance/current-release.md) 已同步。
+- **验证**：当前 Mac（macOS 27.0 / Xcode 27.0）。完整 `scripts/test.sh` 退出码 0，覆盖 998 tests / 91 suites 主清单、13 项独立 XCTest、18 项 DICOM 导入、安装式 LAN HTTP 和真实双流背压门禁。该次完整运行之后只调整了两处视图细节（禁用的命令行不显示悬停底色、归档提示改为居中对齐），随后重跑视图相关的 99 tests / 16 suites 和 `scripts/lint.sh`（warnings-as-errors build 与文档门禁）通过；`scripts/verify-docs.sh` 与 `scripts/privacy-guard.sh` 通过。另用临时测试文件以 `NSHostingView` 和合成数据离屏渲染了组件、记录详情、成员编辑、删除资料库、影像详情和设置页三种备份状态用于目视核对；该文件与图片未进入仓库。
+- **后续调整**：用户运行本地构建后指出日期选择 popover 的日历带蓝色外框。原因是原生 `NSDatePicker` 成为第一响应者后绘制系统强调色焦点环，外加控件自带的内层底框。[`LocalizedDatePickerConfiguration`](../Sources/KinlogueApp/Views/LocalizedDatePicker.swift) 关闭 bezel、border、背景和焦点环；在现有配置测试中补充四项断言，不新增测试计数。`LocalizedDatePickerTests` 的 4 tests 通过，并以离屏渲染对比了有无底框的日历。选中日的蓝色来自系统强调色，本次未改。
+- **边界**：没有启动真实 App。sheet 是否继承主窗口 tint 仍是源码推断，逐根声明不依赖这一结论。悬停与按下的实际动效、系统深色模式下的 sheet 与 Viewer、键盘 Tab/方向键、VoiceOver、提高对比度和窄窗口均未人工验证；键盘焦点环、文本选区和原生日期选择器仍跟随系统强调色。README 预览图 `docs/assets/kinlogue-overview.jpg` 受固定 SHA 门禁保护，本轮未更新，与当前按钮和选中态外观存在差异。改动留在本地工作树，未提交、未 push；候选状态保持 `not-verified` / `pendingManual`。
+
+## [2026-10-11] packaging | App 包加入与 Primary 同值的强调色资源
+
+- **原因**：上一条记录把“原生控件的焦点环、文本选区和日历选中日跟随系统强调色”列为已知限制。用户在本地构建中确认日期选择器的选中日仍是系统蓝，并要求一并处理。SwiftUI 的 tint 到达不了 AppKit 自绘的这些部分，只有主包里的强调色资源可以。
+- **修正**：新增 [`packaging/Assets.xcassets`](../packaging/Assets.xcassets)，只含一个 sRGB `AccentColor`（`#1E6254`）；`packaging/Info.plist` 声明 `NSAccentColorName`。`build-app.sh` 在签名前用 Xcode 自带的 `actool` 编译目录，核对编译结果与 `Info.plist` 的名称一致后复制为 `Contents/Resources/Assets.car`；目录缺失、含符号链接或名称不一致都会终止构建。`verify-app.sh` 把该文件加入精确资源清单，检查源码和 bundle 两处 `NSAccentColorName`，并用 `assetutil --info` 确认归档只有这一个不透明 sRGB 颜色且通道值为 30/98/84。归档内嵌构建时间戳，所以按内容而不是固定哈希校验。验收 App 由已验证 bundle 整体复制而来，随之带上同一资源。没有新增依赖、entitlement 或运行时代码。
+- **生效范围**：只在用户的系统强调色保持默认“多色”时生效；用户选了具体强调色时，原生控件按 macOS 规则跟随用户选择。`swift build` 直接产出的可执行文件和测试进程没有主包资源，不体现这一颜色。规则见 [`design-system.md`](design-system.md)，构建说明见 [`testing-and-release.md`](testing-and-release.md)。
+- **测试**：`KinlogueThemeSourceTests` 新增 1 项，核对 colorset 与 `KinlogueTheme.primary` 同值、`Info.plist` 声明、构建脚本在签名前复制归档，以及校验脚本的清单和内容检查；`LANPhoneAssetSafetyTests` 的精确清单断言加入该文件。主测试清单由 998 变为 999 tests / 91 suites。
+- **验证**：当前 Mac（macOS 27.0 / Xcode 27.0，系统强调色为默认多色）。用临时目录里一个不含任何资料、使用独立标识的最小探针 App 对照：带该资源时 `NSColor.controlAccentColor` 为 `#1E6254`，焦点环与选区色同步变为玉绿系；不带时为系统蓝 `#007AFF`。把两个脚本中新增的片段原样抽出，对临时 bundle 运行：正向通过；颜色偏差一个色阶、多出一个颜色、空文件、目录缺少 colorset、`Info.plist` 缺少声明、目录为符号链接六种情形全部按预期拒绝。`scripts/verify-app.sh --lan-prerequisites-only` 通过。完整 `scripts/test.sh` 在最终代码上退出码 0（999 tests / 91 suites 主清单与各独立门禁），`scripts/lint.sh`、`scripts/verify-docs.sh` 和 `scripts/privacy-guard.sh` 通过。
+- **边界**：完整的 `scripts/verify-app.sh` 没有运行，因为它会重建 `dist/Kinlogue.app`，而用户当时正在运行该构建；新增校验只以抽出的片段验证过，尚未在一次真实的整包校验中执行。远端 CI 上的 `actool` 行为、macOS 26 独立机器、用户选了具体系统强调色时的表现以及 Developer ID 分发流程均未验证。改动留在本地工作树，未提交、未 push；候选状态保持 `not-verified` / `pendingManual`。
+
+- **提交整理**：强调色资源编入本地构建后，资源清单与 `verify-app.sh` 的精确清单一致，抽出的颜色内容校验对该构建的 `Assets.car` 通过，签名有效。用户运行该构建后确认日期选择器、焦点环等效果没有问题，并要求提交。配色统一、日期选择器调整和强调色资源按用户“一起做”的要求合并为一个逻辑提交；上两条中的“未提交”描述保留为验证发生时的状态。提交不提升候选验收状态，完整 `verify-app.sh`、远端 CI 和人工矩阵仍未执行。
+
+## [2026-10-11] docs | 更新 README 预览图并统一侧边栏图标颜色
+
+- **原因**：上一提交之后 README 预览图与实际界面不一致。用户询问能否去掉预览图的固定摘要门禁。结论是保留：它是公开仓库里唯一保证入库截图为已审查合成图的机制，去掉后该路径上的任意图片都会通过；更新预览图只需要登记新图，不需要放宽门禁。
+- **生成方式**：用一个临时测试文件在测试进程里构造假数据服务（四个带“合成示例”标注的成员、九条合成记录和一页由代码绘制的合成 PDF），把真实的 `AppShellView` 放进屏幕外的窗口，等数据、选中记录和原件预览就绪后，读取本进程这一个窗口的合成结果并导出为 2724×1600 的 JPEG。没有启动 App，没有读取资料库，也没有截取屏幕上的其他内容；临时文件已删除，未进入仓库。导出的文件只带 JFIF、像素尺寸和空的 IPTC 段，不含日期、设备或位置信息。
+- **门禁**：历史门禁对每个路径只认一个摘要，原路径上替换必然被拒绝。新图使用 `docs/assets/kinlogue-overview-2026-10.jpg`，在两个门禁脚本和摘要清单中登记；旧图从当前树删除，旧路径只为历史保留登记，当前树门禁不再接受该路径。门禁逻辑没有改动。`ReleaseScriptSafetyTests` 改用新路径，并补充“旧路径即使放入当前已审查的图片也被拒绝”的断言。流程写入 [`privacy-and-security.md`](privacy-and-security.md)。
+- **顺带修正**：渲染时发现侧边栏的“全部记录”“医学影像”“手机上传”“设置”和各命令行图标不跟随行颜色：侧边栏样式的 `List` 把普通 `Label` 图标染成强调色，窗口不活跃时置灰，而成员行图标显式着色、表现正常。对照实验确认这与按钮样式无关，上一提交之前同样如此。新增 `SidebarRowLabel` 在符号上显式设置颜色，九处调用全部替换；`KinlogueThemeSourceTests` 的现有侧边栏测试补充断言，不新增测试计数。规则写入 [`design-system.md`](design-system.md)。
+- **验证**：当前 Mac（macOS 27.0 / Xcode 27.0）。完整 `scripts/test.sh` 在最终代码上退出码 0（主清单仍为 999 tests / 91 suites，另含各独立门禁），`scripts/lint.sh`、`scripts/verify-docs.sh` 和 `scripts/privacy-guard.sh` 通过。历史门禁以一个不挂在任何分支上的演练提交验证：该提交的历史同时包含旧路径上的原图和新路径上的新图，`scripts/privacy-history-guard.sh --ref <演练提交>` 通过；分支和工作树未因演练改变。新图逐像素目视检查过，只有合成成员、合成记录和合成 PDF。
+- **边界**：预览图是窗口不活跃时的外观，交通灯和工具栏图标为灰色。侧边栏图标的修正只通过离屏渲染和预览图确认，尚未在运行中的 App 里由人确认。完整 `verify-app.sh`、远端 CI 和人工矩阵仍未执行；候选状态保持 `not-verified` / `pendingManual`。改动在本地工作树，写入本条时尚未提交。
+- **提交整理**：用户查看新预览图后要求把预览图更新、门禁登记和侧边栏图标修正一起提交，作为上一提交之后的第二个提交保存；没有额外行为修改。上面的“尚未提交”保留为写入时的状态，提交不提升候选验收状态。
+
+## [2026-10-11] merge | 把 main 的字段建议、交互改进与品牌更新并入配色统一分支
+
+- **原因**：PR #18 与 `main` 冲突。`main` 新合入 #16（字段建议规则与交互改进）和 #17（定位与应用图标），与本分支在五个视图文件和三份文档上冲突。按“保留两边意图”合并，不 rebase、不强推。
+- **视图**：`main` 给 sheet 内联错误补了三角图标和红色前景，本分支把同一批错误换成了 `KinlogueStatusLabel`。两边的目的都是“错误不只靠颜色表达”，合并后保留状态标签。导入确认页同时保留 `main` 新增的慢识别说明和本分支的 On Variant 前景；侧边栏“待确认”行同时保留 `main` 的文件名显示、截断规则和本分支的 `SidebarRowLabel`。`main` 新增的 `SlowRecognitionNotice` 原本使用系统 `.secondary`，改为 On Variant，以满足 `Views` 目录的令牌门禁。
+- **规则调和**：`main` 新增的设计规范第 25 条写的是“带 `exclamationmark.triangle` 的 `Label` 加红色前景”，改写为使用 `KinlogueStatusLabel(_:tone: .danger)`，符号为 `exclamationmark.octagon`，以便与警告的三角符号区分。这是对 `main` 上刚合入规则的文字修改，意图未变。`ImportReviewViewSafetyTests.inlineErrorsCarryAWarningSymbolAndNotOnlyColour` 原先按 `.foregroundStyle(.red)` 与三角符号的出现次数断言，改为断言五个文件的错误都经过状态标签、不存在裸的危险色文字或系统红。第 1 条取本分支收窄后的系统样式范围，第 2 条取 `main` 关于 Command-Return 的补充。
+- **媒体门禁**：`main` 把历史门禁改为同一路径可登记多条已审查摘要，本分支此前“每个路径只认一个摘要”的说明不再成立，[`privacy-and-security.md`](privacy-and-security.md) 已改写。预览图的带日期文件名已经进入本分支的可达历史，因此保留该路径及其登记；今后更新可以在同一路径追加摘要。两边对摘要清单、路径清单和 `ReleaseScriptSafetyTests` 的修改自动合并后一致。
+- **账本**：`main` 为 1031 tests / 93 suites，本分支新增 5 项，合并后实测为 1036 tests / 93 suites。`current-release.md` 的其余措辞取 `main`。
+- **验证**：当前 Mac（macOS 27.0 / Xcode 27.0）。合并后的树上完整 `scripts/test.sh` 退出码 0；`scripts/lint.sh`、`scripts/verify-docs.sh`、`scripts/privacy-guard.sh` 通过。
+- **边界**：README 预览图在合并前渲染，没有重新生成；`main` 的界面改动不影响图中展示的状态（“全部记录”下仍显示成员标签，图中没有待确认草稿和识别状态）。完整 `verify-app.sh`、远端 CI 和人工矩阵仍未执行；候选状态保持 `not-verified` / `pendingManual`。

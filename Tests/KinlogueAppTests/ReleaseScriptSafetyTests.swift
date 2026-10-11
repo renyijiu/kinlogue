@@ -459,10 +459,10 @@ struct ReleaseScriptSafetyTests {
             withIntermediateDirectories: true
         )
         let reviewedScreenshot = documentationAssets
-            .appendingPathComponent("kinlogue-overview.jpg")
+            .appendingPathComponent("kinlogue-overview-2026-10.jpg")
         try fileManager.copyItem(
             at: repositoryURL.appendingPathComponent(
-                "docs/assets/kinlogue-overview.jpg"
+                "docs/assets/kinlogue-overview-2026-10.jpg"
             ),
             to: reviewedScreenshot
         )
@@ -475,6 +475,21 @@ struct ReleaseScriptSafetyTests {
         #expect(tampered.status != 0)
         #expect(tampered.output.contains("checked-in report-like PDF or image"))
         try fileManager.removeItem(at: reviewedScreenshot)
+
+        // The retired preview path stays approved for history only: even the
+        // currently reviewed image is rejected there in the working tree.
+        let retiredScreenshot = documentationAssets
+            .appendingPathComponent("kinlogue-overview.jpg")
+        try fileManager.copyItem(
+            at: repositoryURL.appendingPathComponent(
+                "docs/assets/kinlogue-overview-2026-10.jpg"
+            ),
+            to: retiredScreenshot
+        )
+        let retired = try run(script, [], environment: environment)
+        #expect(retired.status != 0)
+        #expect(retired.output.contains("checked-in report-like PDF or image"))
+        try fileManager.removeItem(at: retiredScreenshot)
 
         let packaging = root.appendingPathComponent("packaging")
         try fileManager.createDirectory(at: packaging, withIntermediateDirectories: true)
@@ -523,7 +538,7 @@ struct ReleaseScriptSafetyTests {
 
     @Test
     func privacyHistoryGuardRejectsUnapprovedMediaAtAllowedPathAfterRestore() throws {
-        for mediaPath in ["packaging/AppIcon.png", "docs/assets/kinlogue-overview.jpg"] {
+        for mediaPath in ["packaging/AppIcon.png", "docs/assets/kinlogue-overview-2026-10.jpg"] {
             try assertPrivacyHistoryRejectsRestoredMedia(at: mediaPath)
         }
     }

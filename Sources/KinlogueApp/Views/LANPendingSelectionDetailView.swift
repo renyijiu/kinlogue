@@ -7,6 +7,7 @@ struct LANPendingSelectionDetailView: View {
     @State private var loadedPreview: LoadedPreview?
     @State private var isPreviewLoading = false
     @State private var previewFailed = false
+    @State private var rowInteraction = KinlogueRowInteraction<LANInboxItem.ID>()
 
     var body: some View {
         Group {
@@ -23,7 +24,7 @@ struct LANPendingSelectionDetailView: View {
                             Text(AppLocalization.string("作为 1 份报告"))
                                 .font(.title2.bold())
                             Text(AppLocalization.string("共 \(model.orderedSelectedItems.count) 个原件；顺序只影响这次报告。"))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(KinlogueTheme.onVariant)
                         }
                         Divider()
                         Text(AppLocalization.string("报告页序"))
@@ -33,7 +34,7 @@ struct LANPendingSelectionDetailView: View {
                             HStack(spacing: 12) {
                                 Text("\(index + 1)")
                                     .font(.caption.monospacedDigit())
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(KinlogueTheme.onVariant)
                                     .frame(width: 24)
                                 Button {
                                     previewItemID = item.id
@@ -50,7 +51,7 @@ struct LANPendingSelectionDetailView: View {
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.kinlogueRow { rowInteraction.setPressed($0, for: item.id) })
                                 .accessibilityLabel(AppLocalization.string("查看第 \(index + 1) 个原件"))
                                 .accessibilityAddTraits(
                                     previewItemID == item.id ? .isSelected : []
@@ -60,14 +61,14 @@ struct LANPendingSelectionDetailView: View {
                                 } label: {
                                     Image(systemName: "eye")
                                 }
-                                .buttonStyle(.borderless)
+                                .buttonStyle(.kinlogueGhost)
                                 .accessibilityLabel(AppLocalization.string("查看第 \(index + 1) 个原件"))
                                 Button {
                                     model.moveArchiveItem(itemID: item.id, offset: -1)
                                 } label: {
                                     Image(systemName: "arrow.up")
                                 }
-                                .buttonStyle(.borderless)
+                                .buttonStyle(.kinlogueGhost)
                                 .disabled(index == 0 || model.busyItemIDs.contains(item.id))
                                 .accessibilityLabel(AppLocalization.string("将 \(item.displayName.rawValue) 向前移动"))
                                 Button {
@@ -75,7 +76,7 @@ struct LANPendingSelectionDetailView: View {
                                 } label: {
                                     Image(systemName: "arrow.down")
                                 }
-                                .buttonStyle(.borderless)
+                                .buttonStyle(.kinlogueGhost)
                                 .disabled(
                                     index == model.orderedSelectedItems.count - 1
                                         || model.busyItemIDs.contains(item.id)
@@ -85,11 +86,15 @@ struct LANPendingSelectionDetailView: View {
                             .padding(.vertical, 6)
                             .padding(.horizontal, 8)
                             .background(
-                                previewItemID == item.id
-                                    ? KinlogueTheme.selection
-                                    : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 8)
+                                rowInteraction.fill(
+                                    for: item.id,
+                                    isSelected: previewItemID == item.id
+                                ),
+                                in: RoundedRectangle(cornerRadius: KinlogueTheme.Radius.control)
                             )
+                            .onHover { isHovering in
+                                rowInteraction.setHovering(isHovering, for: item.id)
+                            }
                             if index < model.orderedSelectedItems.count - 1 { Divider() }
                         }
                         Divider()
@@ -97,7 +102,7 @@ struct LANPendingSelectionDetailView: View {
                         Divider()
                         Text(AppLocalization.string("归档后会生成一份待确认报告；在报告中确认前不会进入时间线。"))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(KinlogueTheme.onVariant)
                     }
                     .padding(24)
                 }
@@ -140,10 +145,10 @@ struct LANPendingSelectionDetailView: View {
                     )
                     .id(item.id)
                     .frame(minHeight: 300)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .clipShape(RoundedRectangle(cornerRadius: KinlogueTheme.Radius.card))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(KinlogueTheme.outline)
+                        RoundedRectangle(cornerRadius: KinlogueTheme.Radius.card)
+                            .strokeBorder(KinlogueTheme.outline)
                     }
                     .accessibilityIdentifier("lan-inline-original-preview")
                 } else {

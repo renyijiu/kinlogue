@@ -89,6 +89,7 @@ struct SettingsView: View {
                             Button(AppLocalization.string("导出原始文件…")) {
                                 onExportOriginals()
                             }
+                            .buttonStyle(.kinlogueSecondary)
                             .focused(exportButtonFocus)
                             .fixedSize()
                             .frame(width: Self.controlColumnWidth, alignment: .trailing)
@@ -113,8 +114,7 @@ struct SettingsView: View {
                             Button(AppLocalization.string("删除本机数据…"), role: .destructive) {
                                 onDeleteVault()
                             }
-                            .tint(.red)
-                            .foregroundStyle(.red)
+                            .buttonStyle(.kinlogueDestructive)
                             .fixedSize()
                             .frame(width: Self.controlColumnWidth, alignment: .trailing)
                             .accessibilityIdentifier("settings-delete-local-data")
@@ -160,6 +160,7 @@ struct SettingsView: View {
                     Spacer(minLength: 24)
                     if backupModel.status.enrollment == .notConfigured {
                         Button(AppLocalization.string("选择备份目录…"), action: onChooseBackupDirectory)
+                            .buttonStyle(.kinloguePrimary)
                             .fixedSize()
                             .frame(width: Self.controlColumnWidth, alignment: .trailing)
                             .accessibilityIdentifier("backup-choose-directory")
@@ -171,21 +172,21 @@ struct SettingsView: View {
                     Text(AppLocalization.string("自动备份默认关闭。设置时会生成一份必须独立保存的恢复码。"))
                         .foregroundStyle(KinlogueTheme.onVariant)
                 case .pending:
-                    Label(
-                        AppLocalization.string("备份设置尚未完成。若你仍保存原恢复码，可以继续完成；续页不会生成新的恢复码。"),
-                        systemImage: "exclamationmark.triangle"
+                    KinlogueWarningNotice(
+                        AppLocalization.string("备份设置尚未完成。若你仍保存原恢复码，可以继续完成；续页不会生成新的恢复码。")
                     )
-                    .foregroundStyle(.orange)
                     HStack(spacing: 12) {
                         Button(AppLocalization.string("放弃未完成的设置…"), role: .destructive) {
                             isAbandonPendingBackupConfirmationPresented = true
                         }
+                        .buttonStyle(.kinlogueDestructive)
                         .disabled(backupModel.isPendingEnrollmentOperation)
                         .accessibilityIdentifier("backup-abandon-pending-enrollment")
                         Spacer()
                         Button(AppLocalization.string("继续未完成的备份设置…")) {
                             backupModel.presentPendingEnrollmentRecovery()
                         }
+                        .buttonStyle(.kinloguePrimary)
                         .disabled(backupModel.isPendingEnrollmentOperation)
                         .accessibilityIdentifier("backup-resume-pending-enrollment")
                     }
@@ -195,12 +196,12 @@ struct SettingsView: View {
 
                 Divider()
                 Button(AppLocalization.string("从恢复点恢复…"), action: onRestoreBackup)
+                    .buttonStyle(.kinlogueSecondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .accessibilityIdentifier("backup-restore")
 
                 if let failure = backupModel.failureText {
-                    Label(failure, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.red)
+                    KinlogueStatusLabel(failure, tone: .danger)
                         .accessibilityIdentifier("backup-status-error")
                 }
             }
@@ -210,6 +211,7 @@ struct SettingsView: View {
     private var configuredBackupControls: some View {
         VStack(alignment: .leading, spacing: 12) {
             Button(AppLocalization.string("重新授权原备份目录…"), action: onChooseBackupDirectory)
+                .buttonStyle(.kinlogueSecondary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .accessibilityIdentifier("backup-reauthorize-directory")
             LabeledContent(AppLocalization.string("所选目录")) {
@@ -293,6 +295,7 @@ struct SettingsView: View {
                 }
                 .accessibilityIdentifier("backup-show-in-finder")
             }
+            .buttonStyle(.kinlogueSecondary)
             .frame(maxWidth: .infinity, alignment: .trailing)
             .disabled(backupModel.phase == .backingUp)
         }
@@ -308,11 +311,7 @@ struct SettingsView: View {
     ) -> some View {
         content()
             .padding(22)
-            .background(KinlogueTheme.card, in: RoundedRectangle(cornerRadius: 14))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(KinlogueTheme.outline, lineWidth: 1)
-            }
+            .kinloguePanel(.card)
     }
 
     private func displayName(for language: AppLanguage) -> String {
