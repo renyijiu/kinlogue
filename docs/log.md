@@ -1302,3 +1302,10 @@
 - **本机验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4。冷编译后对 `Sources/` 执行 `touch` 再 `swift build -v`，只有本仓库十个非测试 target 出现编译调用，第三方模块没有重编。`xcodebuild -clonedSourcePackagesDirPath` 指向不存在的多级目录时会自行创建，新 bundle job 没有先行的 `.build/` 不构成障碍。`scripts/test.sh --filter GitHubActionsWorkflowTests --filter ReleaseScriptSafetyTests` 通过 27 tests / 2 suites；临时把一个 job 的矩阵改回固定双 runner、把 bundle 验证放回质量 job、删掉 CodeQL 的 `touch` 后，同一命令按预期出现 3 处失败，随后逐字节恢复。`scripts/lint.sh`、`scripts/verify-docs.sh` 和 `scripts/privacy-guard.sh` 通过。
 - **未执行**：完整 `scripts/test.sh`、`verify-app.sh` 和远端 CI 没有运行。tracer 下的 CodeQL 耗时、Xcode 26.6 原生构建引擎上 `touch` 的重编范围，以及缩小提取范围后告警是否变化，都要等远端运行核对。写入本条时托管端 `Protect main` 规则仍要求旧检查名 `Lint, test, and verify bundle`；合并前须换成 `Lint and test` 与 `Verify bundle and DICOM XPC`，否则该必需检查不会出现。
 - **未采纳**：同一分析中发现的另外三处重复编译没有处理：`verify-dicom-xpc.sh` 为切换 hang 开关从零重编 Helper、lint 与测试因编译参数不同各自全量编译、三个测试分区各自冷编译。
+
+## [2026-10-11] ci | 撤回 CodeQL 预编译：tracer 下仍然全量重编
+
+- **远端结果**：PR #20 首轮运行（CI 38136501062、CodeQL 38136501205）里，新布局的四个 macOS 26 job 全部通过：`Lint and test` 10.0 分钟、`Verify bundle and DICOM XPC` 17.8 分钟、`Complementary test partition` 7.5 分钟、`Dedicated LAN derived-artifact tests` 7.7 分钟，pull request 没有启动 `xcode-27` job。CodeQL 也通过，但用时 38.9 分钟，比改动前 31.4 分钟的中位数更慢。
+- **原因**：日志显示 tracer 下的第二次 `swift build` 从 `[42/94] Write swift-version-…` 起把整个构建重新执行了一遍，JXLSwift、J2KCodec、SwiftNIO 和 DicomCore 等第三方模块全部重编，用时 1374.67 秒；此前不带 tracer 的 265.82 秒预编译没有被复用。tracer 给后续步骤注入了 `DYLD_INSERT_LIBRARIES` 和 `SEMMLE_COPY_EXECUTABLES_ROOT` 等环境变量。推断是环境或工具路径的变化让 SwiftPM 判定全部产物失效，具体机制没有核实。另外，从 tracer 下的 `swift build` 启动到第一条编译输出之间约有 11 分钟没有构建输出，而这时已经没有依赖需要拉取。
+- **处理**：[`codeql.yml`](../.github/workflows/codeql.yml) 恢复为 init 之后单次 `swift build`，对应的测试断言和 [`testing-and-release.md`](testing-and-release.md) 里的说明一并恢复。上一条目中“CodeQL 只追踪第一方源码”的做法没有在远端成立，以本条为准；本机 `touch` 只重编第一方 target 的结论仅适用于不带 tracer 的构建。CI 矩阵调整和 bundle job 拆分保留。
+- **未执行**：撤回后的 workflow 还没有在远端运行；完整 `scripts/test.sh` 和 `verify-app.sh` 没有在本机运行。托管端 `Protect main` 规则写入本条时仍要求旧检查名。CodeQL 的耗时问题没有解决。

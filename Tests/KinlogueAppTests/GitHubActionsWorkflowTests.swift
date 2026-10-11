@@ -29,30 +29,7 @@ struct GitHubActionsWorkflowTests {
         #expect(codeQL.contains("security-events: write"))
         #expect(codeQL.contains("languages: swift"))
         #expect(codeQL.contains("build-mode: manual"))
-        #expect(codeQL.components(separatedBy: "swift build --disable-sandbox").count - 1 == 2)
-        let dependencyPrebuild = try #require(codeQL.range(
-            of: "run: swift build --disable-sandbox"
-        ))
-        let tracerStart = try #require(codeQL.range(
-            of: "github/codeql-action/init@",
-            range: dependencyPrebuild.upperBound..<codeQL.endIndex
-        ))
-        let sourceInvalidation = try #require(codeQL.range(
-            of: "find Sources -type f -name '*.swift' -exec touch {} +",
-            range: tracerStart.upperBound..<codeQL.endIndex
-        ))
-        let tracedBuild = try #require(codeQL.range(
-            of: "swift build --disable-sandbox",
-            range: sourceInvalidation.upperBound..<codeQL.endIndex
-        ))
-        let analysis = try #require(codeQL.range(
-            of: "github/codeql-action/analyze@",
-            range: tracedBuild.upperBound..<codeQL.endIndex
-        ))
-        #expect(dependencyPrebuild.lowerBound < tracerStart.lowerBound)
-        #expect(tracerStart.lowerBound < sourceInvalidation.lowerBound)
-        #expect(sourceInvalidation.lowerBound < tracedBuild.lowerBound)
-        #expect(tracedBuild.lowerBound < analysis.lowerBound)
+        #expect(codeQL.contains("swift build --disable-sandbox"))
         #expect(!codeQL.contains("pull_request_target"))
         try expectExternalActionsPinned(in: codeQL)
 

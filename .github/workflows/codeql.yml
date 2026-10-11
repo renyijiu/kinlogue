@@ -31,21 +31,14 @@ jobs:
         with:
           persist-credentials: false
 
-      # A traced build runs roughly ten times slower. Dependencies are compiled
-      # before the tracer starts so only this repository's sources are extracted.
-      - name: Prebuild dependencies outside the CodeQL tracer
-        run: swift build --disable-sandbox
-
       - name: Initialize CodeQL
         uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           languages: swift
           build-mode: manual
 
-      - name: Rebuild first-party sources under the CodeQL tracer
-        run: |
-          find Sources -type f -name '*.swift' -exec touch {} +
-          swift build --disable-sandbox
+      - name: Build Swift package
+        run: swift build --disable-sandbox
 
       - name: Analyze
         uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
