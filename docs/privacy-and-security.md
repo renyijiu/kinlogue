@@ -100,7 +100,9 @@
 - 不要在未确认可信网络前启动 LAN listener；不要把 `network.server` entitlement、可行性 marker 或 test-only client entitlement 扩大到不该有的 bundle。
 - 修改 `README.md`、`PRIVACY.md`、`packaging/Info.plist`、entitlements、验证脚本或网络行为时，必须一起检查本页和对应验收文档。
 
-README 的合成产品预览 `docs/assets/kinlogue-overview.jpg` 也经过逐文件审查；当前树门禁与历史门禁均按精确路径和固定 SHA-256 放行。历史中曾替换成未批准内容，即使后来恢复原图，历史门禁仍拒绝。
+README 的合成产品预览 `docs/assets/kinlogue-overview-2026-10.jpg` 也经过逐文件审查；当前树门禁与历史门禁均按精确路径和固定 SHA-256 放行。历史中曾替换成未批准内容，即使后来恢复原图，历史门禁仍拒绝。
+
+历史门禁对每个路径只认一个摘要，所以更新预览图不能在原路径上替换：新图使用新的文件名，在 `privacy-guard.sh`、`privacy-history-guard.sh` 的路径清单和 `privacy-history-media-digests.txt` 中登记，README 改指新路径，旧文件从当前树删除。旧路径 `docs/assets/kinlogue-overview.jpg` 只为历史中的原图保留登记，当前树不再接受该路径上的任何文件。预览图必须只含合成数据；当前这张由测试进程用假数据服务渲染真实的 App 界面生成，没有启动 App，也没有截取屏幕。
 
 ## 未来安全升级边界
 

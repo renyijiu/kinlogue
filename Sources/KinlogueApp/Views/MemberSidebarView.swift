@@ -100,7 +100,11 @@ struct MemberSidebarView: View {
                     Button {
                         selectSidebar(.allRecords)
                     } label: {
-                        Label(AppLocalization.string("全部记录"), systemImage: "clock.arrow.circlepath")
+                        SidebarRowLabel(
+                            AppLocalization.string("全部记录"),
+                            systemImage: "clock.arrow.circlepath",
+                            color: sidebarRowForeground(for: .allRecords)
+                        )
                             .sidebarRowHitTarget()
                             .foregroundStyle(sidebarRowForeground(for: .allRecords))
                     }
@@ -122,9 +126,10 @@ struct MemberSidebarView: View {
                     Button {
                         selectSidebar(.imaging)
                     } label: {
-                        Label(
+                        SidebarRowLabel(
                             AppLocalization.string("医学影像"),
-                            systemImage: "waveform.path.ecg.rectangle"
+                            systemImage: "waveform.path.ecg.rectangle",
+                            color: sidebarRowForeground(for: .imaging)
                         )
                         .sidebarRowHitTarget()
                         .foregroundStyle(sidebarRowForeground(for: .imaging))
@@ -148,11 +153,12 @@ struct MemberSidebarView: View {
                         selectSidebar(.lanInbox)
                     } label: {
                         HStack {
-                            Label(
+                            SidebarRowLabel(
                                 isLANReceiverActive ? AppLocalization.string("手机上传（接收中）") : AppLocalization.string("手机上传"),
                                 systemImage: isLANReceiverActive
                                     ? "dot.radiowaves.left.and.right"
-                                    : "iphone.and.arrow.forward.inward"
+                                    : "iphone.and.arrow.forward.inward",
+                                color: sidebarRowForeground(for: .lanInbox)
                             )
                             Spacer()
                             if lanInboxItemCount > 0 {
@@ -245,7 +251,11 @@ struct MemberSidebarView: View {
                         }
                     }
                     SidebarActionButton(action: onAdd) {
-                        Label(AppLocalization.string("添加家庭成员"), systemImage: "person.badge.plus")
+                        SidebarRowLabel(
+                            AppLocalization.string("添加家庭成员"),
+                            systemImage: "person.badge.plus",
+                            color: KinlogueTheme.onVariant
+                        )
                     }
                 }
 
@@ -256,7 +266,11 @@ struct MemberSidebarView: View {
                                 onOpenDraft(draft.id)
                             } label: {
                                 HStack {
-                                    Label(draftLabel(draft), systemImage: "doc.badge.clock")
+                                    SidebarRowLabel(
+                                        draftLabel(draft),
+                                        systemImage: "doc.badge.clock",
+                                        color: KinlogueTheme.onVariant
+                                    )
                                     Spacer()
                                     Image(systemName: "chevron.right")
                                         .font(.caption)
@@ -275,7 +289,11 @@ struct MemberSidebarView: View {
                                 onOpenDICOMStudy(study.id)
                             } label: {
                                 HStack {
-                                    Label(AppLocalization.string("医学影像检查"), systemImage: "waveform.path.ecg.rectangle")
+                                    SidebarRowLabel(
+                                        AppLocalization.string("医学影像检查"),
+                                        systemImage: "waveform.path.ecg.rectangle",
+                                        color: KinlogueTheme.onVariant
+                                    )
                                     Spacer()
                                     Text("\(study.retainedObjectCount)")
                                         .font(.caption.monospacedDigit())
@@ -297,7 +315,11 @@ struct MemberSidebarView: View {
                                     SidebarActionButton {
                                         onRetryDraft(draft.id)
                                     } label: {
-                                        Label(AppLocalization.string("识别失败，点按重试"), systemImage: "arrow.clockwise")
+                                        SidebarRowLabel(
+                                            AppLocalization.string("识别失败，点按重试"),
+                                            systemImage: "arrow.clockwise",
+                                            color: KinlogueTheme.onVariant
+                                        )
                                     }
                                     .disabled(busyDraftIDs.contains(draft.id))
                                     Button(role: .destructive) { onDiscardDraft(draft.id) } label: {
@@ -309,7 +331,11 @@ struct MemberSidebarView: View {
                                 }
                                 .selectionDisabled()
                             } else {
-                                Label(draftLabel(draft), systemImage: "hourglass")
+                                SidebarRowLabel(
+                                    draftLabel(draft),
+                                    systemImage: "hourglass",
+                                    color: KinlogueTheme.onVariant
+                                )
                                     .foregroundStyle(KinlogueTheme.onVariant)
                                     .selectionDisabled()
                             }
@@ -326,7 +352,11 @@ struct MemberSidebarView: View {
                 selectSidebar(.settings)
             } label: {
                 HStack {
-                    Label(AppLocalization.string("设置"), systemImage: "gearshape")
+                    SidebarRowLabel(
+                        AppLocalization.string("设置"),
+                        systemImage: "gearshape",
+                        color: sidebarRowForeground(for: .settings)
+                    )
                     Spacer()
                 }
                 .padding(.horizontal, 12)
@@ -426,6 +456,30 @@ private extension View {
     func sidebarRowHitTarget() -> some View {
         frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
+    }
+}
+
+/// A sidebar-style list tints a bare `Label` icon with the accent color and
+/// grays it while the window is inactive, ignoring the row's foreground. Only
+/// a style on the symbol itself keeps icon and title on the same row color.
+private struct SidebarRowLabel: View {
+    let title: String
+    let systemImage: String
+    let color: Color
+
+    init(_ title: String, systemImage: String, color: Color) {
+        self.title = title
+        self.systemImage = systemImage
+        self.color = color
+    }
+
+    var body: some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: systemImage)
+                .foregroundStyle(color)
+        }
     }
 }
 

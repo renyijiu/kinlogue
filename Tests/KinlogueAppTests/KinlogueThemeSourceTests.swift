@@ -338,6 +338,12 @@ struct KinlogueThemeSourceTests {
         #expect(sidebar.components(separatedBy: ".buttonStyle(.kinlogueRow {").count - 1 == 6)
         #expect(sidebar.components(separatedBy: "rowInteraction.setHovering(isHovering, for:").count - 1 == 5)
         #expect(!sidebar.contains(".buttonStyle(.plain)"))
+        // A bare Label icon follows the accent tint and the window's active
+        // state in a sidebar list, so every row styles its symbol explicitly.
+        #expect(sidebar.contains("private struct SidebarRowLabel: View"))
+        #expect(!sidebar.contains(" Label("))
+        #expect(sidebar.components(separatedBy: "SidebarRowLabel(").count - 1 == 9)
+        #expect(sidebar.components(separatedBy: "color: sidebarRowForeground(for:").count - 1 == 4)
         #expect(sidebar.components(separatedBy: ".focusEffectDisabled()").count - 1 >= 4)
         #expect(sidebar.contains("@FocusState private var focusedSidebarSelection"))
         #expect(sidebar.components(separatedBy: ".overlay(sidebarRowFocusOverlay(for:").count - 1 >= 5)
