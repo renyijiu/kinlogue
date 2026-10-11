@@ -1295,16 +1295,6 @@
         }
       }
     },
-    "待确认": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Awaiting Review"
-          }
-        }
-      }
-    },
     "待确认内容暂时无法打开": {
       "localizations": {
         "en": {
@@ -3904,7 +3894,12 @@
     "输入你在首次设置时独立保存的完整恢复码。续页会继续使用原有备份身份，不会生成新的恢复码。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Enter the complete recovery code you saved independently during initial setup. Kinlogue will continue using the existing backup identity and will not generate a new recovery code."}}}},
     "验证并完成设置": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Verify and Complete Setup"}}}},
     "验证并启用备份": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Verify and Enable Backup"}}}},
-    "续页只在这台 Mac 上处理资料。默认保存在本机；只有在你明确启用数据备份后，续页才会将加密恢复点写入你选择的目录。该目录是否被网盘客户端上传由对应客户端决定。只有在你主动开启“手机上传”时，才会临时接收同一局域网内浏览器发送的资料。活动资料库不提供应用层加密：报告和医学影像原件、成员资料及 OCR 结果以可读取的本地文件保存。能够访问此 Mac 用户资料的人员或软件，以及包含资料库的 Time Machine 备份、APFS 快照或其他副本，可能读取这些内容。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Kinlogue processes data only on this Mac. It stays local by default; only after you explicitly enable data backup does Kinlogue write encrypted restore points to the folder you choose. Whether a cloud-drive client uploads that folder is controlled by that client. Only when you start Phone Upload does Kinlogue temporarily receive files from a browser on the same local network. The active library has no application-level encryption: report and medical-image originals, member information, and OCR results are stored as readable local files. People or software that can access this Mac user’s files, and Time Machine backups, APFS snapshots, or other copies containing the library, may read this content."}}}}
+    "续页只在这台 Mac 上处理资料。默认保存在本机；只有在你明确启用数据备份后，续页才会将加密恢复点写入你选择的目录。该目录是否被网盘客户端上传由对应客户端决定。只有在你主动开启“手机上传”时，才会临时接收同一局域网内浏览器发送的资料。活动资料库不提供应用层加密：报告和医学影像原件、成员资料及 OCR 结果以可读取的本地文件保存。能够访问此 Mac 用户资料的人员或软件，以及包含资料库的 Time Machine 备份、APFS 快照或其他副本，可能读取这些内容。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Kinlogue processes data only on this Mac. It stays local by default; only after you explicitly enable data backup does Kinlogue write encrypted restore points to the folder you choose. Whether a cloud-drive client uploads that folder is controlled by that client. Only when you start Phone Upload does Kinlogue temporarily receive files from a browser on the same local network. The active library has no application-level encryption: report and medical-image originals, member information, and OCR results are stored as readable local files. People or software that can access this Mac user’s files, and Time Machine backups, APFS snapshots, or other copies containing the library, may read this content."}}}},
+    "待确认（%lld）": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Awaiting Review (%lld)"}}}},
+    "等待确认：%@": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Awaiting review: %@"}}}},
+    "正在识别报告…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Recognizing report…"}}}},
+    "正在识别报告（第 %lld/%lld 个）…": {"localizations":{"zh-Hans":{"stringUnit":{"state":"new","value":"正在识别报告（第 %1$lld/%2$lld 个）…"}},"en":{"stringUnit":{"state":"translated","value":"Recognizing reports (%1$lld of %2$lld)…"}}}},
+    "识别仍在进行。系统首次识别需要准备识别模型，可能要等半分钟左右，之后会快很多；页数多的文件也需要更久。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Recognition is still running. The first recognition prepares the system’s recognition model and can take about half a minute; later ones are much faster. Files with many pages also take longer."}}}}
   },
   "version": "1.0"
 }

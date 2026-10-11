@@ -468,8 +468,6 @@
 	<string>The image viewer could not be loaded</string>
 	<key>彻底删除</key>
 	<string>Permanently Delete</string>
-	<key>待确认</key>
-	<string>Awaiting Review</string>
 	<key>待确认内容暂时无法打开</key>
 	<string>The item awaiting review is temporarily unavailable</string>
 	<key>待确认影像</key>
@@ -478,6 +476,8 @@
 	<string>Pending Queue</string>
 	<key>待确认队列暂时无法刷新。</key>
 	<string>The pending queue can't be refreshed right now.</string>
+	<key>待确认（%lld）</key>
+	<string>Awaiting Review (%lld)</string>
 	<key>必须由你明确选择，影像内容不会自动决定归属</key>
 	<string>You must choose explicitly; image content does not assign a family member</string>
 	<key>必须由你确认，识别结果不会自动归档</key>
@@ -790,6 +790,10 @@
 	<string>Waiting for a save location…</string>
 	<key>正在识别</key>
 	<string>Recognizing</string>
+	<key>正在识别报告…</key>
+	<string>Recognizing report…</string>
+	<key>正在识别报告（第 %lld/%lld 个）…</key>
+	<string>Recognizing reports (%1$lld of %2$lld)…</string>
 	<key>正在读取所选原件…</key>
 	<string>Loading Selected Original…</string>
 	<key>正在读取本机原件…</key>
@@ -912,6 +916,8 @@
 	<string>Waiting to Upload</string>
 	<key>等待确认</key>
 	<string>Awaiting Review</string>
+	<key>等待确认：%@</key>
+	<string>Awaiting review: %@</string>
 	<key>等待识别</key>
 	<string>Waiting for Recognition</string>
 	<key>管理 %@</key>
@@ -980,6 +986,8 @@
 	<string>The record and originals no longer shared by other records will no longer be visible in Kinlogue. The originally selected source file is not deleted.</string>
 	<key>设置</key>
 	<string>Settings</string>
+	<key>识别仍在进行。系统首次识别需要准备识别模型，可能要等半分钟左右，之后会快很多；页数多的文件也需要更久。</key>
+	<string>Recognition is still running. The first recognition prepares the system’s recognition model and can take about half a minute; later ones are much faster. Files with many pages also take longer.</string>
 	<key>识别失败，点按重试</key>
 	<string>Recognition failed; press to retry</string>
 	<key>识别结果只是转录建议，请对照左侧原件确认。</key>

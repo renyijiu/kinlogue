@@ -32,6 +32,10 @@
 
 当前 Swift package 声明最低 Swift tools 6.2，使用 Swift 6 language mode；本机 Xcode 27 / Swift 6.4 构建说明见 [`testing-and-release.md`](testing-and-release.md)。只发布 `Kinlogue` App product；Core、Platform 与测试辅助程序保持为内部 target。持续集成以 GitHub Actions 为唯一当前入口，已经完成使命的 Codemagic 试验配置和 LAN feasibility host 只保留历史文档证据，不再进入构建图。
 
+当前候选抽取规则为 extraction version 5：标签与取值的配对、医院抬头兜底、表单名称和识别异体字的处理见 [`import-and-ocr.md`](import-and-ocr.md)；规则移植自 Go 预览的合成版式夹具，真实样本命中率尚未验证。
+
+当前报告界面在进入时间线时默认打开最新记录、在侧边栏为待确认草稿计数并显示文件名、在导入期间显示识别状态并解释首次识别的等待，报告复核页支持 Command-Return 确认；规则与未做的人工检查见 [`design-system.md`](design-system.md) 第 20–25 条。
+
 当前报告复核通过一次有界 Vault 快照取得同一 generation 的草稿、OCR、成员与首个原件；PDF 原件打开只发布页数，所选页 metadata 和 raster 在 actor 内按需读取。具体一致性与 UI 并发边界分别见 [`storage.md`](storage.md)、[`import-and-ocr.md`](import-and-ocr.md) 和 [`design-system.md`](design-system.md)。
 
 整库恢复确认后，共享 lifecycle 会取消并等待已经进入的报告 import/retry/OCR、LAN、DICOM 与导出任务；并发恢复 preparation 以 generation 隔离，activation 失败只允许退出重启。事实与回归入口见 [`backup-and-restore.md`](backup-and-restore.md)、[`architecture.md`](architecture.md) 和 [`import-and-ocr.md`](import-and-ocr.md)。

@@ -81,6 +81,8 @@ struct MemberSidebarView: View {
     let reviewQueue: [DraftSummary]
     let backgroundDrafts: [DraftSummary]
     let busyDraftIDs: Set<ImportDraft.ID>
+    let reportRecognitionActivity: ReportRecognitionActivity?
+    let isReportRecognitionSlow: Bool
     let onAdd: () -> Void
     let onOpenDraft: (ImportDraft.ID) -> Void
     let onRetryDraft: (ImportDraft.ID) -> Void
@@ -250,19 +252,30 @@ struct MemberSidebarView: View {
                 }
 
                 if !reviewQueue.isEmpty {
-                    Section(AppLocalization.string("待确认")) {
+                    Section(AppLocalization.string("待确认（\(reviewQueue.count)）")) {
                         ForEach(reviewQueue) { draft in
                             SidebarActionButton {
                                 onOpenDraft(draft.id)
                             } label: {
                                 HStack {
-                                    Label(draftLabel(draft), systemImage: "doc.badge.clock")
+                                    // The file name is the user's own; it is shown as it is.
+                                    Label(
+                                        draft.displayName ?? draftLabel(draft),
+                                        systemImage: "doc.badge.clock"
+                                    )
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
                                     Spacer()
                                     Image(systemName: "chevron.right")
                                         .font(.caption)
                                         .foregroundStyle(.tertiary)
                                 }
                             }
+                            .help(draft.displayName ?? "")
+                            .accessibilityLabel(
+                                draft.displayName.map { AppLocalization.string("等待确认：\($0)") }
+                                    ?? draftLabel(draft)
+                            )
                             .accessibilityHint(AppLocalization.string("打开原件并确认识别字段"))
                         }
                     }
@@ -320,6 +333,14 @@ struct MemberSidebarView: View {
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
+
+            if let reportRecognitionActivity {
+                Divider()
+                ReportRecognitionStatusView(
+                    activity: reportRecognitionActivity,
+                    isSlow: isReportRecognitionSlow
+                )
+            }
 
             Divider()
 
@@ -493,7 +514,7 @@ struct MemberEditorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if let errorMessage {
-                Text(errorMessage)
+                Label(errorMessage, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.red)
                     .accessibilityLabel(AppLocalization.string("错误：\(errorMessage)"))
