@@ -1190,3 +1190,12 @@
 - **证据与判断**：PR #13 的 [macOS 26 失败日志](https://github.com/renyijiu/kinlogue/actions/runs/35070491037/job/104710615643) 在正式 bundle 验证后输出 `KLD_DICOM_XPC_FAILED:helperTimedOut`。控制握手及崩溃错误校验已完成，因此该错误来自随后的恢复 decode；若崩溃请求超时，探针会输出 `unexpectedFailureCode`。本机 `launchd.plist(5)` 说明默认重启节流为 10 秒，与原恢复请求 10 秒超时重合；据此判断恢复预算缺少重启余量，远端日志没有单独记录 launchd 的实际调度时刻。
 - **修正**：只把独立 XPC 探针的恢复请求预算设为 30 秒；崩溃收敛仍要求 2 秒内失败，恢复仍必须返回精确像素，生产 transport 的 10 秒超时、Helper 的 9 秒硬 watchdog 和 hang 探针不变。不增加重试，不修改依赖或系统节流策略。扩展已有包装边界测试，检查恢复预算与原有时限；不新增测试计数。
 - **验证**：恢复预算断言已在旧源码上观察失败；`scripts/test.sh --filter DICOMPackagingBoundaryTests` 的 7 tests / 1 suite 通过。当前 Mac 的 `scripts/verify-dicom-xpc.sh` 通过真实 Release App/Helper 构建、签名、像素夹具、外部崩溃及恢复、hang watchdog、日志 canary 和零运行时 socket；文档、隐私与 diff 检查通过。本次是工作树验证；新提交远端 CI、clean-source bundle、独立系统安装、真实私有样本及人工矩阵尚未验证。
+
+## [2026-10-11] brand/docs | 定位改为以人为单位、一人管全家，并从矢量母版重画应用图标
+
+- **依据**：用户 2026-10-11 决策：产品按“个人维度，但可以管理整个家庭”定位，并计划延伸为健康助手（运动数据、模型问答）。助手能力未实现，本次只调整品牌表述和图标，取舍见 [`decisions.md`](decisions.md)。
+- **文档**：README 的标语、简介、核心体验首条和“品牌”一节改为以人为单位的表述，`Kin` 的释义改为“自己和家人”；项目总览同步一句话定位。新增 [`brand.md`](brand.md) 维护名称、定位、标语、文案规则、图标母版与生成方式，并把健康助手写成明确标注为未实现的方向；索引与设计系统增加入口。`PRIVACY.md`、App 内文案、本地化资源和 Info.plist 未改。
+- **图标**：新增 `packaging/AppIcon.svg` 与小尺寸母版 `packaging/AppIcon-small.svg`，由 `scripts/render-app-icon.swift` 渲染 `AppIcon.png` 和 iconset 的 10 个表示；16、32 像素使用小尺寸母版。底板、纸页和节点使用精确的品牌母色。旧图标只有位图，颜色偏离母色，线条在底板右下角被裁掉。
+- **历史隐私门禁**：`scripts/privacy-history-guard.sh` 原先每个路径只接受一条摘要，而被替换的图标仍在可达历史中，新旧位图无法同时通过。现改为同一路径可登记多条已审查摘要，每个历史版本必须命中其中一条；完全重复的行、未知路径和缺少摘要的路径仍然失败。摘要清单为 11 个图标路径各追加一条新摘要，旧摘要保留。当前树门禁未改。
+- **验证**：当前 Mac（macOS 27.0.1 / Xcode 27.0）未提交工作树上，完整 `scripts/test.sh` 通过，主测试清单经脚本核对为 995 tests / 91 suites，新增 1 项历史门禁回归；`scripts/lint.sh`、`scripts/verify-docs.sh`、当前树 `scripts/privacy-guard.sh` 和 `git diff --check` 通过。连续两次渲染的 11 个位图摘要一致，PNG 只含像素尺寸元数据；新 iconset 经 `scripts/generate-icns.swift` 打包后由 `iconutil` 展开为 10 个尺寸正确的表示。在一次性克隆中把新图标提交到真实历史之上：旧门禁失败，新门禁配新清单通过，新门禁配只含新摘要的清单失败。
+- **未执行**：`scripts/verify-app.sh` 要求干净的已提交工作树，替换图标后的 Release bundle 未构建或验证；新提交的远端 CI 未运行。图标在 macOS 26/27 的 Dock、Finder 中的实际显示，以及深色或着色外观，未人工核对。

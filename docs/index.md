@@ -15,6 +15,7 @@
 - 想公开源码或净化 Git 历史：读 [`privacy-and-security.md`](privacy-and-security.md) 和 [`testing-and-release.md`](testing-and-release.md)。
 - 想了解同步目录备份/恢复：读 [`backup-and-restore.md`](backup-and-restore.md)、实施计划和 [`acceptance/current-release.md`](acceptance/current-release.md)。
 - 想改界面或文案：读 [`design-system.md`](design-system.md) 和 [`localization.md`](localization.md)。
+- 想改名称、标语、应用图标或了解产品方向：读 [`brand.md`](brand.md)。
 
 当前最低系统已调整为 macOS 26，主要面向个人自用；Xcode 27 构建适配、CI Metal 组件准备、基线检查名兼容与 DICOM 崩溃恢复探针的重启等待预算见 [`testing-and-release.md`](testing-and-release.md)，转录编辑器的系统写作工具边界见 [`import-and-ocr.md`](import-and-ocr.md)；旧系统支持决策见 [`decisions.md`](decisions.md)，macOS 26/27 验收状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
 
@@ -22,7 +23,7 @@
 
 | 主题 | 稳定结论 | 权威页 |
 | --- | --- | --- |
-| 产品 | Mac 优先、单用户、多家庭成员的本机健康记录整理工具；不提供诊断 | [`project-overview.md`](project-overview.md) |
+| 产品 | Mac 优先、单用户操作、以人为单位并可照看全家的本机健康记录整理工具；不提供诊断 | [`project-overview.md`](project-overview.md) |
 | 隐私 | 活动 Vault 为 App Sandbox 内明文；外部恢复点认证加密；公开历史门禁覆盖已删除附件、凭据路径与恢复码；无账号、内置云同步、遥测或第三方崩溃 SDK | [`../PRIVACY.md`](../PRIVACY.md)、[`privacy-and-security.md`](privacy-and-security.md) |
 | 备份 | 用户选择目录、metadata-only 状态加载与自动关闭、自动开关、离线有界退避及已覆盖状态收敛、2–30 份本地保留、generation/keep 围栏的单扫描批量清理、app-private 跨进程 lease 与 witness 高水位线性发布、pending 设置恢复/确认放弃、LAN derived 完整恢复与 transient partial 排除、生产恢复事务逐 phase SIGKILL 收敛与 activation 后损坏回滚、手动备份、Finder 中显示恢复点和整库替换恢复；网盘远端状态未知 | [`backup-and-restore.md`](backup-and-restore.md) |
 | 报告 | 本机 OCR 只生成有来源候选；用户确认后才进入时间线、搜索和比较 | [`import-and-ocr.md`](import-and-ocr.md) |
@@ -43,6 +44,7 @@
 ### 产品与架构
 
 - [`project-overview.md`](project-overview.md)：唯一当前产品契约、用户流程、边界和产品验收定义。
+- [`brand.md`](brand.md)：名称、定位、标语、应用图标母版，以及明确标注为未实现的健康助手方向。
 - [`architecture.md`](architecture.md)：target 图、运行时组装、跨层调用和并发边界。
 - [`architecture-review-2026-09-08.md`](architecture-review-2026-09-08.md)：公开 main 的完整设计/架构审查、已核实问题、最小改进与外部实践依据。
 - [`domain-and-data-model.md`](domain-and-data-model.md)：领域对象、状态机、来源和去重语义。
