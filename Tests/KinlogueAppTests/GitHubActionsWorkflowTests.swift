@@ -29,7 +29,30 @@ struct GitHubActionsWorkflowTests {
         #expect(codeQL.contains("security-events: write"))
         #expect(codeQL.contains("languages: swift"))
         #expect(codeQL.contains("build-mode: manual"))
-        #expect(codeQL.contains("swift build --disable-sandbox"))
+        #expect(codeQL.components(separatedBy: "swift build --disable-sandbox").count - 1 == 2)
+        let dependencyPrebuild = try #require(codeQL.range(
+            of: "run: swift build --disable-sandbox"
+        ))
+        let tracerStart = try #require(codeQL.range(
+            of: "github/codeql-action/init@",
+            range: dependencyPrebuild.upperBound..<codeQL.endIndex
+        ))
+        let sourceInvalidation = try #require(codeQL.range(
+            of: "find Sources -type f -name '*.swift' -exec touch {} +",
+            range: tracerStart.upperBound..<codeQL.endIndex
+        ))
+        let tracedBuild = try #require(codeQL.range(
+            of: "swift build --disable-sandbox",
+            range: sourceInvalidation.upperBound..<codeQL.endIndex
+        ))
+        let analysis = try #require(codeQL.range(
+            of: "github/codeql-action/analyze@",
+            range: tracedBuild.upperBound..<codeQL.endIndex
+        ))
+        #expect(dependencyPrebuild.lowerBound < tracerStart.lowerBound)
+        #expect(tracerStart.lowerBound < sourceInvalidation.lowerBound)
+        #expect(sourceInvalidation.lowerBound < tracedBuild.lowerBound)
+        #expect(tracedBuild.lowerBound < analysis.lowerBound)
         #expect(!codeQL.contains("pull_request_target"))
         try expectExternalActionsPinned(in: codeQL)
 
@@ -56,9 +79,12 @@ struct GitHubActionsWorkflowTests {
 
         #expect(workflow.contains("pull_request:"))
         #expect(workflow.contains("push:"))
-        let jobNames = ["quality", "complementary-tests", "dedicated-lan-derived-tests"]
-        let checkNames = ["Lint, test, and verify bundle", "Complementary test partition",
-                          "Dedicated LAN derived-artifact tests"]
+        let jobNames = ["quality", "bundle", "complementary-tests", "dedicated-lan-derived-tests"]
+        let checkNames = ["Lint and test", "Verify bundle and DICOM XPC",
+                          "Complementary test partition", "Dedicated LAN derived-artifact tests"]
+        // Pull requests run the macOS 26 baseline only; other events add the preview.
+        let runnerMatrix = #"${{ fromJSON(github.event_name == 'pull_request' "#
+            + #"&& '["macos-26"]' || '["macos-26", "xcode-27"]') }}"#
         for (jobName, checkName) in zip(jobNames, checkNames) {
             let start = try #require(workflow.range(of: "  \(jobName):\n"))
             let remaining = workflow[start.upperBound...]
@@ -68,7 +94,7 @@ struct GitHubActionsWorkflowTests {
             #expect(job.contains(
                 "name: ${{ matrix.runner == 'macos-26' && '\(checkName)' || '\(checkName) (xcode-27)' }}"
             ))
-            #expect(job.contains("runner: [macos-26, xcode-27]"))
+            #expect(job.contains("runner: \(runnerMatrix)"))
             #expect(job.contains("runs-on: ${{ matrix.runner }}"))
             #expect(job.contains("continue-on-error: ${{ matrix.runner == 'xcode-27' }}"))
             #expect(job.contains("fail-fast: false"))
@@ -96,10 +122,19 @@ struct GitHubActionsWorkflowTests {
         #expect(workflow.contains("scripts/privacy-history-guard.sh --ref HEAD"))
         #expect(workflow.contains("scripts/test.sh"))
         #expect(workflow.components(separatedBy: "run: scripts/test.sh").count - 1 == 3)
-        #expect(workflow.contains("scripts/verify-app.sh"))
-        #expect(workflow.contains(
-            "scripts/verify-dicom-xpc.sh --use-verified-app"
+        let qualityJob = try job(named: "quality", in: workflow)
+        let bundleJob = try job(named: "bundle", in: workflow)
+        #expect(!qualityJob.contains("scripts/verify-app.sh"))
+        #expect(!qualityJob.contains("scripts/verify-dicom-xpc.sh"))
+        #expect(!bundleJob.contains("scripts/test.sh"))
+        let bundleVerification = try #require(bundleJob.range(
+            of: "scripts/verify-app.sh --require-clean-source"
         ))
+        let runtimeBoundary = try #require(bundleJob.range(
+            of: "scripts/verify-dicom-xpc.sh --use-verified-app",
+            range: bundleVerification.upperBound..<bundleJob.endIndex
+        ))
+        #expect(bundleVerification.lowerBound < runtimeBoundary.lowerBound)
         #expect(!workflow.contains("pull_request_target"))
         #expect(!workflow.contains("brew install"))
         #expect(ripgrepInstaller.contains("RIPGREP_VERSION=\"14.1.1\""))

@@ -29,7 +29,7 @@
 | 报告 | 本机 OCR 只生成有来源候选；用户确认后才进入时间线、搜索和比较 | [`import-and-ocr.md`](import-and-ocr.md) |
 | LAN | 用户显式开启的临时普通 HTTP 会话，绑定所选 Mac 接口并在 HTTP 前拒绝非同 IPv4/IPv6 网络前缀对端，仍只适用于可信任私人网络；成功配对推进浏览器 session generation，手机轮询再以 mutation epoch、revision 与取消 tombstone 防止陈旧状态回退 | [`lan-upload.md`](lan-upload.md) |
 | DICOM | 底层 DICOM-Swift 固定为 1.5.0，codec 依赖和资源仅进入独立 Helper；受限的辅助能力；支持边界窄、非诊断，不代表产品转向通用影像工作站 | [`dicom.md`](dicom.md) |
-| 发布 | 源码仓库已公开，但尚未正式发布可下载产品；GitHub CI 在 macOS 26 基线和 Xcode 27 预览矩阵上各用三个互斥 runner 覆盖同一全局主测试账本，derived-artifact case 从已构建 XCTest inventory 动态发现并逐项有界执行，强制终止不得冒充成功；验收扫描所需 `ripgrep` 由固定版本与 SHA-256 的 CI 引导提供；版本 tag 还必须可从 canonical `main` 到达才能进入构建 | [`testing-and-release.md`](testing-and-release.md)、[`acceptance/current-release.md`](acceptance/current-release.md) |
+| 发布 | 源码仓库已公开，但尚未正式发布可下载产品；GitHub CI 在 pull request 上只运行 macOS 26 基线，main push 与手工触发时再加 Xcode 27 预览矩阵；每个系统用三个互斥 runner 覆盖同一全局主测试账本，另用一个独立 runner 并行验证 clean-source bundle 与 DICOM XPC，derived-artifact case 从已构建 XCTest inventory 动态发现并逐项有界执行，强制终止不得冒充成功；验收扫描所需 `ripgrep` 由固定版本与 SHA-256 的 CI 引导提供；版本 tag 还必须可从 canonical `main` 到达才能进入构建 | [`testing-and-release.md`](testing-and-release.md)、[`acceptance/current-release.md`](acceptance/current-release.md) |
 
 当前 Swift package 声明最低 Swift tools 6.2，使用 Swift 6 language mode；本机 Xcode 27 / Swift 6.4 构建说明见 [`testing-and-release.md`](testing-and-release.md)。只发布 `Kinlogue` App product；Core、Platform 与测试辅助程序保持为内部 target。持续集成以 GitHub Actions 为唯一当前入口，已经完成使命的 Codemagic 试验配置和 LAN feasibility host 只保留历史文档证据，不再进入构建图。
 
