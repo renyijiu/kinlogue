@@ -1191,6 +1191,37 @@
 - **修正**：只把独立 XPC 探针的恢复请求预算设为 30 秒；崩溃收敛仍要求 2 秒内失败，恢复仍必须返回精确像素，生产 transport 的 10 秒超时、Helper 的 9 秒硬 watchdog 和 hang 探针不变。不增加重试，不修改依赖或系统节流策略。扩展已有包装边界测试，检查恢复预算与原有时限；不新增测试计数。
 - **验证**：恢复预算断言已在旧源码上观察失败；`scripts/test.sh --filter DICOMPackagingBoundaryTests` 的 7 tests / 1 suite 通过。当前 Mac 的 `scripts/verify-dicom-xpc.sh` 通过真实 Release App/Helper 构建、签名、像素夹具、外部崩溃及恢复、hang watchdog、日志 canary 和零运行时 socket；文档、隐私与 diff 检查通过。本次是工作树验证；新提交远端 CI、clean-source bundle、独立系统安装、真实私有样本及人工矩阵尚未验证。
 
+## [2026-10-10] import | 把 Go 预览的字段建议规则移回 Swift
+
+- **背景与依据**：评估后 Swift 版继续作为发布线，Go 预览（分支 `codex/go-native-rewrite`）冻结。本条只移植其 `internal/candidate/candidate.go` 在提交 `cc95d6e` 中按两份版式调整、Swift 尚不具备的规则；参考实现只读，没有新增 Go 代码，也没有改动 Vault 存储格式或备份格式。
+- **规则**：`ReportCandidateExtractor` 的标签后必须有冒号或空白才取值（日期标签除外）；机构、科室、报告类型和标题的标签独占一个 block 时取同行右侧相邻块或正下方左对齐块，遇到另一个标签、段落标题或按钮则不取；医院抬头兜底从 80 个字符收紧到 40 个字符并排除说明句；不超过 24 个字符、以“报告单”结尾的表单名称作为报告类型；标题标签增加“医疗名称”，结果标题增加“检查结果描述”，停止行增加“查看影像/图像”“下载影像/图像/报告”。成员名、检验表格重建、异常标记和日期类别全部保留。完整契约见 [`import-and-ocr.md`](import-and-ocr.md)。
+- **与 Go 的差异**：一是异体字。Go 直接在提案里把“査”写成“查”；Swift 只在匹配副本上还原，`originalTranscription` 保留 OCR 实际读到的文字，还原结果作为待确认的 `correctedTranscription`，OCR block 与来源引用不变，[`domain-and-data-model.md`](domain-and-data-model.md) 同步了这一含义。二是检验表格。标题标签含“检验项目”“项目名称”，它们也常是表格列标题；标签与“结果”类表头同行时不取相邻或下方的值，避免把表头或首行项目读成标题。三是标签后的分隔符接受任意空白，避免全角空格分隔的旧输入失效。
+- **版本**：`extractionVersion` 从 4 升到 5。它只在打开、保存、重新识别或确认 `needsReview` 草稿时触发重新抽取，并且只填充原先为空的候选字段；已保存候选、review state 和已确认记录都不改写，旧规则留下的错误候选也不会因此消失。
+- **未移植**：Go 提交 `c6184a8` 的“低置信度来源提示”与 Swift 复核页已有的逐字段识别置信度说明重复，未移植；两者口径不同，Swift 显示来源 block 的平均置信度，Go 在最低置信度不高于 0.3 时提示。
+- **验证**：先写测试并观察其在旧规则下失败，再改实现。`swift test --disable-sandbox --filter KinlogueCoreTests` 的 142 tests / 2 suites 通过；`LiveAppServiceTests`、报告识别快照、`ImportDraftTests`、导入 workflow 与 LAN 归档的定向运行通过，其中新增一条经真实 `LiveAppService` 的链路：旧版本草稿刷新后提出还原文字，确认后的记录仍保留 OCR 原文与同一来源 block。确定性主测试清单变为 1009 tests / 91 suites，已同步[候选账本](acceptance/current-release.md)。完整门禁在后续交互改进完成后对同一工作树统一执行，结果见下一条。
+- **边界**：测试只使用合成文字，版式坐标沿用 Go 预览的合成夹具。规则依据的真实样本只有两份，真实报告上的命中率、误取率和“査”以外的异体字都没有在本仓库验证；改动未提交、未 push。
+
+## [2026-10-10] ux | 把 Go 预览的交互改进移回 Swift 并复验两部分
+
+- **背景与依据**：对照 Go 预览提交 `c628414`（易用性调整）和 `2e8c6c4`（首次识别等待说明）逐项核实 Swift 现状，只移植确认存在且改动小的差距。参考实现只读。界面规则写入 [`design-system.md`](design-system.md) 第 20–25 条，等待说明的事实边界写入 [`import-and-ocr.md`](import-and-ocr.md)。
+- **已做**：报告时间线出现且没有打开记录时自动打开最新一条，自动打开失败不弹提示；某位成员的时间线不再在每张卡片重复成员 Chip；侧边栏“待确认”显示数量和每份草稿第一份原件的文件名；导入或重试期间在侧边栏显示识别状态，超过 4 秒后说明首次识别需要准备模型，复核页“重新识别并覆盖”共用这段说明；报告复核页的确认可用 Command-Return 触发，输入法有未上屏文字时不执行；sheet 内联错误补齐警示符号。`DraftSummary` 新增只读的文件名投影，没有改动存储格式。
+- **核实后未做**：Command-F 聚焦搜索已由“查找”菜单提供；手机归档的 `LANInboxModel.selectedMemberID` 本来没有默认值。短暂浮层提示没有做：Swift 没有会滞留的成功状态行，成功结果已由 sheet 关闭、时间线更新或页面内说明表达，新增一层浮层不属于小改动。已确认记录编辑页没有加 Command-Return：保存按钮已绑定 Return 默认动作，SwiftUI 的一个按钮只能有一个快捷键，再加一个需要不可见控件或放弃 Return。侧边栏没有显示草稿标题：标题在草稿文档里，为此逐份读取文档不属于小改动。日期点选和“更多操作”菜单在任务开始前已核实为不需要。
+- **本地化**：新增 5 条中英文案并移除不再使用的“待确认”键，`scripts/compile-localizations.sh --write` 后 `--check` 通过；带插值的文案有中英运行时断言。待确认数量使用括号内数字，英文没有随数量变化的词形。
+- **验证**：环境为 macOS 27.0.1 (26A434) / Xcode 27.0 (27A266a) / Apple Swift 6.4，工作树未提交。`swift build --disable-sandbox`、`scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/verify-docs.sh` 和 `git diff --check` 通过。`scripts/test.sh` 第一次在没有设置 locale 的 agent shell 中以退出码 1 结束：`documentationLintFailsClosedForFactSafetyLinkAndSymlinkDrift` 调用的文档校验报 `invalid multibyte char (US-ASCII)`，其后的分片没有执行；同一棵树上该测试在 `LC_ALL=en_US.UTF-8` 下通过，判断为 shell locale 而不是本次改动。随后以 `LC_ALL=en_US.UTF-8 scripts/test.sh` 完整重跑，退出码 0：主账 1030 tests / 93 suites 与[候选账本](acceptance/current-release.md)一致，13 项动态发现的 derived-artifact XCTest、验收扫描、33 项跨进程存储、条件式别名锁、18 项 DICOM 导入、安装式 LAN HTTP 与真实双流 RSS/背压门禁均通过。新增测试中，复核页 Command-Return 在宿主窗口内发送键等价并观察到确认命令，去掉快捷键后该测试失败；其余界面断言沿用仓库既有的源码结构断言。本条日志和设计文档的一处措辞是在完整重跑之后追加的，之后只重跑了文档、隐私与 diff 检查。
+- **未执行**：实际窗口中的操作（自动打开、识别状态出现与消失、侧边栏文件名截断、Command-Return 与输入法、错误图标）没有人工走查；VoiceOver 朗读没有检查；首次识别的实际耗时没有在 Swift 上计时；字段规则在真实报告样本上的命中率没有验证。`scripts/verify-app.sh`、安装验收和 macOS 26 独立机器没有执行，候选状态保持 `not-verified` / `pendingManual`。
+- **合并提示**：两部分留在同一工作树，未提交、未 push。第一部分单独提交时账本应为 1009 tests / 91 suites，两部分合计为 1030 / 93。主检出的 `docs/log.md` 和 `docs/index.md` 有未提交改动，合并本分支时这两个文件需要人工对照。
+- **交付整理**：之后按用户要求把两部分整理为两个提交并推送以发起 PR，没有新增行为修改。上面两条里的“未提交、未 push”描述的是验证发生时的工作树；提交和 PR 不提升候选状态，远端 CI 结果以实际运行为准。
+
+## [2026-10-11] brand/docs | 定位改为以人为单位、一人管全家，并从矢量母版重画应用图标
+
+- **依据**：用户 2026-10-11 决策：产品按“个人维度，但可以管理整个家庭”定位，并计划延伸为健康助手（运动数据、模型问答）。助手能力未实现，本次只调整品牌表述和图标，取舍见 [`decisions.md`](decisions.md)。
+- **文档**：README 的标语、简介、核心体验首条和“品牌”一节改为以人为单位的表述，`Kin` 的释义改为“自己和家人”；项目总览同步一句话定位。新增 [`brand.md`](brand.md) 维护名称、定位、标语、文案规则、图标母版与生成方式，并把健康助手写成明确标注为未实现的方向；索引与设计系统增加入口。`PRIVACY.md`、App 内文案、本地化资源和 Info.plist 未改。
+- **图标**：新增 `packaging/AppIcon.svg` 与小尺寸母版 `packaging/AppIcon-small.svg`，由 `scripts/render-app-icon.swift` 渲染 `AppIcon.png` 和 iconset 的 10 个表示；16、32 像素使用小尺寸母版。底板、纸页和节点使用精确的品牌母色。旧图标只有位图，颜色偏离母色，线条在底板右下角被裁掉。
+- **历史隐私门禁**：`scripts/privacy-history-guard.sh` 原先每个路径只接受一条摘要，而被替换的图标仍在可达历史中，新旧位图无法同时通过。现改为同一路径可登记多条已审查摘要，每个历史版本必须命中其中一条；完全重复的行、未知路径和缺少摘要的路径仍然失败。摘要清单为 11 个图标路径各追加一条新摘要，旧摘要保留。当前树门禁未改。
+- **验证**：当前 Mac（macOS 27.0.1 / Xcode 27.0）未提交工作树上，完整 `scripts/test.sh` 通过，主测试清单经脚本核对为 995 tests / 91 suites，新增 1 项历史门禁回归；`scripts/lint.sh`、`scripts/verify-docs.sh`、当前树 `scripts/privacy-guard.sh` 和 `git diff --check` 通过。连续两次渲染的 11 个位图摘要一致，PNG 只含像素尺寸元数据；新 iconset 经 `scripts/generate-icns.swift` 打包后由 `iconutil` 展开为 10 个尺寸正确的表示。在一次性克隆中把新图标提交到真实历史之上：旧门禁失败，新门禁配新清单通过，新门禁配只含新摘要的清单失败。
+- **未执行**：`scripts/verify-app.sh` 要求干净的已提交工作树，替换图标后的 Release bundle 未构建或验证；新提交的远端 CI 未运行。图标在 macOS 26/27 的 Dock、Finder 中的实际显示，以及深色或着色外观，未人工核对。
+- **合并 main**：首次推送的 `9d99f9b` 上，远端 CI 的 lint、隐私、完整测试和 clean-source bundle 验证在 macOS 26 与 Xcode 27 两个环境均通过；macOS 26 基线任务随后在 DICOM XPC 步骤达到 30 分钟任务上限被取消，Xcode 27 的同一步骤通过。之后合并 `main` 的 `12dbc93`，账本与日志的冲突按保留两边内容解决，主测试清单为 1031 tests / 93 suites。合并后的工作树在当前 Mac 上重新通过完整 `scripts/test.sh`、`scripts/lint.sh`、`scripts/verify-docs.sh` 和当前树 `scripts/privacy-guard.sh`；合并提交的远端 CI 尚未运行。
+
 ## [2026-10-11] ui | 统一配色令牌、按钮与列表行交互状态
 
 - **范围**：按用户确认的三项决定处理全 App 的配色与交互状态不一致：内容区和 sheet 的取消、关闭与普通操作改用自定义次要按钮，系统样式只留给窗口工具栏、系统确认框、菜单和原生表单控件；列表行使用选中 13% / 悬停 5% / 按下 18% 的 Primary 交互层；继续只支持亮色，并让每个窗口与 sheet 各自声明。改动限于 `Sources/KinlogueApp/Views`，不涉及 ViewModel、服务、存储、LAN 或手机上传页，也没有新增或删除用户可见文案。
@@ -1221,3 +1252,13 @@
 - **验证**：当前 Mac（macOS 27.0 / Xcode 27.0）。完整 `scripts/test.sh` 在最终代码上退出码 0（主清单仍为 999 tests / 91 suites，另含各独立门禁），`scripts/lint.sh`、`scripts/verify-docs.sh` 和 `scripts/privacy-guard.sh` 通过。历史门禁以一个不挂在任何分支上的演练提交验证：该提交的历史同时包含旧路径上的原图和新路径上的新图，`scripts/privacy-history-guard.sh --ref <演练提交>` 通过；分支和工作树未因演练改变。新图逐像素目视检查过，只有合成成员、合成记录和合成 PDF。
 - **边界**：预览图是窗口不活跃时的外观，交通灯和工具栏图标为灰色。侧边栏图标的修正只通过离屏渲染和预览图确认，尚未在运行中的 App 里由人确认。完整 `verify-app.sh`、远端 CI 和人工矩阵仍未执行；候选状态保持 `not-verified` / `pendingManual`。改动在本地工作树，写入本条时尚未提交。
 - **提交整理**：用户查看新预览图后要求把预览图更新、门禁登记和侧边栏图标修正一起提交，作为上一提交之后的第二个提交保存；没有额外行为修改。上面的“尚未提交”保留为写入时的状态，提交不提升候选验收状态。
+
+## [2026-10-11] merge | 把 main 的字段建议、交互改进与品牌更新并入配色统一分支
+
+- **原因**：PR #18 与 `main` 冲突。`main` 新合入 #16（字段建议规则与交互改进）和 #17（定位与应用图标），与本分支在五个视图文件和三份文档上冲突。按“保留两边意图”合并，不 rebase、不强推。
+- **视图**：`main` 给 sheet 内联错误补了三角图标和红色前景，本分支把同一批错误换成了 `KinlogueStatusLabel`。两边的目的都是“错误不只靠颜色表达”，合并后保留状态标签。导入确认页同时保留 `main` 新增的慢识别说明和本分支的 On Variant 前景；侧边栏“待确认”行同时保留 `main` 的文件名显示、截断规则和本分支的 `SidebarRowLabel`。`main` 新增的 `SlowRecognitionNotice` 原本使用系统 `.secondary`，改为 On Variant，以满足 `Views` 目录的令牌门禁。
+- **规则调和**：`main` 新增的设计规范第 25 条写的是“带 `exclamationmark.triangle` 的 `Label` 加红色前景”，改写为使用 `KinlogueStatusLabel(_:tone: .danger)`，符号为 `exclamationmark.octagon`，以便与警告的三角符号区分。这是对 `main` 上刚合入规则的文字修改，意图未变。`ImportReviewViewSafetyTests.inlineErrorsCarryAWarningSymbolAndNotOnlyColour` 原先按 `.foregroundStyle(.red)` 与三角符号的出现次数断言，改为断言五个文件的错误都经过状态标签、不存在裸的危险色文字或系统红。第 1 条取本分支收窄后的系统样式范围，第 2 条取 `main` 关于 Command-Return 的补充。
+- **媒体门禁**：`main` 把历史门禁改为同一路径可登记多条已审查摘要，本分支此前“每个路径只认一个摘要”的说明不再成立，[`privacy-and-security.md`](privacy-and-security.md) 已改写。预览图的带日期文件名已经进入本分支的可达历史，因此保留该路径及其登记；今后更新可以在同一路径追加摘要。两边对摘要清单、路径清单和 `ReleaseScriptSafetyTests` 的修改自动合并后一致。
+- **账本**：`main` 为 1031 tests / 93 suites，本分支新增 5 项，合并后实测为 1036 tests / 93 suites。`current-release.md` 的其余措辞取 `main`。
+- **验证**：当前 Mac（macOS 27.0 / Xcode 27.0）。合并后的树上完整 `scripts/test.sh` 退出码 0；`scripts/lint.sh`、`scripts/verify-docs.sh`、`scripts/privacy-guard.sh` 通过。
+- **边界**：README 预览图在合并前渲染，没有重新生成；`main` 的界面改动不影响图中展示的状态（“全部记录”下仍显示成员标签，图中没有待确认草稿和识别状态）。完整 `verify-app.sh`、远端 CI 和人工矩阵仍未执行；候选状态保持 `not-verified` / `pendingManual`。

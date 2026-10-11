@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Kinlogue app icon, small sizes</title>
+  <desc>The same turned page corner and thread as AppIcon.svg, drawn heavier with a single end node for 16 and 32 pixel representations.</desc>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#F7F1E4"/>
+  <path d="M420 440C520 470 640 470 695 535C745 595 650 640 595 700C545 755 660 800 800 790" fill="none" stroke="#1E6254" stroke-width="80" stroke-linecap="round"/>
+  <path d="M100 700V285a185 185 0 0 1 185-185H700C670 280 280 670 100 700Z" fill="#15453B"/>
+  <path d="M100 700V285a185 185 0 0 1 185-185H700C620 220 220 620 100 700Z" fill="#1E6254"/>
+  <circle cx="800" cy="790" r="84" fill="#DF8A4A" stroke="#F7F1E4" stroke-width="24"/>
+</svg>

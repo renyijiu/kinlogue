@@ -83,6 +83,221 @@ struct AppModelTests {
     }
 
     @Test
+    func enteringATimelineOpensItsNewestRecordWhenNothingIsOpen() async throws {
+        let member = try FamilyMember(displayName: "Synthetic member")
+        let otherMember = try FamilyMember(displayName: "Other synthetic member")
+        let older = try datedRecord(memberID: member.id, daysAfterBase: 0)
+        let newer = try datedRecord(memberID: member.id, daysAfterBase: 30)
+        let undated = try HealthRecord(
+            memberID: member.id,
+            attachmentID: UUID(),
+            importState: .confirmed
+        )
+        let newestOverall = try datedRecord(memberID: otherMember.id, daysAfterBase: 60)
+        let payload = OriginalDocumentPayload(
+            data: Data([0x25, 0x50, 0x44, 0x46]),
+            contentTypeIdentifier: "com.adobe.pdf"
+        )
+        let service = AppServiceSpy(
+            snapshot: AppSnapshot(
+                members: [member, otherMember],
+                records: [older, undated, newestOverall, newer],
+                drafts: []
+            ),
+            originals: [older.id: payload, newer.id: payload, newestOverall.id: payload]
+        )
+        let model = AppModel(service: service)
+        await model.start()
+        #expect(model.selectedRecordID == nil)
+
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecord?.id == newestOverall.id)
+        #expect(model.originalDocument == payload)
+
+        // An open record is never replaced by entering the timeline again.
+        await model.selectRecord(older.id)
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecord?.id == older.id)
+
+        // One member's timeline opens that member's newest record.
+        model.selectedMemberID = member.id
+        #expect(model.selectedRecordID == nil)
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecord?.id == newer.id)
+    }
+
+    @Test
+    func enteringATimelineWithOnlyUndatedRecordsOpensOneAndAnEmptyTimelineOpensNothing() async throws {
+        let member = try FamilyMember(displayName: "Synthetic member")
+        let emptyMember = try FamilyMember(displayName: "Empty synthetic member")
+        let undated = try HealthRecord(
+            memberID: member.id,
+            attachmentID: UUID(),
+            importState: .confirmed
+        )
+        let service = AppServiceSpy(
+            snapshot: AppSnapshot(members: [member, emptyMember], records: [undated], drafts: []),
+            originals: [undated.id: OriginalDocumentPayload(
+                data: Data([0x25, 0x50, 0x44, 0x46]),
+                contentTypeIdentifier: "com.adobe.pdf"
+            )]
+        )
+        let model = AppModel(service: service)
+        await model.start()
+
+        model.selectedMemberID = emptyMember.id
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecordID == nil)
+        #expect(await service.originalLoadCallIDs.isEmpty)
+
+        model.selectedMemberID = member.id
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecord?.id == undated.id)
+    }
+
+    @Test
+    func enteringATimelineLeavesASearchAComparisonOrASheetUndisturbed() async throws {
+        let fixture = try AppFixture()
+        let service = AppServiceSpy(
+            snapshot: fixture.snapshot,
+            originals: [fixture.confirmed.id: OriginalDocumentPayload(
+                data: Data([0x25, 0x50, 0x44, 0x46]),
+                contentTypeIdentifier: "com.adobe.pdf"
+            )]
+        )
+        let model = AppModel(service: service)
+
+        // Nothing is opened before the library is ready.
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecordID == nil)
+        await model.start()
+
+        model.searchText = "Confirmed"
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecordID == nil)
+        model.searchText = ""
+
+        model.toggleComparisonSelection()
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecordID == nil)
+        model.toggleComparisonSelection()
+
+        model.presentNewMemberEditor()
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecordID == nil)
+        model.isMemberEditorPresented = false
+        #expect(await service.originalLoadCallIDs.isEmpty)
+
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecord?.id == fixture.confirmed.id)
+    }
+
+    @Test
+    func anAutomaticallyOpenedRecordWithAnUnreadableOriginalDoesNotRaiseAnAlert() async throws {
+        let fixture = try AppFixture()
+        let model = AppModel(service: AppServiceSpy(snapshot: fixture.snapshot))
+        await model.start()
+
+        await model.openNewestRecordIfNothingIsOpen()
+
+        #expect(model.selectedRecord?.id == fixture.confirmed.id)
+        #expect(model.originalDocument == nil)
+        #expect(model.isOriginalLoading == false)
+        #expect(model.banner == nil)
+
+        // Opening the same record by hand still reports the failure.
+        model.clearSelection()
+        await model.selectRecord(fixture.confirmed.id)
+        #expect(model.banner != nil)
+    }
+
+    @Test
+    func importingShowsWhichFileIsBeingRecognizedUntilTheImportEnds() async throws {
+        let gate = OriginalLoadGate()
+        let service = AppServiceSpy(snapshot: .empty, importGate: gate)
+        let model = AppModel(service: service, slowRecognitionNoticeDelay: .seconds(3_600))
+        #expect(model.reportRecognitionActivity == nil)
+
+        let importing = Task {
+            await model.handleImporterResult(.success([
+                URL(fileURLWithPath: "/synthetic/first.pdf"),
+                URL(fileURLWithPath: "/synthetic/second.pdf"),
+            ]))
+        }
+        await gate.waitUntilLoadStarts()
+
+        #expect(model.reportRecognitionActivity == ReportRecognitionActivity(position: 1, total: 2))
+        #expect(model.isReportRecognitionSlow == false)
+
+        await gate.open()
+        await importing.value
+        #expect(await service.importCallCount == 2)
+        #expect(model.reportRecognitionActivity == nil)
+        #expect(model.isReportRecognitionSlow == false)
+    }
+
+    @Test
+    func aLongRecognitionIsExplainedUntilItEnds() async throws {
+        let gate = OriginalLoadGate()
+        let service = AppServiceSpy(snapshot: .empty, importGate: gate)
+        let model = AppModel(service: service, slowRecognitionNoticeDelay: .zero)
+        await model.start()
+
+        let retrying = Task { await model.retryDraft(UUID()) }
+        await gate.waitUntilLoadStarts()
+        #expect(model.reportRecognitionActivity == ReportRecognitionActivity(position: 1, total: 1))
+        for _ in 0..<400 where !model.isReportRecognitionSlow {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(model.isReportRecognitionSlow)
+
+        await gate.open()
+        await retrying.value
+        #expect(model.reportRecognitionActivity == nil)
+        #expect(model.isReportRecognitionSlow == false)
+    }
+
+    @Test
+    func clearingTheLibraryDropsRecognitionStatusThatALateImportCannotRestore() async throws {
+        let gate = OriginalLoadGate()
+        let service = AppServiceSpy(snapshot: .empty, importGate: gate)
+        let model = AppModel(service: service, slowRecognitionNoticeDelay: .zero)
+        await model.start()
+        let importing = Task {
+            await model.handleImporterResult(.success([
+                URL(fileURLWithPath: "/synthetic/first.pdf"),
+                URL(fileURLWithPath: "/synthetic/second.pdf"),
+            ]))
+        }
+        await gate.waitUntilLoadStarts()
+        #expect(model.reportRecognitionActivity != nil)
+
+        await model.beginDestructiveVaultLifecycle()
+        #expect(model.reportRecognitionActivity == nil)
+        #expect(model.isReportRecognitionSlow == false)
+
+        await gate.open()
+        await importing.value
+        #expect(model.reportRecognitionActivity == nil)
+        #expect(model.isReportRecognitionSlow == false)
+    }
+
+    @Test
+    func aWaitingDraftIsNamedAfterItsFirstOriginal() throws {
+        let named = ImportDraft(
+            sources: try ReportSources([
+                ReportSource(attachmentID: UUID(), displayName: "synthetic-a.pdf", pageCount: 1),
+                ReportSource(attachmentID: UUID(), displayName: "synthetic-b.png", pageCount: 1),
+            ]),
+            state: .needsReview
+        )
+        let unnamed = ImportDraft(attachmentID: UUID(), state: .needsReview)
+
+        #expect(DraftSummary(draft: named).displayName == "synthetic-a.pdf")
+        #expect(DraftSummary(draft: unnamed).displayName == nil)
+    }
+
+    @Test
     func importerCancellationDoesNotInvokeTheService() async throws {
         let service = AppServiceSpy(snapshot: .empty)
         let model = AppModel(service: service)
@@ -1070,6 +1285,7 @@ actor AppServiceSpy: AppDataServicing {
     private let memberDeletionSnapshot: AppSnapshot?
     private let memberDeletionError: AppServiceError?
     private let deferError: AppServiceError?
+    private let importGate: OriginalLoadGate?
     private(set) var importCallCount = 0
     private(set) var confirmedCommands: [ConfirmDraftCommand] = []
     private(set) var updatedCommands: [UpdateRecordCommand] = []
@@ -1108,7 +1324,8 @@ actor AppServiceSpy: AppDataServicing {
         recordDeletionDelay: Duration? = nil,
         memberDeletionSnapshot: AppSnapshot? = nil,
         memberDeletionError: AppServiceError? = nil,
-        deferError: AppServiceError? = nil
+        deferError: AppServiceError? = nil,
+        importGate: OriginalLoadGate? = nil
     ) {
         currentSnapshot = snapshot
         self.outcomes = importOutcomes
@@ -1135,6 +1352,7 @@ actor AppServiceSpy: AppDataServicing {
         self.memberDeletionSnapshot = memberDeletionSnapshot
         self.memberDeletionError = memberDeletionError
         self.deferError = deferError
+        self.importGate = importGate
     }
 
     func bootstrap() async throws -> AppSnapshot { currentSnapshot }
@@ -1150,10 +1368,12 @@ actor AppServiceSpy: AppDataServicing {
     func archiveMember(id: FamilyMember.ID) async throws -> AppSnapshot { currentSnapshot }
     func importFile(at url: URL) async throws -> AppImportOutcome {
         importCallCount += 1
+        if let importGate { await importGate.wait() }
         return outcomes.isEmpty ? .failed(.importFailed) : outcomes.removeFirst()
     }
     func retryDraft(id: ImportDraft.ID) async throws -> AppImportOutcome {
-        outcomes.isEmpty ? .failed(.importFailed) : outcomes.removeFirst()
+        if let importGate { await importGate.wait() }
+        return outcomes.isEmpty ? .failed(.importFailed) : outcomes.removeFirst()
     }
     func loadReview(draftID: ImportDraft.ID) async throws -> ImportReviewContent {
         guard let value = documents[draftID] else { throw AppServiceError.draftUnavailable }
@@ -1349,6 +1569,28 @@ private actor OutOfOrderRefreshService: AppDataServicing {
     ) async throws -> OriginalDocumentPayload {
         throw AppServiceError.recordUnavailable
     }
+}
+
+private func datedRecord(
+    memberID: FamilyMember.ID,
+    daysAfterBase: Int
+) throws -> HealthRecord {
+    let date = try #require(ReportDateSemantics.canonicalDate(
+        from: Date(timeIntervalSince1970: 1_784_332_800 + TimeInterval(daysAfterBase) * 86_400),
+        timeZone: TimeZone(secondsFromGMT: 0)!
+    ))
+    let candidate = ReportDateCandidate(
+        date: date,
+        kind: .report,
+        source: try SourceField.manualEntry("Synthetic date")
+    )
+    return try HealthRecord(
+        memberID: memberID,
+        attachmentID: UUID(),
+        importState: .confirmed,
+        dateCandidates: [candidate],
+        timelineDateCandidateID: candidate.id
+    )
 }
 
 private struct AppFixture {
