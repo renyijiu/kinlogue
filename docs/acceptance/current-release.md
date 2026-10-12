@@ -9,7 +9,7 @@
 | 维度 | 当前状态 | 说明 |
 | --- | --- | --- |
 | 源码自动化 | `not-verified` | 当前主清单 1254 tests / 98 suites；合入 main（PR #16–#20）、改写搜索并把界面入口切到 SQLite 之后，macOS 27 上的完整 `scripts/test.sh`、规定的隔离门禁、lint、文档、本地化与当前树隐私门禁通过。覆盖数据库各领域、按需查询、逻辑备份/严格恢复、跨进程故障及 App 故障排空；具体命令与边界见[实现日志](../log.md)。尚未绑定不可变 source ref，安装、系统与人工验收另列 |
-| clean-source bundle / XPC | `notExecuted` | 合并前 SQLite 候选的 macOS 27 dirty-source Release/XPC、GRDB 资源、签名与包边界曾通过，证据见[实现日志](../log.md)；合并 main 的应用图标与强调色资源之后，bundle 尚未在本机重新构建或验证；尚未登记 `scripts/verify-app.sh --require-clean-source` 及绑定同一不可变 source ref 的候选证据 |
+| clean-source bundle / XPC | `notExecuted` | 2026-10-12 在本机提交 `a595f8234c23a3455cfcfbdf149ce8506b1c5f3a`（干净工作树，macOS 27.0.1 / Xcode 27.0）上，`scripts/verify-app.sh --require-clean-source` 通过：Release 构建、ad-hoc 签名与完整性、含 `Assets.car` 和 GRDB privacy manifest 的精确资源清单、entitlement 白名单、最低系统 26.0、DICOM Helper 结构与主进程隔离、无 Keychain / Security 依赖。该提交只存在于本机分支，不是已发布的不可变 ref，因此本行状态不变；`verify-dicom-xpc.sh` 的真实 XPC 探针、安装验收和 synthetic smoke 没有在该提交上运行 |
 | Git 历史隐私 | `verified-baseline` | 历史已验证基线为 `f9cc99b8adcfbfeba35bddc8575a8a464d25eaa2`；历史通过不替代每次公开推送前对待发布 ref 运行 history guard，全部公开 refs 仍须单独核验 |
 | 公开托管 | `external` | CI、CodeQL、Dependabot 与治理文件已入库；GitHub 安全设置、branch rules 和 workflow 运行属于可变远端状态，必须在托管平台实时核对，不把它们固化成 commit 内的永久结论 |
 | 公共分发 | `notExecuted` | 没有 Developer ID、notarization 或正式公众下载渠道证明 |
@@ -34,7 +34,7 @@
 
 Core、Platform、App 与真实跨进程测试已经分别覆盖报告/OCR、LAN inbox、DICOM XPC、原件导出、加密 checkpoint、保留、离线重试、跨进程 publication 和恢复事务。各能力的具体证明与未执行项由 [LAN 矩阵](lan-upload-matrix.md)、[DICOM 矩阵](dicom-mri-viewer-matrix.md)、[备份与恢复](../backup-and-restore.md)及[测试与发布](../testing-and-release.md)维护。
 
-DICOM-Swift 1.5.0 升级的历史验证保留在[实现日志](../log.md)及 [DICOM 专题](../dicom.md)。本轮 SQLite 资料库在 macOS 27 上完成全量测试及收口定向回归；dirty-source 构建、lint 与包边界的各次证据见实现日志。界面入口已于 2026-10-12 切到 SQLite；`run-acceptance.sh` 的 seed、restart、强制终止、LAN 与 DICOM 阶段仍运行 JSON 服务，不覆盖界面实际使用的存储，切换后的 App bundle 也没有重新构建、安装或运行。独立 Release 探针完成近上限、实际约 9.76 GiB 原件和 20,001 个原件的发布/严格恢复；存储启动、短操作及相关资源数值门槛通过；搜索在 2026-10-12 改用预筛键后，同一规模的 macOS 27 探针低于计划门槛，见[搜索复测](../storage-search-measurement-2026-10-12.md)。其余规模收益及未达目标见[实测记录](../storage-refactor-measurement-2026-10-11.md)。这些本机证据不自动绑定新的 clean-source 发布候选。
+DICOM-Swift 1.5.0 升级的历史验证保留在[实现日志](../log.md)及 [DICOM 专题](../dicom.md)。本轮 SQLite 资料库在 macOS 27 上完成全量测试及收口定向回归；dirty-source 构建、lint 与包边界的各次证据见实现日志。界面入口已于 2026-10-12 切到 SQLite；`run-acceptance.sh` 的 seed、restart、强制终止、LAN 与 DICOM 阶段仍运行 JSON 服务，不覆盖界面实际使用的存储；切换后的 App bundle 通过了下表所列的静态验证，但没有安装或运行。独立 Release 探针完成近上限、实际约 9.76 GiB 原件和 20,001 个原件的发布/严格恢复；存储启动、短操作及相关资源数值门槛通过；搜索在 2026-10-12 改用预筛键后，同一规模的 macOS 27 探针低于计划门槛，见[搜索复测](../storage-search-measurement-2026-10-12.md)。其余规模收益及未达目标见[实测记录](../storage-refactor-measurement-2026-10-11.md)。这些本机证据不自动绑定新的 clean-source 发布候选。
 
 这些聚焦证据在最终完整门禁登记前只能描述对应行为，不能把本页的源码自动化或公共发布状态提升为 `passed`。
 

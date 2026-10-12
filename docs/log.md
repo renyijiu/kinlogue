@@ -1522,3 +1522,9 @@
 - **测试**：新增三项声明：两次启动之间 SQLite 资料库持久存在且根目录只有 `library.sqlite` 与 `originals`；没有运行时身份时报告不可用且不创建任何东西；源码断言界面入口只经由启动协调器、不引用 JSON composition，并且存储说明先于任何打开动作。既有测试继续覆盖第二实例被拒后重试、坏数据库保留字节并提供同 owner 恢复、旧 JSON 原样保留。用临时测试把存储说明、旧资料库失败页、不可用页和空资料库主界面离屏渲染后目视检查，随后删除该测试。
 - **验证**：macOS 27.0.1 / Xcode 27 上，切换后的完整 `scripts/test.sh` 退出码 0，主清单 1254 tests / 98 suites，隔离的 derived XCTest、验收扫描、storage process、DICOM 导入集成和两条 LAN 用例全部通过。传入实际清单的 `scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。
 - **未执行**：切换后的 App bundle 没有重新构建、安装或运行；界面只做了离屏渲染，没有真实窗口、键盘或 VoiceOver 检查；macOS 26 的 SQLite engine、安装后的 Ready 时间与内存、真实手机和人工 OCR 门禁都没有执行。计划把这些列为切换的前置门禁，本次是在它们缺失的情况下按用户要求完成代码切换，验收账本保持 `not-verified` / `pendingManual`。
+
+## [2026-10-12] release-check | 切换后的 App bundle 在干净源码上通过静态验证
+
+- **命令与结果**：在提交 `a595f8234c23a3455cfcfbdf149ce8506b1c5f3a` 的干净工作树上运行 `scripts/verify-app.sh --require-clean-source`，退出码 0。报告记录 `source.dirty = false`、macOS 27.0.1、Xcode 27.0（27A266a）、Swift 6.4、arm64、最低系统 26.0，bundle 内容摘要 `44b1c86a4e062c3edef8b70a0afc211401fc95dc6904f67d69da0026af3c1b1e`。
+- **通过的门禁**：Release 构建、ad-hoc 签名与签名完整性、bundle metadata 与 Info.plist、应用图标、精确资源清单（这是合并 main 之后 `Assets.car` 与 GRDB privacy manifest 第一次一起出现在实际包里）、第三方声明、依赖锁定、entitlement 白名单、LAN composition、DICOM Helper 结构 / 签名 / entitlement 与主进程隔离、无 Security framework、Keychain 或旧加密运行时依赖。
+- **未执行**：报告中的 `installedAcceptance`、`syntheticSmoke`、`canaryScan` 和 `overall` 仍是 `notExecuted`；`verify-dicom-xpc.sh` 的真实 XPC 探针没有在该提交上重跑；App 没有安装或启动；Developer ID 与 notarization 未执行。该提交尚未推送，产物在被忽略的 `dist/` 下，不进入 Git。此前切换记录里“bundle 没有重新构建”的说法由本条更新，其余未执行项不变。
