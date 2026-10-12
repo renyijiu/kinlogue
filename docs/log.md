@@ -1292,3 +1292,20 @@
 - **目检**：离屏渲染真实筛选条的静止态（与改动前一致），并用同一组主题函数渲染未选中与选中各三种状态的色样逐一查看。离屏渲染无法触发真实悬停与按下，所以没有在运行中的 App 里看到这两个状态。
 - **账本**：主测试清单经脚本核对为 1041 tests / 92 suites。
 - **验证**：当前 Mac（macOS 27.0.1 / Xcode 27 / Swift 6.4）未提交工作树上，`scripts/lint.sh` 与完整 `scripts/test.sh --quiet` 均以 0 退出，日志中没有失败项；derived XCTest 13/13、验收扫描 14/1、storage process 33/1、DICOM 导入集成 18/1、安装 LAN 生产 HTTP 1/1 与真实双流 LAN RSS/背压 1/1 通过。`scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。
+
+## [2026-10-11] ci | PR 只跑 macOS 26 基线，bundle 验证独立并行，CodeQL 只追踪第一方源码
+
+- **依据**：用 `gh` 读取最近 30 次 CI 与 12 次 CodeQL 运行的 job 与 step 时间。加入 Xcode 27 矩阵后的 17 次 CI 运行里，原质量 job 在 macOS 26 上成功时中位 24.5 分钟、最长 27.5 分钟，另有 5 次撞到 30 分钟 job 上限被取消（macOS 26 三次、Xcode 27 两次）；每次触发启动 7 个 macOS job，96 个 job 中 43 个排队超过 5 分钟，最长 31 分钟。CodeQL 成功运行中位 31.4 分钟，其中 tracer 下的 `swift build` 中位 28.8 分钟；抽样运行 38115425342 里同一命令在 lint 中不带 tracer 只用 165 秒，tracer 下的时间主要花在 JXLSwift、J2KCodec、DicomCore 和 SwiftNIO 等第三方模块。
+- **CI**：三个测试分区和新的 bundle job 的矩阵改为按事件取值，pull request 只用 `macos-26`，main push 与手工触发仍同时使用 `macos-26` 和 `xcode-27`。原质量 job 拆成两个并行 job：`quality` 保留 lint、隐私门禁和分区 `0/3`，检查名改为 `Lint and test`；新 `bundle` job 在自己的 checkout 上运行 `verify-app.sh --require-clean-source` 与 `verify-dicom-xpc.sh --use-verified-app`，检查名为 `Verify bundle and DICOM XPC`。各脚本、分区划分、deadline 和 30 分钟 job 上限未改。
+- **CodeQL**：在 `codeql-action/init` 之前增加一次不被追踪的 `swift build`，tracer 启动后对 `Sources/` 下的 Swift 源码执行 `touch` 再编译。第三方依赖不再被提取，这是有意缩小的范围：依赖内部的问题不由这一门禁发现。
+- **测试**：[`GitHubActionsWorkflowTests.swift`](../Tests/KinlogueAppTests/GitHubActionsWorkflowTests.swift) 的两项既有测试改为断言四个 job 的检查名、按事件取值的矩阵、bundle 与 XPC 只出现在 `bundle` job 且顺序固定，以及 CodeQL 的预编译、tracer 启动、源码失效、追踪编译和分析的先后顺序。没有新增测试，主测试清单计数不变。
+- **本机验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4。冷编译后对 `Sources/` 执行 `touch` 再 `swift build -v`，只有本仓库十个非测试 target 出现编译调用，第三方模块没有重编。`xcodebuild -clonedSourcePackagesDirPath` 指向不存在的多级目录时会自行创建，新 bundle job 没有先行的 `.build/` 不构成障碍。`scripts/test.sh --filter GitHubActionsWorkflowTests --filter ReleaseScriptSafetyTests` 通过 27 tests / 2 suites；临时把一个 job 的矩阵改回固定双 runner、把 bundle 验证放回质量 job、删掉 CodeQL 的 `touch` 后，同一命令按预期出现 3 处失败，随后逐字节恢复。`scripts/lint.sh`、`scripts/verify-docs.sh` 和 `scripts/privacy-guard.sh` 通过。
+- **未执行**：完整 `scripts/test.sh`、`verify-app.sh` 和远端 CI 没有运行。tracer 下的 CodeQL 耗时、Xcode 26.6 原生构建引擎上 `touch` 的重编范围，以及缩小提取范围后告警是否变化，都要等远端运行核对。写入本条时托管端 `Protect main` 规则仍要求旧检查名 `Lint, test, and verify bundle`；合并前须换成 `Lint and test` 与 `Verify bundle and DICOM XPC`，否则该必需检查不会出现。
+- **未采纳**：同一分析中发现的另外三处重复编译没有处理：`verify-dicom-xpc.sh` 为切换 hang 开关从零重编 Helper、lint 与测试因编译参数不同各自全量编译、三个测试分区各自冷编译。
+
+## [2026-10-11] ci | 撤回 CodeQL 预编译：tracer 下仍然全量重编
+
+- **远端结果**：PR #20 首轮运行（CI 38136501062、CodeQL 38136501205）里，新布局的四个 macOS 26 job 全部通过：`Lint and test` 10.0 分钟、`Verify bundle and DICOM XPC` 17.8 分钟、`Complementary test partition` 7.5 分钟、`Dedicated LAN derived-artifact tests` 7.7 分钟，pull request 没有启动 `xcode-27` job。CodeQL 也通过，但用时 38.9 分钟，比改动前 31.4 分钟的中位数更慢。
+- **原因**：日志显示 tracer 下的第二次 `swift build` 从 `[42/94] Write swift-version-…` 起把整个构建重新执行了一遍，JXLSwift、J2KCodec、SwiftNIO 和 DicomCore 等第三方模块全部重编，用时 1374.67 秒；此前不带 tracer 的 265.82 秒预编译没有被复用。tracer 给后续步骤注入了 `DYLD_INSERT_LIBRARIES` 和 `SEMMLE_COPY_EXECUTABLES_ROOT` 等环境变量。推断是环境或工具路径的变化让 SwiftPM 判定全部产物失效，具体机制没有核实。另外，从 tracer 下的 `swift build` 启动到第一条编译输出之间约有 11 分钟没有构建输出，而这时已经没有依赖需要拉取。
+- **处理**：[`codeql.yml`](../.github/workflows/codeql.yml) 恢复为 init 之后单次 `swift build`，对应的测试断言和 [`testing-and-release.md`](testing-and-release.md) 里的说明一并恢复。上一条目中“CodeQL 只追踪第一方源码”的做法没有在远端成立，以本条为准；本机 `touch` 只重编第一方 target 的结论仅适用于不带 tracer 的构建。CI 矩阵调整和 bundle job 拆分保留。
+- **未执行**：撤回后的 workflow 还没有在远端运行；完整 `scripts/test.sh` 和 `verify-app.sh` 没有在本机运行。托管端 `Protect main` 规则写入本条时仍要求旧检查名。CodeQL 的耗时问题没有解决。

@@ -16,11 +16,13 @@ concurrency:
 
 jobs:
   quality:
-    name: ${{ matrix.runner == 'macos-26' && 'Lint, test, and verify bundle' || 'Lint, test, and verify bundle (xcode-27)' }}
+    name: ${{ matrix.runner == 'macos-26' && 'Lint and test' || 'Lint and test (xcode-27)' }}
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-26, xcode-27]
+        # Pull requests gate on the macOS 26 baseline only. The Xcode 27 preview
+        # joins on main pushes and manual runs, where it cannot delay a merge.
+        runner: ${{ fromJSON(github.event_name == 'pull_request' && '["macos-26"]' || '["macos-26", "xcode-27"]') }}
     # The Xcode 27 runner is a public preview; keep macOS 26 as the required baseline.
     continue-on-error: ${{ matrix.runner == 'xcode-27' }}
     runs-on: ${{ matrix.runner }}
@@ -64,6 +66,36 @@ jobs:
       - name: Run the full test suite
         run: scripts/test.sh
 
+  # The release bundle and its XPC probes rebuild everything from clean source,
+  # so they run beside the tests instead of after them.
+  bundle:
+    name: ${{ matrix.runner == 'macos-26' && 'Verify bundle and DICOM XPC' || 'Verify bundle and DICOM XPC (xcode-27)' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pull requests gate on the macOS 26 baseline only. The Xcode 27 preview
+        # joins on main pushes and manual runs, where it cannot delay a merge.
+        runner: ${{ fromJSON(github.event_name == 'pull_request' && '["macos-26"]' || '["macos-26", "xcode-27"]') }}
+    # The Xcode 27 runner is a public preview; keep macOS 26 as the required baseline.
+    continue-on-error: ${{ matrix.runner == 'xcode-27' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prepare toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+          if ! xcrun --sdk macosx metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+            xcrun --kill-cache
+          fi
+          xcrun --sdk macosx metal --version
+
       - name: Build and verify the release bundle
         run: scripts/verify-app.sh --require-clean-source
 
@@ -75,7 +107,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-26, xcode-27]
+        # Pull requests gate on the macOS 26 baseline only. The Xcode 27 preview
+        # joins on main pushes and manual runs, where it cannot delay a merge.
+        runner: ${{ fromJSON(github.event_name == 'pull_request' && '["macos-26"]' || '["macos-26", "xcode-27"]') }}
     # The Xcode 27 runner is a public preview; keep macOS 26 as the required baseline.
     continue-on-error: ${{ matrix.runner == 'xcode-27' }}
     runs-on: ${{ matrix.runner }}
@@ -109,7 +143,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-26, xcode-27]
+        # Pull requests gate on the macOS 26 baseline only. The Xcode 27 preview
+        # joins on main pushes and manual runs, where it cannot delay a merge.
+        runner: ${{ fromJSON(github.event_name == 'pull_request' && '["macos-26"]' || '["macos-26", "xcode-27"]') }}
     # The Xcode 27 runner is a public preview; keep macOS 26 as the required baseline.
     continue-on-error: ${{ matrix.runner == 'xcode-27' }}
     runs-on: ${{ matrix.runner }}
