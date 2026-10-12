@@ -60,6 +60,7 @@
 
 ### 平台与用户能力
 
+- [`storage-search-measurement-2026-10-12.md`](storage-search-measurement-2026-10-12.md)：搜索改用预筛键与按摘要缓存后，近上限资料库上的计时、基线对照和未测范围。
 - [`sqlite-storage.md`](sqlite-storage.md)：实验 SQLite 内核、报告/OCR、LAN 与规范化 DICOM 事务、逻辑备份/恢复、实体字节预算、窄查询、单实例、完整性和原件生命周期；生产切换门禁。
 - [`storage.md`](storage.md)：Vault/inbox 布局、原子提交、恢复、删除和导出。
 - [`backup-and-restore.md`](backup-and-restore.md)：加密恢复点、目录授权、自动化、保留和整库恢复。

@@ -63,5 +63,6 @@ kind: pattern-reference | product-decision | external-spec
 - [`2026-10-11-sqlite-capture-cache.md`](2026-10-11-sqlite-capture-cache.md)：SQLite cache/spill 官方语义及临时捕获副本的本机验证边界。
 
 - [`2026-10-11-apple-search-semantics.md`](2026-10-11-apple-search-semantics.md)：Foundation 与 CF 的本地化子串匹配契约。
+- [`2026-10-12-corefoundation-find-implementation.md`](2026-10-12-corefoundation-find-implementation.md)：开源 CFString 查找实现的大小写折叠、非字面匹配与 locale 处理。
 - [`2026-10-11-sqlite-column-bounds.md`](2026-10-11-sqlite-column-bounds.md)：SQLite 大字段字节长度与惰性 CASE 的读取边界。
 - [`2026-10-11-grdb-text-fidelity.md`](2026-10-11-grdb-text-fidelity.md)：固定 GRDB 版本的 NUL 文本读写行为及项目保真边界。

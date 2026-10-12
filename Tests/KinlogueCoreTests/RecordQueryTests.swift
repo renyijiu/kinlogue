@@ -36,6 +36,24 @@ func searchIncludesReportedResults() throws {
 }
 
 @Test
+func searchTermEndingInNULMatchesOnlyTextThatContainsIt() {
+    // Foundation reads past the end of the text for such a term: without the guard the first two
+    // lines report a match and the third traps.
+    for locale in [Locale(identifier: "en_US"), Locale(identifier: "zh_Hans_CN"), Locale(identifier: "tr_TR")] {
+        #expect(!RecordQuery.localizedContains("A\u{0}", in: "ungla", locale: locale))
+        #expect(!RecordQuery.localizedContains("a\u{0}\u{0}", in: "ungla", locale: locale))
+        #expect(!RecordQuery.localizedContains("成\u{0}", in: "合成", locale: locale))
+        #expect(RecordQuery.localizedContains("A\u{0}", in: "xa\u{0}y", locale: locale))
+        #expect(RecordQuery.localizedContains("成\u{0}", in: "合成\u{0}", locale: locale))
+        #expect(RecordQuery.localizedContains("\u{0}", in: "a\u{0}", locale: locale))
+        #expect(!RecordQuery.localizedContains("\u{0}", in: "a", locale: locale))
+    }
+    #expect(!RecordQuery.matchesSearchTerm("成\u{0}", fields: ["合成", "Synthetic"]))
+    #expect(RecordQuery.matchesSearchTerm("syn", fields: ["合成", "Synthetic"]))
+    #expect(!RecordQuery.matchesSearchTerm("", fields: ["合成"]))
+}
+
+@Test
 func searchCanBeScopedToOneFamilyMember() throws {
     let firstMember = try FamilyMember(displayName: "First synthetic member")
     let secondMember = try FamilyMember(displayName: "Second synthetic member")

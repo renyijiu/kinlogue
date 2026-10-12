@@ -66,7 +66,13 @@ pin 固定 descriptor 和文件身份，不在快照捕获时读取全部原件�
 
 header、列表、搜索、成员编辑、复核、详情、原件和比较都有请求身份及库 epoch 围栏；切换筛选立即清空旧游标，分页失败保留已加载项，陈旧游标重新从第一页查询。整库替换同步撤销查询身份后取消并等待全部已进入读取。物理数据库失败使用固定语义错误 `databaseUnavailable`；即使 header 表仍可读也不能回到 Ready。普通行/OCR 损坏则隔离目标。SQL Viewer 的失效只依赖目标 study revision 和库 epoch，无关报告提交不关闭窗口。候选 composition 的普通读写已纳入同一 lifecycle：拒绝新任务后取消并等待已进入操作，已提交命令仍能返回成功结果及必要的有界 header；随后才关闭数据库并保留替换 owner。
 
-搜索在同一数据库读取中取得拥有自身内存的候选，每批最多 512 行 / 2 MiB、最多八个同步工作 lane；大于批预算的合法单实体独立处理。字段摘要验证、JSON 解码与匹配均保留，取消会等待所有 lane 排空。CF 预筛与最终 Foundation 逐字段谓词使用同一 locale，最终结果保持字段边界；依据见 [API 来源](sources/2026-10-11-apple-search-semantics.md)。DICOM study 的 `uid_domain` 同样在 SQL 返回前按固定 domain 字节长度检查，超限时返回占位和损坏标记，列表保留坏项 ID 和健康项，详情、逻辑备份与导出共用该投影；不先将超长字段复制进 Swift 再拒绝。冷热查询使用直接列 `octet_length` 和惰性 CASE，在 SQL 返回前执行字节预算，来源见 [字节边界](sources/2026-10-11-sqlite-column-bounds.md)。[规模结果](storage-refactor-measurement-2026-10-11.md#sqlite-按需查询) 仍有未通过项。
+[搜索](../Sources/KinloguePlatform/Storage/SQLiteReportSearch.swift) 的每次查询先按存储顺序读出范围内报告的 ID、成员、日期和搜索摘要，在内存里排成时间线次序，再顺序扫描全部搜索行。每一行的字节都重新计算两个摘要并与报告行和搜索行自身的摘要比较，所以无论是否命中，损坏的行都会被报告；每批最多 512 行 / 2 MiB、最多八个同步工作 lane，大于批预算的合法单实体独立处理，取消会等待所有 lane 排空。结果始终是完整的有序命中，首页不提前结束扫描。
+
+是否命中只由各字段上的 Foundation 谓词决定。[预筛键](../Sources/KinloguePlatform/Storage/SQLiteReportSearchKey.swift) 只用来跳过不可能命中的字段：每个标量做兼容分解，再逐标量映射为大写后小写直到稳定，最后只保留字母和数字，字段之间用 UTF-8 中不会出现的字节分隔。Foundation 在任何 locale 下能找到的词，其键一定是该字段键的字节子串；反过来不成立，所以键命中后仍要用 Foundation 确认。不含字母或数字的词没有键，不做预筛。这一保证由 [测试](../Tests/KinloguePlatformTests/SQLiteReportSearchKeyTests.swift) 对照运行系统上的真实 Foundation 检查：穷举每个标量的大小写与规范等价变体，再加多文字、多 locale 的语料和生成文本。设计依据见 [API 来源](sources/2026-10-11-apple-search-semantics.md) 和 [实现核对](sources/2026-10-12-corefoundation-find-implementation.md)。
+
+解码后的字段和预筛键按行缓存在打开的数据库对象上，预算 64 MiB，关闭或替换数据库时清空。缓存不被单独信任：只有本次查询读到的字节算出的摘要与条目的摘要相同，才使用该条目；它省掉的是相同已校验字节的解码和键推导，不是校验。超出预算的行每次重新解码。连接页缓存设为 32 MiB，使近上限资料库的报告表和搜索表在两次搜索之间留在连接内。
+
+搜索词以 NUL 结尾时，带 locale 的 Foundation 搜索会越过文本末尾读取，报告不存在的匹配，对部分文本会直接终止进程。[Core 谓词](../Sources/KinlogueCore/Domain/RecordQuery.swift) 在这种情况下给被搜索文本补一个非 NUL 单元，JSON 与 SQLite 两条路径共用。DICOM study 的 `uid_domain` 同样在 SQL 返回前按固定 domain 字节长度检查，超限时返回占位和损坏标记，列表保留坏项 ID 和健康项，详情、逻辑备份与导出共用该投影；不先将超长字段复制进 Swift 再拒绝。冷热查询使用直接列 `octet_length` 和惰性 CASE，在 SQL 返回前执行字节预算，来源见 [字节边界](sources/2026-10-11-sqlite-column-bounds.md)。近上限资料库上的搜索计时见 [2026-10-12 复测](storage-search-measurement-2026-10-12.md)；此前未通过的基线保留在 [首批实测](storage-refactor-measurement-2026-10-11.md#sqlite-按需查询)。
 
 [文本边界](../Sources/KinloguePlatform/Storage/SQLiteRows.swift) 以 UTF-8 字节绑定 TEXT，并在 GRDB cursor 生命周期内读取完整字节，避免锁定版本默认 C 字符串读写截断 NUL。非法 UTF-8 由行 codec 拒绝；保留合法 NUL、组合 Unicode、空字符串与 NULL 的区别，不修改行摘要或逻辑备份格式。成员、报告热摘要、来源、原件 metadata、导出和逻辑恢复共用该边界。[来源核对](sources/2026-10-11-grdb-text-fidelity.md) 记录具体依赖行为。
 

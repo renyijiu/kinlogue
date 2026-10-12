@@ -122,7 +122,18 @@ public enum RecordQuery {
     }
 
     package static func matchesSearchTerm(_ term: String, fields: [String]) -> Bool {
-        fields.contains { $0.localizedCaseInsensitiveContains(term) }
+        fields.contains { localizedContains(term, in: $0, locale: .current) }
+    }
+
+    /// The localized, case-insensitive search behind every query path.
+    ///
+    /// When the term ends in NUL, Foundation's localized search reads past the end of the text as if
+    /// NUL followed it: it reports a match that is not there, and for some text it traps. The text is
+    /// then searched with one more unit that is not NUL, which keeps that read inside the text and
+    /// can never be part of a match.
+    package static func localizedContains(_ term: String, in field: String, locale: Locale) -> Bool {
+        let text = term.unicodeScalars.last?.value == 0 ? field + "\u{1}" : field
+        return text.range(of: term, options: .caseInsensitive, locale: locale) != nil
     }
 
     package static func searchableFields(record: HealthRecord) -> [String] {

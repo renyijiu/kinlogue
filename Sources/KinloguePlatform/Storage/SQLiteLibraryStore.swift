@@ -120,6 +120,7 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
     var activeOriginals: Set<UUID> = []
     var activeDICOMImports: Set<UUID> = []
     package let originalReadMetrics = SQLiteOriginalReadMetrics()
+    let reportSearchCache = SQLiteReportSearchCache()
     var quarantinedTargets: Set<SQLiteIntegrityTarget> = [] // Protected by admission, scoped to openEpoch.
     private(set) var openEpoch = UUID()
     let originalFault: (@Sendable (SQLiteOriginalFaultPoint) -> Bool)?
@@ -209,6 +210,7 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
             databaseIdentity = nil
             originalsIdentity = nil
         }
+        reportSearchCache.removeAll()
         notifications.finish()
     }
 
@@ -228,6 +230,7 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
             releaseDatabaseClaim()
             owner = nil
         }
+        reportSearchCache.removeAll()
         notifications.finish()
     }
 
@@ -321,6 +324,9 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
             try db.execute(sql: "PRAGMA trusted_schema = OFF")
             try db.execute(sql: "PRAGMA synchronous = EXTRA")
             try db.execute(sql: "PRAGMA fullfsync = ON")
+            // 32 MiB of pages. A near-limit library's report and search tables then stay in the
+            // connection's cache between searches; the 8 MiB default re-read them from the system.
+            try db.execute(sql: "PRAGMA cache_size = -32768")
         }
         let opened = try DatabaseQueue(path: databaseURL.path, configuration: configuration)
         do {

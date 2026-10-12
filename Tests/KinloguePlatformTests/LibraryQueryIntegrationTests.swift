@@ -336,7 +336,7 @@ func sqliteReportSearchCancellationStopsTheScanWithoutPoisoningLaterQueries() as
     let gate = SQLiteReportStageGate()
     try kernel.write { db in
         db.trace { event in
-            if case let .statement(statement) = event, statement.sql.hasPrefix("SELECT r.record_id, r.member_id, r.timeline_date, r.search_hash") { gate.pause() }
+            if case let .statement(statement) = event, statement.sql.hasPrefix("SELECT record_id, length(fields) AS field_bytes") { gate.pause() }
         }
     }
     let search = Task { try await repository.reportPage(query: "图像") }
@@ -346,6 +346,124 @@ func sqliteReportSearchCancellationStopsTheScanWithoutPoisoningLaterQueries() as
     await #expect(throws: CancellationError.self) { _ = try await search.value }
     try kernel.write { db in db.trace(nil) }
     #expect(try await repository.reportPage(query: "图像").items.map(\.id) == [record.id])
+}
+
+@Test
+func sqliteSearchCacheServesOnlyRowsWhoseCurrentBytesStillHashTheSame() async throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let kernel = try SQLiteLibraryStore(rootURL: root)
+    defer { try? kernel.close() }
+    let repository = SQLiteReportRepository(store: kernel)
+    let member = try FamilyMember(displayName: "Synthetic member")
+    try await repository.saveMember(member, replacing: nil)
+    let edited = try await sqliteConfirmedRecord(repository, member: member, seed: "cache edited", conclusion: "Synthetic alpha finding")
+    let tampered = try await sqliteConfirmedRecord(repository, member: member, seed: "cache tampered", conclusion: "Synthetic alpha finding")
+    let deleted = try await sqliteConfirmedRecord(repository, member: member, seed: "cache deleted", conclusion: "Synthetic alpha finding")
+    let kept = try await sqliteConfirmedRecord(repository, member: member, seed: "cache kept", conclusion: "Synthetic alpha finding")
+    let everyone = Set([edited.id, tampered.id, deleted.id, kept.id])
+
+    let cold = try await repository.measureReportSearch("ALPHA")
+    #expect(Set(cold.ids) == everyone)
+    #expect(cold.cachedRowCount == 0)
+    #expect(kernel.reportSearchCache.snapshot().count == 4)
+    let warm = try await repository.measureReportSearch("ALPHA")
+    #expect(warm.ids == cold.ids)
+    #expect(warm.cachedRowCount == 4)
+
+    // An edit changes the row's bytes and digest, so its old entry is never consulted again.
+    let replacement = try HealthRecord(id: edited.id, memberID: edited.memberID, sources: edited.sources,
+        ocrDocumentObjectID: edited.ocrDocumentObjectID, importState: .confirmed, revision: edited.revision + 1,
+        conclusion: SourceField.manualEntry("Synthetic beta finding"))
+    try await repository.updateRecord(replacement, expectedRevision: edited.revision)
+    let afterEdit = try await repository.measureReportSearch("alpha")
+    #expect(Set(afterEdit.ids) == [tampered.id, deleted.id, kept.id])
+    #expect(afterEdit.cachedRowCount == 3)
+    #expect(try await repository.measureReportSearch("beta").ids == [edited.id])
+
+    // Bytes changed behind the stored digests are reported as damage even though an entry exists.
+    try kernel.write { db in
+        try db.execute(sql: "UPDATE report_search SET fields = ? WHERE record_id = ?",
+            arguments: [Data("[\"Synthetic alpha finding\"]".utf8), tampered.id.sqliteBytes])
+    }
+    let afterTampering = try await repository.measureReportSearch("alpha")
+    #expect(Set(afterTampering.ids) == [deleted.id, kept.id])
+    #expect(afterTampering.damagedIDs == [tampered.id])
+    #expect(try await repository.reportPage(query: "alpha").damagedIDs == [tampered.id])
+
+    // A scan of the whole library drops the entry of a report that no longer exists.
+    try await repository.deleteRecord(deleted.id, expectedRevision: deleted.revision)
+    let afterDeletion = try await repository.measureReportSearch("alpha")
+    #expect(afterDeletion.ids == [kept.id])
+    #expect(kernel.reportSearchCache.snapshot()[deleted.id] == nil)
+
+    // The reference path decodes every row itself and agrees with the cached path.
+    let reference = try await repository.measureReportSearch("alpha", prefilter: false)
+    #expect(reference.ids == afterDeletion.ids)
+    #expect(reference.damagedIDs == afterDeletion.damagedIDs)
+    #expect(reference.cachedRowCount == 0)
+
+    try kernel.closeDatabaseForReplacement()
+    #expect(kernel.reportSearchCache.snapshot().isEmpty)
+}
+
+@Test
+func sqliteSearchResultsKeepTheTimelineOrderOfThePlainReportPage() async throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let kernel = try SQLiteLibraryStore(rootURL: root)
+    defer { try? kernel.close() }
+    let repository = SQLiteReportRepository(store: kernel)
+    let member = try FamilyMember(displayName: "Synthetic member")
+    try await repository.saveMember(member, replacing: nil)
+    // Equal dates, different dates and no date exercise every branch of the ordering.
+    var records: [HealthRecord] = []
+    for index in 0..<12 {
+        let base = try await sqliteConfirmedRecord(repository, member: member, seed: "ordered \(index)")
+        let dates: [ReportDateCandidate] = index % 4 == 3 ? [] : [ReportDateCandidate(
+            date: CanonicalVaultJSON.persistenceStableDate(Date(timeIntervalSince1970: 1_786_000_000 + Double(index % 3) * 86_400)),
+            kind: .report, source: try SourceField.manualEntry("Synthetic date"))]
+        let dated = try HealthRecord(id: base.id, memberID: base.memberID, sources: base.sources,
+            ocrDocumentObjectID: base.ocrDocumentObjectID, importState: .confirmed, revision: base.revision + 1,
+            title: SourceField.manualEntry("图像"), dateCandidates: dates, timelineDateCandidateID: dates.first?.id)
+        try await repository.updateRecord(dated, expectedRevision: base.revision)
+        records.append(dated)
+    }
+    let plain = try await repository.reportPage().items.map(\.id)
+    #expect(plain.count == 12)
+    #expect(try await repository.measureReportSearch("图像").ids == plain)
+    #expect(try await repository.reportPage(query: "图像").items.map(\.id) == plain)
+
+    // Paging through the search follows the same order without gaps or repeats.
+    var paged: [UUID] = [], cursor: LibraryQueryCursor?
+    repeat {
+        let page = try await repository.reportPage(query: "图像", limit: 5, cursor: cursor)
+        paged += page.items.map(\.id); cursor = page.nextCursor
+    } while cursor != nil
+    #expect(paged == plain)
+}
+
+@Test
+func sqliteSearchCacheStopsGrowingAtItsBudgetAndDropsEntriesOfMissingReports() {
+    let cache = SQLiteReportSearchCache()
+    let text = String(repeating: "合成", count: 400_000)
+    func entry() -> SQLiteReportSearchCache.Entry {
+        .init(fieldsHash: Data(repeating: 1, count: 32), fields: [text], key: SQLiteReportSearchKey.key(fields: [text]))
+    }
+    let one = entry()
+    #expect(one.cost > 4 * 1_024 * 1_024)
+    let ids = (0..<40).map { _ in UUID() }
+    cache.update(ids.map { ($0, one) }, present: nil)
+    let stored = cache.snapshot()
+    #expect(!stored.isEmpty && stored.count < ids.count)
+    #expect(stored.count * one.cost <= SQLiteReportSearchCache.costLimit)
+
+    // Room freed by a report that is gone can be used again.
+    let kept = Set(stored.keys.prefix(1)), newcomer = UUID()
+    cache.update([(newcomer, one)], present: kept.union([newcomer]))
+    #expect(Set(cache.snapshot().keys) == kept.union([newcomer]))
+    cache.removeAll()
+    #expect(cache.snapshot().isEmpty)
 }
 
 @Test

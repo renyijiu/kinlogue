@@ -461,15 +461,20 @@ enum StorageScaleProbe {
         for (key, query) in [("first_page", ""), ("no_match", "synthetic-absent-query"), ("rare", "项目9876"), ("date", "2026-01"), ("chinese", "合成"), ("member", "成员")] {
             // The uncached Core predicate runs outside measured samples, with the same bounded scanner.
             let expected = try await repository.measureReportSearch(query, prefilter: false)
+            // The first query of the process also decodes every row and derives its key.
+            let firstStarted = now()
             let checked = try await repository.measureReportSearch(query)
+            let firstElapsed = milliseconds(since: firstStarted)
             guard expected.ids == checked.ids, expected.damagedIDs == checked.damagedIDs else { throw ProbeError.unexpectedState }
             var result = ProbeReport()
+            result.set("first_checked_ms", firstElapsed)
             result.set("match_count", checked.ids.count)
             result.set("oracle_ids_equal", "true")
             result.set("peak_batch_bytes", checked.peakBatchBytes)
             result.set("maximum_lanes", checked.maximumLanes)
             result.set("candidate_count", checked.candidateCount)
-            var pageValues: [Double] = [], fullValues: [Double] = [], sqlValues: [Double] = []
+            result.set("cached_row_count", checked.cachedRowCount)
+            var pageValues: [Double] = [], fullValues: [Double] = [], sqlValues: [Double] = [], directoryValues: [Double] = []
             _ = try await repository.reportPage(query: query)
             for iteration in 0..<configuration.iterations {
                 var started = now()
@@ -481,10 +486,11 @@ enum StorageScaleProbe {
                 let fullElapsed = milliseconds(since: started)
                 guard full.ids == expected.ids else { throw ProbeError.unexpectedState }
                 fullValues.append(fullElapsed); sqlValues.append(full.sqlReadMilliseconds)
+                directoryValues.append(full.directoryMilliseconds)
                 result.set("full_match_sample_\(iteration)", fullElapsed)
                 result.set("sql_read_sample_\(iteration)", full.sqlReadMilliseconds)
             }
-            for (prefix, values) in [("first_page", pageValues), ("full_match", fullValues), ("sql_read", sqlValues)] {
+            for (prefix, values) in [("first_page", pageValues), ("full_match", fullValues), ("sql_read", sqlValues), ("directory_read", directoryValues)] {
                 let sorted = values.sorted()
                 result.set(prefix + "_p50_ms", sorted[(sorted.count - 1) / 2])
                 result.set(prefix + "_empirical_p95_ms", sorted[max(0, Int(ceil(Double(sorted.count) * 0.95)) - 1)])

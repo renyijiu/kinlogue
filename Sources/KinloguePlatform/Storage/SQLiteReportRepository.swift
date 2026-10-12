@@ -93,7 +93,7 @@ package actor SQLiteReportRepository: ImportDraftStore {
                         generation: UInt64(state.generation), commitID: state.commitID)
                     if !term.isEmpty {
                         let scan = try SQLiteReportSearch.scan(db, term: term, memberID: memberID, cursor: cursor,
-                            maximumMatches: limit + 1, cancellation: cancellation)
+                            maximumMatches: limit + 1, cancellation: cancellation, cache: store.reportSearchCache)
                         var items: [LibraryReportSummary] = [], damaged: [UUID] = []
                         for match in scan.matches.prefix(limit) {
                             try cancellation.check()
