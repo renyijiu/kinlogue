@@ -14,40 +14,7 @@ struct AppComposition {
     var libraryObserver: AppLibraryObservationCoordinator? = nil
     var integrityCoordinator: AppIntegrityCoordinator? = nil
 
-    /// The JSON composition. The GUI no longer builds it: `AppStartupCoordinator.makeDefault()`
-    /// opens the SQLite library and publishes `makeOpened`. It remains for tests of the JSON
-    /// services, which the installed acceptance phases still use.
-    static func makeDefault(identity: AppRuntimeIdentity) -> Self {
-        do {
-            let services = try LiveAppServiceEnvironment.makeDefault(identity: identity)
-            guard let vault = services.vault else { return makeUnavailable() }
-            let backup = try makeBackupRuntime(
-                identity: identity,
-                vault: vault,
-                lifecycle: services.lifecycle
-            )
-            return makeComposition(services: services, backup: backup)
-        } catch {
-            do {
-                // Damaged/unsupported Vaults still get the seed-only restore
-                // stack. No writer configuration is created by construction.
-                try VaultParentDirectoryPreparation.ensureParentDirectory(
-                    for: identity.sourceVault.rootURL
-                )
-                let vault = try PlaintextVault(rootURL: identity.sourceVault.rootURL)
-                let lifecycle = LibraryLifecycleCoordinator()
-                let backup = try makeBackupRuntime(
-                    identity: identity,
-                    vault: vault,
-                    lifecycle: lifecycle
-                )
-                return makeUnavailable(backup: backup)
-            } catch {
-                return makeUnavailable()
-            }
-        }
-    }
-
+    /// The composition on an opened SQLite library. `LibraryLaunchCoordinator` is its only caller.
     static func makeOpened(identity: AppRuntimeIdentity, services: LiveAppServiceEnvironment,
                            context: SQLiteStartupContext, database: SQLiteLibraryStore) -> Self {
         let live = LiveBackupService(store: database, configurationStore: context.configuration,
@@ -59,9 +26,6 @@ struct AppComposition {
             backupModel: BackupModel(service: live), restoreService: LiveRestoreService(service: restore)), restoreReconciled: true, database: database)
     }
 
-    static func makeSQLiteUnavailable(restoreService: (any BackupRestoreServicing)?) -> Self {
-        makeUnavailable(seedRestoreService: restoreService)
-    }
 
     private static func makeComposition(
         services: LiveAppServiceEnvironment,
@@ -117,7 +81,7 @@ struct AppComposition {
         let observer = services.commitChanges.map { subscribe in
             AppLibraryObservationCoordinator(subscribe: subscribe, reconcile: { [weak appModel, weak lanInboxModel] in
                 guard let appModel, appModel.phase == .ready else { return nil }
-                await appModel.refresh()
+                await appModel.refresh(skippingUnchanged: true)
                 await lanInboxModel?.refresh()
                 return appModel.currentLibraryRevision
             }, onDurableChange: { [weak backupModel = backup.backupModel] in
@@ -183,7 +147,9 @@ struct AppComposition {
         )
     }
 
-    private static func makeUnavailable(backup: BackupRuntime? = nil, seedRestoreService: (any BackupRestoreServicing)? = nil) -> Self {
+    /// The composition shown when the library could not be opened. It reads and writes nothing;
+    /// `restoreService` is the seed-only restore offered for a library this launch owns but cannot read.
+    static func makeUnavailable(restoreService: (any BackupRestoreServicing)?) -> Self {
         let unavailableAppService = UnavailableAppService()
         let dicomViewerRegistry = DICOMViewerRegistry()
         let appModel = AppModel(
@@ -198,24 +164,12 @@ struct AppComposition {
         let lanInboxModel = LANInboxModel(
             service: unavailableLANService, processing: processing
         )
-        let backupModel = backup?.backupModel ?? BackupModel(service: UnavailableBackupService())
-        let restoreService: any BackupRestoreServicing = seedRestoreService ?? backup?.restoreService
-            ?? UnavailableRestoreService()
+        let backupModel = BackupModel(service: UnavailableBackupService())
         let restoreModel = makeRestoreModel(
-            service: restoreService,
+            service: restoreService ?? UnavailableRestoreService(),
             appModel: appModel,
             lanInboxModel: lanInboxModel
         )
-        let destroy: any VaultDestroyServicing
-        if let backup {
-            destroy = BackupCoordinatedVaultDestroyService(
-                operationCoordinator: backup.liveBackup.operationCoordinator,
-                configurationStore: backup.liveBackup.configurationStore,
-                underlying: UnavailableVaultDestroyService()
-            )
-        } else {
-            destroy = UnavailableVaultDestroyService()
-        }
         let startup = AppStartupCoordinator(
             reconcileRestore: { [weak restoreModel] in
                 await restoreModel?.reconcileBeforeStartingServices() ?? false
@@ -229,7 +183,7 @@ struct AppComposition {
         return Self(
             appModel: appModel,
             deletionModel: deletionModel(
-                destroyService: destroy,
+                destroyService: UnavailableVaultDestroyService(),
                 appModel: appModel,
                 lanInboxModel: lanInboxModel
             ),
@@ -279,38 +233,6 @@ struct AppComposition {
             onReplacementEnded: { [weak appModel] in
                 appModel?.requireRestartAfterVaultLifecycle()
             }
-        )
-    }
-
-    private static func makeBackupRuntime(
-        identity: AppRuntimeIdentity,
-        vault: PlaintextVault,
-        lifecycle: LibraryLifecycleCoordinator
-    ) throws -> BackupRuntime {
-        let store = BackupLocalConfigurationStore(rootURL: identity.backupIdentity.rootURL)
-        let liveBackup = try LiveBackupService(
-            activeVaultURL: identity.sourceVault.rootURL,
-            configurationStore: store,
-            vault: vault,
-            requiresSelectedDirectoryScope: identity.mode == .production
-        )
-        let verifier = try BackupRestoreVerifier(
-            stableParentURL: identity.sourceVault.rootURL.deletingLastPathComponent(),
-            activeRootURL: identity.sourceVault.rootURL
-        )
-        let transaction = try BackupRestoreTransaction(activeRootURL: identity.sourceVault.rootURL)
-        let restoreService = BackupRestoreService(
-            verifier: verifier,
-            transaction: transaction,
-            configurationStore: store,
-            operationCoordinator: liveBackup.operationCoordinator,
-            lifecycle: lifecycle
-        )
-        let liveRestore = LiveRestoreService(service: restoreService)
-        return .init(
-            liveBackup: liveBackup,
-            backupModel: BackupModel(service: liveBackup),
-            restoreService: liveRestore
         )
     }
 }

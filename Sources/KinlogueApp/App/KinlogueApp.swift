@@ -28,12 +28,12 @@ enum KinlogueApp {
 private struct KinlogueGUIApp: App {
     /// Owns the library for the whole launch. Models exist only once the storage disclosure is
     /// accepted and the SQLite library has opened, so the scenes read them from here.
-    @StateObject private var startup: AppStartupCoordinator
+    @StateObject private var startup: LibraryLaunchCoordinator
     @AppStorage(AppLocalization.languagePreferenceKey)
     private var selectedLanguage = AppLanguage.system
 
     init() {
-        _startup = StateObject(wrappedValue: AppStartupCoordinator.makeDefault())
+        _startup = StateObject(wrappedValue: LibraryLaunchCoordinator.makeDefault())
     }
 
     var body: some Scene {

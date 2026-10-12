@@ -11,7 +11,7 @@ struct SQLiteAppStartupTests {
     func disclosurePrecedesIOAndConcurrentOpeningSharesTheOwner() async throws {
         let fixture = try SQLStartupFixture()
         defer { fixture.remove() }
-        let startup = AppStartupCoordinator(identity: fixture.identity)
+        let startup = LibraryLaunchCoordinator(identity: fixture.identity)
         #expect(!FileManager.default.fileExists(atPath: fixture.identity.sourceVault.rootURL.deletingLastPathComponent().path))
         await #expect(throws: AppStartupError.disclosureRequired) { try await startup.openEnvironment() }
         #expect(!FileManager.default.fileExists(atPath: fixture.identity.sourceVault.rootURL.deletingLastPathComponent().path))
@@ -25,7 +25,7 @@ struct SQLiteAppStartupTests {
         #expect(!FileManager.default.fileExists(atPath: fixture.identity.backupIdentity.rootURL.path))
         // Re-opening does not run restore reconciliation against its already-open database.
         #expect(try await startup.openEnvironment().dataService === left.dataService)
-        let other = AppStartupCoordinator(identity: fixture.identity)
+        let other = LibraryLaunchCoordinator(identity: fixture.identity)
         other.acknowledgeStorageDisclosure()
         await #expect(throws: SQLiteLibraryError.occupied) { try await other.openEnvironment() }
         #expect(other.seedRestoreService == nil)
@@ -41,16 +41,22 @@ struct SQLiteAppStartupTests {
         let fixture = try SQLStartupFixture()
         defer { fixture.remove() }
         let root = fixture.identity.sourceVault.rootURL
-        let first = AppStartupCoordinator(identity: fixture.identity)
+        let first = LibraryLaunchCoordinator(identity: fixture.identity)
         first.acknowledgeStorageDisclosure()
         #expect(await first.start())
         let model = try #require(first.composition?.appModel)
         #expect(model.phase == .ready)
         #expect(await model.createMember(displayName: "Synthetic launch member", disambiguationLabel: nil))
         #expect(Set(try FileManager.default.contentsOfDirectory(atPath: root.path)) == ["library.sqlite", "originals"])
+        // A first launch is an ordinary start: nothing to restore, a private parent directory,
+        // and no backup identity until the user sets one up.
+        #expect(first.composition?.restoreModel.phase == .idle && first.failure == nil)
+        let parent = try FileManager.default.attributesOfItem(atPath: root.deletingLastPathComponent().path)
+        #expect((parent[.posixPermissions] as? NSNumber)?.intValue == 0o700)
+        #expect(!FileManager.default.fileExists(atPath: fixture.identity.backupIdentity.rootURL.path))
         await first.shutdown()
 
-        let second = AppStartupCoordinator(identity: fixture.identity)
+        let second = LibraryLaunchCoordinator(identity: fixture.identity)
         second.acknowledgeStorageDisclosure()
         #expect(await second.start())
         #expect(second.composition?.appModel.members.map(\.displayName) == ["Synthetic launch member"])
@@ -59,14 +65,14 @@ struct SQLiteAppStartupTests {
 
     @Test
     func launchWithoutARuntimeIdentityReportsTheLibraryAsUnavailable() async {
-        let startup = AppStartupCoordinator(identity: nil)
+        let startup = LibraryLaunchCoordinator(identity: nil)
         // Nothing is attempted before the storage disclosure is accepted.
         #expect(!(await startup.start()))
-        #expect(startup.candidateFailure == nil && startup.composition == nil)
+        #expect(startup.failure == nil && startup.composition == nil)
 
         startup.acknowledgeStorageDisclosure()
         #expect(!(await startup.start()))
-        #expect(startup.candidateFailure == .unavailable)
+        #expect(startup.failure == .unavailable)
         #expect(startup.composition != nil && startup.composition?.appModel.phase != .ready)
         #expect(startup.seedRestoreService == nil && startup.database == nil)
         await startup.shutdown()
@@ -92,7 +98,7 @@ struct SQLiteAppStartupTests {
             importState: .confirmed, conclusion: SourceField.manualEntry("Synthetic source"))
         try await reports.confirm(draftID: id, expectedRevision: draft.revision, record: record)
         try initial.close()
-        let startup = AppStartupCoordinator(identity: fixture.identity)
+        let startup = LibraryLaunchCoordinator(identity: fixture.identity)
         startup.acknowledgeStorageDisclosure()
         #expect(await startup.start())
         #expect(startup.composition?.appModel.phase == .ready)
@@ -114,7 +120,7 @@ struct SQLiteAppStartupTests {
         let transaction = try PlaintextVaultDeletionTransaction(rootURL: root, strictReceipt: true)
         let bytes = Data("synthetic unknown deletion receipt".utf8)
         try bytes.write(to: transaction.receiptURL)
-        let startup = AppStartupCoordinator(identity: fixture.identity)
+        let startup = LibraryLaunchCoordinator(identity: fixture.identity)
         startup.acknowledgeStorageDisclosure()
         await #expect(throws: (any Error).self) { try await startup.openEnvironment() }
         #expect(try Data(contentsOf: transaction.receiptURL) == bytes)
@@ -133,7 +139,7 @@ struct SQLiteAppStartupTests {
         try store.close()
         let transaction = try PlaintextVaultDeletionTransaction(rootURL: root, failureInjector: { $0 == .afterDeletionReceipt }, strictReceipt: true)
         #expect(throws: (any Error).self) { try transaction.begin() }
-        let startup = AppStartupCoordinator(identity: fixture.identity)
+        let startup = LibraryLaunchCoordinator(identity: fixture.identity)
         startup.acknowledgeStorageDisclosure()
         #expect(try await startup.openEnvironment().dataService.bootstrap().reportCount == 0)
         #expect(!FileManager.default.fileExists(atPath: transaction.receiptURL.path))
@@ -144,18 +150,18 @@ struct SQLiteAppStartupTests {
     func startRetriesAnOccupiedRootByReplacingTheUnavailableComposition() async throws {
         let fixture = try SQLStartupFixture()
         defer { fixture.remove() }
-        let first = AppStartupCoordinator(identity: fixture.identity)
+        let first = LibraryLaunchCoordinator(identity: fixture.identity)
         first.acknowledgeStorageDisclosure()
         _ = try await first.openEnvironment()
-        let other = AppStartupCoordinator(identity: fixture.identity)
+        let other = LibraryLaunchCoordinator(identity: fixture.identity)
         other.acknowledgeStorageDisclosure()
         #expect(!(await other.start()))
-        #expect(other.candidateFailure == .occupied && other.candidateFailure?.canRetry == true)
+        #expect(other.failure == .occupied && other.failure?.canRetry == true)
         #expect(other.seedRestoreService == nil)
         await first.shutdown()
         #expect(await other.start())
         #expect(other.composition?.appModel.phase == .ready)
-        #expect(other.candidateFailure == nil)
+        #expect(other.failure == nil)
         await other.shutdown()
     }
 
@@ -173,7 +179,7 @@ struct SQLiteAppStartupTests {
         try handle.write(contentsOf: Data([0xff]))
         try handle.close()
         let before = try Data(contentsOf: url)
-        let startup = AppStartupCoordinator(identity: fixture.identity)
+        let startup = LibraryLaunchCoordinator(identity: fixture.identity)
         startup.acknowledgeStorageDisclosure()
         await #expect(throws: SQLiteLibraryError.databaseUnavailable) { try await startup.openEnvironment() }
         #expect(startup.seedRestoreService != nil)
@@ -190,14 +196,14 @@ struct SQLiteAppStartupTests {
         let bytes = Data("synthetic old JSON bytes must survive".utf8)
         let file = root.appendingPathComponent("library.json")
         try bytes.write(to: file)
-        let startup = AppStartupCoordinator(identity: fixture.identity)
+        let startup = LibraryLaunchCoordinator(identity: fixture.identity)
         startup.acknowledgeStorageDisclosure()
         await #expect(throws: SQLiteLibraryError.unsupportedFormat) { try await startup.openEnvironment() }
         #expect(try Data(contentsOf: file) == bytes)
         #expect(startup.seedRestoreService != nil)
         #expect(throws: SQLiteLibraryError.occupied) { try SQLiteLibraryOwner(rootURL: root) }
         #expect(!(await startup.start()))
-        #expect(startup.candidateFailure == .unrecognized && startup.candidateFailure?.canRetry == false)
+        #expect(startup.failure == .unrecognized && startup.failure?.canRetry == false)
         await startup.shutdown()
     }
 }

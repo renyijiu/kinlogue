@@ -1528,3 +1528,30 @@
 - **命令与结果**：在提交 `a595f8234c23a3455cfcfbdf149ce8506b1c5f3a` 的干净工作树上运行 `scripts/verify-app.sh --require-clean-source`，退出码 0。报告记录 `source.dirty = false`、macOS 27.0.1、Xcode 27.0（27A266a）、Swift 6.4、arm64、最低系统 26.0，bundle 内容摘要 `44b1c86a4e062c3edef8b70a0afc211401fc95dc6904f67d69da0026af3c1b1e`。
 - **通过的门禁**：Release 构建、ad-hoc 签名与签名完整性、bundle metadata 与 Info.plist、应用图标、精确资源清单（这是合并 main 之后 `Assets.car` 与 GRDB privacy manifest 第一次一起出现在实际包里）、第三方声明、依赖锁定、entitlement 白名单、LAN composition、DICOM Helper 结构 / 签名 / entitlement 与主进程隔离、无 Security framework、Keychain 或旧加密运行时依赖。
 - **未执行**：报告中的 `installedAcceptance`、`syntheticSmoke`、`canaryScan` 和 `overall` 仍是 `notExecuted`；`verify-dicom-xpc.sh` 的真实 XPC 探针没有在该提交上重跑；App 没有安装或启动；Developer ID 与 notarization 未执行。该提交尚未推送，产物在被忽略的 `dist/` 下，不进入 Git。此前切换记录里“bundle 没有重新构建”的说法由本条更新，其余未执行项不变。
+
+## [2026-10-12] review/app | 刷新不再清空列表，并修复评审发现的四处问题
+
+- **起因**：用户要求以技术栈重构为目标评审当前实现。对 `origin/main...HEAD` 的生产代码做了一轮评审，发现 12 项，本条记录其中已修的 6 项；其余是结构性问题，列在本条末尾，未改代码。
+- **刷新清空列表**：重构后每次刷新都先清空时间线、搜索结果和草稿队列再从第一页重载，而刷新在每次提交通知、切回应用和唤醒时都会发生，旧 JSON 实现是原地重建。现在 [`AppModel`](../Sources/KinlogueApp/App/AppModel.swift) 刷新时保留已显示的行，按原来已加载的行数读完再一次替换；草稿各状态在新一页到达后才替换，四个状态并行读取。只有切换成员、筛选或搜索词才清空列表。
+- **重复刷新**：界面自己发起的修改会收到两次相同的 revision（服务返回的 header 和同一次提交的通知），各触发一轮完整重载。提交通知、激活、唤醒以及修改返回的 header 现在遇到已显示的 revision 时不重载列表，只重新核对已打开的记录和草稿；这一步保留下来，是因为没有改变 revision 的数据库故障原本靠它在激活时被发现，对应的既有测试继续通过。显式刷新仍然总是重载，因为草稿的重试资格可以不经提交而变化。
+- **陈旧游标**：游标绑定 commitID，任何提交都会让“载入更多”失败，原实现随即清空并回到第一页。现在按“已显示行数加一页”的深度重读一次；提交持续到来时退回只读第一页。游标与 commitID 的绑定没有改。
+- **搜索缓存**：某一行的新条目放不进预算时，旧条目原先留在缓存里，摘要已不匹配却一直占着预算。现在先移除旧条目。
+- **LAN 预处理调度**：读取队列页出错时循环直接返回，期间到达的调度请求被丢掉。现在这种请求会得到一次自己的扫描；没有新请求时仍然结束，不会对同一个错误空转。
+- **测试**：新增 4 项声明并强化 1 项，主清单 1258 tests / 98 suites。把这几处临时改回原行为后，5 项测试全部失败（列表被清空、深度回到 100、队列出现空值、未变化的 revision 仍触发分页读取、调度请求丢失、陈旧条目残留），恢复后通过。测试替身的 revision 现在随内容变化，与真实提交一致。
+- **验证**：macOS 27.0.1 上，修改后的完整 `scripts/test.sh` 退出码 0，主清单 1258 tests / 98 suites，隔离门禁全部通过；传入实际清单的 `scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。界面行为只由模型测试证明，没有在真实窗口里检查滚动位置；macOS 26、安装与人工门禁未执行。
+- **已提出、未修改的结构性问题**：空闲完整性巡检在任何提交后都从头重跑，包括重新计算全部原件的摘要；存储内核的 read / write 是持锁的同步调用，却在并发线程池上的 async 函数里执行；JSON 存储栈和临时查询适配器在界面入口切换后只剩验收阶段和测试使用；本机导入把原件先写临时文件再复制一次；`AppStartupCoordinator` 一个类型承担两个角色且仍沿用 candidate 命名；`AppModel` 用八个字典分别跟踪读取任务。这些需要单独决定方案，本次没有动。
+
+## [2026-10-12] review/storage | 处理评审留下的结构性问题，并把安装验收迁到 SQLite
+
+- **起因**：用户要求按上一条记录末尾的建议处理六项结构性问题。五项已完成；第六项（删除 JSON 存储栈）完成了前置部分，JSON 实现本身没有删除，原因见本条末尾。
+- **本机导入写盘一次**：[`SQLiteReportRepository.stage`](../Sources/KinloguePlatform/Storage/SQLiteReportRepository.swift) 原先把导入字节先写进临时文件，再由内核从临时文件复制到 staged 原件。内核现在可以直接暂存内存中的字节，登记、同步、回读校验和提交前复核与从 descriptor 复制的入口共用。
+- **空闲巡检续跑**：巡检原先在任何提交、切回应用和唤醒之后都从头重做，每个原件每轮读两遍。现在一次打开期间保留[进度记录](../Sources/KinloguePlatform/Storage/SQLiteIntegrityProgress.swift)：资料库状态与 SQLite `data_version` 未变时从断点继续，已完成的同一 revision 只重新核对原件的文件身份；提交后行检查从头开始，但字节校验通过的原件在行内容哈希与文件的设备、inode、长度、修改和状态变更时间都未变时不再重读，每次校验只读一遍。行检查仍绑定单一 revision，“revision 变化只算未完成”的语义没有改。身份信息不变而字节损坏的情况要到下次读取该原件或重新打开资料库后才发现；读原件时的校验不受影响。
+- **读取登记表**：`AppModel` 的九个任务字典和 `ComparisonModel` 的两个字典合并为 [`LibraryReadRegistry`](../Sources/KinlogueApp/ViewModels/LibraryReadRegistry.swift)，取消与排空各只有一处实现。行为不变。
+- **启动协调器拆分**：原先一个 `AppStartupCoordinator` 靠布尔标志兼任“持有本次启动的资料库”和“排定 composition 内各服务的启动次序”。前者现在是 [`LibraryLaunchCoordinator`](../Sources/KinlogueApp/App/LibraryLaunchCoordinator.swift)，后者保留原名；相关成员不再叫 candidate。
+- **阻塞调用离开并发线程池**：存储内核是持锁的同步调用，原先在 Swift 并发线程池的线程上执行，admission 被长时间持有时等待的读取会把线程池占满。现在存储层的异步入口经 [`LibraryStorageExecutor`](../Sources/KinloguePlatform/Storage/LibraryStorageExecutor.swift) 移到允许阻塞的专用线程，四个会等存储的 actor 各用自己的串行队列，备份、恢复激活、恢复收敛和原件导出在任务根部切换；细节见 [SQLite 存储专题](sqlite-storage.md#阻塞调用所在的线程)。内核的同步 API 没有改成异步。排查时给 admission 临时加了调用栈记录并跑了一遍全量测试，据此补上了批量改造没有覆盖的路径；该记录工具已删除。
+- **安装验收迁到 SQLite**：[`SyntheticAcceptanceRunner`](../Sources/KinlogueApp/App/SyntheticAcceptanceRunner.swift) 的 seed、restart、强制终止和 cleanup，以及 LAN 与 DICOM 安装验收，都改为经 `LibraryLaunchCoordinator` 打开 SQLite 资料库并走数据服务；事件的字段和 `run-acceptance.sh` 没有改。场景不再预先决定记录和原件的 ID（由资料库在暂存时分配），报告靠原件摘要对应，`summarySHA256` 改为资料库身份加各报告原件摘要。强制终止阶段现在让进程带着 owner 和打开的数据库等待被杀。单独的 `sqlite-candidate` 阶段与探针已并入这些阶段并删除。
+- **App 不再能组装 JSON 资料库**：删除了 `AppComposition.makeDefault(identity:)`、`LiveAppServiceEnvironment.makeDefault`、JSON 的备份运行时组装、`PlaintextVaultDestroyService` 和导出服务的 JSON 构造入口。对应的五项测试所验证的性质（构造不触碰磁盘、父目录权限、首次启动、不创建备份身份、旧格式原样拒绝）已由 SQLite 启动测试覆盖，其中父目录权限、恢复状态和备份身份三处是这次补上的断言。
+- **未完成：JSON 实现的删除**。`PlaintextVault`、`PlaintextLANInboxStore`、JSON 备份源与恢复事务、`LegacyLibraryQueryAdapter` 以及 `LiveAppService`、`LiveLANInboxService`、`LiveBackupService` 的 JSON 构造入口仍在，现在只被测试和跨进程 fixture 使用。删除它们需要先处置约 130 项以 JSON 资料库或 `VaultStore` 替身为夹具的测试（`LiveAppServiceTests`、`ImportWorkflowIntegrationTests`、`DICOMImportWorkflowIntegrationTests`、LAN 归档与 inbox、加密恢复点的写入与恢复、跨进程协调等），逐项判断移植到 SQLite 夹具还是随实现删除；计划的 U10 把这一步估为 3–5 人日，并要求保留第二实例、crash、根替换和备份 repository 竞争的测试。本次没有在未提交的大改动之上继续做这一步。
+- **测试**：新增 11 项声明（内存字节暂存 1、巡检续跑 3、读取登记表 4、存储执行器 3），删除 7 项（candidate 阶段 2、JSON 组装 5），改写验收场景、进程内全阶段运行和 LAN 探针 3 项。主清单 1262 tests / 100 suites。反向验证：去掉 `data_version` 围栏后“其他连接提交”一项失败；去掉执行器切换后线程池在 admission 被持有的 5 秒内无法运行其他任务，两项测试失败；恢复后通过。
+- **验证**：macOS 27.0.1 上，全部改动完成后的完整 `scripts/test.sh` 退出码 0，主清单 1262 tests / 100 suites，隔离的 derived XCTest、验收扫描、storage process、DICOM 导入集成和 LAN 用例通过；传入实际清单摘要的 `scripts/lint.sh`（含 warnings-as-errors 构建与文档校验）、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：迁移后的 `run-acceptance.sh` 没有运行，DICOM 验收阶段因此没有任何执行证据；App 没有安装或启动；提交后行检查在大库上的耗时、专用线程上的调用开销都没有测量；macOS 26、真实手机和人工门禁未执行。

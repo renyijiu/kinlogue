@@ -19,7 +19,7 @@
 
 当前最低系统已调整为 macOS 26，主要面向个人自用；Xcode 27 构建适配、CI Metal 组件准备、基线检查名兼容与 DICOM 崩溃恢复探针的重启等待预算见 [`testing-and-release.md`](testing-and-release.md)，转录编辑器的系统写作工具边界见 [`import-and-ocr.md`](import-and-ocr.md)；旧系统支持决策见 [`decisions.md`](decisions.md)，macOS 26/27 验收状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
 
-本分支按 [SQLite 与架构重构计划](plans/2026-10-10-2322-refactor-sqlite-architecture-plan.md) 把资料库从 JSON 清单换成 [SQLite 数据库加不可变原件](sqlite-storage.md)，并已合入 main 的时间线、配色和品牌更新。备份与去重的平方增长、容量格式、App 任务归属、报告/OCR、LAN、规范化 DICOM、逻辑备份/严格恢复、原件导出、按需查询、提交观察和空闲完整性巡检都已实现并有真实链路测试。**正式界面入口从 2026-10-12 起只打开 SQLite 资料库**；已有的 JSON 资料库会被原样保留并拒绝打开，本分支没有提供转换。搜索在近上限资料库上的计时见 [搜索复测](storage-search-measurement-2026-10-12.md)，其余规模结果见 [首批实测](storage-refactor-measurement-2026-10-11.md)。尚未完成：安装验收各阶段仍运行 JSON 服务，JSON 代码未删除；切换后的 App bundle 只通过了干净源码上的构建与静态验证，没有安装或运行；macOS 26、真实手机和人工门禁未执行；状态以 [验收账本](acceptance/current-release.md) 为准。
+本分支按 [SQLite 与架构重构计划](plans/2026-10-10-2322-refactor-sqlite-architecture-plan.md) 把资料库从 JSON 清单换成 [SQLite 数据库加不可变原件](sqlite-storage.md)，并已合入 main 的时间线、配色和品牌更新。备份与去重的平方增长、容量格式、App 任务归属、报告/OCR、LAN、规范化 DICOM、逻辑备份/严格恢复、原件导出、按需查询、提交观察和空闲完整性巡检都已实现并有真实链路测试。**正式界面入口从 2026-10-12 起只打开 SQLite 资料库**；已有的 JSON 资料库会被原样保留并拒绝打开，本分支没有提供转换。搜索在近上限资料库上的计时见 [搜索复测](storage-search-measurement-2026-10-12.md)，其余规模结果见 [首批实测](storage-refactor-measurement-2026-10-11.md)。安装验收各阶段已改在 SQLite 资料库上运行，App 不再有组装 JSON 资料库的入口。尚未完成：JSON 代码未删除，仍被一批测试和跨进程 fixture 使用；迁移后的 `run-acceptance.sh` 没有重跑；切换后的 App bundle 只通过了干净源码上的构建与静态验证，没有安装或运行；macOS 26、真实手机和人工门禁未执行；状态以 [验收账本](acceptance/current-release.md) 为准。
 
 ## 当前边界
 

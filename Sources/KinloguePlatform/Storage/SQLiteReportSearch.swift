@@ -36,10 +36,11 @@ final class SQLiteReportSearchCache: @unchecked Sendable {
                 }
             }
             for (id, entry) in fresh {
-                let previous = entries[id]?.cost ?? 0
-                guard cost - previous + entry.cost <= Self.costLimit else { continue }
+                // The row's bytes changed, so its previous entry can never be used again.
+                cost -= entries.removeValue(forKey: id)?.cost ?? 0
+                guard cost + entry.cost <= Self.costLimit else { continue }
                 entries[id] = entry
-                cost += entry.cost - previous
+                cost += entry.cost
             }
         }
     }
@@ -335,18 +336,20 @@ package struct SQLiteReportSearchMeasurement: Sendable {
 extension SQLiteReportRepository {
     /// Standalone scale probe only; uses the identical scan and retains at most the format's 20k IDs.
     @concurrent package nonisolated func measureReportSearch(_ query: String, prefilter: Bool = true) async throws -> SQLiteReportSearchMeasurement {
-        let cancellation = SQLiteReportQueryCancellation()
-        return try await withTaskCancellationHandler {
-            try store.read { db in
-                let scan = try SQLiteReportSearch.scan(db, term: query.trimmingCharacters(in: .whitespacesAndNewlines),
-                    memberID: nil, cursor: nil, maximumMatches: 20_001, cancellation: cancellation, prefilter: prefilter,
-                    cache: store.reportSearchCache)
-                guard scan.matches.count <= 20_000 else { throw LibraryReportError.resourceLimit }
-                return SQLiteReportSearchMeasurement(ids: scan.matches.filter { !$0.damaged }.map(\.id),
-                    damagedIDs: scan.matches.filter(\.damaged).map(\.id), sqlReadMilliseconds: scan.readMilliseconds,
-                    peakBatchBytes: scan.peakBatchBytes, maximumLanes: scan.maximumLanes, candidateCount: scan.candidateCount,
-                    cachedRowCount: scan.cachedRowCount, directoryMilliseconds: scan.directoryMilliseconds)
-            }
-        } onCancel: { cancellation.cancel() }
+        try await LibraryStorageExecutor.run {
+            let cancellation = SQLiteReportQueryCancellation()
+            return try await withTaskCancellationHandler {
+                try store.read { db in
+                    let scan = try SQLiteReportSearch.scan(db, term: query.trimmingCharacters(in: .whitespacesAndNewlines),
+                        memberID: nil, cursor: nil, maximumMatches: 20_001, cancellation: cancellation, prefilter: prefilter,
+                        cache: store.reportSearchCache)
+                    guard scan.matches.count <= 20_000 else { throw LibraryReportError.resourceLimit }
+                    return SQLiteReportSearchMeasurement(ids: scan.matches.filter { !$0.damaged }.map(\.id),
+                        damagedIDs: scan.matches.filter(\.damaged).map(\.id), sqlReadMilliseconds: scan.readMilliseconds,
+                        peakBatchBytes: scan.peakBatchBytes, maximumLanes: scan.maximumLanes, candidateCount: scan.candidateCount,
+                        cachedRowCount: scan.cachedRowCount, directoryMilliseconds: scan.directoryMilliseconds)
+                }
+            } onCancel: { cancellation.cancel() }
+        }
     }
 }

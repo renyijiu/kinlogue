@@ -206,6 +206,11 @@ final class DICOMSliceMemoryBudget: @unchecked Sendable {
 }
 
 actor DICOMSliceCache {
+    /// A render validates its target against storage and may wait there, so the cache runs on
+    /// a queue of its own instead of on the cooperative pool.
+    private let isolationQueue = DispatchSerialQueue(label: "com.kinlogue.dicom-slice-cache")
+    nonisolated var unownedExecutor: UnownedSerialExecutor { isolationQueue.asUnownedSerialExecutor() }
+
     static let defaultMaximumCount = 32
     static let defaultMaximumBytes = 192 * 1_024 * 1_024
 

@@ -560,6 +560,32 @@ func sqliteKernelStageRejectsBytesChangedAfterFileSync() throws {
     #expect(try store.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM originals WHERE lifecycle='live'") } == 0)
 }
 
+@Test
+func sqliteKernelStagesInMemoryBytesAndRejectsAWrongDigest() throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let store = try SQLiteLibraryStore(rootURL: root)
+    defer { try? store.close() }
+    // Longer than one copy chunk and not a multiple of it.
+    let bytes = Data((0..<200_003).map { UInt8(truncatingIfNeeded: $0 &* 31) })
+    let operation = UUID()
+    let id = try store.stageOriginal(bytes: bytes, sha256: ContentDigest.sha256(bytes), contentType: "public.data", operationID: operation)
+    try store.publishOriginal(id, operationID: operation)
+    let directory = root.appendingPathComponent("originals")
+    let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+    #expect(names.count == 1)
+    #expect(try names.first.map { try Data(contentsOf: directory.appendingPathComponent($0)) } == bytes)
+
+    let rejected = UUID()
+    #expect(throws: SQLiteLibraryError.invalidOriginal) {
+        _ = try store.stageOriginal(bytes: bytes, sha256: ContentDigest.sha256(Data("other synthetic bytes".utf8)),
+                                    contentType: "public.data", operationID: rejected)
+    }
+    #expect(try store.reclaimOriginals(operationID: rejected).isEmpty)
+    #expect(try store.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM originals") } == 1)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == names)
+}
+
 @Test(arguments: [false, true])
 func sqliteKernelPinRejectsTemporaryContentChangesDuringConsumer(mutate: Bool) throws {
     let root = try sqliteTestRoot()

@@ -37,12 +37,10 @@ struct AcceptanceSmokeEvent: Codable, Equatable, Sendable {
 }
 
 struct SyntheticAcceptanceTarget: Equatable, Sendable {
-    let memberID: FamilyMember.ID
     let memberName: String
-    let recordID: HealthRecord.ID
-    let attachmentID: Attachment.ID
     let reportDate: Date
     let organization: String
+    let originalDigest: Data
 
     func matches(
         _ record: HealthRecord,
@@ -64,32 +62,75 @@ enum SyntheticAcceptanceError: Error, Equatable, Sendable {
     case unsafeCleanupTarget
 }
 
+/// The library one acceptance run seeds and later verifies. Only its text and original bytes
+/// are fixed in advance: the library assigns record, source and original identifiers when an
+/// original is staged, so a report is recognised by the digest of its original.
 struct SyntheticAcceptanceScenario: Sendable {
     static let expectedMemberCount = 4
     static let recordsPerMember = 24
     static let expectedRecordCount = expectedMemberCount * recordsPerMember
     static let targetOrdinal = recordsPerMember * 2 + 11
 
-    let catalog: VaultCatalog
-    let originals: [Attachment.ID: Data]
+    struct Report: Sendable {
+        let ordinal: Int
+        let memberIndex: Int
+        let original: Data
+        let originalDigest: Data
+        let title: String
+        let organization: String
+        let reportType: String
+        let reportDate: Date
+        let dateSource: String
+        let dateCandidateID: UUID
+        let conclusion: String
+
+        /// The confirmed record for this report, built on the draft the library made for its original.
+        func record(confirming draft: ImportDraft, memberID: FamilyMember.ID) throws -> HealthRecord {
+            guard let source = draft.sources.soleSource else { throw SyntheticAcceptanceError.invariantFailed }
+            let reference = try SourceReference(sourceID: source.id, attachmentID: source.attachmentID, filePageNumber: 1)
+            func field(_ text: String) throws -> SourceField {
+                try SourceField(originalTranscription: text, references: [reference])
+            }
+            return try HealthRecord(
+                id: draft.id,
+                memberID: memberID,
+                sources: draft.sources,
+                ocrDocumentObjectID: draft.documentObjectID,
+                importState: .confirmed,
+                title: try field(title),
+                organization: try field(organization),
+                reportType: try field(reportType),
+                dateCandidates: [ReportDateCandidate(id: dateCandidateID, date: reportDate, kind: .report, source: try field(dateSource))],
+                timelineDateCandidateID: dateCandidateID,
+                conclusion: try field(conclusion)
+            )
+        }
+
+        func matches(_ record: HealthRecord, memberID: FamilyMember.ID) -> Bool {
+            record.importState == .confirmed && record.memberID == memberID
+                && record.title?.transcription == title
+                && record.organization?.transcription == organization
+                && record.reportType?.transcription == reportType
+                && record.timelineDate == reportDate
+                && record.dateCandidates.map(\.source.transcription) == [dateSource]
+                && record.conclusion?.transcription == conclusion
+        }
+    }
+
+    let memberNames: [String]
+    let reports: [Report]
     let canary: String
     let originalMagic: String
     let scanTokens: [String]
-    let memberNames: [String]
     let conclusions: [String]
     let searchTerm: String
     let memberSearchTerm: String
     let organizationSearchTerm: String
     let dateSearchTerm: String
     let target: SyntheticAcceptanceTarget
-    let summarySHA256: String
     let tokenSetSHA256: String
 
-    static func make(
-        runID: String,
-        vaultID: UUID,
-        generation: UInt64
-    ) throws -> Self {
+    static func make(runID: String) throws -> Self {
         let canary = derivedToken(
             prefixScalars: [0x4B, 0x4C, 0x41, 0x2D],
             domain: "kinlogue.acceptance.canary.v1",
@@ -140,146 +181,67 @@ struct SyntheticAcceptanceScenario: Sendable {
         let organizationStem = unicodeString([0x5408, 0x6210, 0x673A, 0x6784])
         let organizationSearchTerm = organizationStem + " " + organizationToken
 
-        var members: [FamilyMember] = []
-        var memberNames: [String] = []
-        for memberIndex in 0..<expectedMemberCount {
-            let memberID = AcceptanceFixtureIdentity.deterministicUUID(
-                domain: "member",
-                runID: runID,
-                ordinal: memberIndex
-            )
-            let name = nameStem + String(memberIndex + 1) + " " + memberToken
-            members.append(try FamilyMember(id: memberID, displayName: name))
-            memberNames.append(name)
-        }
-
-        var records: [HealthRecord] = []
-        var attachments: [Attachment] = []
-        var originals: [Attachment.ID: Data] = [:]
-        var conclusions: [String] = []
+        let memberNames = (0..<expectedMemberCount).map { nameStem + String($0 + 1) + " " + memberToken }
+        var reports: [Report] = []
         let dateFormatter = ISO8601DateFormatter()
         for memberIndex in 0..<expectedMemberCount {
             for recordIndex in 0..<recordsPerMember {
                 let ordinal = memberIndex * recordsPerMember + recordIndex
-                let attachmentID = AcceptanceFixtureIdentity.deterministicUUID(
-                    domain: "attachment",
-                    runID: runID,
-                    ordinal: ordinal
-                )
-                let recordID = AcceptanceFixtureIdentity.deterministicUUID(
-                    domain: "record",
-                    runID: runID,
-                    ordinal: ordinal
-                )
-                let dateID = AcceptanceFixtureIdentity.deterministicUUID(
-                    domain: "date",
-                    runID: runID,
-                    ordinal: ordinal
-                )
                 let reportDate = Date(
                     timeIntervalSince1970: 1_700_000_000
                         + TimeInterval(
                             (recordIndex * 32 + memberIndex) * 86_400
                         )
                 )
-                let organization = organizationSearchTerm
-                    + " " + String((ordinal % 3) + 1)
-                let conclusion = conclusionStem
-                    + " " + String(memberIndex + 1)
-                    + "-" + String(recordIndex + 1)
-                    + " " + conclusionToken
                 let original = makePDF(
                     text: originalMagic + " " + canary + " " + String(ordinal)
                 )
-                let attachment = try Attachment(
-                    id: attachmentID,
-                    contentTypeIdentifier: "com.adobe.pdf",
-                    byteCount: original.count,
-                    sha256Digest: ContentDigest.sha256(original)
-                )
-                let sourceReference = try SourceReference(pageNumber: 1)
-                let dateCandidate = ReportDateCandidate(
-                    id: dateID,
-                    date: reportDate,
-                    kind: .report,
-                    source: try SourceField(
-                        originalTranscription: dateFormatter.string(from: reportDate)
-                            + " " + dateSourceToken,
-                        references: [sourceReference]
-                    )
-                )
-                let record = try HealthRecord(
-                    id: recordID,
-                    memberID: members[memberIndex].id,
-                    attachmentID: attachmentID,
-                    importState: .confirmed,
-                    title: try SourceField(
-                        originalTranscription: titleStem + " " + String(ordinal + 1)
-                            + " " + titleToken,
-                        references: [sourceReference]
-                    ),
-                    organization: try SourceField(
-                        originalTranscription: organization,
-                        references: [sourceReference]
-                    ),
-                    reportType: try SourceField(
-                        originalTranscription: titleStem + " " + titleToken,
-                        references: [sourceReference]
-                    ),
-                    dateCandidates: [dateCandidate],
-                    timelineDateCandidateID: dateID,
-                    conclusion: try SourceField(
-                        originalTranscription: conclusion,
-                        references: [sourceReference]
-                    )
-                )
-                attachments.append(attachment)
-                records.append(record)
-                originals[attachmentID] = original
-                conclusions.append(conclusion)
+                reports.append(Report(
+                    ordinal: ordinal,
+                    memberIndex: memberIndex,
+                    original: original,
+                    originalDigest: ContentDigest.sha256(original),
+                    title: titleStem + " " + String(ordinal + 1) + " " + titleToken,
+                    organization: organizationSearchTerm + " " + String((ordinal % 3) + 1),
+                    reportType: titleStem + " " + titleToken,
+                    reportDate: reportDate,
+                    dateSource: dateFormatter.string(from: reportDate) + " " + dateSourceToken,
+                    dateCandidateID: AcceptanceFixtureIdentity.deterministicUUID(domain: "date", runID: runID, ordinal: ordinal),
+                    conclusion: conclusionStem + " " + String(memberIndex + 1) + "-" + String(recordIndex + 1)
+                        + " " + conclusionToken
+                ))
             }
         }
-
-        let catalog = try VaultCatalog(
-            vaultID: vaultID,
-            generation: generation,
-            members: members,
-            records: records,
-            attachments: attachments
-        )
-        let targetRecord = records[targetOrdinal]
-        let targetMember = members[targetOrdinal / recordsPerMember]
-        guard targetRecord.memberID == targetMember.id,
-              let targetDate = targetRecord.timelineDate,
-              let targetOrganization = targetRecord.organization?.transcription,
-              let targetAttachmentID = targetRecord.soleAttachmentID else {
-            throw SyntheticAcceptanceError.invariantFailed
-        }
+        let targetReport = reports[targetOrdinal]
         return Self(
-            catalog: catalog,
-            originals: originals,
+            memberNames: memberNames,
+            reports: reports,
             canary: canary,
             originalMagic: originalMagic,
             scanTokens: scanTokens,
-            memberNames: memberNames,
-            conclusions: conclusions,
+            conclusions: reports.map(\.conclusion),
             searchTerm: conclusionToken,
             memberSearchTerm: memberNames[0],
             organizationSearchTerm: organizationSearchTerm,
-            dateSearchTerm: dateFormatter.string(
-                from: records[0].timelineDate ?? .distantPast
-            ),
+            dateSearchTerm: dateFormatter.string(from: reports[0].reportDate),
             target: SyntheticAcceptanceTarget(
-                memberID: targetRecord.memberID,
-                memberName: targetMember.displayName,
-                recordID: targetRecord.id,
-                attachmentID: targetAttachmentID,
-                reportDate: targetDate,
-                organization: targetOrganization
+                memberName: memberNames[targetReport.memberIndex],
+                reportDate: targetReport.reportDate,
+                organization: targetReport.organization,
+                originalDigest: targetReport.originalDigest
             ),
-            summarySHA256: summaryDigest(for: catalog),
             tokenSetSHA256: tokenSetDigest(tokens: scanTokens)
         )
+    }
+
+    /// Identifies the seeded library across process restarts: its identity and the originals
+    /// of its confirmed reports. Later commits that leave both alone do not change it.
+    func summarySHA256(libraryID: UUID) -> String {
+        var input = Data("kinlogue.acceptance.summary.v2".utf8)
+        var libraryUUID = libraryID.uuid
+        Swift.withUnsafeBytes(of: &libraryUUID) { input.append(contentsOf: $0) }
+        for report in reports { input.append(report.originalDigest) }
+        return ContentDigest.sha256(input).hexadecimalString
     }
 
     private static func derivedToken(
@@ -297,6 +259,7 @@ struct SyntheticAcceptanceScenario: Sendable {
     private static func unicodeString(_ scalars: [UInt32]) -> String {
         String(scalars.compactMap { UnicodeScalar($0) }.map(Character.init))
     }
+
 }
 
 enum AcceptanceFixtureIdentity {
@@ -361,20 +324,6 @@ private extension SyntheticAcceptanceScenario {
         return output
     }
 
-    private static func summaryDigest(for catalog: VaultCatalog) -> String {
-        var input = Data("kinlogue.acceptance.summary.v1".utf8)
-        var vaultUUID = catalog.vaultID.uuid
-        Swift.withUnsafeBytes(of: &vaultUUID) { input.append(contentsOf: $0) }
-        input.append(contentsOf: String(catalog.generation).utf8)
-        input.append(0)
-        for attachment in catalog.attachments {
-            var attachmentUUID = attachment.id.uuid
-            Swift.withUnsafeBytes(of: &attachmentUUID) { input.append(contentsOf: $0) }
-            input.append(attachment.sha256Digest)
-        }
-        return ContentDigest.sha256(input).hexadecimalString
-    }
-
     private static func tokenSetDigest(tokens: [String]) -> String {
         var input = Data()
         for (index, token) in tokens.enumerated() {
@@ -382,6 +331,67 @@ private extension SyntheticAcceptanceScenario {
             input.append(contentsOf: token.utf8)
         }
         return ContentDigest.sha256(input).hexadecimalString
+    }
+}
+
+/// The SQLite library of one acceptance run, opened through the launch path the app uses.
+@MainActor
+struct AcceptanceLibrary {
+    let launch: LibraryLaunchCoordinator
+    let services: LiveAppServiceEnvironment
+    let store: SQLiteLibraryStore
+
+    static func open(identity: AppRuntimeIdentity) async throws -> Self {
+        let launch = LibraryLaunchCoordinator(identity: identity)
+        launch.acknowledgeStorageDisclosure()
+        do {
+            let services = try await launch.openEnvironment()
+            guard let store = launch.database else { throw SyntheticAcceptanceError.invariantFailed }
+            _ = try await services.dataService.bootstrap()
+            // Reaching a usable library must not have read any original.
+            guard store.originalReadMetrics.verifiedReadByteCount == 0 else { throw SyntheticAcceptanceError.invariantFailed }
+            return Self(launch: launch, services: services, store: store)
+        } catch {
+            await launch.shutdown()
+            throw error
+        }
+    }
+
+    /// Releases the owner and closes the database; a phase that returns leaves nothing open.
+    func close() async { await launch.shutdown() }
+
+    /// Runs `body` on the opened library and closes it whether or not `body` succeeds.
+    static func with<Result: Sendable>(
+        identity: AppRuntimeIdentity,
+        _ body: @MainActor (AcceptanceLibrary) async throws -> Result
+    ) async throws -> Result {
+        let library = try await open(identity: identity)
+        do {
+            let result = try await body(library)
+            await library.close()
+            return result
+        } catch {
+            await library.close()
+            throw error
+        }
+    }
+}
+
+/// Opens at most one library for an acceptance phase and closes it when the phase ends.
+@MainActor
+final class AcceptanceLibrarySession {
+    private var opened: AcceptanceLibrary?
+
+    func library(identity: AppRuntimeIdentity) async throws -> AcceptanceLibrary {
+        if let opened { return opened }
+        let library = try await AcceptanceLibrary.open(identity: identity)
+        opened = library
+        return library
+    }
+
+    func close() async {
+        await opened?.close()
+        opened = nil
     }
 }
 
@@ -407,14 +417,12 @@ struct SyntheticAcceptanceRunner: Sendable {
             case .lanReceiverRestart:
                 try await verifyLANReceiverAfterProcessRestart()
             case .forcedReady:
-                try await verifyAfterRestart(code: .forcedReady)
+                try await holdOpenLibraryForForcedTermination()
                 return .holdForForcedTermination
             case .afterForce:
                 try await verifyAfterRestart(code: .afterForceComplete)
             case .cleanup:
                 try await cleanup()
-            case .sqliteCandidate:
-                try await SQLiteCandidateAcceptanceProbe.run(request: request).emit()
             }
             return .exit(Self.successExitCode)
         } catch let error as InstalledLANAcceptanceProbeError {
@@ -459,44 +467,65 @@ struct SyntheticAcceptanceRunner: Sendable {
         ).emit()
     }
 
+    /// Seeds through the services the app uses: members by the data service, and each report by
+    /// staging its original, recording a recognised document and confirming the draft.
     private func seed() async throws {
         let runID = try acceptanceRunID()
         _ = try loadRunOwnership(runID: runID)
-        let sourceVault = try makeVault(identity: request.identity.sourceVault)
-        guard await sourceVault.inspect() == .absent else {
+        guard !FileManager.default.fileExists(atPath: request.identity.sourceVault.rootURL.path) else {
             throw SyntheticAcceptanceError.invariantFailed
         }
-        let initial = try await sourceVault.initialize()
-        let scenario = try SyntheticAcceptanceScenario.make(
-            runID: runID,
-            vaultID: initial.vaultID,
-            generation: try VaultGeneration.successor(of: initial.generation)
-        )
-        let writes = try scenario.catalog.attachments.map { attachment in
-            guard let original = scenario.originals[attachment.id] else {
-                throw SyntheticAcceptanceError.invariantFailed
+        let scenario = try SyntheticAcceptanceScenario.make(runID: runID)
+        let verified = try await AcceptanceLibrary.with(identity: request.identity) { library in
+            let service = library.services.dataService
+            guard try await service.refresh().members.isEmpty else { throw SyntheticAcceptanceError.invariantFailed }
+            var memberIDs: [UUID] = []
+            for name in scenario.memberNames {
+                let header = try await service.createMember(displayName: name, disambiguationLabel: nil)
+                guard let member = header.members.first(where: { $0.displayName == name }) else {
+                    throw SyntheticAcceptanceError.invariantFailed
+                }
+                memberIDs.append(member.id)
             }
-            return VaultObjectWrite(
-                reference: VaultObjectReference(id: attachment.id, kind: .attachment),
-                plaintext: original
-            )
+            let reports = SQLiteReportRepository(store: library.store)
+            for report in scenario.reports {
+                let file = try ValidatedImportedFile(data: report.original, kind: .pdf, contentTypeIdentifier: "com.adobe.pdf",
+                                                     sha256Digest: report.originalDigest, pageCount: 1)
+                guard case .created(let draftID) = try await reports.stage(file) else {
+                    throw SyntheticAcceptanceError.invariantFailed
+                }
+                let lease = try await reports.beginProcessing(draftID: draftID, attemptID: UUID())
+                try await reports.completeProcessing(lease: lease, document: ImportDraftDocument(blocks: [], candidates: ReportCandidates()))
+                let draft = try await reports.draft(draftID)
+                try await reports.confirm(draftID: draftID, expectedRevision: draft.revision,
+                                          record: report.record(confirming: draft, memberID: memberIDs[report.memberIndex]))
+            }
+            return try await verify(library, runID: runID)
         }
-        _ = try await sourceVault.commit(VaultCommitRequest(
-            expectedGeneration: initial.generation,
-            catalog: scenario.catalog,
-            writes: writes
-        ))
-        let verified = try await verify(vault: sourceVault, runID: runID)
-
         verified.event(code: .seedComplete).emit()
     }
 
     private func verifyAfterRestart(code: AcceptanceSmokeEventCode) async throws {
         let runID = try acceptanceRunID()
         _ = try loadRunOwnership(runID: runID)
-        let source = try makeVault(identity: request.identity.sourceVault)
-        let verified = try await verify(vault: source, runID: runID)
+        let verified = try await AcceptanceLibrary.with(identity: request.identity) { try await verify($0, runID: runID) }
         verified.event(code: code).emit()
+    }
+
+    /// Verifies the library and then keeps it open, with the owner lock held, so the forced
+    /// termination that follows interrupts a process that still owns the database.
+    private func holdOpenLibraryForForcedTermination() async throws {
+        let runID = try acceptanceRunID()
+        _ = try loadRunOwnership(runID: runID)
+        let library = try await AcceptanceLibrary.open(identity: request.identity)
+        do {
+            let verified = try await verify(library, runID: runID)
+            await ForcedTerminationHold.shared.keep(library)
+            verified.event(code: .forcedReady).emit()
+        } catch {
+            await library.close()
+            throw error
+        }
     }
 
     private func runLANReceiverProbe() async throws {
@@ -506,7 +535,7 @@ struct SyntheticAcceptanceRunner: Sendable {
             throw SyntheticAcceptanceError.invariantFailed
         }
         try await InstalledLANAcceptanceProbe(
-            rootURL: request.identity.sourceVault.rootURL,
+            identity: request.identity,
             runID: runID,
             executableURL: executableURL
         ).run().emit()
@@ -519,7 +548,7 @@ struct SyntheticAcceptanceRunner: Sendable {
             throw SyntheticAcceptanceError.invariantFailed
         }
         try await InstalledLANAcceptanceProbe(
-            rootURL: request.identity.sourceVault.rootURL,
+            identity: request.identity,
             runID: runID,
             executableURL: executableURL
         ).verifyAfterProcessRestart().emit()
@@ -528,16 +557,13 @@ struct SyntheticAcceptanceRunner: Sendable {
     private func cleanup() async throws {
         let runID = try acceptanceRunID()
         let ownership = try loadRunOwnership(runID: runID)
-        let source = try makeVault(identity: request.identity.sourceVault)
-        switch await source.inspect() {
-        case .ready:
-            try await source.destroy()
-        case .absent:
-            break
-        case .operationInProgress, .legacyEncrypted, .damaged, .unsupportedVersion:
-            throw SyntheticAcceptanceError.invariantFailed
+        let root = request.identity.sourceVault.rootURL
+        if FileManager.default.fileExists(atPath: root.path) {
+            try await AcceptanceLibrary.with(identity: request.identity) { library in
+                try await library.services.destroyService.destroyCurrentVault()
+            }
         }
-        guard await source.inspect() == .absent else {
+        guard !FileManager.default.fileExists(atPath: root.path) else {
             throw SyntheticAcceptanceError.invariantFailed
         }
         try ownership.releaseAfterVaultRemoval()
@@ -553,54 +579,36 @@ struct SyntheticAcceptanceRunner: Sendable {
         ).emit()
     }
 
-    private func verify(
-        vault: PlaintextVault,
-        runID: String
-    ) async throws -> VerificationSummary {
+    /// Reads the library back through the data service: the targeted lookup a user would do
+    /// first, then every report, its original bytes, search, timelines and a comparison.
+    @MainActor
+    private func verify(_ library: AcceptanceLibrary, runID: String) async throws -> VerificationSummary {
+        let service = library.services.dataService
+        let expected = try SyntheticAcceptanceScenario.make(runID: runID)
         let targetedClock = ContinuousClock()
         let targetedStart = targetedClock.now
-        let catalog = try await vault.loadCatalog()
-        let expected = try SyntheticAcceptanceScenario.make(
-            runID: runID,
-            vaultID: catalog.vaultID,
-            generation: catalog.generation
-        )
-        let targetedMembers = catalog.members.filter {
-            $0.displayName == expected.target.memberName
-        }
-        guard targetedMembers.count == 1,
-              let targetedMember = targetedMembers.first,
-              targetedMember.id == expected.target.memberID else {
+        let header = try await service.refresh()
+        let targetedMembers = header.members.filter { $0.displayName == expected.target.memberName }
+        guard targetedMembers.count == 1, let targetedMember = targetedMembers.first else {
             throw SyntheticAcceptanceError.invariantFailed
         }
-        let targetedRecords = catalog.records.filter {
-            expected.target.matches(
-                $0,
-                resolvedMemberID: targetedMember.id
-            )
-        }
-        let targetedAttachments = catalog.attachments.filter {
-            $0.id == expected.target.attachmentID
-        }
-        guard targetedRecords.count == 1,
-              let targetedRecord = targetedRecords.first,
-              targetedRecord.id == expected.target.recordID,
-              targetedRecord.soleAttachmentID == expected.target.attachmentID,
-              targetedAttachments.count == 1,
-              let targetedAttachment = targetedAttachments.first,
-              targetedAttachment.id == targetedRecord.soleAttachmentID,
-              let expectedTargetOriginal = expected.originals[targetedAttachment.id] else {
+        let targetedSummaries = try await reports(service, query: expected.organizationSearchTerm, memberID: targetedMember.id)
+            .filter { $0.timelineDate == expected.target.reportDate }
+        guard targetedSummaries.count == 1, let targetedSummary = targetedSummaries.first else {
             throw SyntheticAcceptanceError.invariantFailed
         }
-        let targetedOriginal = try await vault.readObject(
-            VaultObjectReference(
-                id: targetedAttachment.id,
-                kind: .attachment
-            )
+        let targetedSelection = try await service.loadRecords(ids: [targetedSummary.id])
+        guard let targetedRecord = targetedSelection.records.first,
+              expected.target.matches(targetedRecord, resolvedMemberID: targetedMember.id),
+              let targetedSource = targetedRecord.sources.soleSource else {
+            throw SyntheticAcceptanceError.invariantFailed
+        }
+        let targetedOriginal = try await service.loadOriginal(
+            recordID: targetedRecord.id, sourceID: targetedSource.id,
+            expectedRevision: targetedRecord.revision, expectedLibrary: targetedSelection.revision
         )
-        let targetedDigest = ContentDigest.sha256(targetedOriginal)
-        guard targetedOriginal == expectedTargetOriginal,
-              targetedDigest == targetedAttachment.sha256Digest else {
+        guard targetedOriginal.data == expected.reports[SyntheticAcceptanceScenario.targetOrdinal].original,
+              ContentDigest.sha256(targetedOriginal.data) == expected.target.originalDigest else {
             throw SyntheticAcceptanceError.invariantFailed
         }
         let targetedRetrievalUnderThirtySeconds = targetedStart.duration(
@@ -610,87 +618,104 @@ struct SyntheticAcceptanceRunner: Sendable {
             throw SyntheticAcceptanceError.invariantFailed
         }
 
-        guard catalog == expected.catalog else {
+        var memberIDsByName: [String: UUID] = [:]
+        for member in header.members { memberIDsByName[member.displayName] = member.id }
+        guard header.members.count == SyntheticAcceptanceScenario.expectedMemberCount,
+              Set(memberIDsByName.keys) == Set(expected.memberNames),
+              header.reportCount == SyntheticAcceptanceScenario.expectedRecordCount else {
             throw SyntheticAcceptanceError.invariantFailed
         }
-        let search = RecordQuery.search(
-            expected.searchTerm,
-            records: catalog.records,
-            members: catalog.members
-        )
-        guard search.count == SyntheticAcceptanceScenario.expectedRecordCount else {
+        var reportsByDigest: [Data: SyntheticAcceptanceScenario.Report] = [:]
+        for report in expected.reports { reportsByDigest[report.originalDigest] = report }
+        let summaries = try await reports(service, query: "", memberID: nil)
+        guard summaries.count == SyntheticAcceptanceScenario.expectedRecordCount else {
             throw SyntheticAcceptanceError.invariantFailed
         }
-        let memberSearch = RecordQuery.search(
-            expected.memberSearchTerm,
-            records: catalog.records,
-            members: catalog.members
-        )
-        guard memberSearch.count == SyntheticAcceptanceScenario.recordsPerMember,
-              memberSearch.allSatisfy({
-                  $0.memberID == expected.catalog.members[0].id
-              }) else {
+        var verifiedOrdinals: Set<Int> = []
+        var records: [HealthRecord] = []
+        // The detail read serves an open record or a comparison, so it takes one record at a time here.
+        for summary in summaries {
+            let selection = try await service.loadRecords(ids: [summary.id])
+            guard let record = selection.records.first, selection.records.count == 1,
+                  let source = record.sources.soleSource else { throw SyntheticAcceptanceError.invariantFailed }
+            let original = try await service.loadOriginal(
+                recordID: record.id, sourceID: source.id,
+                expectedRevision: record.revision, expectedLibrary: selection.revision
+            )
+            guard let report = reportsByDigest[ContentDigest.sha256(original.data)],
+                  original.data == report.original,
+                  let memberID = memberIDsByName[expected.memberNames[report.memberIndex]],
+                  report.matches(record, memberID: memberID),
+                  verifiedOrdinals.insert(report.ordinal).inserted else {
+                throw SyntheticAcceptanceError.invariantFailed
+            }
+            records.append(record)
+        }
+        guard verifiedOrdinals.count == SyntheticAcceptanceScenario.expectedRecordCount else {
             throw SyntheticAcceptanceError.invariantFailed
         }
-        let organizationSearch = RecordQuery.search(
-            expected.organizationSearchTerm,
-            records: catalog.records,
-            members: catalog.members
-        )
-        guard organizationSearch.count
+
+        guard try await reports(service, query: expected.searchTerm, memberID: nil).count
                 == SyntheticAcceptanceScenario.expectedRecordCount else {
             throw SyntheticAcceptanceError.invariantFailed
         }
-        let dateSearch = RecordQuery.search(
-            expected.dateSearchTerm,
-            records: catalog.records,
-            members: catalog.members
-        )
-        guard dateSearch.count == 1 else {
+        let memberSearch = try await reports(service, query: expected.memberSearchTerm, memberID: nil)
+        guard memberSearch.count == SyntheticAcceptanceScenario.recordsPerMember,
+              memberSearch.allSatisfy({ $0.memberID == memberIDsByName[expected.memberNames[0]] }) else {
             throw SyntheticAcceptanceError.invariantFailed
         }
-        for member in catalog.members {
-            let timeline = RecordQuery.timeline(
-                records: catalog.records,
-                memberID: member.id
-            )
-            guard timeline.count == SyntheticAcceptanceScenario.recordsPerMember,
-                  timeline.allSatisfy({ section in
-                      if case .dated = section.group { return section.records.count == 1 }
-                      return false
-                  }) else {
+        guard try await reports(service, query: expected.organizationSearchTerm, memberID: nil).count
+                == SyntheticAcceptanceScenario.expectedRecordCount else {
+            throw SyntheticAcceptanceError.invariantFailed
+        }
+        guard try await reports(service, query: expected.dateSearchTerm, memberID: nil).count == 1 else {
+            throw SyntheticAcceptanceError.invariantFailed
+        }
+        for member in header.members {
+            var dates: [Date] = []
+            var cursor: LibraryQueryCursor?
+            repeat {
+                let page = try await service.timelinePage(memberID: member.id, cursor: cursor)
+                guard page.damagedIDs.isEmpty else { throw SyntheticAcceptanceError.invariantFailed }
+                for item in page.items {
+                    guard case .report(let report) = item, let date = report.timelineDate else {
+                        throw SyntheticAcceptanceError.invariantFailed
+                    }
+                    dates.append(date)
+                }
+                cursor = page.nextCursor
+            } while cursor != nil
+            guard dates.count == SyntheticAcceptanceScenario.recordsPerMember,
+                  Set(dates).count == dates.count else {
                 throw SyntheticAcceptanceError.invariantFailed
             }
         }
-        let comparison = try RecordComparison(records: Array(catalog.records.prefix(2)))
+        let comparison = try RecordComparison(records: Array(records.prefix(2)))
         guard comparison.left.conclusion != .notProvided,
               comparison.right.conclusion != .notProvided else {
             throw SyntheticAcceptanceError.invariantFailed
         }
-        for attachment in catalog.attachments {
-            guard let expectedOriginal = expected.originals[attachment.id] else {
-                throw SyntheticAcceptanceError.invariantFailed
-            }
-            let original = try await vault.readObject(
-                VaultObjectReference(id: attachment.id, kind: .attachment)
-            )
-            guard original == expectedOriginal,
-                  ContentDigest.sha256(original) == attachment.sha256Digest else {
-                throw SyntheticAcceptanceError.invariantFailed
-            }
-        }
         return VerificationSummary(
-            memberCount: catalog.members.count,
-            recordCount: catalog.records.count,
-            attachmentCount: catalog.attachments.count,
-            summarySHA256: expected.summarySHA256,
+            memberCount: header.members.count,
+            recordCount: header.reportCount,
+            attachmentCount: verifiedOrdinals.count,
+            summarySHA256: expected.summarySHA256(libraryID: header.revision.libraryID),
             targetedRetrievalUnderThirtySeconds: targetedRetrievalUnderThirtySeconds,
             tokenSetSHA256: expected.tokenSetSHA256
         )
     }
 
-    private func makeVault(identity: RuntimeVaultIdentity) throws -> PlaintextVault {
-        try PlaintextVault(rootURL: identity.rootURL)
+    /// Every confirmed report a query returns, in the pages the app would read.
+    private func reports(_ service: LiveAppService, query: String, memberID: UUID?) async throws -> [LibraryReportSummary] {
+        var items: [LibraryReportSummary] = []
+        var cursor: LibraryQueryCursor?
+        repeat {
+            let page = try await service.reportPage(query: query, memberID: memberID, cursor: cursor)
+            guard page.damagedIDs.isEmpty, page.damagedMemberIDs.isEmpty else { throw SyntheticAcceptanceError.invariantFailed }
+            items += page.items
+            cursor = page.nextCursor
+        } while cursor != nil
+        return items
     }
 
     private func acceptanceRunID() throws -> String {
@@ -756,3 +781,22 @@ extension Data {
         map { String(format: "%02x", $0) }.joined()
     }
 }
+
+/// Keeps the library of a forced-termination phase open until the process is killed.
+@MainActor
+private final class ForcedTerminationHold {
+    static let shared = ForcedTerminationHold()
+    private var library: AcceptanceLibrary?
+    func keep(_ library: AcceptanceLibrary) { self.library = library }
+    func release() async {
+        await library?.close()
+        library = nil
+    }
+}
+
+#if DEBUG
+extension SyntheticAcceptanceRunner {
+    /// Stands in for the kill an installed run delivers after a forced-termination phase.
+    static func releaseForcedTerminationHoldForTesting() async { await ForcedTerminationHold.shared.release() }
+}
+#endif

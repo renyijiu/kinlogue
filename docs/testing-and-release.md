@@ -29,7 +29,7 @@
 | `scripts/verify-app.sh` | release build、Info.plist、资源、entitlement、签名、依赖和隐私 | 安装后用户流程 |
 | `scripts/verify-dicom-xpc.sh --use-verified-app` | 同一已验证 bundle 的真实 XPC、签名、恶意输入、SIGKILL、hang watchdog、socket/log canary | 更广真实 DICOM 兼容矩阵 |
 | `scripts/build-acceptance-app.sh` | 从已验证 executable 组装隔离合成验收身份 | 生产身份或真实用户资料 |
-| `scripts/run-acceptance.sh` | 安装后报告、DICOM、重启、强制终止、Viewer workload、删除和清理；这些阶段目前运行 JSON 服务 | 界面实际使用的 SQLite 资料库、真实样本、最低系统和可访问性 |
+| `scripts/run-acceptance.sh` | 安装后报告、DICOM、重启、强制终止、Viewer workload、删除和清理；各阶段经界面使用的启动链路打开 SQLite 资料库。迁移到 SQLite 之后脚本尚未重跑 | 真实样本、最低系统和可访问性 |
 | `scripts/verify-app-zip-safety.sh <zip>` | ZIP 条目、路径、类型和大小写安全 | Apple 签名或 notarization |
 | `scripts/package-adhoc-candidate.sh v<version>` | 把同一 clean-source ad-hoc bundle/report 打成 private Pre-release 候选并复验 | Developer ID/notarized 公共分发 |
 

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 import GRDB
 import KinlogueCore
 import KinlogueSQLiteConfiguration
@@ -104,11 +105,33 @@ package struct SQLiteEngineConfiguration: Sendable {
 
 package enum SQLiteLibraryOpenMode: Sendable { case normal, strictExisting }
 
-/// Experimental platform kernel. It does not implement VaultStore or select the production backend.
+/// Serializes the connection, owner, pin and active-original state of one store.
+final class SQLiteAdmission: Sendable {
+    private let lock = NSLock()
+#if DEBUG
+    private let observer = OSAllocatedUnfairLock<(@Sendable () -> Void)?>(initialState: nil)
+
+    /// Called when admission is requested on a cooperative-pool thread, where waiting for it
+    /// holds up unrelated tasks. Tests install it to prove that an entry point left the pool.
+    var onCooperativePoolEntry: (@Sendable () -> Void)? {
+        get { observer.withLock { $0 } }
+        set { observer.withLock { $0 = newValue } }
+    }
+#endif
+
+    func withLock<T>(_ body: () throws -> T) rethrows -> T {
+#if DEBUG
+        if let onCooperativePoolEntry, LibraryStorageExecutor.callerIsOnCooperativePool { onCooperativePoolEntry() }
+#endif
+        return try lock.withLock(body)
+    }
+}
+
+/// The library's storage kernel: one owner, one SQLite connection and the originals directory.
 // SAFETY: admission serializes connection, owner, pin and active-original state. GRDB owns its serial DB queue.
 package final class SQLiteLibraryStore: @unchecked Sendable {
     package static let databaseFilename = "library.sqlite"
-    let admission = NSLock()
+    let admission = SQLiteAdmission()
     let notifications = SQLiteCommitNotifications()
     private var owner: SQLiteLibraryOwner?
     private var ownerClaim: UUID?
@@ -121,6 +144,7 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
     var activeDICOMImports: Set<UUID> = []
     package let originalReadMetrics = SQLiteOriginalReadMetrics()
     let reportSearchCache = SQLiteReportSearchCache()
+    let integrityProgress = SQLiteIntegrityProgress()
     var quarantinedTargets: Set<SQLiteIntegrityTarget> = [] // Protected by admission, scoped to openEpoch.
     private(set) var openEpoch = UUID()
     let originalFault: (@Sendable (SQLiteOriginalFaultPoint) -> Bool)?
@@ -211,6 +235,7 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
             originalsIdentity = nil
         }
         reportSearchCache.removeAll()
+        integrityProgress.removeAll()
         notifications.finish()
     }
 
@@ -231,6 +256,7 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
             owner = nil
         }
         reportSearchCache.removeAll()
+        integrityProgress.removeAll()
         notifications.finish()
     }
 
@@ -356,6 +382,7 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
             queue = opened
             openEpoch = UUID()
             quarantinedTargets.removeAll()
+            integrityProgress.removeAll()
             try validateRoot()
             if initializing {
                 let receiptURL = rootURL.appendingPathComponent(SQLiteLibraryInitialization.filename)

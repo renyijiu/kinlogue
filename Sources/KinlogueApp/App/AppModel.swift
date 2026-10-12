@@ -118,15 +118,8 @@ final class AppModel: ObservableObject {
     var currentLibraryRevision: LibraryRevision? { phase == .ready ? appliedRevision : nil }
     private var detailLibraryRevision: LibraryRevision?
     private var applicationRequestID = UUID()
-    private var headerReads: [UUID: Task<AppSnapshot, Error>] = [:]
-    private var memberReads: [UUID: Task<FamilyMember, Error>] = [:]
-    private var reviewReads: [UUID: Task<ImportDraft, Error>] = [:]
-    private var detailReads: [UUID: Task<LibraryRecordSelection, Error>] = [:]
-    private var timelineReads: [UUID: Task<LibraryTimelinePage, Error>] = [:]
-    private var searchReads: [UUID: Task<LibraryReportPage, Error>] = [:]
-    private var draftReads: [UUID: Task<AppDraftPage, Error>] = [:]
-    private var originalReads: [UUID: Task<Void, Never>] = [:]
-    private var libraryFailureTasks: [UUID: Task<Void, Never>] = [:]
+    /// Every read this model has started; a destructive library lifecycle cancels and drains it.
+    private let reads = LibraryReadRegistry()
     private var detailReadTask: Task<LibraryRecordSelection, Error>?
     private var detailRequestID = UUID()
     private var memberRequestID = UUID()
@@ -321,13 +314,17 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func refresh() async {
+    /// `skippingUnchanged` is for callers that only react to a possible change, such as a commit
+    /// hint, activation or wake. The same revision is the same library, so nothing is reloaded.
+    /// A plain refresh always reloads, because retry eligibility of a draft can change in memory
+    /// without a commit.
+    func refresh(skippingUnchanged: Bool = false) async {
         guard !vaultLifecycleIsLocked, phase != .locked else { return }
         let requestID = beginStateRequest()
         do {
             let snapshot = try await readHeader(bootstrap: false)
             guard requestID == stateRequestID, !vaultLifecycleIsLocked else { return }
-            await applyAfterRevokingStaleDICOMViewers(snapshot)
+            await applyAfterRevokingStaleDICOMViewers(snapshot, skippingUnchanged: skippingUnchanged)
         } catch is CancellationError {
             return
         } catch {
@@ -370,38 +367,27 @@ final class AppModel: ObservableObject {
 
     private func scheduleLibraryFailure(_ error: Error) {
         guard error is SQLiteLibraryError, phase == .ready, !vaultLifecycleIsLocked else { return }
-        let id = UUID(), identity = appliedRevision
-        libraryFailureTasks[id] = Task { [weak self] in
-            guard let self else { return }
-            defer { libraryFailureTasks.removeValue(forKey: id) }
-            guard !Task.isCancelled, identity?.libraryID == appliedRevision?.libraryID,
+        let identity = appliedRevision
+        reads.start { [weak self] in
+            guard let self, !Task.isCancelled, identity?.libraryID == appliedRevision?.libraryID,
                   identity?.openEpoch == appliedRevision?.openEpoch else { return }
             _ = await handleLibraryFailure(error)
         }
     }
 
     private func readHeader(bootstrap: Bool) async throws -> AppSnapshot {
-        let service = service, id = UUID()
-        let task = Task { try await bootstrap ? service.bootstrap() : service.refresh() }
-        headerReads[id] = task
-        defer { headerReads.removeValue(forKey: id) }
-        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        let service = service
+        return try await reads.run { try await bootstrap ? service.bootstrap() : service.refresh() }
     }
 
     private func readDraft(_ id: UUID) async throws -> ImportDraft {
-        let service = service, request = UUID()
-        let task = Task { try await service.loadDraft(id: id) }
-        reviewReads[request] = task
-        defer { reviewReads.removeValue(forKey: request) }
-        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        let service = service
+        return try await reads.run { try await service.loadDraft(id: id) }
     }
 
     private func readRecords(_ ids: [UUID]) async throws -> LibraryRecordSelection {
-        let service = service, request = UUID()
-        let task = Task { try await service.loadRecords(ids: ids) }
-        detailReads[request] = task
-        defer { detailReads.removeValue(forKey: request) }
-        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        let service = service
+        return try await reads.run { try await service.loadRecords(ids: ids) }
     }
 
     func createMember(displayName: String, disambiguationLabel: String?) async -> Bool {
@@ -409,7 +395,7 @@ final class AppModel: ObservableObject {
             await applyAfterRevokingStaleDICOMViewers(try await service.createMember(
                 displayName: displayName,
                 disambiguationLabel: disambiguationLabel
-            ))
+            ), skippingUnchanged: true)
             return true
         } catch {
             return false
@@ -418,7 +404,7 @@ final class AppModel: ObservableObject {
 
     func updateMember(_ member: FamilyMember, replacing expected: FamilyMember) async -> Bool {
         do {
-            await applyAfterRevokingStaleDICOMViewers(try await service.updateMember(member, replacing: expected))
+            await applyAfterRevokingStaleDICOMViewers(try await service.updateMember(member, replacing: expected), skippingUnchanged: true)
             return true
         } catch {
             return false
@@ -428,7 +414,7 @@ final class AppModel: ObservableObject {
     func archiveMember(_ member: FamilyMember) async {
         do {
             await applyAfterRevokingStaleDICOMViewers(
-                try await service.archiveMember(id: member.id)
+                try await service.archiveMember(id: member.id), skippingUnchanged: true
             )
         } catch {
             reportBanner(.archiveMember)
@@ -445,7 +431,7 @@ final class AppModel: ObservableObject {
         if pendingDeleteMemberID == id { pendingDeleteMemberID = nil }
         do {
             await applyAfterRevokingStaleDICOMViewers(
-                try await service.deleteMember(id: id)
+                try await service.deleteMember(id: id), skippingUnchanged: true
             )
         } catch AppServiceError.memberStillReferenced(let recordCount, let draftCount) {
             reportBanner(.memberReferenced(records: recordCount, drafts: draftCount))
@@ -579,10 +565,7 @@ final class AppModel: ObservableObject {
         let request = UUID(); memberRequestID = request
         do {
             let service = service
-            let task = Task { try await service.loadMember(id: member.id) }
-            memberReads[request] = task
-            defer { memberReads.removeValue(forKey: request) }
-            let full = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            let full = try await reads.run { try await service.loadMember(id: member.id) }
             guard request == memberRequestID, !vaultLifecycleIsLocked, !hasBlockingPresentation else { return }
             editingMember = full
         } catch {
@@ -746,7 +729,7 @@ final class AppModel: ObservableObject {
         }
         do {
             await applyAfterRevokingStaleDICOMViewers(
-                try await service.discardDraft(command)
+                try await service.discardDraft(command), skippingUnchanged: true
             )
             if pendingDiscardDraftID == id { pendingDiscardDraftID = nil }
         } catch {
@@ -771,9 +754,7 @@ final class AppModel: ObservableObject {
             let service = self.service
             let task = Task { try await service.loadRecords(ids: [id]) }
             detailReadTask?.cancel(); detailReadTask = task
-            detailReads[request] = task
-            defer { detailReads.removeValue(forKey: request) }
-            let selection = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            let selection = try await reads.value(of: task)
             guard request == detailRequestID, !vaultLifecycleIsLocked else { return }
             detailReadTask = nil
             guard accepts(selection.revision), let record = selection.records.first else {
@@ -884,10 +865,7 @@ final class AppModel: ObservableObject {
                 }
             }
         }
-        let task = originalLoadTask
-        originalReads[loadID] = task
-        defer { originalReads.removeValue(forKey: loadID) }
-        await withTaskCancellationHandler { await task?.value } onCancel: { task?.cancel() }
+        if let task = originalLoadTask { await reads.value(of: task) }
     }
 
     func clearSelection() {
@@ -928,7 +906,7 @@ final class AppModel: ObservableObject {
         }
         do {
             await applyAfterRevokingStaleDICOMViewers(
-                try await service.deleteRecord(id: id)
+                try await service.deleteRecord(id: id), skippingUnchanged: true
             )
         } catch {
             reportBanner(.deleteRecord)
@@ -990,7 +968,7 @@ final class AppModel: ObservableObject {
             service: dicomService,
             onReadFailure: { [weak self] error in self?.scheduleLibraryFailure(error) },
             onSnapshotChanged: { [weak self] snapshot in
-                await self?.applyAfterRevokingStaleDICOMViewers(snapshot)
+                await self?.applyAfterRevokingStaleDICOMViewers(snapshot, skippingUnchanged: true)
             },
             onStudyMetadataChanged: { [weak self] studyID in
                 await self?.dicomViewerRegistry.revoke(studyID: studyID)
@@ -1041,7 +1019,7 @@ final class AppModel: ObservableObject {
             let existingSourceID = selectedOriginalSourceID
             let snapshot = try await service.updateRecord(command)
             guard isCurrentLibrary() else { return .failed }
-            await applyAfterRevokingStaleDICOMViewers(snapshot)
+            await applyAfterRevokingStaleDICOMViewers(snapshot, skippingUnchanged: true)
             guard isCurrentLibrary() else { return .failed }
             let request = UUID(); detailRequestID = request
             let selection = try await readRecords([command.recordID])
@@ -1083,26 +1061,14 @@ final class AppModel: ObservableObject {
         vaultLifecycleIsLocked = true
         _ = beginStateRequest()
         let page = pageLoadTask
-        let headers = Array(headerReads.values), members = Array(memberReads.values), reviews = Array(reviewReads.values)
-        let details = Array(detailReads.values), timelines = Array(timelineReads.values), searches = Array(searchReads.values)
-        let drafts = Array(draftReads.values), originals = Array(originalReads.values), failures = Array(libraryFailureTasks.values)
-        headers.forEach { $0.cancel() }; members.forEach { $0.cancel() }; reviews.forEach { $0.cancel() }
-        details.forEach { $0.cancel() }; timelines.forEach { $0.cancel() }; searches.forEach { $0.cancel() }
-        drafts.forEach { $0.cancel() }; originals.forEach { $0.cancel() }; failures.forEach { $0.cancel() }; page?.cancel()
-        let comparisonDrain = comparisonModel.cancelReads()
+        let drains = reads.cancelAll()
+        page?.cancel()
+        let comparisonDrains = comparisonModel.cancelReads()
         clearSensitiveState()
         phase = .changingVault
-        await comparisonDrain.value
+        for drain in comparisonDrains { await drain() }
         await page?.value
-        for task in headers { _ = try? await task.value }
-        for task in members { _ = try? await task.value }
-        for task in reviews { _ = try? await task.value }
-        for task in details { _ = try? await task.value }
-        for task in timelines { _ = try? await task.value }
-        for task in searches { _ = try? await task.value }
-        for task in drafts { _ = try? await task.value }
-        for task in originals { await task.value }
-        for task in failures { await task.value }
+        for drain in drains { await drain() }
         await dicomViewerRegistry.revokeAll()
     }
 
@@ -1150,8 +1116,15 @@ final class AppModel: ObservableObject {
         if let previous, previous != snapshot.revision { onDurableStateChanged() }
     }
 
-    private func applyAfterRevokingStaleDICOMViewers(_ snapshot: AppSnapshot) async {
+    private func applyAfterRevokingStaleDICOMViewers(_ snapshot: AppSnapshot, skippingUnchanged: Bool = false) async {
         guard !vaultLifecycleIsLocked, phase != .locked else { return }
+        // A commit hint and the mutation that caused it both deliver the same revision, and so
+        // does activation when nothing happened. The lists are then current. What is open is
+        // still read again, which is how a failure that changed no revision gets noticed.
+        if skippingUnchanged, phase == .ready, appliedRevision == snapshot.revision {
+            await reconcileOpenTargets()
+            return
+        }
         let request = UUID(); applicationRequestID = request
         if let previous = appliedRevision {
             if previous.libraryID != snapshot.revision.libraryID || previous.openEpoch != snapshot.revision.openEpoch {
@@ -1184,11 +1157,7 @@ final class AppModel: ObservableObject {
         applicationRequestID = UUID()
         clearingSensitiveState = true
         defer { clearingSensitiveState = false }
-        headerReads.values.forEach { $0.cancel() }; memberReads.values.forEach { $0.cancel() }
-        reviewReads.values.forEach { $0.cancel() }; detailReads.values.forEach { $0.cancel() }
-        timelineReads.values.forEach { $0.cancel() }; searchReads.values.forEach { $0.cancel() }
-        draftReads.values.forEach { $0.cancel() }; originalReads.values.forEach { $0.cancel() }
-        libraryFailureTasks.values.forEach { $0.cancel() }
+        reads.cancelAll()
         originalLoadTask?.cancel(); detailReadTask?.cancel(); detailReadTask = nil
         pageLoadTask?.cancel(); pageLoadTask = nil
         pageRequestID = UUID(); draftRequestID = UUID(); detailRequestID = UUID(); memberRequestID = UUID(); reviewRequestID = UUID()
@@ -1268,13 +1237,48 @@ final class AppModel: ObservableObject {
         pageState = .loading
     }
 
-    private func loadRecordsPage(reset: Bool, request: UUID) async {
+    private struct RecordsPage {
+        let revision: LibraryRevision
+        var entries: [AppTimelineEntry]
+        var next: LibraryQueryCursor?
+        var damaged: [UUID]
+        var damagedMembers: [UUID]
+    }
+
+    private func fetchRecordsPage(query: String, member: FamilyMember.ID?, filter: AppTimelineFilter,
+                                  cursor: LibraryQueryCursor?) async throws -> RecordsPage {
+        let service = service
+        if query.isEmpty, filter == .all {
+            let page = try await reads.run { try await service.timelinePage(memberID: member, cursor: cursor) }
+            return RecordsPage(revision: page.revision, entries: page.items.map { switch $0 {
+                case .report(let report): .record(report)
+                case .study(let study): .dicomStudy(DICOMStudySummary(study: study))
+            } }, next: page.nextCursor, damaged: page.damagedIDs, damagedMembers: [])
+        }
+        // An empty query lists every confirmed report in timeline order.
+        let page = try await reads.run { try await service.reportPage(query: query, memberID: member, cursor: cursor) }
+        return RecordsPage(revision: page.revision, entries: page.items.map(AppTimelineEntry.record),
+                           next: page.nextCursor, damaged: page.damagedIDs, damagedMembers: page.damagedMemberIDs)
+    }
+
+    /// The number of rows the list shows now, which a reload reads again before replacing them.
+    private var shownRecordCount: Int {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? timelineEntries.count : searchResults.count
+    }
+
+    /// Starts over from the first page without emptying the list, and reads `depth` rows before
+    /// publishing so the list neither blanks nor shrinks back to one page.
+    private func reloadRecords(depth: Int) async {
+        invalidatePages(clear: false)
+        await loadRecordsPage(reset: true, request: pageRequestID, depth: depth)
+    }
+
+    private func loadRecordsPage(reset: Bool, request: UUID, depth: Int = 0, isRetryAfterStaleCursor: Bool = false) async {
         guard request == pageRequestID, !vaultLifecycleIsLocked else { return }
         pageState = .loading
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let member = selectedMemberID
         let filter = timelineFilter
-        let cursor = reset ? nil : pageCursor
         // Confirmed studies arrive whole with the header, and imaging never enters search.
         if filter == .imaging {
             guard let appliedRevision else { pageState = .failed; return }
@@ -1287,56 +1291,49 @@ final class AppModel: ObservableObject {
             pageState = .loaded
             return
         }
+        // One more page than is shown: a stale cursor on "load more" still ends with more rows.
+        let shown = shownRecordCount
         do {
-            let revision: LibraryRevision
-            let entries: [AppTimelineEntry]
-            let next: LibraryQueryCursor?
-            let damaged: [UUID]
-            if query.isEmpty, filter == .all {
-                let service = service, id = UUID()
-                let task = Task { try await service.timelinePage(memberID: member, cursor: cursor) }
-                timelineReads[id] = task
-                defer { timelineReads.removeValue(forKey: id) }
-                let page = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
-                revision = page.revision; next = page.nextCursor; damaged = page.damagedIDs
-                entries = page.items.map { switch $0 {
-                    case .report(let report): .record(report)
-                    case .study(let study): .dicomStudy(DICOMStudySummary(study: study))
-                } }
-            } else {
-                // An empty query lists every confirmed report in timeline order.
-                let service = service, id = UUID()
-                let task = Task { try await service.reportPage(query: query, memberID: member, cursor: cursor) }
-                searchReads[id] = task
-                defer { searchReads.removeValue(forKey: id) }
-                let page = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
-                revision = page.revision; next = page.nextCursor; damaged = page.damagedIDs
-                entries = page.items.map(AppTimelineEntry.record)
-                guard request == pageRequestID else { return }
-                damagedMemberIDs.formUnion(page.damagedMemberIDs)
-            }
+            var page = try await fetchRecordsPage(query: query, member: member, filter: filter, cursor: reset ? nil : pageCursor)
             try Task.checkCancellation()
             guard request == pageRequestID, !vaultLifecycleIsLocked else { return }
-            guard accepts(revision) else { pageState = .failed; return }
-            if !reset, let pageRevision, pageRevision != revision {
-                invalidatePages(clear: true)
-                await loadRecordsPage(reset: true, request: pageRequestID)
+            guard accepts(page.revision) else { pageState = .failed; return }
+            if !reset, let pageRevision, pageRevision != page.revision {
+                await reloadRecords(depth: shown + 1)
                 return
             }
-            pageRevision = revision; pageCursor = next
-            damagedItemIDs.formUnion(damaged)
+            while reset, page.entries.count < depth, let cursor = page.next {
+                let more = try await fetchRecordsPage(query: query, member: member, filter: filter, cursor: cursor)
+                try Task.checkCancellation()
+                guard request == pageRequestID, !vaultLifecycleIsLocked else { return }
+                // The pages of one reload must describe one revision.
+                guard more.revision == page.revision else { throw LibraryReportError.staleCursor }
+                page.entries += more.entries; page.next = more.next
+                page.damaged += more.damaged; page.damagedMembers += more.damagedMembers
+            }
+            pageRevision = page.revision; pageCursor = page.next
+            damagedItemIDs.formUnion(page.damaged)
+            damagedMemberIDs.formUnion(page.damagedMembers)
             if query.isEmpty {
-                timelineEntries = reset ? entries : timelineEntries + entries
+                timelineEntries = reset ? page.entries : timelineEntries + page.entries
                 rebuildTimeline()
             } else {
-                let reports = entries.compactMap { if case .record(let record) = $0 { record } else { nil } }
+                let reports = page.entries.compactMap { if case .record(let record) = $0 { record } else { nil } }
                 searchResults = reset ? reports : searchResults + reports
             }
             pageState = .loaded
         } catch LibraryReportError.staleCursor {
             guard request == pageRequestID, !vaultLifecycleIsLocked else { return }
-            invalidatePages(clear: true)
-            await loadRecordsPage(reset: true, request: pageRequestID)
+            // A commit landed between pages. Read the same depth once more; if commits keep
+            // arriving, fall back to the first page, which needs no cursor.
+            if isRetryAfterStaleCursor {
+                invalidatePages(clear: false)
+                await loadRecordsPage(reset: true, request: pageRequestID)
+            } else {
+                invalidatePages(clear: false)
+                await loadRecordsPage(reset: true, request: pageRequestID, depth: max(depth, reset ? 0 : shown + 1),
+                                      isRetryAfterStaleCursor: true)
+            }
         } catch is CancellationError {
             // Replacement requests own their own loading state.
         } catch {
@@ -1354,9 +1351,11 @@ final class AppModel: ObservableObject {
 
     private func reloadVisibleQueries() async {
         guard !vaultLifecycleIsLocked else { return }
-        invalidatePages(clear: true)
+        // Rows stay on screen until fresh ones replace them; only a new query empties the list.
+        let depth = shownRecordCount
+        invalidatePages(clear: false)
         let request = pageRequestID
-        let task = Task<Void, Never> { [weak self] in await self?.loadRecordsPage(reset: true, request: request) }
+        let task = Task<Void, Never> { [weak self] in await self?.loadRecordsPage(reset: true, request: request, depth: depth) }
         pageLoadTask = task
         async let drafts: Void = reloadDraftPages()
         async let targets: Void = reconcileOpenTargets()
@@ -1367,9 +1366,12 @@ final class AppModel: ObservableObject {
 
     private func reloadDraftPages() async {
         let request = UUID(); draftRequestID = request
-        draftCursors = [:]; draftPages = [:]; reviewQueue = []; backgroundDrafts = []
-        for state in [ImportState.needsReview, .failed, .processing, .staging] {
-            await loadDraftPage(state: state, reset: true, request: request)
+        // Each state's rows stay until its fresh first page replaces them.
+        draftCursors = [:]
+        await withTaskGroup(of: Void.self) { group in
+            for state in [ImportState.needsReview, .failed, .processing, .staging] {
+                group.addTask { await self.loadDraftPage(state: state, reset: true, request: request) }
+            }
         }
     }
 
@@ -1383,11 +1385,8 @@ final class AppModel: ObservableObject {
         draftLoadingStates.insert(state)
         defer { if request == draftRequestID { draftLoadingStates.remove(state) } }
         do {
-            let service = service, id = UUID(), cursor = reset ? nil : draftCursors[state]
-            let task = Task { try await service.draftPage(states: [state], cursor: cursor) }
-            draftReads[id] = task
-            defer { draftReads.removeValue(forKey: id) }
-            let page = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            let service = service, cursor = reset ? nil : draftCursors[state]
+            let page = try await reads.run { try await service.draftPage(states: [state], cursor: cursor) }
             guard request == draftRequestID, !vaultLifecycleIsLocked else { return }
             guard accepts(page.revision) else { draftFailedStates.insert(state); return }
             if !reset, draftRevisions[state] != page.revision {
@@ -1413,7 +1412,8 @@ final class AppModel: ObservableObject {
 
     func retryDraftPage(state: ImportState) async {
         guard !draftLoadingStates.contains(state) else { return }
-        await loadDraftPage(state: state, reset: draftPages[state] == nil, request: draftRequestID)
+        // Without a cursor there is no next page to continue from, so the state starts over.
+        await loadDraftPage(state: state, reset: draftCursors[state] == nil, request: draftRequestID)
     }
 
     func hasMoreDrafts(state: ImportState) -> Bool { draftCursors[state] != nil }

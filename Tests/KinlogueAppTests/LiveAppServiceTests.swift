@@ -9,84 +9,6 @@ import UniformTypeIdentifiers
 
 struct LiveAppServiceTests {
     @Test
-    func defaultEnvironmentCreatesOnlyThePrivateVaultParent() throws {
-        let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-            .appendingPathComponent(
-                "kinlogue-live-environment-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        defer { try? FileManager.default.removeItem(at: base) }
-        try FileManager.default.createDirectory(
-            at: base,
-            withIntermediateDirectories: false
-        )
-        let identity = try AppRuntimeIdentity.resolve(
-            bundleInfo: [
-                "CFBundleIdentifier": AppRuntimeIdentity.productionBundleIdentifier,
-            ],
-            arguments: ["Kinlogue"],
-            trustedApplicationSupportDirectory: base
-        )
-
-        _ = try LiveAppServiceEnvironment.makeDefault(identity: identity)
-
-        let parent = base.appendingPathComponent("Kinlogue", isDirectory: true)
-        #expect(FileManager.default.fileExists(atPath: parent.path))
-        #expect(!FileManager.default.fileExists(atPath: identity.sourceVault.rootURL.path))
-        let permissions = try FileManager.default.attributesOfItem(atPath: parent.path)[
-            .posixPermissions
-        ] as? NSNumber
-        #expect(permissions?.intValue == 0o700)
-    }
-
-    @Test
-    func defaultEnvironmentBootstrapsAndDeletesWithoutExternalCredentials() async throws {
-        let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-            .appendingPathComponent(
-                "kinlogue-plaintext-environment-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        defer { try? FileManager.default.removeItem(at: base) }
-        try FileManager.default.createDirectory(
-            at: base,
-            withIntermediateDirectories: false
-        )
-        let identity = try AppRuntimeIdentity.resolve(
-            bundleInfo: [
-                "CFBundleIdentifier": AppRuntimeIdentity.productionBundleIdentifier,
-            ],
-            arguments: ["Kinlogue"],
-            trustedApplicationSupportDirectory: base
-        )
-        let environment = try LiveAppServiceEnvironment.makeDefault(identity: identity)
-
-        let snapshot = try await environment.dataService.bootstrap()
-
-        #expect(snapshot.generation == 1)
-        #expect(snapshot.members.isEmpty)
-        #expect(snapshot.reportCount == 0)
-        #expect(snapshot.draftCount == 0)
-        let inbox = try await environment.lanInboxService.initialize()
-        let catalog = try await PlaintextVault(
-            rootURL: identity.sourceVault.rootURL
-        ).loadCatalog()
-        #expect(inbox.page.revision.libraryID == catalog.vaultID)
-        #expect(inbox.page.items.isEmpty)
-        let manifestURL = identity.sourceVault.rootURL.appendingPathComponent("library.json")
-        let manifest = try Data(contentsOf: manifestURL)
-        #expect(manifest.range(of: Data("KLGPLAINTEXT1".utf8)) != nil)
-
-        try await environment.destroyService.destroyCurrentVault()
-        #expect(!FileManager.default.fileExists(atPath: identity.sourceVault.rootURL.path))
-        do {
-            _ = try await environment.lanInboxService.refresh()
-            Issue.record("A revoked LAN runtime reopened the deleted root")
-        } catch {
-            #expect(!FileManager.default.fileExists(atPath: identity.sourceVault.rootURL.path))
-        }
-    }
-
-    @Test
     func restoreRevocationCancelsAndDrainsBlockedReportOCRBeforeReturning() async throws {
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent(
             "kinlogue-report-restore-lifecycle-\(UUID().uuidString)",
@@ -389,38 +311,6 @@ struct LiveAppServiceTests {
         #expect(model.reviewQueue.isEmpty)
         #expect(model.backgroundDrafts.isEmpty)
         #expect(try await vault.loadCatalog().importDrafts.first?.state == .processing)
-    }
-
-    @Test
-    func defaultEnvironmentRejectsCatalogV2WithoutRewritingTheVault() async throws {
-        let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-            .appendingPathComponent(
-                "kinlogue-current-catalog-environment-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        defer { try? FileManager.default.removeItem(at: base) }
-        try FileManager.default.createDirectory(
-            at: base,
-            withIntermediateDirectories: false
-        )
-        let identity = try AppRuntimeIdentity.resolve(
-            bundleInfo: [
-                "CFBundleIdentifier": AppRuntimeIdentity.productionBundleIdentifier,
-            ],
-            arguments: ["Kinlogue"],
-            trustedApplicationSupportDirectory: base
-        )
-        let environment = try LiveAppServiceEnvironment.makeDefault(identity: identity)
-        let vault = try PlaintextVault(rootURL: identity.sourceVault.rootURL)
-        _ = try await vault.initialize()
-        let manifestURL = identity.sourceVault.rootURL.appendingPathComponent("library.json")
-        try rewriteCatalogVersionForStartupTest(2, manifestURL: manifestURL)
-        let before = try startupTestVaultContents(at: identity.sourceVault.rootURL)
-
-        await #expect(throws: AppServiceError.vaultUnavailable) {
-            _ = try await environment.dataService.bootstrap()
-        }
-        #expect(try startupTestVaultContents(at: identity.sourceVault.rootURL) == before)
     }
 
     @Test
@@ -2092,37 +1982,6 @@ private func makeRealDataService(rootURL: URL) throws -> LiveAppService {
         textExtractor: extractor,
         startupCompleted: true
     )
-}
-
-private func rewriteCatalogVersionForStartupTest(
-    _ version: Int,
-    manifestURL: URL
-) throws {
-    var manifest = try #require(
-        JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))
-            as? [String: Any]
-    )
-    var catalog = try #require(manifest["catalog"] as? [String: Any])
-    catalog["formatVersion"] = version
-    let catalogData = try JSONSerialization.data(withJSONObject: catalog, options: [.sortedKeys])
-    manifest["catalog"] = catalog
-    manifest["catalogSHA256"] = ContentDigest.sha256(catalogData).base64EncodedString()
-    try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
-        .write(to: manifestURL, options: .atomic)
-}
-
-private func startupTestVaultContents(at root: URL) throws -> [String: Data] {
-    let enumerator = try #require(FileManager.default.enumerator(at: root, includingPropertiesForKeys: [
-        .isRegularFileKey,
-    ]))
-    var contents: [String: Data] = [:]
-    for case let url as URL in enumerator
-    where try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
-        contents[url.path.replacingOccurrences(of: root.path + "/", with: "")] = try Data(
-            contentsOf: url
-        )
-    }
-    return contents
 }
 
 private struct LiveAppServiceFixture {

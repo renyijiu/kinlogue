@@ -586,6 +586,27 @@ struct LANInboxModelTests {
     }
 
     @Test
+    func aRequestThatArrivesDuringAFailedSweepStillGetsItsOwnSweep() async throws {
+        let item = try storedItem(seed: 97).item
+        let service = try LANPendingQueueServiceSpy(items: [item])
+        let failingRead = AsyncOperationGate()
+        await service.failNextProcessingPage(after: failingRead)
+        let processing = AppProcessingCoordinator(lanService: service)
+
+        processing.schedulePreprocessing()
+        #expect(await failingRead.waitUntilStarted())
+        // A new upload asks for a sweep while the read that is about to fail is still in flight.
+        processing.schedulePreprocessing()
+        await failingRead.open()
+
+        for _ in 0..<200 where await service.preprocessedItemIDs.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await service.preprocessedItemIDs == [item.id])
+        await processing.cancelAndDrain()
+    }
+
+    @Test
     func automaticFailureIsNotRetriedByRefreshOrReplacementPresentation() async throws {
         let fixture = try storedItem(seed: 91)
         let service = try LANPendingQueueServiceSpy(items: [fixture.item], blobs: [fixture.blob])
@@ -802,6 +823,7 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
     private var initializeGate: AsyncOperationGate?
     private var refreshGate: AsyncOperationGate?
     private var pageGate: AsyncOperationGate?
+    private var processingPageFailureGate: AsyncOperationGate?
     private var pageError = false
     private var refreshError = false
     private var resolveAddressesGate: AsyncOperationGate?
@@ -870,8 +892,14 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
         if let gate = pageGate { pageGate = nil; await gate.wait() }
         return response
     }
+    func failNextProcessingPage(after gate: AsyncOperationGate) { processingPageFailureGate = gate }
     func processingPage(cursor: LANInboxPageCursor?) async throws -> LANInboxPage {
-        try PlaintextLANInboxStore.page(durableSnapshot, cursor: cursor, processing: true, openEpoch: queryEpoch)
+        if let gate = processingPageFailureGate {
+            processingPageFailureGate = nil
+            await gate.wait()
+            throw LANInboxError.storageFailure
+        }
+        return try PlaintextLANInboxStore.page(durableSnapshot, cursor: cursor, processing: true, openEpoch: queryEpoch)
     }
 
     func setArchiveError(_ error: any Error) { archiveError = error }

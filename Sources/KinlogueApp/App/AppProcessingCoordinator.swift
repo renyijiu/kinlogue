@@ -82,7 +82,12 @@ final class AppProcessingCoordinator {
                     // Only a complete independent sweep may prune retained attempts.
                     attemptedRevisions = attemptedRevisions.filter { seen.contains($0.key) }
                     failedItemIDs.formIntersection(seen)
-                } catch { return }
+                } catch {
+                    // A request that arrived during the failed sweep still gets a sweep of its own.
+                    // Without one, the loop ends here instead of retrying the same failure.
+                    if processingRefreshRequested { continue }
+                    return
+                }
             }
         }
     }

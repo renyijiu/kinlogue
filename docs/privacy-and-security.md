@@ -45,7 +45,7 @@
 ## 代码中的保护边界
 
 - `SQLiteLibraryStore` / `SQLiteLibraryOwner`：界面入口使用的资料库。资料库打开期间持有单实例 owner 锁，校验可信根与文件身份；STRICT 表的每行带内容摘要并在读取时校验；原件经 `staged → live → deleting` 发布和回收，reader pin 防止提前删除。搜索用的解码缓存只在进程内，关闭数据库时清空。
-- `PlaintextVault`（旧 JSON 格式，界面不再打开，安装验收阶段和测试仍使用）：对象 immutable、`library.json` 单一提交点、generation/Catalog validation、SHA-256、orphan cleanup、原子 replace。
+- `PlaintextVault`（旧 JSON 格式，界面和安装验收都不再打开，只有测试仍使用）：对象 immutable、`library.json` 单一提交点、generation/Catalog validation、SHA-256、orphan cleanup、原子 replace。
 - `AtomicFileStore`、`VaultRootBinding`、`VaultProcessLock`：`O_NOFOLLOW`、descriptor identity、父/root inode 检查、共享 root mutation coordination。
 - `PlaintextVaultInitializationTransaction` / `PlaintextVaultDeletionTransaction`：初始化和删除 receipt、quarantine、同步和崩溃恢复。
 - `ImportedFileValidator`、`PDFTextExtractor`、`VisionTextRecognizer`：输入类型、页/像素/输出预算、单页处理和取消检查。

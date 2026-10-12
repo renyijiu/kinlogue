@@ -40,7 +40,7 @@ App 不解释像素、不生成测量或医学结论。DICOM 自由文本和像�
 
 ## SQLite 开发路径
 
-上述 JSON/manifest 流程仍由安装验收的 DICOM 阶段使用；界面入口现在使用 [SQLite DICOM 仓库](sqlite-storage.md#规范化-dicom-与按序列读取)，它将影像图规范化为四张表，并复用真实 scanner/indexer 与 decoder；无 index 文件或 study BLOB。活动导入保护 scanner/原件交接，完整图与原件 live 状态在一个事务提交；同卷 inode 接管保持既有导入 I/O 与磁盘预算。
+上述 JSON/manifest 流程是遗留实现，现在只被测试使用；界面入口和安装验收的 DICOM 阶段使用 [SQLite DICOM 仓库](sqlite-storage.md#规范化-dicom-与按序列读取)，它将影像图规范化为四张表，并复用真实 scanner/indexer 与 decoder；无 index 文件或 study BLOB。活动导入保护 scanner/原件交接，完整图与原件 live 状态在一个事务提交；同卷 inode 接管保持既有导入 I/O 与磁盘预算。
 
 SQLite 的列表/详情/序列读取按用途分开，坏 header 显式返回 ID；严格读与确认前验证完整目标图。Viewer 使用 open epoch、study revision 和目标 series hash，拒绝相关变化而不因无关报告提交失效；异常文件类型不会阻塞打开。App 层按需模型已通过真实 SQLite Viewer 的目标变更/无关提交/关闭库回归；当前正式 Viewer 仍由 composition 选择上文 JSON 路径，统一开库与整库替换绑定留待 U7。SQLite Viewer 未缓存解码目前执行 4 次 pin hash 加 decoder 读取，首切片/浏览性能及真实 XPC 安装矩阵尚未由本单元验证。
 

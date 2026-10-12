@@ -87,8 +87,11 @@ actor BackupRestoreService {
     ) async throws -> BackupRestoreActivationResult {
         try await operations.destructiveFence {
             await self.operations.revokeLifecycle()
-            return try await self.operations.activate(prepared) {
-                try await self.operations.removeWriterConfiguration()
+            // Activation replaces the root and strictly validates it; both wait on storage.
+            return try await LibraryStorageExecutor.run {
+                try await self.operations.activate(prepared) {
+                    try await self.operations.removeWriterConfiguration()
+                }
             }
         }
     }
@@ -97,8 +100,10 @@ actor BackupRestoreService {
     /// committed restore keeps `requiresApplicationRestart`; this method is
     /// for next-launch convergence, never hot service rebinding.
     func reconcileBeforeStartingServices() async throws -> BackupRestoreReconciliationOutcome {
-        let outcome = try await operations.reconcile()
-        try await operations.reconcilePreflights()
-        return outcome
+        try await LibraryStorageExecutor.run {
+            let outcome = try await operations.reconcile()
+            try await operations.reconcilePreflights()
+            return outcome
+        }
     }
 }

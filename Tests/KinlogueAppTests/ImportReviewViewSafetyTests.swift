@@ -283,7 +283,7 @@ struct AppShellPresentationSafetyTests {
         let composition = try source("App/AppComposition.swift")
         let launch = try source("Views/SQLiteAppLaunchView.swift")
 
-        #expect(entry.contains("AppStartupCoordinator.makeDefault()"))
+        #expect(entry.contains("LibraryLaunchCoordinator.makeDefault()"))
         #expect(entry.contains("SQLiteAppLaunchView(startup: startup"))
         #expect(entry.contains("startup.composition?.appModel"))
         #expect(!entry.contains("AppComposition"))

@@ -109,7 +109,7 @@ struct SQLiteIntegrityAppTests {
         let closeGate = AsyncOperationGate()
         let services = LiveAppServiceEnvironment(dataService: live.dataService, originalExportService: live.originalExportService,
             destroyService: live.destroyService, lanInboxService: lan, dicomSliceServiceFactory: { IntegrityGatedSlices(closeGate: closeGate) },
-            dicomImportMetrics: nil, vault: nil, lifecycle: context.lifecycle, commitChanges: live.commitChanges)
+            dicomImportMetrics: nil, lifecycle: context.lifecycle, commitChanges: live.commitChanges)
         let composition = AppComposition.makeOpened(identity: fixture.identity, services: services, context: context, database: database)
         #expect(await composition.startupCoordinator.start())
         let model = composition.appModel
@@ -364,6 +364,87 @@ struct SQLiteIntegrityAppTests {
     }
 
     @Test
+    func anInterruptedPassContinuesWhereItStoppedWhileTheRevisionIsUnchanged() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let member = try FamilyMember(displayName: "Synthetic resumed member")
+        try await fixture.reports.saveMember(member, replacing: nil)
+        for seed in ["resume one", "resume two", "resume three"] { _ = try await fixture.confirmed(member: member, seed: seed) }
+        let scrubber = SQLiteLibraryIntegrityScrubber(store: fixture.store)
+        await #expect(throws: CancellationError.self) {
+            _ = try await scrubber.run { count in if count == 5 { throw CancellationError() } }
+        }
+        let resumed = IntegrityProgressLog()
+        let report = try await scrubber.run { await resumed.append($0) }
+        #expect(report.completed && report.damagedTargets.isEmpty)
+        // One member, three reports, three documents and three originals, each counted once.
+        #expect(report.checkedCount == 10)
+        #expect(await resumed.counts == Array(5...10))
+
+        // A commit starts the rows again; nothing from the earlier revision is carried over.
+        try await fixture.reports.saveMember(FamilyMember(displayName: "Synthetic later member"), replacing: nil)
+        let restarted = IntegrityProgressLog()
+        let next = try await scrubber.run { await restarted.append($0) }
+        #expect(next.completed && next.checkedCount == 11)
+        #expect(await restarted.counts == Array(0...11))
+    }
+
+    @Test
+    func verifiedOriginalBytesAreReadOnceUntilTheFileOrItsRowChanges() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let member = try FamilyMember(displayName: "Synthetic ledger member")
+        try await fixture.reports.saveMember(member, replacing: nil)
+        let seeds = ["ledger first original", "ledger second"]
+        let first = try await fixture.confirmed(member: member, seed: seeds[0])
+        let second = try await fixture.confirmed(member: member, seed: seeds[1])
+        let scrubber = SQLiteLibraryIntegrityScrubber(store: fixture.store)
+        let metrics = fixture.store.originalReadMetrics
+        let before = metrics.verifiedReadByteCount
+        #expect(try await scrubber.run().completed)
+        let once = UInt64(seeds.reduce(0) { $0 + $1.utf8.count })
+        #expect(metrics.verifiedReadByteCount - before == once)
+
+        // The same revision again, and then a later one: no original is read a second time.
+        let repeated = try await scrubber.run()
+        #expect(repeated.completed && repeated.damagedTargets.isEmpty)
+        try await fixture.reports.saveMember(FamilyMember(displayName: "Synthetic unrelated member"), replacing: nil)
+        #expect(try await scrubber.run().completed)
+        #expect(metrics.verifiedReadByteCount - before == once)
+
+        // Rewriting a file changes its timestamps, so it is read again and found damaged even
+        // though no commit happened; the untouched original is still not reread.
+        let id = first.sources.first.attachmentID
+        let url = fixture.store.originalsURL.appendingPathComponent(id.uuidString.lowercased() + ".data")
+        try Data(repeating: 0, count: seeds[0].utf8.count).write(to: url)
+        let damaged = try await scrubber.run()
+        #expect(damaged.completed)
+        #expect(damaged.damagedTargets.map(\.id) == [id])
+        #expect(metrics.verifiedReadByteCount - before <= once + UInt64(seeds[0].utf8.count))
+        await #expect(throws: SQLiteLibraryError.damaged) { try await fixture.reports.record(first.id) }
+        #expect(try await fixture.reports.record(second.id) == second)
+    }
+
+    @Test
+    func aCommitFromAnotherConnectionStartsTheRowsAgain() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let member = try FamilyMember(displayName: "Synthetic external member")
+        try await fixture.reports.saveMember(member, replacing: nil)
+        let scrubber = SQLiteLibraryIntegrityScrubber(store: fixture.store)
+        #expect(try await scrubber.run().damagedTargets.isEmpty)
+        // The library state is untouched, so only SQLite's data version shows this write.
+        let external = try DatabaseQueue(path: fixture.store.databaseURL.path)
+        try await external.write { db in
+            try db.execute(sql: "UPDATE members SET archived = 1 WHERE id = ?", arguments: [member.id.sqliteBytes])
+        }
+        try external.close()
+        let report = try await scrubber.run()
+        #expect(report.completed)
+        #expect(report.damagedTargets.contains { $0.kind == .member && $0.id == member.id })
+    }
+
+    @Test
     func cancellationGuardIsRemovedBeforeTheNextOrdinaryReadAndWrite() throws {
         let fixture = try SQLiteAppQueryFixture()
         defer { fixture.destroy() }
@@ -379,6 +460,10 @@ struct SQLiteIntegrityAppTests {
         #expect(try fixture.store.state().generation >= 0)
         _ = try fixture.store.write { db in try SQLiteLibraryState.advance(in: db) }
     }
+}
+private actor IntegrityProgressLog {
+    private(set) var counts: [Int] = []
+    func append(_ count: Int) { counts.append(count) }
 }
 private actor IntegrityMutationOnce {
     private var claimed = false

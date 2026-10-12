@@ -10,96 +10,30 @@ struct LiveAppServiceEnvironment: Sendable {
     let lanInboxService: any LANInboxServicing
     let dicomSliceServiceFactory: @Sendable () -> any DICOMSliceViewing
     let dicomImportMetrics: DICOMImportMetricsRecorder?
-    let vault: PlaintextVault?
     let lifecycle: LibraryLifecycleCoordinator
     var commitChanges: (@Sendable () -> AsyncStream<LibraryRevision>)? = nil
 
     @concurrent
     static func makeOpened(identity: AppRuntimeIdentity, store: SQLiteLibraryStore,
                            lifecycle: LibraryLifecycleCoordinator) async throws -> Self {
-        let reports = SQLiteReportRepository(store: store)
-        let studies = try SQLiteDICOMRepository(store: store)
-        let extractor = OnDeviceTextExtractionService()
-        let metrics: DICOMImportMetricsRecorder? = if case .acceptance = identity.mode { DICOMImportMetricsRecorder() } else { nil }
-        let scope: DICOMSecurityScopeRequirement = if case .acceptance = identity.mode { .notRequiredForTesting } else { .required }
-        let workflow = ImportWorkflow(store: reports, textExtractor: extractor)
-        let dicom = try DICOMImportWorkflow(repository: studies, metrics: metrics)
-        return Self(dataService: LiveAppService(reports: reports, studies: studies, draftStore: reports,
-            workflow: workflow, textExtractor: extractor, lifecycle: lifecycle,
-            dicomRuntime: DICOMAppRuntime(workflow: dicom, lifecycle: lifecycle, securityScope: scope)),
-            originalExportService: LiveOriginalExportService(store: store, lifecycle: lifecycle),
-            destroyService: LifecycleCoordinatedVaultDestroyService(lifecycle: lifecycle,
-                underlying: SQLiteVaultDestroyService(store: store)),
-            lanInboxService: try LiveLANInboxService(store: store, lifecycle: lifecycle),
-            dicomSliceServiceFactory: { DICOMSliceService(repository: studies) }, dicomImportMetrics: metrics,
-            vault: nil, lifecycle: lifecycle, commitChanges: { store.changes() })
-    }
-
-    static func makeDefault() throws -> Self {
-        try makeDefault(identity: AppRuntimeIdentity.current())
-    }
-
-    static func makeDefault(identity: AppRuntimeIdentity) throws -> Self {
-        let source = identity.sourceVault
-        try VaultParentDirectoryPreparation.ensureParentDirectory(
-            for: source.rootURL
-        )
-        let vault = try PlaintextVault(rootURL: source.rootURL)
-        let lifecycle = LibraryLifecycleCoordinator()
-        let lanInboxService = LiveLANInboxService(
-            rootURL: source.rootURL,
-            vault: vault,
-            lifecycle: lifecycle
-        )
-        let destroyService = LifecycleCoordinatedVaultDestroyService(
-            lifecycle: lifecycle,
-            underlying: PlaintextVaultDestroyService(vault: vault)
-        )
-        let originalExportService = LiveOriginalExportService(
-            vault: vault,
-            lifecycle: lifecycle
-        )
-        let store = VaultImportDraftStore(vault: vault)
-        let textExtractor = OnDeviceTextExtractionService()
-        let workflow = ImportWorkflow(
-            store: store,
-            textExtractor: textExtractor
-        )
-        let acceptanceMetrics: DICOMImportMetricsRecorder?
-        let securityScope: DICOMSecurityScopeRequirement
-        if case .acceptance = identity.mode {
-            acceptanceMetrics = DICOMImportMetricsRecorder()
-            securityScope = .notRequiredForTesting
-        } else {
-            acceptanceMetrics = nil
-            securityScope = .required
+        try await LibraryStorageExecutor.run {
+            let reports = SQLiteReportRepository(store: store)
+            let studies = try SQLiteDICOMRepository(store: store)
+            let extractor = OnDeviceTextExtractionService()
+            let metrics: DICOMImportMetricsRecorder? = if case .acceptance = identity.mode { DICOMImportMetricsRecorder() } else { nil }
+            let scope: DICOMSecurityScopeRequirement = if case .acceptance = identity.mode { .notRequiredForTesting } else { .required }
+            let workflow = ImportWorkflow(store: reports, textExtractor: extractor)
+            let dicom = try DICOMImportWorkflow(repository: studies, metrics: metrics)
+            return Self(dataService: LiveAppService(reports: reports, studies: studies, draftStore: reports,
+                workflow: workflow, textExtractor: extractor, lifecycle: lifecycle,
+                dicomRuntime: DICOMAppRuntime(workflow: dicom, lifecycle: lifecycle, securityScope: scope)),
+                originalExportService: LiveOriginalExportService(store: store, lifecycle: lifecycle),
+                destroyService: LifecycleCoordinatedVaultDestroyService(lifecycle: lifecycle,
+                    underlying: SQLiteVaultDestroyService(store: store)),
+                lanInboxService: try LiveLANInboxService(store: store, lifecycle: lifecycle),
+                dicomSliceServiceFactory: { DICOMSliceService(repository: studies) }, dicomImportMetrics: metrics,
+                lifecycle: lifecycle, commitChanges: { store.changes() })
         }
-        let dicomWorkflow = try DICOMImportWorkflow(
-            rootURL: source.rootURL,
-            vault: vault,
-            metrics: acceptanceMetrics
-        )
-        return Self(
-            dataService: LiveAppService(
-                vault: vault,
-                draftStore: store,
-                workflow: workflow,
-                textExtractor: textExtractor,
-                lifecycle: lifecycle,
-                dicomRuntime: DICOMAppRuntime(
-                    workflow: dicomWorkflow,
-                    lifecycle: lifecycle,
-                    securityScope: securityScope
-                )
-            ),
-            originalExportService: originalExportService,
-            destroyService: destroyService,
-            lanInboxService: lanInboxService,
-            dicomSliceServiceFactory: { DICOMSliceService(vault: vault) },
-            dicomImportMetrics: acceptanceMetrics,
-            vault: vault,
-            lifecycle: lifecycle
-        )
     }
 }
 
@@ -116,18 +50,6 @@ struct DICOMAppRuntime: Sendable {
         self.workflow = workflow
         self.lifecycle = lifecycle
         self.securityScope = securityScope
-    }
-}
-
-actor PlaintextVaultDestroyService: VaultDestroyServicing {
-    private let vault: PlaintextVault
-
-    init(vault: PlaintextVault) {
-        self.vault = vault
-    }
-
-    func destroyCurrentVault() async throws {
-        try await vault.destroy()
     }
 }
 

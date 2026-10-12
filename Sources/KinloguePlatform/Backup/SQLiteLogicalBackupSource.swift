@@ -337,11 +337,13 @@ package struct SQLiteLogicalBackupSource: Sendable {
         return try BackupRevisionPair(vault: revision, lanInbox: revision)
     }
     @concurrent package func prepare() async throws -> SQLiteLogicalBackupSnapshot {
-        let cancellation = SQLiteLogicalCancellation()
-        return try await withTaskCancellationHandler {
-            try Task.checkCancellation()
-            return try captureFrozen(check: cancellation.check)
-        } onCancel: { cancellation.cancel() }
+        try await LibraryStorageExecutor.run {
+            let cancellation = SQLiteLogicalCancellation()
+            return try await withTaskCancellationHandler {
+                try Task.checkCancellation()
+                return try captureFrozen(check: cancellation.check)
+            } onCancel: { cancellation.cancel() }
+        }
     }
     func validateStrict(check: () throws -> Void = { try Task.checkCancellation() }) throws -> SQLiteLogicalValidation {
         let snapshot = try captureStrict(check: check)

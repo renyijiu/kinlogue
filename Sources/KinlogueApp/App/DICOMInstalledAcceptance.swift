@@ -142,34 +142,36 @@ struct DICOMInstalledAcceptanceRunner: Sendable {
     let request: AcceptanceSmokeRequest
 
     func run() async throws {
+        let session = AcceptanceLibrarySession()
         do {
             switch request.phase {
             case .dicomImport:
-                try await runImport()
+                try await runImport(session)
             case .dicomRestart:
-                try await runRestart()
+                try await runRestart(session)
             case .dicomDelete:
-                try await runDelete()
+                try await runDelete(session)
             default:
                 throw DICOMInstalledAcceptanceError.invariantFailed(.phase)
             }
+            await session.close()
         } catch let error as DICOMInstalledAcceptanceError {
+            await session.close()
             throw error
         } catch {
+            await session.close()
             throw DICOMInstalledAcceptanceError.invariantFailed(.phase)
         }
     }
 
-    private func runImport() async throws {
+    private func runImport(_ session: AcceptanceLibrarySession) async throws {
         var step = DICOMInstalledAcceptanceFailureStep.context
         do {
             let context = try context()
             step = .inputOwnership
             try verifyOwnedInput(context.inputDirectory)
             step = .environment
-            let environment = try LiveAppServiceEnvironment.makeDefault(
-                identity: request.identity
-            )
+            let environment = try await session.library(identity: request.identity).services
             let baselineRSS = try residentMemoryByteCount()
             step = .initialSnapshot
             let initial = try await environment.dataService.bootstrap()
@@ -291,8 +293,8 @@ struct DICOMInstalledAcceptanceRunner: Sendable {
         return result
     }
 
-    private func runRestart() async throws {
-        let environment = try LiveAppServiceEnvironment.makeDefault(identity: request.identity)
+    private func runRestart(_ session: AcceptanceLibrarySession) async throws {
+        let environment = try await session.library(identity: request.identity).services
         let snapshot = try await environment.dataService.bootstrap()
         guard snapshot.members.count == 4,
               snapshot.reportCount == 96,
@@ -338,8 +340,8 @@ struct DICOMInstalledAcceptanceRunner: Sendable {
         ).emit()
     }
 
-    private func runDelete() async throws {
-        let environment = try LiveAppServiceEnvironment.makeDefault(identity: request.identity)
+    private func runDelete(_ session: AcceptanceLibrarySession) async throws {
+        let environment = try await session.library(identity: request.identity).services
         let before = try await environment.dataService.bootstrap()
         let beforeReports = try await reportSummaries(environment.dataService)
         guard before.members.count == 4,

@@ -458,6 +458,16 @@ func sqliteSearchCacheStopsGrowingAtItsBudgetAndDropsEntriesOfMissingReports() {
     #expect(!stored.isEmpty && stored.count < ids.count)
     #expect(stored.count * one.cost <= SQLiteReportSearchCache.costLimit)
 
+    // A changed row whose new entry does not fit leaves no entry behind, rather than a stale one.
+    guard let changed = stored.keys.first else { return }
+    let oversized = SQLiteReportSearchCache.Entry(fieldsHash: Data(repeating: 2, count: 32),
+        fields: Array(repeating: text, count: 60), key: [])
+    #expect(oversized.cost > SQLiteReportSearchCache.costLimit)
+    cache.update([(changed, oversized)], present: nil)
+    #expect(cache.snapshot()[changed] == nil)
+    cache.update([(changed, one)], present: nil)
+    #expect(cache.snapshot()[changed]?.fieldsHash == one.fieldsHash)
+
     // Room freed by a report that is gone can be used again.
     let kept = Set(stored.keys.prefix(1)), newcomer = UUID()
     cache.update([(newcomer, one)], present: kept.union([newcomer]))

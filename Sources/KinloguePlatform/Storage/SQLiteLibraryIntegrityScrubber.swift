@@ -39,6 +39,10 @@ package struct SQLiteIntegrityReport: Sendable {
 
 /// A cold inspection uses the same per-entity codecs as strict logical backup.
 /// It releases database admission between targets and never captures a full-library spool.
+///
+/// A pass that is interrupted without a commit continues where it stopped, and a pass that
+/// already completed for the current revision is reported again without rereading anything; see
+/// `SQLiteIntegrityProgress` for what is carried over and why.
 package struct SQLiteLibraryIntegrityScrubber: Sendable {
     let store: SQLiteLibraryStore
     package init(store: SQLiteLibraryStore) { self.store = store }
@@ -46,87 +50,175 @@ package struct SQLiteLibraryIntegrityScrubber: Sendable {
     @concurrent package func run(
         progress: @escaping @Sendable (Int) async throws -> Void = { _ in }
     ) async throws -> SQLiteIntegrityReport {
-        let cancellation = SQLiteLogicalCancellation()
-        return try await withTaskCancellationHandler {
-            try await inspect(cancellation: cancellation, progress: progress)
-        } onCancel: { cancellation.cancel() }
+        try await LibraryStorageExecutor.run {
+            let cancellation = SQLiteLogicalCancellation()
+            return try await withTaskCancellationHandler {
+                try await inspect(cancellation: cancellation, progress: progress)
+            } onCancel: { cancellation.cancel() }
+        }
+    }
+
+    /// Changes when any other connection commits, which the library state alone would not show.
+    private static func dataVersion(_ db: Database) throws -> Int64 {
+        guard let version = try Int64.fetchOne(db, sql: "PRAGMA data_version") else { throw SQLiteLibraryError.damaged }
+        return version
+    }
+
+    private enum Step { case checked, damaged, stale }
+
+    /// The revision one pass is bound to, and the checks that hold only while it is current.
+    private struct Pass {
+        let scrubber: SQLiteLibraryIntegrityScrubber
+        let epoch: UUID
+        let initial: SQLiteLibraryState
+        let dataVersion: Int64
+        let cancellation: SQLiteLogicalCancellation
+        var store: SQLiteLibraryStore { scrubber.store }
+
+        func unchanged(_ db: Database) throws -> Bool {
+            try SQLiteLibraryState.read(from: db) == initial && SQLiteLibraryIntegrityScrubber.dataVersion(db) == dataVersion
+        }
+
+        /// The next keys of one kind, or nil when the revision is no longer the one inspected.
+        func keys(_ kind: SQLiteIntegrityTarget.Kind, after: Data) throws -> [Data]? {
+            try store.read(epoch: epoch) { db in
+                guard try unchanged(db) else { return nil }
+                return try Data.fetchAll(db, sql: "SELECT \(kind.key) FROM \(kind.table) WHERE \(kind.key)>? ORDER BY \(kind.key) LIMIT 16", arguments: [after])
+            }
+        }
+
+        /// Checks one target. `rows` is false when its rows were already checked at this revision
+        /// and only the file of an original is looked at again.
+        func check(_ target: SQLiteIntegrityTarget, rows: Bool) throws -> Step {
+            do {
+                return try verify(target, rows: rows) ? .checked : .stale
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // A revision change during a file read is incomplete coverage, not damage.
+                guard try store.read(epoch: epoch, unchanged) else { return .stale }
+                if let failure = error as? SQLiteLibraryError,
+                   [.closed, .staleRoot, .databaseUnavailable, .unsupportedFormat, .unsupportedConfiguration].contains(failure) {
+                    throw failure
+                }
+                try cancellation.check()
+                guard try store.rememberIntegrityFailure(target, state: initial, epoch: epoch) else { return .stale }
+                return .damaged
+            }
+        }
+
+        /// False when the revision changed before the target could be checked.
+        private func verify(_ target: SQLiteIntegrityTarget, rows: Bool) throws -> Bool {
+            if rows {
+                let current = try store.read(epoch: epoch) { db in
+                    guard try unchanged(db) else { return false }
+                    try SQLiteReadProgress.withGuard(db, check: cancellation.check) { try scrubber.validate(target, db) }
+                    return true
+                }
+                guard current else { return false }
+            }
+            guard target.kind == .original, let id = target.id else { return true }
+            let live: Bool? = try store.read(epoch: epoch) { db in
+                try unchanged(db) ? try SQLiteOriginal.read(id, from: db).lifecycle == "live" : nil
+            }
+            guard let live else { return false }
+            guard live else { return true }
+            let pin = try store.pinOriginalForInspection(id)
+            defer { pin.release() }
+            try pin.verifyForInspection()
+            try cancellation.check()
+            return true
+        }
     }
 
     private func inspect(cancellation: SQLiteLogicalCancellation,
                          progress: @escaping @Sendable (Int) async throws -> Void) async throws -> SQLiteIntegrityReport {
-        let (initial, epoch) = try store.readWithEpoch { db in
+        let record = store.integrityProgress
+        let (opened, epoch) = try store.readWithEpoch { db in
             try SQLiteReadProgress.withGuard(db, check: cancellation.check) {
-                try SQLiteLibrarySchema.validate(in: db)
-                guard try Int.fetchOne(db, sql: "SELECT count(*) FROM ocr_documents")! <= 45_000,
-                      try Int.fetchOne(db, sql: "SELECT count(*) FROM inbox_archive_receipts")! <= 5_000 else { throw SQLiteLibraryError.damaged }
-                guard try String.fetchAll(db, sql: "PRAGMA integrity_check") == ["ok"],
-                      try Row.fetchOne(db, sql: "PRAGMA foreign_key_check") == nil else { throw SQLiteLibraryError.damaged }
-                return try SQLiteLibraryState.read(from: db)
+                let state = try SQLiteLibraryState.read(from: db)
+                var position = record.position(state: state, dataVersion: try Self.dataVersion(db))
+                if !position.structureChecked {
+                    try SQLiteLibrarySchema.validate(in: db)
+                    guard try Int.fetchOne(db, sql: "SELECT count(*) FROM ocr_documents")! <= 45_000,
+                          try Int.fetchOne(db, sql: "SELECT count(*) FROM inbox_archive_receipts")! <= 5_000 else { throw SQLiteLibraryError.damaged }
+                    guard try String.fetchAll(db, sql: "PRAGMA integrity_check") == ["ok"],
+                          try Row.fetchOne(db, sql: "PRAGMA foreign_key_check") == nil else { throw SQLiteLibraryError.damaged }
+                    position.structureChecked = true
+                }
+                return position
             }
         }
-        let revision = LibraryRevision(libraryID: initial.libraryID, openEpoch: epoch,
-            generation: UInt64(initial.generation), commitID: initial.commitID)
-        var checked = 0
-        var damaged: [SQLiteIntegrityTarget] = []
+        var position = opened
+        record.save(position)
+        let pass = Pass(scrubber: self, epoch: epoch, initial: position.state, dataVersion: position.dataVersion, cancellation: cancellation)
+        let revision = LibraryRevision(libraryID: pass.initial.libraryID, openEpoch: epoch,
+            generation: UInt64(pass.initial.generation), commitID: pass.initial.commitID)
         func result(completed: Bool) -> SQLiteIntegrityReport {
-            SQLiteIntegrityReport(revision: revision, completed: completed, checkedCount: checked,
-                checkedAt: Date(), damagedTargets: damaged)
+            SQLiteIntegrityReport(revision: revision, completed: completed, checkedCount: position.checked,
+                checkedAt: position.completedAt ?? Date(), damagedTargets: position.damaged)
         }
-        try await progress(checked)
-        for kind in SQLiteIntegrityTarget.Kind.allCases {
+        try await progress(position.checked)
+        if position.completedAt != nil {
+            // The rows are the ones already checked. Files can change without a commit, so every
+            // original is looked at again; only one whose identity changed is read.
             var after = Data()
             while true {
                 try cancellation.check()
-                let keys: [Data]? = try store.read(epoch: epoch) { db in
-                    guard try SQLiteLibraryState.read(from: db) == initial else { return nil }
-                    return try Data.fetchAll(db, sql: "SELECT \(kind.key) FROM \(kind.table) WHERE \(kind.key)>? ORDER BY \(kind.key) LIMIT 16", arguments: [after])
-                }
-                guard let keys else { return result(completed: false) }
-                guard !keys.isEmpty else { break }
-                for key in keys {
-                    let target = SQLiteIntegrityTarget(kind: kind, key: key)
-                    do {
-                        let current = try store.read(epoch: epoch) { db in
-                            guard try SQLiteLibraryState.read(from: db) == initial else { return false }
-                            try SQLiteReadProgress.withGuard(db, check: cancellation.check) { try validate(target, db) }
-                            return true
-                        }
-                        guard current else { return result(completed: false) }
-                        if kind == .original, let id = target.id {
-                            let live = try store.read(epoch: epoch) { try SQLiteOriginal.read(id, from: $0).lifecycle == "live" }
-                            if live {
-                                let pin = try store.pinOriginalForInspection(id)
-                                defer { pin.release() }
-                                try pin.withVerifiedDescriptor { _ in try cancellation.check() }
-                            }
-                        }
-                    } catch is CancellationError { throw CancellationError() }
-                    catch {
-                        // A revision change during a file read is incomplete coverage, not damage.
-                        guard try store.read(epoch: epoch, { try SQLiteLibraryState.read(from: $0) }) == initial else {
-                            return result(completed: false)
-                        }
-                        if let failure = error as? SQLiteLibraryError,
-                           [.closed, .staleRoot, .databaseUnavailable, .unsupportedFormat, .unsupportedConfiguration].contains(failure) {
-                            throw failure
-                        }
-                        try cancellation.check()
-                        guard try store.rememberIntegrityFailure(target, state: initial, epoch: epoch) else { return result(completed: false) }
-                        damaged.append(target)
+                guard let batch = try pass.keys(.original, after: after) else { return result(completed: false) }
+                guard let last = batch.last else { break }
+                for key in batch {
+                    let target = SQLiteIntegrityTarget(kind: .original, key: key)
+                    switch try pass.check(target, rows: false) {
+                    case .stale: return result(completed: false)
+                    case .damaged: if !position.damaged.contains(target) { position.damaged.append(target); record.save(position) }
+                    case .checked: break
                     }
-                    checked += 1
-                    try await progress(checked)
                     try cancellation.check()
                     await Task.yield()
                 }
-                after = keys[keys.count - 1]
+                after = last
             }
+            return result(completed: true)
         }
-        let unchanged = try store.read(epoch: epoch) { try SQLiteLibraryState.read(from: $0) == initial }
-        return result(completed: unchanged)
+        let kinds = SQLiteIntegrityTarget.Kind.allCases
+        while position.kindIndex < kinds.count {
+            let kind = kinds[position.kindIndex]
+            while true {
+                try cancellation.check()
+                guard let batch = try pass.keys(kind, after: position.after) else { return result(completed: false) }
+                guard !batch.isEmpty else { break }
+                for key in batch {
+                    let target = SQLiteIntegrityTarget(kind: kind, key: key)
+                    switch try pass.check(target, rows: true) {
+                    case .stale: return result(completed: false)
+                    case .damaged: position.damaged.append(target)
+                    case .checked: break
+                    }
+                    position.checked += 1
+                    position.after = key
+                    record.save(position)
+                    try await progress(position.checked)
+                    try cancellation.check()
+                    await Task.yield()
+                }
+            }
+            position.kindIndex += 1
+            position.after = Data()
+            record.save(position)
+        }
+        let present: Set<UUID>? = try store.read(epoch: epoch) { db in
+            guard try pass.unchanged(db) else { return nil }
+            return Set(try Data.fetchAll(db, sql: "SELECT id FROM originals").compactMap { UUID(sqliteBytes: $0) })
+        }
+        guard let present else { return result(completed: false) }
+        record.retainOriginals(present)
+        position.completedAt = Date()
+        record.save(position)
+        return result(completed: true)
     }
 
-    private func validate(_ target: SQLiteIntegrityTarget, _ db: Database) throws {
+    fileprivate func validate(_ target: SQLiteIntegrityTarget, _ db: Database) throws {
         // Unlike strict backup's whole-library bounds, an oversized entity is local damage.
         let boundedExpression: String?
         switch target.kind {

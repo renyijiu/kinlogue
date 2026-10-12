@@ -63,6 +63,25 @@ extension SQLiteLibraryStore {
         copyingFrom source: Int32, byteCount: Int, sha256: Data,
         contentType: String, operationID: UUID
     ) throws -> UUID {
+        try stageOriginal(.descriptor(source), byteCount: byteCount, sha256: sha256,
+                          contentType: contentType, operationID: operationID)
+    }
+
+    /// Stages bytes that are already in memory, so they reach the disk once.
+    package func stageOriginal(bytes: Data, sha256: Data, contentType: String, operationID: UUID) throws -> UUID {
+        try stageOriginal(.bytes(bytes), byteCount: bytes.count, sha256: sha256,
+                          contentType: contentType, operationID: operationID)
+    }
+
+    private enum OriginalSource {
+        case descriptor(Int32)
+        case bytes(Data)
+    }
+
+    private func stageOriginal(
+        _ source: OriginalSource, byteCount: Int, sha256: Data,
+        contentType: String, operationID: UUID
+    ) throws -> UUID {
         let (original, directory, descriptor) = try admission.withLock {
             try Task.checkCancellation()
             try validateRoot()
@@ -101,29 +120,44 @@ extension SQLiteLibraryStore {
         }
         try failOriginal(.afterIdentityCommit)
         try Task.checkCancellation()
-        var sourceMetadata = stat()
-        guard fstat(source, &sourceMetadata) == 0, sourceMetadata.st_mode & S_IFMT == S_IFREG,
-              sourceMetadata.st_size == byteCount else { throw SQLiteLibraryError.invalidOriginal }
-        var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
-        var offset = 0
+        let chunkSize = 64 * 1_024
         var hasher = SHA256()
-        while offset < byteCount {
-            try Task.checkCancellation()
-            let count = pread(source, &buffer, min(buffer.count, byteCount - offset), off_t(offset))
-            if count < 0, errno == EINTR { continue }
-            guard count > 0 else { throw SQLiteLibraryError.invalidOriginal }
-            try buffer.withUnsafeBytes { bytes in
-                guard let base = bytes.baseAddress else { throw SQLiteLibraryError.invalidOriginal }
-                var written = 0
-                while written < count {
-                    let amount = Darwin.write(descriptor, base.advanced(by: written), count - written)
-                    if amount < 0, errno == EINTR { continue }
-                    guard amount > 0 else { throw SQLiteLibraryError.ioFailure(errno) }
-                    written += amount
-                }
-                hasher.update(bufferPointer: UnsafeRawBufferPointer(start: base, count: count))
+        func append(_ chunk: UnsafeRawBufferPointer) throws {
+            guard let base = chunk.baseAddress else { throw SQLiteLibraryError.invalidOriginal }
+            var written = 0
+            while written < chunk.count {
+                let amount = Darwin.write(descriptor, base.advanced(by: written), chunk.count - written)
+                if amount < 0, errno == EINTR { continue }
+                guard amount > 0 else { throw SQLiteLibraryError.ioFailure(errno) }
+                written += amount
             }
-            offset += count
+            hasher.update(bufferPointer: chunk)
+        }
+        switch source {
+        case let .descriptor(source):
+            var sourceMetadata = stat()
+            guard fstat(source, &sourceMetadata) == 0, sourceMetadata.st_mode & S_IFMT == S_IFREG,
+                  sourceMetadata.st_size == byteCount else { throw SQLiteLibraryError.invalidOriginal }
+            var buffer = [UInt8](repeating: 0, count: chunkSize)
+            var offset = 0
+            while offset < byteCount {
+                try Task.checkCancellation()
+                let count = pread(source, &buffer, min(buffer.count, byteCount - offset), off_t(offset))
+                if count < 0, errno == EINTR { continue }
+                guard count > 0 else { throw SQLiteLibraryError.invalidOriginal }
+                try buffer.withUnsafeBytes { try append(UnsafeRawBufferPointer(rebasing: $0[..<count])) }
+                offset += count
+            }
+        case let .bytes(data):
+            try data.withUnsafeBytes { bytes in
+                var offset = 0
+                while offset < bytes.count {
+                    try Task.checkCancellation()
+                    let count = min(chunkSize, bytes.count - offset)
+                    try append(UnsafeRawBufferPointer(rebasing: bytes[offset..<(offset + count)]))
+                    offset += count
+                }
+            }
         }
         guard Data(hasher.finalize()) == sha256 else { throw SQLiteLibraryError.invalidOriginal }
         if fcntl(descriptor, F_FULLFSYNC) != 0, fsync(descriptor) != 0 { throw SQLiteLibraryError.ioFailure(errno) }
@@ -497,6 +531,21 @@ package final class SQLiteOriginalPin: @unchecked Sendable {
             }
             try store.admission.withLock { try store.validateRoot() }
             return result
+        }
+    }
+
+    /// One full read for inspection, which runs no consumer between two verifications. Bytes
+    /// already verified under this exact row and file identity are not read again.
+    func verifyForInspection() throws {
+        try lock.withLock {
+            guard let store, descriptor >= 0 else { throw SQLiteLibraryError.closed }
+            try store.admission.withLock { try store.validateRoot() }
+            let current = try store.validateOriginalDescriptor(descriptor, original: original, hashBytes: false)
+            if store.integrityProgress.isVerified(original, snapshot: current) { return }
+            store.integrityProgress.forget(original.id)
+            let verified = try verifiedSnapshot(store)
+            try store.admission.withLock { try store.validateRoot() }
+            store.integrityProgress.noteVerified(original, snapshot: verified)
         }
     }
 

@@ -5,7 +5,7 @@ import SwiftUI
 /// accepted; after that it shows the opening state, a failure with its recovery actions, or
 /// the app shell on the opened SQLite library.
 struct SQLiteAppLaunchView: View {
-    @ObservedObject var startup: AppStartupCoordinator
+    @ObservedObject var startup: LibraryLaunchCoordinator
     @Binding var selectedLanguage: AppLanguage
     @AppStorage("hasAcknowledgedPlaintextStorageDisclosure") private var acknowledged = false
 
@@ -15,7 +15,7 @@ struct SQLiteAppLaunchView: View {
                 StorageDisclosureView { acknowledged = true }
             } else if startup.isOpening {
                 ProgressView(AppLocalization.string("正在打开资料库…"))
-            } else if let failure = startup.candidateFailure {
+            } else if let failure = startup.failure {
                 failureView(failure)
             } else if let composition = startup.composition {
                 AppShellView(model: composition.appModel, deletionModel: composition.deletionModel,

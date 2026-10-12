@@ -11,10 +11,17 @@ struct TestLibrarySnapshot: Sendable {
     var dicomStudies: [DICOMStudySummary] = []
     static let empty = Self()
     var revision: LibraryRevision {
-        LibraryRevision(libraryID: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
+        // A real commit always changes the commit ID, so fixtures with different content must
+        // not share one: the model skips a reload when the revision it already shows comes back.
+        var hasher = Hasher()
+        hasher.combine(members.map { "\($0)" }); hasher.combine(records.map { "\($0)" })
+        hasher.combine(drafts.map { "\($0)" }); hasher.combine(dicomStudies.map { "\($0)" })
+        let content = UInt64(bitPattern: Int64(hasher.finalize()))
+        return LibraryRevision(libraryID: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
                         openEpoch: UUID(uuidString: "10000000-0000-0000-0000-000000000002")!,
                         generation: generation,
-                        commitID: UUID(uuidString: String(format: "10000000-0000-0000-0000-%012llu", generation))!)
+                        commitID: UUID(uuidString: String(format: "10000000-0000-0000-%04llx-%012llx",
+                            generation & 0xFFFF, content & 0xFFFF_FFFF_FFFF))!)
     }
     var header: AppSnapshot {
         AppSnapshot(header: LibraryHeader(revision: revision, members: members.map(LibraryMemberSummary.init),

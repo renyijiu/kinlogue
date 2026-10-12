@@ -173,10 +173,12 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
     }
 
     @concurrent public func prepare(checkpointURL: URL, recoveryCode: String) async throws -> BackupPreparedRestore {
-        let cancellation = SQLiteLogicalCancellation()
-        return try await withTaskCancellationHandler {
-            try await prepare(checkpointURL: checkpointURL, recoveryCode: recoveryCode, cancellation: cancellation)
-        } onCancel: { cancellation.cancel() }
+        try await LibraryStorageExecutor.run {
+            let cancellation = SQLiteLogicalCancellation()
+            return try await withTaskCancellationHandler {
+                try await prepare(checkpointURL: checkpointURL, recoveryCode: recoveryCode, cancellation: cancellation)
+            } onCancel: { cancellation.cancel() }
+        }
     }
 
     private func prepare(

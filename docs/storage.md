@@ -1,6 +1,6 @@
 # 存储格式与持久化不变量
 
-> **当前状态**：本分支的正式界面入口从 2026-10-12 起打开 SQLite 资料库，布局和不变量见 [SQLite 存储专题](sqlite-storage.md)。本页从“资料库根目录”到“SQLite 开发边界”之前描述的是 JSON 清单格式：它仍由安装验收的各阶段和 JSON 服务的测试使用，界面不再创建或打开这种资料库，遇到它时原样保留并拒绝打开。
+> **当前状态**：本分支的正式界面入口从 2026-10-12 起打开 SQLite 资料库，布局和不变量见 [SQLite 存储专题](sqlite-storage.md)。本页从“资料库根目录”到“SQLite 开发边界”之前描述的是 JSON 清单格式：它现在只被 JSON 服务的测试和跨进程 fixture 使用，界面和安装验收都不再创建或打开这种资料库，遇到它时原样保留并拒绝打开。
 
 ## 资料库根目录
 
@@ -174,4 +174,4 @@ inbox manifest 同样校验 generation、vault ID、item/receipt/terminal 引用
 
 ## SQLite 资料库与 JSON 的边界
 
-[`KinlogueApp`](../Sources/KinlogueApp/App/KinlogueApp.swift) 通过 `AppStartupCoordinator.makeDefault()` 只打开 [SQLite 资料库](sqlite-storage.md)：`Vault/library.sqlite` 加 `Vault/originals/`。报告/OCR、LAN 上传与归档、规范化 DICOM、按需查询、逻辑备份/严格恢复、原件导出和整库删除共用一个 owner 与数据库。启动不再校验全部原件，改为结构门禁、使用前校验和空闲巡检。上文的 JSON 布局、启动原件校验和整份 catalog 提交不再是界面的行为；旧 JSON 根目录不会被转换、清空或写入，启动页说明格式不受支持，旧格式恢复点同样被新 reader 拒绝。把已有 JSON 资料迁入需要另行验证的离线转换，本分支没有提供。JSON 代码尚未删除：[安装验收](testing-and-release.md) 的 seed、restart、强制终止、LAN 和 DICOM 阶段仍在它上面运行，因此这些阶段目前不覆盖界面实际使用的存储。
+[`KinlogueApp`](../Sources/KinlogueApp/App/KinlogueApp.swift) 通过 `LibraryLaunchCoordinator.makeDefault()` 只打开 [SQLite 资料库](sqlite-storage.md)：`Vault/library.sqlite` 加 `Vault/originals/`。报告/OCR、LAN 上传与归档、规范化 DICOM、按需查询、逻辑备份/严格恢复、原件导出和整库删除共用一个 owner 与数据库。启动不再校验全部原件，改为结构门禁、使用前校验和空闲巡检。上文的 JSON 布局、启动原件校验和整份 catalog 提交不再是界面的行为；旧 JSON 根目录不会被转换、清空或写入，启动页说明格式不受支持，旧格式恢复点同样被新 reader 拒绝。把已有 JSON 资料迁入需要另行验证的离线转换，本分支没有提供。JSON 代码尚未删除，但 App 的生产组装和[安装验收](testing-and-release.md)各阶段都已改在 SQLite 资料库上运行；JSON 实现现在只被测试和跨进程 fixture 使用，本页上文描述的是这部分遗留代码的行为。

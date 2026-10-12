@@ -203,6 +203,10 @@ struct PlaintextVaultDICOMSliceSource: DICOMVerifiedSliceSource, Sendable {
 
 public actor DICOMSliceService {
     private static let maximumPrefetchWorkingSet = 64 * 1_024 * 1_024
+    /// Rendering validates its target against storage and may wait there, so the actor runs
+    /// on a queue of its own instead of on the cooperative pool.
+    private let isolationQueue = DispatchSerialQueue(label: "com.kinlogue.dicom-slice-service")
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { isolationQueue.asUnownedSerialExecutor() }
 
     private struct ScheduledDecode {
         let id: UUID

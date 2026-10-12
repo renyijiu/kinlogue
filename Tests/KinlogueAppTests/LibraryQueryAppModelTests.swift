@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import Testing
 @testable import KinlogueApp
@@ -55,6 +56,87 @@ struct LibraryQueryAppModelTests {
         await model.retryRecordsPage()
         #expect(model.pageState == .loaded && !model.hasMoreRecords)
         #expect(Set(model.timelineSections.flatMap(\.records).map(\.id)).count == 103)
+    }
+
+    @Test
+    func refreshKeepsShownRowsAndLoadedDepthInsteadOfReturningToTheFirstPage() async throws {
+        let member = try FamilyMember(displayName: "Synthetic member")
+        let records = try (0..<230).map { _ in try HealthRecord(memberID: member.id, attachmentID: UUID(), importState: .confirmed) }
+        let added = try HealthRecord(memberID: member.id, attachmentID: UUID(), importState: .confirmed)
+        let drafts = (0..<3).map { _ in DraftSummary(draft: LibraryDraftSummary(id: UUID(), state: .needsReview,
+            revision: 0, memberID: nil, failureCode: nil, sourceCount: 1)) }
+        let service = AppServiceSpy(
+            snapshot: TestLibrarySnapshot(generation: 1, members: [member], records: records, drafts: drafts),
+            refreshedSnapshot: TestLibrarySnapshot(generation: 2, members: [member], records: records + [added], drafts: drafts))
+        let model = AppModel(service: service)
+        await model.start()
+        model.selectedMemberID = member.id
+        await model.waitForCurrentPage()
+        await model.loadNextRecordsPage()
+        let shown = model.timelineSections.flatMap(\.records).map(\.id)
+        #expect(shown.count == 200 && model.hasMoreRecords)
+        #expect(model.reviewQueue.count == 3)
+
+        var queueWasEmptied = false
+        let observation = model.$reviewQueue.dropFirst().sink { if $0.isEmpty { queueWasEmptied = true } }
+        defer { observation.cancel() }
+        let gate = OriginalLoadGate()
+        await service.gatePage(gate, member: member.id)
+        let refreshing = Task { await model.refresh() }
+        await gate.waitUntilLoadStarts()
+        // The reload is in flight: what was shown is still shown.
+        #expect(model.timelineSections.flatMap(\.records).map(\.id) == shown)
+        #expect(model.pageState == .loading)
+        await gate.open()
+        await refreshing.value
+
+        #expect(model.currentLibraryRevision?.generation == 2)
+        #expect(model.pageState == .loaded && model.hasMoreRecords)
+        #expect(model.timelineSections.flatMap(\.records).count == 200)
+        #expect(model.reviewQueue.count == 3 && !queueWasEmptied)
+    }
+
+    @Test
+    func anUnchangedRevisionReloadsNoListButAChangedOneAndAPlainRefreshDo() async throws {
+        let record = try HealthRecord(memberID: UUID(), attachmentID: UUID(), importState: .confirmed)
+        let added = try HealthRecord(memberID: UUID(), attachmentID: UUID(), importState: .confirmed)
+        let service = AppServiceSpy(
+            snapshot: TestLibrarySnapshot(generation: 1, records: [record]),
+            refreshedSnapshot: TestLibrarySnapshot(generation: 2, records: [record, added]))
+        let model = AppModel(service: service)
+        await model.start()
+        let afterStart = await service.pageCalls
+
+        // The first hint brings a new revision, so the list is read again.
+        await model.refresh(skippingUnchanged: true)
+        #expect(await service.pageCalls == afterStart + 1)
+        #expect(Set(model.timelineSections.flatMap(\.records).map(\.id)) == [record.id, added.id])
+
+        // The same revision again, as on activation or after the model's own mutation.
+        await model.refresh(skippingUnchanged: true)
+        #expect(await service.pageCalls == afterStart + 1)
+        #expect(model.pageState == .loaded)
+
+        // A plain refresh reloads regardless: retry eligibility can change without a commit.
+        await model.refresh()
+        #expect(await service.pageCalls == afterStart + 2)
+    }
+
+    @Test
+    func aStaleCursorOnLoadMoreKeepsTheRowsAndEndsWithTheNextPage() async throws {
+        let records = try (0..<230).map { _ in try HealthRecord(memberID: UUID(), attachmentID: UUID(), importState: .confirmed) }
+        let service = AppServiceSpy(snapshot: TestLibrarySnapshot(records: records))
+        let model = AppModel(service: service)
+        await model.start()
+        let firstPage = model.timelineSections.flatMap(\.records).map(\.id)
+        #expect(firstPage.count == 100)
+
+        await service.staleNextPage()
+        await model.loadNextRecordsPage()
+
+        let reloaded = model.timelineSections.flatMap(\.records).map(\.id)
+        #expect(model.pageState == .loaded && model.hasMoreRecords)
+        #expect(reloaded.count == 200 && Array(reloaded.prefix(100)) == firstPage)
     }
 
     @Test

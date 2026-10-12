@@ -79,38 +79,6 @@ struct SyntheticAcceptanceRunnerTests {
     }
 
     @Test
-    func sqliteCandidateEntryRequiresTheExistingAcceptanceIdentity() {
-        let arguments = ["Kinlogue", AppRuntimeIdentity.syntheticSmokeArgument, "--acceptance-phase=sqlite-candidate"]
-        let accepted = AcceptanceSmokeEntry.resolve(bundleInfo: [
-            "CFBundleIdentifier": "com.kinlogue.mac.acceptance.\(runID)",
-            AppRuntimeIdentity.acceptanceEnabledInfoKey: true,
-            AppRuntimeIdentity.acceptanceRunIDInfoKey: runID
-        ], arguments: arguments, trustedApplicationSupportDirectory: supportDirectory)
-        #expect(accepted.request?.phase.rawValue == "sqlite-candidate")
-        #expect(AcceptanceSmokeEntry.resolve(bundleInfo: ["CFBundleIdentifier": AppRuntimeIdentity.productionBundleIdentifier],
-            arguments: arguments, trustedApplicationSupportDirectory: supportDirectory) == .reject)
-    }
-
-    @Test
-    @MainActor
-    func sqliteCandidateProbeUsesRealServicesAndReleasesItsExactOwnership() async throws {
-        let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("kinlogue-candidate-probe-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        defer { try? FileManager.default.removeItem(at: base) }
-        let identity = try AppRuntimeIdentity.resolve(bundleInfo: [
-            "CFBundleIdentifier": "com.kinlogue.mac.acceptance.\(runID)",
-            AppRuntimeIdentity.acceptanceEnabledInfoKey: true,
-            AppRuntimeIdentity.acceptanceRunIDInfoKey: runID
-        ], arguments: ["Kinlogue", AppRuntimeIdentity.syntheticSmokeArgument, AcceptanceSmokePhase.sqliteCandidate.argument],
-            trustedApplicationSupportDirectory: base)
-        _ = try AcceptanceRunOwnership.claim(applicationSupportURL: base, runID: runID)
-        let result = try await SQLiteCandidateAcceptanceProbe.run(request: AcceptanceSmokeRequest(identity: identity, phase: .sqliteCandidate))
-        #expect(result.reportCount == 1 && result.originalBytesBeforeReady == 0 && result.exportedOriginalCount == 1)
-        #expect(!FileManager.default.fileExists(atPath: identity.sourceVault.rootURL.deletingLastPathComponent().path))
-        try result.emit()
-    }
-
-    @Test
     func installedLANEvidenceCannotEncodeAFailedRequiredField() throws {
         let hash = String(repeating: "a", count: 64)
         let valid = try InstalledLANAcceptanceEvent(
@@ -180,21 +148,21 @@ struct SyntheticAcceptanceRunnerTests {
     func installedLANProbeUsesProductionHTTPAndPersistsAcrossProcessPhases()
         async throws
     {
-        let root = FileManager.default.temporaryDirectory
+        let support = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
             .appendingPathComponent("kinlogue-installed-lan-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
-        try FileManager.default.createDirectory(
-            at: root,
-            withIntermediateDirectories: true
-        )
-        _ = try await PlaintextVault(rootURL: root).initialize()
+        defer { try? FileManager.default.removeItem(at: support) }
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: false,
+                                                attributes: [.posixPermissions: 0o700])
+        let identity = try acceptanceIdentity(support: support, phase: .lanReceiver)
+        _ = try AcceptanceRunOwnership.claim(applicationSupportURL: support, runID: runID)
         let executable = try #require(Bundle.main.executableURL)
         let probe = InstalledLANAcceptanceProbe(
-            rootURL: root,
+            identity: identity,
             runID: runID,
             executableURL: executable
         )
 
+        // Each phase opens the SQLite library and closes it again, as a separate process would.
         let receiver = try await probe.run()
         let restarted = try await probe.verifyAfterProcessRestart()
 
@@ -203,158 +171,105 @@ struct SyntheticAcceptanceRunnerTests {
         #expect(receiver.interruptedUploadCleanupVerified)
         #expect(restarted.completedFilesAfterProcessRestart)
         #expect(restarted.listenerAbsentAfterRestartStop)
+        #expect(FileManager.default.fileExists(
+            atPath: identity.sourceVault.rootURL.appendingPathComponent(SQLiteLibraryStore.databaseFilename).path))
+    }
+
+    private func acceptanceIdentity(support: URL, phase: AcceptanceSmokePhase) throws -> AppRuntimeIdentity {
+        try AppRuntimeIdentity.resolve(bundleInfo: [
+            "CFBundleIdentifier": "com.kinlogue.mac.acceptance.\(runID)",
+            AppRuntimeIdentity.acceptanceEnabledInfoKey: true,
+            AppRuntimeIdentity.acceptanceRunIDInfoKey: runID,
+        ], arguments: ["Kinlogue", AppRuntimeIdentity.syntheticSmokeArgument, phase.argument],
+            trustedApplicationSupportDirectory: support)
     }
 
     @Test
     func generatedScenarioHasFourMembersAndTwentyFourConfirmedOriginalsEach() throws {
-        let vaultID = UUID(uuidString: "10000000-0000-4000-8000-000000000001")!
-        let scenario = try SyntheticAcceptanceScenario.make(
-            runID: runID,
-            vaultID: vaultID,
-            generation: 2
-        )
+        let scenario = try SyntheticAcceptanceScenario.make(runID: runID)
 
-        #expect(scenario.catalog.members.count == 4)
-        #expect(scenario.catalog.records.count == 96)
-        #expect(scenario.catalog.attachments.count == 96)
-        #expect(Set(scenario.catalog.records.map(\.memberID)).count == 4)
-        let recordsByMember = Dictionary(
-            grouping: scenario.catalog.records,
-            by: \.memberID
-        )
-        #expect(recordsByMember.count == 4)
-        #expect(recordsByMember.values.allSatisfy { $0.count == 24 })
-        #expect(scenario.catalog.records.allSatisfy { $0.importState == .confirmed })
-        #expect(scenario.originals.count == 96)
+        #expect(scenario.memberNames.count == 4)
+        #expect(Set(scenario.memberNames).count == 4)
+        #expect(scenario.reports.count == 96)
+        #expect(scenario.reports.map(\.ordinal) == Array(0..<96))
+        #expect(Set(scenario.reports.map(\.originalDigest)).count == 96)
+        let reportsByMember = Dictionary(grouping: scenario.reports, by: \.memberIndex)
+        #expect(reportsByMember.count == 4)
+        #expect(reportsByMember.values.allSatisfy { $0.count == 24 })
         #expect(scenario.scanTokens.count == 7)
         #expect(Set(scenario.scanTokens).count == scenario.scanTokens.count)
         #expect(
             scenario.tokenSetSHA256
                 == "42197b855f8339ba1c0eedf7a8ddfa64a76e16730264022785faa3fcf628adc7"
         )
-        #expect(scenario.originals.values.allSatisfy {
-            $0.starts(with: [0x25, 0x50, 0x44, 0x46, 0x2D])
+        #expect(scenario.reports.allSatisfy {
+            $0.original.starts(with: [0x25, 0x50, 0x44, 0x46, 0x2D])
+                && ContentDigest.sha256($0.original) == $0.originalDigest
         })
-        let firstOriginal = try #require(scenario.originals.values.first)
-        #expect(PDFDocument(data: firstOriginal)?.pageCount == 1)
+        #expect(PDFDocument(data: scenario.reports[0].original)?.pageCount == 1)
 
-        let reportDates = scenario.catalog.records.compactMap(\.timelineDate)
+        let reportDates = scenario.reports.map(\.reportDate)
         let earliestDate = try #require(reportDates.min())
         let latestDate = try #require(reportDates.max())
         let twoYearSpan = earliestDate.distance(to: latestDate)
         #expect(twoYearSpan >= 700 * 86_400)
         #expect(twoYearSpan <= 800 * 86_400)
-        for member in scenario.catalog.members {
-            let memberDates = scenario.catalog.records
-                .filter { $0.memberID == member.id }
-                .compactMap(\.timelineDate)
-            let first = try #require(memberDates.min())
-            let last = try #require(memberDates.max())
+        for reports in reportsByMember.values {
+            let first = try #require(reports.map(\.reportDate).min())
+            let last = try #require(reports.map(\.reportDate).max())
             #expect(first.distance(to: last) == 23 * 32 * 86_400)
         }
 
-        let targetedMembers = scenario.catalog.members.filter {
-            $0.displayName == scenario.target.memberName
-        }
-        let targetedMember = try #require(targetedMembers.first)
-        #expect(targetedMembers.count == 1)
-        #expect(targetedMember.id == scenario.target.memberID)
-        let targetedRecords = scenario.catalog.records.filter {
-            scenario.target.matches(
-                $0,
-                resolvedMemberID: targetedMember.id
-            )
-        }
-        let targetedRecord = try #require(targetedRecords.first)
-        #expect(targetedRecords.count == 1)
-        #expect(targetedRecord.id == scenario.target.recordID)
-        #expect(targetedRecord.memberID == scenario.target.memberID)
-        #expect(targetedMember.displayName == scenario.target.memberName)
-        #expect(targetedRecord.soleAttachmentID == scenario.target.attachmentID)
-        #expect(targetedRecord.timelineDate == scenario.target.reportDate)
-        #expect(
-            targetedRecord.organization?.transcription
-                == scenario.target.organization
-        )
-        let targetedAttachments = scenario.catalog.attachments.filter {
-            $0.id == scenario.target.attachmentID
-        }
-        let targetedAttachment = try #require(targetedAttachments.first)
-        #expect(targetedAttachments.count == 1)
-        let targetedOriginal = try #require(
-            scenario.originals[scenario.target.attachmentID]
-        )
-        #expect(
-            Data(SHA256.hash(data: targetedOriginal))
-                == targetedAttachment.sha256Digest
-        )
+        let targetReport = scenario.reports[SyntheticAcceptanceScenario.targetOrdinal]
+        #expect(scenario.target.memberName == scenario.memberNames[targetReport.memberIndex])
+        #expect(scenario.target.reportDate == targetReport.reportDate)
+        #expect(scenario.target.organization == targetReport.organization)
+        #expect(scenario.target.originalDigest == targetReport.originalDigest)
 
-        let search = RecordQuery.search(
-            scenario.searchTerm,
-            records: scenario.catalog.records,
-            members: scenario.catalog.members
-        )
-        #expect(search.count == 96)
-
-        let memberSearch = RecordQuery.search(
-            scenario.memberSearchTerm,
-            records: scenario.catalog.records,
-            members: scenario.catalog.members
-        )
-        #expect(memberSearch.count == 24)
-        #expect(memberSearch.allSatisfy {
-            $0.memberID == scenario.catalog.members[0].id
-        })
-        #expect(RecordQuery.search(
-            scenario.organizationSearchTerm,
-            records: scenario.catalog.records,
-            members: scenario.catalog.members
-        ).count == 96)
-        #expect(RecordQuery.search(
-            scenario.dateSearchTerm,
-            records: scenario.catalog.records,
-            members: scenario.catalog.members
-        ).count == 1)
-        #expect(scenario.catalog.members.allSatisfy { member in
-            RecordQuery.timeline(
-                records: scenario.catalog.records,
-                memberID: member.id
-            ).count == 24
-        })
-
-        #expect(scenario.memberNames.allSatisfy { value in
-            scenario.scanTokens.contains { value.contains($0) }
-        })
-        #expect(scenario.conclusions.allSatisfy { value in
-            scenario.scanTokens.contains { value.contains($0) }
-        })
-        #expect(scenario.catalog.records.allSatisfy { record in
-            let values = [
-                record.title?.transcription,
-                record.organization?.transcription,
-                record.reportType?.transcription,
-                record.dateCandidates.first?.source.transcription,
-                record.conclusion?.transcription,
-            ].compactMap { $0 }
-            return values.allSatisfy { value in
-                scenario.scanTokens.contains { value.contains($0) }
+        // The library assigns identifiers when an original is staged, so records are built on
+        // the draft it returns. Here a draft stands in for each staged original.
+        let members = try scenario.memberNames.map { try FamilyMember(displayName: $0) }
+        let records = try scenario.reports.map { report in
+            let draft = try ImportDraft(sources: ReportSources([ReportSource(attachmentID: UUID(), pageCount: 1)]))
+            let record = try report.record(confirming: draft, memberID: members[report.memberIndex].id)
+            #expect(record.id == draft.id && record.sources == draft.sources)
+            #expect(report.matches(record, memberID: members[report.memberIndex].id))
+            return record
+        }
+        #expect(records.allSatisfy { $0.importState == .confirmed })
+        #expect(!scenario.reports[1].matches(records[0], memberID: members[0].id))
+        #expect(!scenario.reports[0].matches(records[0], memberID: members[1].id))
+        #expect(records.filter {
+            scenario.target.matches($0, resolvedMemberID: members[targetReport.memberIndex].id)
+        } == [records[SyntheticAcceptanceScenario.targetOrdinal]])
+        #expect(records.allSatisfy { record in
+            [record.title, record.organization, record.reportType, record.conclusion].allSatisfy { field in
+                field?.references.allSatisfy { $0.sourceID == record.sources.first.id } == true
             }
         })
 
-        let comparison = try RecordComparison(
-            records: Array(scenario.catalog.records.prefix(2))
-        )
-        #expect(comparison.left.sources != comparison.right.sources)
+        #expect(RecordQuery.search(scenario.searchTerm, records: records, members: members).count == 96)
+        let memberSearch = RecordQuery.search(scenario.memberSearchTerm, records: records, members: members)
+        #expect(memberSearch.count == 24)
+        #expect(memberSearch.allSatisfy { $0.memberID == members[0].id })
+        #expect(RecordQuery.search(scenario.organizationSearchTerm, records: records, members: members).count == 96)
+        #expect(RecordQuery.search(scenario.dateSearchTerm, records: records, members: members).count == 1)
+        let comparison = try RecordComparison(records: Array(records.prefix(2)))
         #expect(comparison.left.conclusion != .notProvided)
         #expect(comparison.right.conclusion != .notProvided)
+
+        let libraryID = UUID(uuidString: "10000000-0000-4000-8000-000000000001")!
+        #expect(scenario.summarySHA256(libraryID: libraryID) == scenario.summarySHA256(libraryID: libraryID))
+        #expect(scenario.summarySHA256(libraryID: libraryID) != scenario.summarySHA256(libraryID: UUID()))
     }
 
     @Test
-    func plaintextRunnerPersistsAcrossRestartsAndRemovesItsOwnedRun() async throws {
-        let support = FileManager.default.temporaryDirectory
-            .appendingPathComponent("kinlogue-plaintext-runner-\(UUID().uuidString)")
+    func runnerSeedsTheSQLiteLibraryPersistsAcrossRestartsAndRemovesItsOwnedRun() async throws {
+        let support = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+            .appendingPathComponent("kinlogue-acceptance-runner-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: support) }
-        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: false,
+                                                attributes: [.posixPermissions: 0o700])
         let info: [String: Any] = [
             "CFBundleIdentifier": "com.kinlogue.mac.acceptance.\(runID)",
             AppRuntimeIdentity.acceptanceEnabledInfoKey: true,
@@ -385,8 +300,18 @@ struct SyntheticAcceptanceRunnerTests {
             let disposition = await SyntheticAcceptanceRunner(request: request).run()
             if phase == .forcedReady {
                 #expect(disposition == .holdForForcedTermination)
+                // The phase leaves the library open for the kill that follows. A second owner is
+                // refused until this process lets go, which the installed run does by dying.
+                let second = await SyntheticAcceptanceRunner(request: request).run()
+                #expect(second == .exit(SyntheticAcceptanceRunner.failureExitCode))
+                await SyntheticAcceptanceRunner.releaseForcedTerminationHoldForTesting()
             } else {
                 #expect(disposition == .exit(SyntheticAcceptanceRunner.successExitCode))
+            }
+            if phase == .seed {
+                let root = try #require(entry.request).identity.sourceVault.rootURL
+                #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(SQLiteLibraryStore.databaseFilename).path))
+                #expect(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("originals").path).count == 96)
             }
         }
 
@@ -399,18 +324,14 @@ struct SyntheticAcceptanceRunnerTests {
 
     @Test
     func eventEncodingNeverIncludesRuntimeSecretsOrPaths() throws {
-        let scenario = try SyntheticAcceptanceScenario.make(
-            runID: runID,
-            vaultID: UUID(uuidString: "20000000-0000-4000-8000-000000000002")!,
-            generation: 2
-        )
+        let scenario = try SyntheticAcceptanceScenario.make(runID: runID)
         let event = AcceptanceSmokeEvent(
             code: .seedComplete,
             ok: true,
-            memberCount: scenario.catalog.members.count,
-            recordCount: scenario.catalog.records.count,
-            attachmentCount: scenario.catalog.attachments.count,
-            summarySHA256: scenario.summarySHA256,
+            memberCount: scenario.memberNames.count,
+            recordCount: scenario.reports.count,
+            attachmentCount: scenario.reports.count,
+            summarySHA256: scenario.summarySHA256(libraryID: UUID(uuidString: "20000000-0000-4000-8000-000000000002")!),
             targetedRetrievalUnderThirtySeconds: true,
             tokenSetSHA256: scenario.tokenSetSHA256
         )

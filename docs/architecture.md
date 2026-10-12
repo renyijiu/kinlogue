@@ -177,8 +177,8 @@ sequenceDiagram
 
 ## SQLite 资料库与遗留 JSON 的边界
 
-界面入口组装 SQLite 资料库：[`KinlogueApp`](../Sources/KinlogueApp/App/KinlogueApp.swift) 持有一个 `AppStartupCoordinator`，接受存储说明后由它取得 owner、打开数据库并发布 `AppComposition.makeOpened`，各窗口从它读取模型。Platform 的 [SQLite 内核](sqlite-storage.md) 只有一份 lifetime owner，GRDB 及系统 SQLite 的配置 shim 仅由 Platform 依赖；Core 仍只依赖 Foundation，DICOM Helper 的独立 package 图保持不变。JSON Vault/inbox 及其跨进程 lease 还在代码里，由安装验收阶段和 JSON 服务的测试使用，界面不再构造它们。
+界面入口组装 SQLite 资料库：[`KinlogueApp`](../Sources/KinlogueApp/App/KinlogueApp.swift) 持有一个 `LibraryLaunchCoordinator`，接受存储说明后由它取得 owner、打开数据库并发布 `AppComposition.makeOpened`，各窗口从它读取模型。Platform 的 [SQLite 内核](sqlite-storage.md) 只有一份 lifetime owner，GRDB 及系统 SQLite 的配置 shim 仅由 Platform 依赖；Core 仍只依赖 Foundation，DICOM Helper 的独立 package 图保持不变。JSON Vault/inbox 及其跨进程 lease 还在代码里，只被测试和跨进程 fixture 使用；App 的组装和安装验收都不再构造它们，本页前文的 JSON 启动流程与时序图描述的是这部分遗留代码。
 
 `AppProcessingCoordinator` 由 `AppComposition` 持有并负责启动恢复与 LAN preprocessing 的任务、失败抑制、取消和 drain。`LANInboxModel` 只负责请求和界面观察，替换 presentation 不取消正在进行的处理；失败的自动处理需要明确重试。恢复完成后逐项刷新 App snapshot。`LiveAppService` 将持久化失败绑定到具体恢复 attempt，快照提供内存中的重试资格；Sidebar 继续使用现有本地化重试入口，删除仍限于 durable failed 状态。旧失败不能覆盖新的处理任务。整库恢复/删除通过共享 lifecycle 撤销 owner，拒绝迟到结果。
 
-App 已使用 [目的型查询和提交观察](sqlite-storage.md#app-查询与提交观察)：header、分页、按 ID 详情和比较不再通过 App 常驻全量 catalog；各读取由模型持有并在破坏性生命周期排空。[SQLite 启动](sqlite-storage.md#启动与空闲完整性巡检) 将一个 owner、数据库和 lifecycle 组装到报告、LAN、DICOM、备份/恢复、导出与删除，界面入口只使用这条链路；临时 JSON adapter 仅供 JSON 服务的测试和安装验收阶段。真实 service 测试不能替代最终规模、系统和安装门禁。
+App 已使用 [目的型查询和提交观察](sqlite-storage.md#app-查询与提交观察)：header、分页、按 ID 详情和比较不再通过 App 常驻全量 catalog；各读取登记在模型持有的 [LibraryReadRegistry](../Sources/KinlogueApp/ViewModels/LibraryReadRegistry.swift) 中，破坏性生命周期统一取消并排空。[SQLite 启动](sqlite-storage.md#启动与空闲完整性巡检) 将一个 owner、数据库和 lifecycle 组装到报告、LAN、DICOM、备份/恢复、导出与删除，界面入口和安装验收都只使用这条链路；临时 JSON adapter 仅供 JSON 服务的测试。真实 service 测试不能替代最终规模、系统和安装门禁。

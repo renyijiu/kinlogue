@@ -29,27 +29,35 @@ struct SQLiteStartupContext: Sendable {
     let configuration: BackupLocalConfigurationStore
 
     @concurrent static func make(identity: AppRuntimeIdentity) async throws -> Self {
-        try Task.checkCancellation()
-        try VaultParentDirectoryPreparation.ensureParentDirectory(for: identity.sourceVault.rootURL)
-        let owner = try SQLiteLibraryOwner(rootURL: identity.sourceVault.rootURL)
-        return try Self(owner: owner, verifier: BackupRestoreVerifier(owner: owner),
-            transaction: BackupRestoreTransaction(owner: owner), lifecycle: LibraryLifecycleCoordinator(),
-            configuration: BackupLocalConfigurationStore(rootURL: identity.backupIdentity.rootURL))
+        try await LibraryStorageExecutor.run {
+            try Task.checkCancellation()
+            try VaultParentDirectoryPreparation.ensureParentDirectory(for: identity.sourceVault.rootURL)
+            let owner = try SQLiteLibraryOwner(rootURL: identity.sourceVault.rootURL)
+            return try Self(owner: owner, verifier: BackupRestoreVerifier(owner: owner),
+                transaction: BackupRestoreTransaction(owner: owner), lifecycle: LibraryLifecycleCoordinator(),
+                configuration: BackupLocalConfigurationStore(rootURL: identity.backupIdentity.rootURL))
+        }
     }
 
     @concurrent func reconcile() async throws {
-        _ = try await transaction.reconcile()
-        try verifier.reconcileAbandonedPreflights()
-        try owner.reconcilePendingDeletion()
+        try await LibraryStorageExecutor.run {
+            _ = try await transaction.reconcile()
+            try verifier.reconcileAbandonedPreflights()
+            try owner.reconcilePendingDeletion()
+        }
     }
 
     @concurrent func open() async throws -> SQLiteLibraryStore {
-        try Task.checkCancellation()
-        return try SQLiteLibraryStore(owner: owner)
+        try await LibraryStorageExecutor.run {
+            try Task.checkCancellation()
+            return try SQLiteLibraryStore(owner: owner)
+        }
     }
 
     @concurrent static func close(_ database: SQLiteLibraryStore, releasingOwner: Bool) async throws {
-        if releasingOwner { try database.close() } else { try database.closeDatabaseForReplacement() }
+        try await LibraryStorageExecutor.run {
+            if releasingOwner { try database.close() } else { try database.closeDatabaseForReplacement() }
+        }
     }
 
     func seedRestore() -> LiveRestoreService {
@@ -60,103 +68,5 @@ struct SQLiteStartupContext: Sendable {
             activate: { try await transaction.activate(prepared: $0, resetWriter: $1) },
             removeWriterConfiguration: { try await configuration.removeForDestructiveReset() },
             reconcilePreflights: {}, reconcile: { .noTransaction })))
-    }
-}
-
-extension AppStartupCoordinator {
-    func acknowledgeStorageDisclosure() { disclosureAccepted = true }
-
-    func openEnvironment() async throws -> LiveAppServiceEnvironment {
-        guard disclosureAccepted else { throw AppStartupError.disclosureRequired }
-        guard !shutdownRequested else { throw LibraryLifecycleCoordinatorError.revoked }
-        if let context { try await context.lifecycle.requireActive() }
-        if let environment { return environment }
-        if let openingTask { return try await openingTask.value }
-        // A failed-format launch offers seed-only restore, never hot rebinding while
-        // a confirmation prepared against that launch may still be outstanding.
-        if seedRestoreService != nil, let openingFailure { throw openingFailure }
-        let task = Task { try await performOpening() }
-        openingTask = task
-        defer { openingTask = nil }
-        return try await task.value
-    }
-
-    private func performOpening() async throws -> LiveAppServiceEnvironment {
-        guard let identity else { throw AppServiceError.runtimeUnavailable }
-        if context == nil { context = try await SQLiteStartupContext.make(identity: identity) }
-        guard let context else { throw AppServiceError.runtimeUnavailable }
-        if !didReconcile {
-            try await context.reconcile()
-            didReconcile = true
-        }
-        do {
-            let store = try await context.open()
-            database = store
-            let services = try await LiveAppServiceEnvironment.makeOpened(identity: identity, store: store, lifecycle: context.lifecycle)
-            try Task.checkCancellation()
-            try await context.lifecycle.requireActive()
-            environment = services
-            openingFailure = nil
-            return services
-        } catch {
-            if let database {
-                // Keep authority if closing cannot be proved; a later launch must recover.
-                do { try await SQLiteStartupContext.close(database, releasingOwner: false); self.database = nil }
-                catch { shutdownRequested = true; throw error }
-            }
-            openingFailure = error
-            if let failure = error as? SQLiteLibraryError,
-               [.unsupportedFormat, .unsupportedConfiguration, .damaged, .databaseUnavailable].contains(failure) {
-                seedRestoreService = context.seedRestore()
-            }
-            throw error
-        }
-    }
-
-    func startSQLiteCandidate() async -> Bool {
-        if let candidateStartingTask { return await candidateStartingTask.value }
-        isOpening = true
-        let task = Task { await performCandidateStart() }
-        candidateStartingTask = task
-        defer { candidateStartingTask = nil; isOpening = false }
-        return await task.value
-    }
-
-    private func performCandidateStart() async -> Bool {
-        do {
-            let services = try await openEnvironment()
-            try Task.checkCancellation()
-            if !hasOpenedComposition, let identity, let context, let database {
-                publish(AppComposition.makeOpened(identity: identity, services: services, context: context, database: database))
-                hasOpenedComposition = true
-            }
-            let ready = await composition?.startupCoordinator.start() ?? false
-            candidateFailure = ready ? nil : .unavailable
-            return ready
-        } catch {
-            if !disclosureAccepted { return false }
-            if shutdownRequested || error is LibraryLifecycleCoordinatorError { candidateFailure = .restartRequired }
-            else if error as? SQLiteLibraryError == .occupied { candidateFailure = .occupied }
-            else if seedRestoreService != nil { candidateFailure = .unrecognized }
-            else if context != nil && !didReconcile { candidateFailure = .recoveryUnresolved }
-            else { candidateFailure = .unavailable }
-            if composition == nil { publish(AppComposition.makeSQLiteUnavailable(restoreService: seedRestoreService)) }
-            return false
-        }
-    }
-
-    func shutdown() async {
-        shutdownRequested = true
-        candidateStartingTask?.cancel()
-        let opening = openingTask
-        opening?.cancel()
-        _ = try? await opening?.value
-        _ = await candidateStartingTask?.value
-        await composition?.libraryObserver?.stop()
-        await composition?.appModel.beginDestructiveVaultLifecycle()
-        await context?.lifecycle.revoke()
-        do { if let database { try await SQLiteStartupContext.close(database, releasingOwner: true) } } catch { return } // Preserve authority on a failed close.
-        environment = nil; database = nil; publish(nil)
-        seedRestoreService = nil; context = nil
     }
 }

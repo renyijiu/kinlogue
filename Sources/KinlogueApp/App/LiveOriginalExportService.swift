@@ -16,10 +16,6 @@ actor LiveOriginalExportService: OriginalExportServicing {
     private var lifecycleIsRegistered = false
     private var cancelActiveOperation: (@Sendable () -> Bool)?
 
-    init(vault: PlaintextVault, lifecycle: LibraryLifecycleCoordinator) {
-        self.init(exporter: PlaintextOriginalArchiveExporter(vault: vault), lifecycle: lifecycle)
-    }
-
     init(store: SQLiteLibraryStore, lifecycle: LibraryLifecycleCoordinator) {
         self.init(exporter: PlaintextOriginalArchiveExporter(store: store), lifecycle: lifecycle)
     }
@@ -112,8 +108,9 @@ actor LiveOriginalExportService: OriginalExportServicing {
         guard cancelActiveOperation == nil else {
             throw OriginalExportServiceError.unavailable
         }
+        // Reading and archiving originals waits on storage and file I/O.
         let task = Task {
-            try await operation()
+            try await LibraryStorageExecutor.run(operation)
         }
         cancelActiveOperation = { cancellationGate.cancel(task) }
         defer {

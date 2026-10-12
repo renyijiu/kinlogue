@@ -1,12 +1,18 @@
 # SQLite 存储内核（开发中）
 
-本分支按 [重构计划](plans/2026-10-10-2322-refactor-sqlite-architecture-plan.md) 增加 Platform 内核。正式界面入口从 2026-10-12 起打开 SQLite 资料库：[`KinlogueApp`](../Sources/KinlogueApp/App/KinlogueApp.swift) 只通过 `AppStartupCoordinator.makeDefault()` 和 [启动页](../Sources/KinlogueApp/Views/SQLiteAppLaunchView.swift) 取得资料库，不再构造 JSON `PlaintextVault`。本页描述内核、报告/OCR、LAN、规范化 DICOM、逻辑备份/恢复与原件导出的数据库链路。切换只完成了界面入口：安装验收的各阶段仍运行 JSON 服务，JSON 代码也还没有删除；macOS 26、安装后的 App 和人工门禁未执行，见 [当前验收账本](acceptance/current-release.md)。
+本分支按 [重构计划](plans/2026-10-10-2322-refactor-sqlite-architecture-plan.md) 增加 Platform 内核。正式界面入口从 2026-10-12 起打开 SQLite 资料库：[`KinlogueApp`](../Sources/KinlogueApp/App/KinlogueApp.swift) 只通过 `LibraryLaunchCoordinator.makeDefault()` 和 [启动页](../Sources/KinlogueApp/Views/SQLiteAppLaunchView.swift) 取得资料库，不再构造 JSON `PlaintextVault`。本页描述内核、报告/OCR、LAN、规范化 DICOM、逻辑备份/恢复与原件导出的数据库链路。界面入口、App 的生产组装和安装验收的各阶段都运行在这个资料库上，App 里已没有组装 JSON 资料库的入口。JSON 代码尚未删除，现在只被测试和跨进程 fixture 使用。迁移后的安装验收只在进程内测试中跑过，`run-acceptance.sh` 还没有在安装后的 App 上重跑；macOS 26 和人工门禁未执行，见 [当前验收账本](acceptance/current-release.md)。
 
 ## 连接与单实例
 
 [SQLiteLibraryStore](../Sources/KinloguePlatform/Storage/SQLiteLibraryStore.swift) 使用 GRDB 7.11.1 的单个 `DatabaseQueue`，锁文件位于资料库外、采用复用的 canonical/case-alias 路径规则。`flock(LOCK_EX | LOCK_NB)` 在打开数据库前拒绝第二 owner；数据库关闭用于整库替换时继续持锁，完整关闭或进程退出才释放。旧 JSON mutation lease 不共用这个 inode，避免 POSIX process-owned `fcntl` 被其他 descriptor 的关闭解除。
 
 配置为 DELETE journal、EXTRA 同步、fullfsync、外键检查、关闭 trusted schema、defensive 和禁用扩展加载。小型 [C shim](../Sources/KinlogueSQLiteConfiguration/KinlogueSQLiteConfiguration.c) 只适配 Swift 不能安全直接调用的 `sqlite3_db_config` 可变参数；不重新实现 SQLite 绑定。支持扩展的 engine 要求配置成功且回读关闭；编译为 `OMIT_LOAD_EXTENSION` 的 engine 显式验证该选项。来源、许可、privacy bundle 和 engine 点时证据见 [依赖核查](sources/2026-10-11-grdb-engine-review.md)。
+
+### 阻塞调用所在的线程
+
+内核是同步的：一次调用要等 admission 锁、等 SQLite、等文件 I/O。Swift 并发线程池每核只有一个线程，几个这样的等待就能把它占满，届时全进程的异步任务一起停顿；长时间持有 admission 的操作（例如备份捕获）会把这种情况变成现实。因此存储层的每个异步入口（仓库、查询、LAN、DICOM、备份和导出中所有标注 `@concurrent` 的函数）先经 [LibraryStorageExecutor](../Sources/KinloguePlatform/Storage/LibraryStorageExecutor.swift) 把任务移到一组允许阻塞的专用线程；本身会等存储的 actor（`SQLiteReportRepository`、`LANUploadSink`、`DICOMSliceService`、`DICOMSliceCache`）各用一条自己的串行队列；备份、恢复激活、启动时的恢复收敛和原件导出在任务根部切换。内核的同步 API 没有改成异步，直接调用它的代码仍会阻塞调用线程，目前这样做的只有测试和进程 fixture。
+
+[回归](../Tests/KinloguePlatformTests/LibraryStorageExecutorTests.swift) 在 admission 被持有期间启动数倍于线程池宽度的读取，要求线程池上的其他任务照常运行；用调试构建里的观察点确认仓库调用、巡检以及 LAN 上传的完成和取消都不在线程池线程上取 admission；另有一项源码检查要求每个 `@concurrent` 入口都经过该执行器。观察点依据 libdispatch 给线程池线程的队列标签判断，测试先用一个普通任务确认这个判断有效。
 
 ## 格式与完整性
 
@@ -22,6 +28,8 @@
 
 原件复制和发布校验按 original ID 登记活动操作，释放 admission 后执行长字节 I/O；返回或提交前重新核对根、行摘要、operation/lifecycle、路径身份和取消。活动操作期间，其他记录的数据库读写可以继续，同一原件的竞争修改和资料库关闭/替换返回 `originalBusy`；恢复跳过活动 ID，所有退出路径在关闭 descriptor 后释放登记。
 
+本机导入的字节已在内存中，[报告仓库](../Sources/KinloguePlatform/Storage/SQLiteReportRepository.swift)直接把它们写入 staged 原件并在写入时计算摘要，不再先落一份临时文件；从 descriptor 复制的入口目前只有测试和进程 fixture 使用。两条入口共用登记、同步、回读校验和提交前复核。
+
 stage、报告/LAN 发布与 DICOM 发布共用原件 stat snapshot：既有完整哈希返回 device/inode/长度/纳秒 mtime/ctime，rename 前核对完整 token，rename 后只允许该操作改变 ctime，最终提交前再次核对命名文件。pin 消费前后比较同一 token，能拒绝过程中改写后又恢复原字节的情况；没有增加完整哈希次数。
 
 运行期失败或完成清理按确切 operation ID 选择非 live 原件；DICOM 收尾不扫描其他报告的 staged→publish 间隙。活动、被 pin、被引用或未知 inode 保留并返回未回收 ID，调用方不能把未回收当成功。仅启动恢复使用全库扫描。
@@ -30,15 +38,17 @@ pin 固定 descriptor 和文件身份，不在快照捕获时读取全部原件�
 
 ## 启动与空闲完整性巡检
 
-[SQLiteAppStartup](../Sources/KinlogueApp/App/SQLiteAppStartup.swift) 的构造不访问资料库；用户接受明文说明后，才准备可信父目录、取得单实例 owner，依次收敛恢复事务、capture/preflight 和严格删除 receipt，再打开数据库。报告、LAN、DICOM、备份/恢复、导出和删除共用该 owner 与 lifecycle。第二实例被拒后可重试；旧 JSON、未知 schema 或坏数据库保留原件，仅提供持有同一 owner 的备份恢复入口。未知恢复 receipt 不能授权恢复或删除。界面入口只走这条链路；取不到可信运行时身份时同样得到一个启动协调器，它报告资料库不可用而不解析其他位置。
+[LibraryLaunchCoordinator](../Sources/KinlogueApp/App/LibraryLaunchCoordinator.swift) 持有一次启动的资料库，它的构造不访问资料库；用户接受明文说明后，才准备可信父目录、取得单实例 owner，依次收敛恢复事务、capture/preflight 和严格删除 receipt，再打开数据库。报告、LAN、DICOM、备份/恢复、导出和删除共用该 owner 与 lifecycle。第二实例被拒后可重试；旧 JSON、未知 schema 或坏数据库保留原件，仅提供持有同一 owner 的备份恢复入口。未知恢复 receipt 不能授权恢复或删除。界面入口只走这条链路；取不到可信运行时身份时同样得到一个 `LibraryLaunchCoordinator`，它报告资料库不可用而不解析其他位置。资料库打开后，composition 内各服务的启动次序（恢复收敛、存储就绪、后台处理、备份调度）由 [AppStartupCoordinator](../Sources/KinlogueApp/App/AppStartupCoordinator.swift) 负责；两者原先是同一个类型靠标志区分，现已分开。
 
-[完整性巡检](../Sources/KinloguePlatform/Storage/SQLiteLibraryIntegrityScrubber.swift) 在 Ready 后由 [AppIntegrityCoordinator](../Sources/KinlogueApp/App/AppIntegrityCoordinator.swift) 等待空闲两秒再启动。它使用可取消的结构检查、每批 16 个主键、既有严格实体 codec 与单原件流式校验；不创建全库逻辑 spool。前台任务会取消并等待巡检真正结束，并发等待者等待同一任务。完成后的普通读取不重复触发巡检；提交或激活重新使覆盖失效。设置页展示未检查、等待、进度、不完整及完成时间/损坏数量；发生 revision 变化只算未完成，不把旧版本检查冒充当前完整性。
+[完整性巡检](../Sources/KinloguePlatform/Storage/SQLiteLibraryIntegrityScrubber.swift) 在 Ready 后由 [AppIntegrityCoordinator](../Sources/KinlogueApp/App/AppIntegrityCoordinator.swift) 等待空闲两秒再启动。它使用可取消的结构检查、每批 16 个主键、既有严格实体 codec 与单原件流式校验；不创建全库逻辑 spool。前台任务会取消并等待巡检真正结束，并发等待者等待同一任务。完成后的普通读取不重复触发巡检；提交使行覆盖失效，激活和唤醒要求重新确认覆盖。设置页展示未检查、等待、进度、不完整及完成时间/损坏数量；发生 revision 变化只算未完成，不把旧版本检查冒充当前完整性。
+
+巡检在一次打开期间保留[进度记录](../Sources/KinloguePlatform/Storage/SQLiteIntegrityProgress.swift)，关闭或替换数据库时清空。行检查仍绑定一个 revision：被前台任务打断后，只要资料库状态和 SQLite `data_version`（其他连接提交即变化）都未变，就从断点继续，结构检查也不重做；同一 revision 已完成时不再重读行，只重新核对每个原件的文件身份。提交之后行检查从头开始。原件是不可变文件，字节校验通过后按行内容哈希加文件的设备、inode、长度、修改时间和状态变更时间记账，之后只有这些信息变化的文件才重读，每次校验只读一遍。身份信息不变而字节损坏的情况，要到下次读取该原件或重新打开资料库后才发现；这不影响[读原件时的校验](#原件事务与恢复)，读取仍然每次校验。[回归](../Tests/KinlogueAppTests/SQLiteIntegrityAppTests.swift)覆盖断点续跑、提交后行重查而字节不重读、文件改写后被发现，以及其他连接提交后行重查。提交后行检查在大库上的耗时未测量。
 
 [隔离状态](../Sources/KinloguePlatform/Storage/SQLiteIntegrityQuarantine.swift) 仅属于当前 open epoch，在 admission 下记录坏项及其报告、草稿、inbox 或 DICOM 依赖。已发现损坏的目标拒绝读取、编辑、确认和删除，保留字节；无关良好项仍可用。原件预览、ZIP、加密备份和严格校验发现的身份、长度或摘要失败均进入该边界；外层 writer 回传摘要失败，不额外哈希原件。取消和消费者解码错误不作为原件损坏。数据库结构或 owner 身份失败则要求重启。巡检、详情读取和提交观察中的基础设施错误共用 composition 的停机入口：先拒绝新任务，再由独立持有的任务并行排空 UI 和 lifecycle，关闭 LAN receiver，最后进入 restartRequired，避免故障读取或观察任务等待自身结束。已完成的巡检状态也会失效；普通刷新取消不作为基础设施故障。
 
 巡检隔离已打开的报告或草稿后，刷新会关闭该项详情、原件、编辑和比较；草稿复核实例同步关闭并释放原件。迟到错误受请求身份和选中 ID 约束，不关闭后来打开的页面；无关良好项仍可读取。真实 SQLite/LAN/Viewer 回归见 [SQLiteIntegrityAppTests](../Tests/KinlogueAppTests/SQLiteIntegrityAppTests.swift)。
 
-[SQLite 验收入口](../Sources/KinlogueApp/App/SQLiteCandidateAcceptanceProbe.swift)（代码中仍叫 candidate，`run-acceptance.sh` 尚未调用它）只允许受验收身份和 inode receipt 约束的合成空根，真实 production 身份拒绝该 phase。它覆盖实际启动、service 查询、原件 ZIP、删除与 owner 释放；单报告 Debug 实测 Ready 前原件读取为零，不代表近上限、安装 App、OS 冷缓存或所有崩溃恢复路径达标。LAN 初始化现已改用首批 100 项查询；独立规模探针的数据库打开至首批摘要不读取原件，安装 App Ready 仍须单独验收。
+[安装验收](../Sources/KinlogueApp/App/SyntheticAcceptanceRunner.swift) 的 seed、restart、强制终止、LAN、DICOM 和 cleanup 阶段都通过 `LibraryLaunchCoordinator` 打开这个资料库，只允许受验收身份和 inode receipt 约束的合成根，真实 production 身份拒绝这些 phase。seed 用数据服务建成员，每份报告经暂存原件、写入识别文档和确认草稿三步入库；校验按成员、机构和日期做一次定向检索，再逐条读回 96 份报告及其原件字节，并核对搜索、分成员时间线和比较。记录、来源和原件的 ID 由资料库在暂存时分配，报告靠原件摘要对应。每个阶段打开资料库后都要求尚未读取任何原件字节，结束时关闭数据库并释放 owner；强制终止阶段例外，它让进程带着 owner 和打开的数据库等待被杀。原先单独的 candidate 探针已并入这些阶段并删除。[进程内测试](../Tests/KinlogueAppTests/SyntheticAcceptanceRunnerTests.swift) 依次跑完除 DICOM 外的全部阶段；DICOM 阶段需要安装包里的解码 Helper，只能由 `run-acceptance.sh` 执行，迁移后尚未执行。这些结果不代表近上限、安装 App、OS 冷缓存或所有崩溃恢复路径达标。LAN 初始化现已改用首批 100 项查询；独立规模探针的数据库打开至首批摘要不读取原件，安装 App Ready 仍须单独验收。
 
 ## 报告、OCR 与窄查询
 
@@ -64,7 +74,7 @@ pin 固定 descriptor 和文件身份，不在快照捕获时读取全部原件�
 
 [提交流](../Sources/KinloguePlatform/Storage/SQLiteCommitNotifications.swift) 在持久提交且释放 admission 后发布只含 revision 的最新提示，不携带记录内容或 affected IDs。部分上传、回滚与无变化操作不发业务提示；丢失响应但已提交仍发提示。App 的 [观察 owner](../Sources/KinlogueApp/App/AppLibraryObservationCoordinator.swift) 先订阅再读 header，合并通知并重新读取有界当前页面和已打开的目标，激活/唤醒/流重建也按持久 revision 收敛。
 
-header、列表、搜索、成员编辑、复核、详情、原件和比较都有请求身份及库 epoch 围栏；切换筛选立即清空旧游标，分页失败保留已加载项，陈旧游标重新从第一页查询。整库替换同步撤销查询身份后取消并等待全部已进入读取。物理数据库失败使用固定语义错误 `databaseUnavailable`；即使 header 表仍可读也不能回到 Ready。普通行/OCR 损坏则隔离目标。SQL Viewer 的失效只依赖目标 study revision 和库 epoch，无关报告提交不关闭窗口。候选 composition 的普通读写已纳入同一 lifecycle：拒绝新任务后取消并等待已进入操作，已提交命令仍能返回成功结果及必要的有界 header；随后才关闭数据库并保留替换 owner。
+header、列表、搜索、成员编辑、复核、详情、原件和比较都有请求身份及库 epoch 围栏；切换筛选立即清空列表和旧游标，分页失败保留已加载项。刷新不清空列表：已显示的行留在屏幕上，模型按原来已加载的行数重新读取后一次替换，草稿各状态同样在新的一页到达后才替换，四个状态并行读取。提交通知、切回应用和唤醒带来的刷新如果读到的 revision 与已显示的相同，只重新核对已打开的记录和草稿，不重载列表；模型自己发起的修改返回的 header 若已由通知应用过，也按同样方式跳过。显式刷新总是重载，因为草稿的重试资格可以在没有提交的情况下变化。“载入更多”遇到陈旧游标时按“已显示行数加一页”的深度重读一次；提交持续到来时退回只读第一页。整库替换同步撤销查询身份后取消并等待全部已进入读取。物理数据库失败使用固定语义错误 `databaseUnavailable`；即使 header 表仍可读也不能回到 Ready。普通行/OCR 损坏则隔离目标。SQL Viewer 的失效只依赖目标 study revision 和库 epoch，无关报告提交不关闭窗口。候选 composition 的普通读写已纳入同一 lifecycle：拒绝新任务后取消并等待已进入操作，已提交命令仍能返回成功结果及必要的有界 header；随后才关闭数据库并保留替换 owner。
 
 [搜索](../Sources/KinloguePlatform/Storage/SQLiteReportSearch.swift) 的每次查询先按存储顺序读出范围内报告的 ID、成员、日期和搜索摘要，在内存里排成时间线次序，再顺序扫描全部搜索行。每一行的字节都重新计算两个摘要并与报告行和搜索行自身的摘要比较，所以无论是否命中，损坏的行都会被报告；每批最多 512 行 / 2 MiB、最多八个同步工作 lane，大于批预算的合法单实体独立处理，取消会等待所有 lane 排空。结果始终是完整的有序命中，首页不提前结束扫描。
 
@@ -116,4 +126,4 @@ DICOM 导入先登记活动 operation，覆盖扫描、索引和原件间隙；�
 
 [内核测试](../Tests/KinloguePlatformTests/SQLiteLibraryStoreTests.swift) 覆盖配置回读、schema/外键、事务回滚、未知格式、摘要损坏、初始化恢复、staged/live/deleting 与 pin。[真实进程测试](../Tests/KinlogueStorageProcessTests/SQLiteProcessCoordinationTests.swift) 使用生产内核，在第二 owner、SIGKILL 和重开边界验收。
 
-stage/publish 的长字节 I/O 已移出 admission，参数化测试覆盖无关写入继续、同原件竞争、取消清理和重入时 root/row/path 身份变化；这些内核故意阻塞的测试 worker 使用独立 OS Thread，避免占满 Swift cooperative executor。[报告集成测试](../Tests/KinloguePlatformTests/LibraryQueryIntegrationTests.swift) 覆盖复核/确认/编辑、完整字段搜索、有界摘要、损坏隔离、取消、epoch、共享原件与带 pin 删除。[LAN 数据库测试](../Tests/KinloguePlatformTests/SQLiteLANInboxTests.swift) 与真实 Receiver、App service、socket 回压和子进程强退测试已覆盖上传/OCR/归档、scope 时序及恢复。[DICOM 数据库测试](../Tests/KinloguePlatformTests/SQLiteDICOMTests.swift) 覆盖真实导入、去重、损坏隔离、Viewer、取消和资源边界，另有 5 个真实强退交接窗口。U3 仍须在 macOS 26 上取证。[逻辑备份测试](../Tests/KinloguePlatformTests/SQLiteLogicalBackupTests.swift)、[捕获测试](../Tests/KinloguePlatformTests/SQLiteLogicalCaptureTests.swift) 和 [恢复进程测试](../Tests/KinlogueStorageProcessTests/SQLiteLogicalRestoreProcessTests.swift) 已验证冻结格式、真实加密发布、恢复后编辑、取消/空间边界及 19 个 root/capture 故障场景；相关 App service 使用实际共享 owner 链路。App 按需查询和数据库提交观察已通过真实 SQL service 注入测试；界面现在直接使用 SQLite 实现，临时 JSON 适配器只剩 JSON 服务的测试和安装验收阶段在用。搜索在 macOS 27 的近上限探针上低于门槛，见 [搜索复测](storage-search-measurement-2026-10-12.md)；LAN 的 Platform 首批 100 项近上限 p95 为 7.648 ms，真实 service/model 分页回归通过，安装 App 计时仍待验证。近上限、约 9.76 GiB 原件及 20,001 个原件的完整发布/严格恢复已通过独立探针，存储打开至首批摘要与短操作数值门槛通过，口径见 [规模闭环](storage-refactor-measurement-2026-10-11.md#sqlite-完整规模闭环)；App/系统门禁仍待验证；启动、恢复/删除、任务排空和巡检已接通并通过真实链路定向回归。界面入口已切换，macOS 26、安装后的 App 与人工门禁尚未执行，安装验收阶段也还没有改到 SQLite 上。开发 schema 尚可调整，不提供旧 JSON 或旧实验 SQLite 的自动迁移。当前生产 JSON 的启动全原件校验、整份 catalog 保存与搜索物化仍存在。
+stage/publish 的长字节 I/O 已移出 admission，参数化测试覆盖无关写入继续、同原件竞争、取消清理和重入时 root/row/path 身份变化；这些内核故意阻塞的测试 worker 使用独立 OS Thread，避免占满 Swift cooperative executor；生产入口的做法见[阻塞调用所在的线程](#阻塞调用所在的线程)。[报告集成测试](../Tests/KinloguePlatformTests/LibraryQueryIntegrationTests.swift) 覆盖复核/确认/编辑、完整字段搜索、有界摘要、损坏隔离、取消、epoch、共享原件与带 pin 删除。[LAN 数据库测试](../Tests/KinloguePlatformTests/SQLiteLANInboxTests.swift) 与真实 Receiver、App service、socket 回压和子进程强退测试已覆盖上传/OCR/归档、scope 时序及恢复。[DICOM 数据库测试](../Tests/KinloguePlatformTests/SQLiteDICOMTests.swift) 覆盖真实导入、去重、损坏隔离、Viewer、取消和资源边界，另有 5 个真实强退交接窗口。U3 仍须在 macOS 26 上取证。[逻辑备份测试](../Tests/KinloguePlatformTests/SQLiteLogicalBackupTests.swift)、[捕获测试](../Tests/KinloguePlatformTests/SQLiteLogicalCaptureTests.swift) 和 [恢复进程测试](../Tests/KinlogueStorageProcessTests/SQLiteLogicalRestoreProcessTests.swift) 已验证冻结格式、真实加密发布、恢复后编辑、取消/空间边界及 19 个 root/capture 故障场景；相关 App service 使用实际共享 owner 链路。App 按需查询和数据库提交观察已通过真实 SQL service 注入测试；界面现在直接使用 SQLite 实现，临时 JSON 适配器只剩 JSON 服务的测试和安装验收阶段在用。搜索在 macOS 27 的近上限探针上低于门槛，见 [搜索复测](storage-search-measurement-2026-10-12.md)；LAN 的 Platform 首批 100 项近上限 p95 为 7.648 ms，真实 service/model 分页回归通过，安装 App 计时仍待验证。近上限、约 9.76 GiB 原件及 20,001 个原件的完整发布/严格恢复已通过独立探针，存储打开至首批摘要与短操作数值门槛通过，口径见 [规模闭环](storage-refactor-measurement-2026-10-11.md#sqlite-完整规模闭环)；App/系统门禁仍待验证；启动、恢复/删除、任务排空和巡检已接通并通过真实链路定向回归。界面入口已切换，macOS 26、安装后的 App 与人工门禁尚未执行，安装验收阶段也还没有改到 SQLite 上。开发 schema 尚可调整，不提供旧 JSON 或旧实验 SQLite 的自动迁移。当前生产 JSON 的启动全原件校验、整份 catalog 保存与搜索物化仍存在。

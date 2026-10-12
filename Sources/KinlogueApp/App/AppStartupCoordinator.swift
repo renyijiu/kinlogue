@@ -1,47 +1,11 @@
-import Combine
 import Foundation
-import KinloguePlatform
 
-/// The only GUI startup order: restore receipts converge before the first
-/// storage-backed service call, and automatic backup starts only after the
-/// normal library is confirmed ready. This prevents a stale writer or root
-/// object from being exposed across restore activation.
+/// The order in which one composition starts its services: restore receipts converge before the
+/// first storage-backed service call, and automatic backup starts only after the library is
+/// confirmed ready. This prevents a stale writer or root object from being exposed across
+/// restore activation.
 @MainActor
-final class AppStartupCoordinator: ObservableObject {
-    @Published private(set) var composition: AppComposition?
-    @Published var candidateFailure: SQLiteStartupFailure?
-    @Published var isOpening = false
-    var candidateStartingTask: Task<Bool, Never>?
-    /// True for the coordinator that opens the library for the GUI; false for the one a
-    /// composition uses to order its own services.
-    private let launchesLibrary: Bool
-    var identity: AppRuntimeIdentity?
-    var disclosureAccepted = false
-    var context: SQLiteStartupContext?
-    var didReconcile = false
-    var hasOpenedComposition = false
-    var environment: LiveAppServiceEnvironment?
-    var database: SQLiteLibraryStore?
-    var openingTask: Task<LiveAppServiceEnvironment, Error>?
-    var seedRestoreService: (any BackupRestoreServicing)?
-    var openingFailure: (any Error)?
-    var shutdownRequested = false
-
-    /// Without an identity the launch still has a coordinator; its start reports the library
-    /// as unavailable instead of resolving any other location.
-    init(identity: AppRuntimeIdentity?) {
-        self.identity = identity
-        launchesLibrary = true
-        reconcileRestore = { false }; startStorage = { false }; startScheduler = {}
-        startProcessing = {}; reconcileLibrary = {}
-    }
-
-    /// The GUI's only way to a library: the SQLite library under the trusted runtime identity.
-    static func makeDefault() -> AppStartupCoordinator {
-        AppStartupCoordinator(identity: try? AppRuntimeIdentity.current())
-    }
-
-    func publish(_ composition: AppComposition?) { self.composition = composition }
+final class AppStartupCoordinator {
     typealias ReconcileRestore = () async -> Bool
     typealias StartStorage = () async -> Bool
     typealias StartScheduler = () async -> Void
@@ -66,7 +30,6 @@ final class AppStartupCoordinator: ObservableObject {
         startScheduler: @escaping StartScheduler,
         reconcileLibrary: @escaping StartScheduler = {}
     ) {
-        launchesLibrary = false
         self.reconcileRestore = reconcileRestore
         self.startStorage = startStorage
         self.startScheduler = startScheduler
@@ -75,14 +38,12 @@ final class AppStartupCoordinator: ObservableObject {
     }
 
     func reconcile() async {
-        if launchesLibrary { await composition?.startupCoordinator.reconcile(); return }
         guard case .started = state else { return }
         await reconcileLibrary()
     }
 
     @discardableResult
     func start() async -> Bool {
-        if launchesLibrary { return await startSQLiteCandidate() }
         switch state {
         case .started:
             return true

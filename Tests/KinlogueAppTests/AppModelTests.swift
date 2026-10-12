@@ -1290,12 +1290,17 @@ actor AppServiceSpy: TestLibraryServing {
     private var gatedQuery: String?
     private var gatedMember: UUID?
     private var failPage = false
+    private var stalePage = false
+    private(set) var pageCalls = 0
     func gatePage(_ gate: OriginalLoadGate, query: String? = nil, member: UUID? = nil) {
         pageGate = gate; gatedQuery = query; gatedMember = member
     }
     func failNextPage() { failPage = true }
+    func staleNextPage() { stalePage = true }
     func beforePage(query: String?, memberID: UUID?, cursor: LibraryQueryCursor?) async throws {
+        pageCalls += 1
         if failPage { failPage = false; throw AppServiceError.recordUnavailable }
+        if stalePage { stalePage = false; throw LibraryReportError.staleCursor }
         if let pageGate, (gatedQuery != nil && query == gatedQuery) || (gatedMember != nil && memberID == gatedMember) {
             await pageGate.wait()
         }

@@ -81,8 +81,7 @@ final class ComparisonModel: ObservableObject {
     private let service: any AppDataServicing
     private var comparisonRecords: [HealthRecord] = []
     private var comparisonRevision: LibraryRevision?
-    private var recordReads: [UUID: Task<LibraryRecordSelection, Error>] = [:]
-    private var originalReads: [UUID: Task<OriginalDocumentPayload, Error>] = [:]
+    private let reads = LibraryReadRegistry()
     private var recordLoadTask: Task<LibraryRecordSelection, Error>?
     private var loadID: UUID?
     private var leftLoadID: UUID?
@@ -119,11 +118,8 @@ final class ComparisonModel: ObservableObject {
         guard !selectedRecordIDs.isEmpty else { return }
         let ids = selectedRecordIDs, selectionRequest = loadID
         do {
-            let service = service, request = UUID()
-            let task = Task { try await service.loadRecords(ids: ids) }
-            recordReads[request] = task
-            defer { recordReads.removeValue(forKey: request) }
-            let current = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            let service = service
+            let current = try await reads.run { try await service.loadRecords(ids: ids) }
             guard ids == selectedRecordIDs, selectionRequest == loadID else { return }
             if let comparisonRevision,
                (comparisonRevision.libraryID != current.revision.libraryID || comparisonRevision.openEpoch != current.revision.openEpoch
@@ -213,9 +209,9 @@ final class ComparisonModel: ObservableObject {
         let service = self.service
         let recordsTask = Task { try await service.loadRecords(ids: ids) }
         recordLoadTask = recordsTask
-        recordReads[requestID] = recordsTask
+        let recordsReadID = reads.register(recordsTask)
         defer {
-            recordReads.removeValue(forKey: requestID)
+            reads.end(recordsReadID)
             if loadID == requestID, recordLoadTask != nil {
                 recordLoadTask = nil; isLoadingOriginals = false
             }
@@ -267,9 +263,8 @@ final class ComparisonModel: ObservableObject {
         rightLoadID = requestID
         leftLoadTask = leftTask
         rightLoadTask = rightTask
-        let leftReadID = UUID(), rightReadID = UUID()
-        originalReads[leftReadID] = leftTask; originalReads[rightReadID] = rightTask
-        defer { originalReads.removeValue(forKey: leftReadID); originalReads.removeValue(forKey: rightReadID) }
+        let leftReadID = reads.register(leftTask), rightReadID = reads.register(rightTask)
+        defer { reads.end(leftReadID); reads.end(rightReadID) }
         await withTaskGroup(of: ComparisonSideLoadResult.self) { group in
             group.addTask { .left(await leftTask.result) }
             group.addTask { .right(await rightTask.result) }
@@ -341,8 +336,8 @@ final class ComparisonModel: ObservableObject {
             rightLoadTask = task
         }
 
-        originalReads[requestID] = task
-        defer { originalReads.removeValue(forKey: requestID) }
+        let readID = reads.register(task)
+        defer { reads.end(readID) }
         let result = await task.result
         guard isPresented, (side == .left ? leftLoadID : rightLoadID) == requestID else { return }
         if case .failure(let error) = result { onReadFailure(error) }
@@ -374,21 +369,17 @@ final class ComparisonModel: ObservableObject {
         }
     }
 
-    func cancelAndDrain() async { await cancelReads().value }
+    func cancelAndDrain() async { for drain in cancelReads() { await drain() } }
 
     /// Cancellation happens synchronously before any drain waits behind a storage read.
-    func cancelReads() -> Task<Void, Never> {
-        let records = Array(recordReads.values), originals = Array(originalReads.values)
-        records.forEach { $0.cancel() }; originals.forEach { $0.cancel() }
+    func cancelReads() -> [LibraryReadRegistry.Drain] {
+        let drains = reads.cancelAll()
         closeComparison()
-        return Task {
-            for task in records { _ = try? await task.value }
-            for task in originals { _ = try? await task.value }
-        }
+        return drains
     }
 
     func closeComparison() {
-        recordReads.values.forEach { $0.cancel() }; originalReads.values.forEach { $0.cancel() }
+        reads.cancelAll()
         recordLoadTask?.cancel(); recordLoadTask = nil
         comparisonRecords = []; comparisonRevision = nil
         loadID = nil

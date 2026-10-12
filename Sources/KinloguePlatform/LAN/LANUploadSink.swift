@@ -10,6 +10,11 @@ import NIOPosix
 /// `O_CLOEXEC`, exclusive ownership and a zero byte offset before transferring
 /// it to this actor.
 public actor LANUploadSink {
+    /// Writing, syncing and publishing an upload wait on file I/O and on storage, so each sink
+    /// runs on a queue of its own instead of on the cooperative pool.
+    private let isolationQueue = DispatchSerialQueue(label: "com.kinlogue.lan-upload-sink")
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { isolationQueue.asUnownedSerialExecutor() }
+
     public struct CompletedUpload: Equatable, Sendable {
         public let attemptID: UUID
         public let sha256Digest: Data
