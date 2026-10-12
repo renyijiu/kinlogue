@@ -37,7 +37,7 @@ flowchart LR
 | `ReportSources` | 一份报告的有序、非空 source rows | 同一 attachment 可以出现多次；每个 attachment 的 page count 必须一致；逻辑页码由顺序动态投影。 |
 | `ImportDraft` | sources、状态、revision、processing attempt、OCR object、可选成员 | 只有 `.needsReview` 可保存/确认；`processing` 用 lease 防止旧任务回写。 |
 | `HealthRecord` | 成员、sources、OCR provenance、字段候选、日期候选、notes、import state、revision | 只有 `.confirmed` 参与正常 timeline/search/comparison；字段引用必须指向现有 source 和合法文件页；编辑必须匹配当前 revision。catalog v3 中缺少 revision 时按 `0` 读取，revision 为 `0` 时编码继续省略该 key，以保持既有 v3 canonical bytes/digest 可重开。 |
-| `SourceField` | OCR 原文、可选人工修正、source references、entry method | 修正替换显示转录但保留原文；无来源的文本必须显式标为 manual。 |
+| `SourceField` | OCR 原文、可选修正、source references、entry method | 修正替换显示转录但保留原文；已确认记录中的修正是用户确认过的文字，待确认候选中可以是抽取规则对识别异体字的还原建议；无来源的文本必须显式标为 manual。 |
 | `ReportDateCandidate` | 日期、日期类型、来源字段 | 时间线选择必须指向候选或显式手工日期；不把猜测日期写成事实。 |
 | `OCRBlock` | 页码、文本、bounding box、confidence、方法、engine version、block ID | OCR 文档只存来源转录与 provenance，不生成医学结论。 |
 | `DICOMStudy` | 状态、versioned fingerprint、index object ID、权威 attachment ID 集合 | `needsReview` 不得带成员/日期；`confirmed` 必须指向活跃成员和有限日期；不进入 report/OCR 模型。 |
@@ -104,7 +104,7 @@ DICOM 使用独立的 `DICOMStudyFingerprint`：对 exact duplicate 折叠后的
 
 - 持久化只有 `needsReview` 和 `confirmed`；扫描、校验、staging 和 commit 进度属于未持久的导入状态，不塞进 study header。
 - 确认/重新分配只能改成员和用户确认日期，不改 study ID、fingerprint、index 或原件集合。
-- DICOM 原件、自由文本和像素不进入报告 OCR、搜索或比较。U3 Platform service 从一个目录原子发布完整 `needsReview` study，U4 Platform service 可从已验证 Vault object 按需生成一个可失效的 8-bit slice；App snapshot 只投影 study 摘要，`confirmed` 检查按成员和日期进入对应成员时间线与独立医学影像导航域，`needsReview` 检查不会进入这些已确认入口。用户必须明确确认成员与日期。
+- DICOM 原件、自由文本和像素不进入报告 OCR、搜索或比较。U3 Platform service 从一个目录原子发布完整 `needsReview` study，U4 Platform service 可从已验证 Vault object 按需生成一个可失效的 8-bit slice；App snapshot 只投影 study 摘要，`confirmed` 检查按成员和日期进入对应成员时间线，与报告共用同一条时间线和右栏详情，不再有独立的医学影像导航域；`needsReview` 检查不会进入时间线。时间线的“全部 / 报告 / 影像”筛选和当前选中项都是 App 层查看态，不进入 catalog。用户必须明确确认成员与日期。
 
 ## LAN inbox 领域状态
 

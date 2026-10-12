@@ -76,6 +76,19 @@ struct DICOMStudyReviewPresentation: Equatable, Identifiable {
     let id: DICOMStudy.ID
 }
 
+/// The file a report import or retry is on, counted from one.
+struct ReportRecognitionActivity: Equatable {
+    let position: Int
+    let total: Int
+}
+
+enum ReportRecognitionNotice {
+    /// How long recognition runs before the interface explains the wait. The
+    /// system prepares its recognition model on first use, which takes far
+    /// longer than any later recognition.
+    static let slowDelay: Duration = .seconds(4)
+}
+
 enum UpdateRecordResult: Equatable {
     case saved
     case recordChanged(latest: HealthRecord?)
@@ -145,6 +158,9 @@ final class AppModel: ObservableObject {
     private var pendingDiscardDraftCommand: DiscardDraftCommand?
     private weak var activeImportReviewModel: ImportReviewModel?
     private var activeDICOMStudyReviewModel: DICOMStudyReviewModel?
+    private let slowRecognitionNoticeDelay: Duration
+    private var reportRecognitionJobs: [(id: UUID, activity: ReportRecognitionActivity)] = []
+    private var slowRecognitionNoticeTask: Task<Void, Never>?
     let comparisonModel: ComparisonModel
     let dicomImportModel: DICOMImportModel
     let dicomLibraryModel: DICOMLibraryModel
@@ -155,9 +171,18 @@ final class AppModel: ObservableObject {
     @Published private(set) var members: [LibraryMemberSummary] = []
     @Published var selectedMemberID: FamilyMember.ID? {
         didSet {
+            clearSelection()
             filtersDidChange()
         }
     }
+    @Published var timelineFilter: AppTimelineFilter = .all {
+        didSet {
+            guard timelineFilter != oldValue else { return }
+            clearSelectionHiddenByTimelineFilter()
+            filtersDidChange()
+        }
+    }
+    @Published private(set) var isTimelineFilterAvailable = false
     @Published private(set) var timelineSections: [AppTimelineSection] = []
     @Published private(set) var searchResults: [LibraryReportSummary] = []
     @Published var searchText = "" { didSet { filtersDidChange() } }
@@ -187,6 +212,8 @@ final class AppModel: ObservableObject {
     @Published var pendingDeleteMemberID: FamilyMember.ID?
     @Published var pendingDiscardDraftID: ImportDraft.ID?
     @Published private(set) var busyDraftIDs: Set<ImportDraft.ID> = []
+    @Published private(set) var reportRecognitionActivity: ReportRecognitionActivity?
+    @Published private(set) var isReportRecognitionSlow = false
     @Published var banner: AppBanner?
     @Published private(set) var searchFocusRequestID = 0
 
@@ -198,9 +225,11 @@ final class AppModel: ObservableObject {
             UnavailableDICOMSliceService()
         },
         dicomViewerRegistry: DICOMViewerRegistry = DICOMViewerRegistry(),
+        slowRecognitionNoticeDelay: Duration = ReportRecognitionNotice.slowDelay,
         onDurableStateChanged: @escaping @MainActor @Sendable () -> Void = {}
     ) {
         self.service = service
+        self.slowRecognitionNoticeDelay = slowRecognitionNoticeDelay
         self.dicomService = dicomService
         self.dicomSliceServiceFactory = dicomSliceServiceFactory
         self.dicomViewerRegistry = dicomViewerRegistry
@@ -499,10 +528,34 @@ final class AppModel: ObservableObject {
         switch result.destination {
         case .review:
             presentDICOMReview(result.studyID)
-        case .library:
-            dicomLibraryModel.select(result.studyID)
+        case .timeline:
+            revealDICOMStudy(result.studyID)
         }
         return result
+    }
+
+    func selectDICOMStudy(_ id: DICOMStudy.ID) {
+        guard dicomLibraryModel.studies.contains(where: {
+            $0.id == id && $0.state == .confirmed
+        }) else { return }
+        clearSelection()
+        dicomLibraryModel.select(id)
+    }
+
+    private func revealDICOMStudy(_ id: DICOMStudy.ID) {
+        guard let study = dicomLibraryModel.studies.first(where: {
+            $0.id == id && $0.state == .confirmed
+        }) else { return }
+        if let selectedMemberID, study.confirmedMemberID != selectedMemberID {
+            self.selectedMemberID = nil
+        }
+        if timelineFilter == .reports {
+            timelineFilter = .all
+        }
+        if !searchText.isEmpty {
+            searchText = ""
+        }
+        selectDICOMStudy(id)
     }
 
     func presentReviewDraft(_ id: ImportDraft.ID) async {
@@ -620,8 +673,11 @@ final class AppModel: ObservableObject {
         }
         guard !urls.isEmpty else { return }
 
+        let jobID = beginReportRecognitionJob(total: urls.count)
+        defer { endReportRecognitionJob(jobID) }
         var nextReviewID: ImportDraft.ID?
-        for url in urls {
+        for (index, url) in urls.enumerated() {
+            advanceReportRecognitionJob(jobID, to: index + 1)
             do {
                 switch try await service.importFile(at: url) {
                 case .needsReview(let id), .existingDraft(let id):
@@ -641,8 +697,10 @@ final class AppModel: ObservableObject {
 
     func retryDraft(_ id: ImportDraft.ID) async {
         guard busyDraftIDs.insert(id).inserted else { return }
+        let jobID = beginReportRecognitionJob(total: 1)
         defer {
             busyDraftIDs.remove(id)
+            endReportRecognitionJob(jobID)
             presentationDidEnd()
         }
         do {
@@ -697,7 +755,15 @@ final class AppModel: ObservableObject {
     }
 
     func selectRecord(_ id: HealthRecord.ID) async {
+        await selectRecord(id, reportsFailure: true)
+    }
+
+    private func selectRecord(_ id: HealthRecord.ID, reportsFailure: Bool) async {
         guard !vaultLifecycleIsLocked else { return }
+        dicomLibraryModel.select(nil)
+        if timelineFilter == .imaging {
+            timelineFilter = .all
+        }
         originalLoadTask?.cancel(); originalLoadID = nil
         let request = UUID(); detailRequestID = request
         recordDetailState = .loading(recordID: id)
@@ -711,16 +777,42 @@ final class AppModel: ObservableObject {
             guard request == detailRequestID, !vaultLifecycleIsLocked else { return }
             detailReadTask = nil
             guard accepts(selection.revision), let record = selection.records.first else {
-                recordDetailState = .empty; reportBanner(.recordUnavailable); return
+                recordDetailState = .empty
+                if reportsFailure { reportBanner(.recordUnavailable) }
+                return
             }
             detailLibraryRevision = selection.revision
-            await loadOriginal(for: record, sourceID: record.sources.first.id, isInitialSelection: true)
+            await loadOriginal(
+                for: record,
+                sourceID: record.sources.first.id,
+                isInitialSelection: true,
+                reportsFailure: reportsFailure
+            )
         } catch {
             guard request == detailRequestID, !vaultLifecycleIsLocked else { return }
             if await handleLibraryFailure(error) { return }
             recordDetailState = .empty
-            reportBanner(.recordUnavailable)
+            if reportsFailure { reportBanner(.recordUnavailable) }
         }
+    }
+
+    /// Opens the newest record of the visible timeline when it is entered with
+    /// nothing open. An open record, a selected imaging study, a search, a
+    /// comparison selection or a presented sheet is never disturbed.
+    func openNewestRecordIfNothingIsOpen() async {
+        // The timeline arrives a page at a time; the first page holds the newest record.
+        await waitForCurrentPage()
+        guard !Task.isCancelled,
+              phase == .ready,
+              selectedRecordID == nil,
+              dicomLibraryModel.selectedStudyID == nil,
+              !hasBlockingPresentation,
+              !comparisonModel.isSelecting,
+              searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let newest = timelineSections.lazy.flatMap(\.records).first else { return }
+        // The user did not ask for this record, so a failed load stays in the
+        // detail pane instead of raising an alert.
+        await selectRecord(newest.id, reportsFailure: false)
     }
 
     func selectOriginalSource(_ sourceID: ReportSource.ID) async {
@@ -737,7 +829,8 @@ final class AppModel: ObservableObject {
     private func loadOriginal(
         for record: HealthRecord,
         sourceID: ReportSource.ID,
-        isInitialSelection: Bool
+        isInitialSelection: Bool,
+        reportsFailure: Bool = true
     ) async {
         guard let library = detailLibraryRevision else { return }
         originalLoadTask?.cancel()
@@ -785,7 +878,9 @@ final class AppModel: ObservableObject {
                         original: nil
                     )
                     self.isOriginalLoading = false
-                    self.reportBanner(.originalUnavailable)
+                    if reportsFailure {
+                        self.reportBanner(.originalUnavailable)
+                    }
                 }
             }
         }
@@ -805,6 +900,20 @@ final class AppModel: ObservableObject {
         recordDetailState = .empty
         editingRecord = nil
         viewingOriginal = nil
+        dicomLibraryModel.select(nil)
+    }
+
+    private func clearSelectionHiddenByTimelineFilter() {
+        switch timelineFilter {
+        case .all:
+            break
+        case .reports:
+            dicomLibraryModel.select(nil)
+        case .imaging:
+            if selectedRecordID != nil {
+                clearSelection()
+            }
+        }
     }
 
     func requestDeleteRecord(_ record: HealthRecord) {
@@ -1028,6 +1137,10 @@ final class AppModel: ObservableObject {
         damagedMemberIDs = Set(snapshot.damagedMemberIDs)
         damagedItemIDs = Set(snapshot.damagedStudyIDs)
         dicomLibraryModel.update(studies: snapshot.dicomStudies, members: members)
+        isTimelineFilterAvailable = !dicomLibraryModel.confirmedStudies(memberID: nil).isEmpty
+        if !isTimelineFilterAvailable {
+            timelineFilter = .all
+        }
         if let selectedMemberID, !members.contains(where: { $0.id == selectedMemberID && !$0.isArchived }) {
             self.selectedMemberID = nil
         }
@@ -1096,6 +1209,8 @@ final class AppModel: ObservableObject {
         backgroundDrafts = []
         selectedMemberID = nil
         searchText = ""
+        timelineFilter = .all
+        isTimelineFilterAvailable = false
         isImporterPresented = false
         isDICOMFolderPickerPresented = false
         isDICOMImportPresented = false
@@ -1120,6 +1235,8 @@ final class AppModel: ObservableObject {
         pendingDiscardDraftID = nil
         pendingDiscardDraftCommand = nil
         busyDraftIDs = []
+        reportRecognitionJobs = []
+        publishReportRecognitionActivity()
         banner = nil
         deferredBanner = nil
         pendingAutomaticReviewID = nil
@@ -1156,13 +1273,26 @@ final class AppModel: ObservableObject {
         pageState = .loading
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let member = selectedMemberID
+        let filter = timelineFilter
         let cursor = reset ? nil : pageCursor
+        // Confirmed studies arrive whole with the header, and imaging never enters search.
+        if filter == .imaging {
+            guard let appliedRevision else { pageState = .failed; return }
+            pageRevision = appliedRevision; pageCursor = nil
+            timelineEntries = query.isEmpty
+                ? dicomLibraryModel.confirmedStudies(memberID: member).map(AppTimelineEntry.dicomStudy)
+                : []
+            searchResults = []
+            rebuildTimeline()
+            pageState = .loaded
+            return
+        }
         do {
             let revision: LibraryRevision
             let entries: [AppTimelineEntry]
             let next: LibraryQueryCursor?
             let damaged: [UUID]
-            if query.isEmpty {
+            if query.isEmpty, filter == .all {
                 let service = service, id = UUID()
                 let task = Task { try await service.timelinePage(memberID: member, cursor: cursor) }
                 timelineReads[id] = task
@@ -1174,6 +1304,7 @@ final class AppModel: ObservableObject {
                     case .study(let study): .dicomStudy(DICOMStudySummary(study: study))
                 } }
             } else {
+                // An empty query lists every confirmed report in timeline order.
                 let service = service, id = UUID()
                 let task = Task { try await service.reportPage(query: query, memberID: member, cursor: cursor) }
                 searchReads[id] = task
@@ -1357,6 +1488,47 @@ final class AppModel: ObservableObject {
             deferredBanner = next
         } else {
             banner = next
+        }
+    }
+
+    private func beginReportRecognitionJob(total: Int) -> UUID {
+        let id = UUID()
+        reportRecognitionJobs.append(
+            (id, ReportRecognitionActivity(position: 1, total: total))
+        )
+        publishReportRecognitionActivity()
+        return id
+    }
+
+    private func advanceReportRecognitionJob(_ id: UUID, to position: Int) {
+        guard let index = reportRecognitionJobs.firstIndex(where: { $0.id == id }) else { return }
+        reportRecognitionJobs[index].activity = ReportRecognitionActivity(
+            position: position,
+            total: reportRecognitionJobs[index].activity.total
+        )
+        publishReportRecognitionActivity()
+    }
+
+    private func endReportRecognitionJob(_ id: UUID) {
+        reportRecognitionJobs.removeAll { $0.id == id }
+        publishReportRecognitionActivity()
+    }
+
+    /// Shows the most recently started job. The wait is explained once, for as
+    /// long as any job keeps running.
+    private func publishReportRecognitionActivity() {
+        reportRecognitionActivity = reportRecognitionJobs.last?.activity
+        guard !reportRecognitionJobs.isEmpty else {
+            slowRecognitionNoticeTask?.cancel()
+            slowRecognitionNoticeTask = nil
+            isReportRecognitionSlow = false
+            return
+        }
+        guard slowRecognitionNoticeTask == nil else { return }
+        slowRecognitionNoticeTask = Task { [weak self, slowRecognitionNoticeDelay] in
+            try? await Task.sleep(for: slowRecognitionNoticeDelay)
+            guard !Task.isCancelled, let self, !self.reportRecognitionJobs.isEmpty else { return }
+            self.isReportRecognitionSlow = true
         }
     }
 

@@ -39,6 +39,168 @@ struct DICOMAppModelTests {
     }
 
     @Test
+    func timelineSelectsEitherARecordOrAnImagingStudyAndMemberChangesClearBoth() async throws {
+        let fixture = try TimelineImagingFixture()
+        let model = fixture.makeModel()
+        await model.start()
+
+        await model.selectRecord(fixture.record.id)
+        #expect(model.selectedRecord?.id == fixture.record.id)
+
+        model.selectDICOMStudy(fixture.study.id)
+        #expect(model.dicomLibraryModel.selectedStudyID == fixture.study.id)
+        #expect(model.selectedRecordID == nil)
+        #expect(model.originalDocument == nil)
+
+        await model.selectRecord(fixture.record.id)
+        #expect(model.selectedRecord?.id == fixture.record.id)
+        #expect(model.dicomLibraryModel.selectedStudyID == nil)
+
+        model.selectDICOMStudy(fixture.pending.id)
+        #expect(model.selectedRecord?.id == fixture.record.id)
+        #expect(model.dicomLibraryModel.selectedStudyID == nil)
+
+        model.selectDICOMStudy(fixture.study.id)
+        model.selectedMemberID = fixture.otherMember.id
+        await model.waitForCurrentPage()
+        #expect(model.dicomLibraryModel.selectedStudyID == nil)
+        #expect(model.timelineSections.isEmpty)
+    }
+
+    @Test
+    func enteringTheTimelineKeepsASelectedImagingStudyAndOpensNoRecordUnderTheImagingFilter() async throws {
+        let fixture = try TimelineImagingFixture()
+        let model = fixture.makeModel()
+        await model.start()
+
+        model.selectDICOMStudy(fixture.study.id)
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.dicomLibraryModel.selectedStudyID == fixture.study.id)
+        #expect(model.selectedRecordID == nil)
+
+        model.timelineFilter = .imaging
+        model.selectedMemberID = fixture.member.id
+        #expect(model.dicomLibraryModel.selectedStudyID == nil)
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecordID == nil)
+        #expect(model.timelineFilter == .imaging)
+
+        model.timelineFilter = .all
+        await model.openNewestRecordIfNothingIsOpen()
+        #expect(model.selectedRecord?.id == fixture.record.id)
+        #expect(model.dicomLibraryModel.selectedStudyID == nil)
+    }
+
+    @Test
+    func timelineFilterNarrowsEntriesAndSearchAndClearsTheHiddenSelection() async throws {
+        let fixture = try TimelineImagingFixture()
+        let model = fixture.makeModel()
+        await model.start()
+        #expect(model.isTimelineFilterAvailable)
+        #expect(model.timelineFilter == .all)
+
+        model.selectDICOMStudy(fixture.study.id)
+        model.timelineFilter = .reports
+        await model.waitForCurrentPage()
+        #expect(model.timelineSections.flatMap(\.dicomStudies).isEmpty)
+        #expect(model.timelineSections.flatMap(\.records).map(\.id) == [fixture.record.id])
+        #expect(model.dicomLibraryModel.selectedStudyID == nil)
+
+        await model.selectRecord(fixture.record.id)
+        model.searchText = "Synthetic timeline"
+        await model.waitForCurrentPage()
+        #expect(model.searchResults.map(\.id) == [fixture.record.id])
+
+        // Imaging never enters search, so the filter shows no entries while a search is active.
+        model.timelineFilter = .imaging
+        await model.waitForCurrentPage()
+        #expect(model.timelineSections.isEmpty)
+        #expect(model.searchResults.isEmpty)
+        #expect(model.selectedRecordID == nil)
+
+        model.searchText = ""
+        await model.waitForCurrentPage()
+        #expect(model.timelineSections.flatMap(\.records).isEmpty)
+        #expect(model.timelineSections.flatMap(\.dicomStudies).map(\.id) == [fixture.study.id])
+
+        model.selectDICOMStudy(fixture.study.id)
+        model.timelineFilter = .all
+        await model.waitForCurrentPage()
+        #expect(model.timelineSections.flatMap(\.records).map(\.id) == [fixture.record.id])
+        #expect(model.timelineSections.flatMap(\.dicomStudies).map(\.id) == [fixture.study.id])
+        #expect(model.dicomLibraryModel.selectedStudyID == fixture.study.id)
+
+        model.searchText = "Synthetic timeline"
+        await model.waitForCurrentPage()
+        #expect(model.searchResults.map(\.id) == [fixture.record.id])
+        model.searchText = ""
+
+        model.timelineFilter = .imaging
+        await model.selectRecord(fixture.record.id)
+        await model.waitForCurrentPage()
+        #expect(model.timelineFilter == .all)
+        #expect(model.selectedRecord?.id == fixture.record.id)
+        #expect(model.timelineSections.flatMap(\.records).map(\.id) == [fixture.record.id])
+    }
+
+    @Test
+    func timelineFilterFallsBackToAllWhenNoConfirmedImagingRemains() async throws {
+        let fixture = try TimelineImagingFixture()
+        let model = fixture.makeModel(refreshedSnapshot: TestLibrarySnapshot(
+            generation: 2,
+            members: [fixture.member, fixture.otherMember],
+            records: [fixture.record],
+            drafts: [],
+            dicomStudies: [fixture.pending]
+        ))
+        await model.start()
+        model.timelineFilter = .imaging
+        model.selectDICOMStudy(fixture.study.id)
+
+        await model.refresh()
+
+        #expect(!model.isTimelineFilterAvailable)
+        #expect(model.timelineFilter == .all)
+        #expect(model.dicomLibraryModel.selectedStudyID == nil)
+        #expect(model.timelineSections.flatMap(\.records).map(\.id) == [fixture.record.id])
+
+        await model.beginDestructiveVaultLifecycle()
+        #expect(model.timelineFilter == .all)
+        #expect(!model.isTimelineFilterAvailable)
+    }
+
+    @Test
+    func finishingAnAlreadyConfirmedImportRevealsTheStudyOnTheTimeline() async throws {
+        let fixture = try TimelineImagingFixture()
+        let dicomService = DICOMAppServiceSpy()
+        await dicomService.setImportOutcome(dicomImportOutcome(
+            studyID: fixture.study.id,
+            destination: .timeline,
+            wasExisting: true
+        ))
+        let model = fixture.makeModel(dicomService: dicomService)
+        await model.start()
+        model.selectedMemberID = fixture.otherMember.id
+        model.timelineFilter = .reports
+        model.searchText = "Synthetic timeline"
+
+        model.presentDICOMImport()
+        await model.handleDICOMImporterResult(.success([
+            URL(fileURLWithPath: "/synthetic/existing-dicom", isDirectory: true),
+        ]))
+        let outcome = await model.finishDICOMImport()
+        await model.waitForCurrentPage()
+
+        #expect(outcome?.destination == .timeline)
+        #expect(model.selectedMemberID == nil)
+        #expect(model.timelineFilter == .all)
+        #expect(model.searchText.isEmpty)
+        #expect(model.dicomLibraryModel.selectedStudyID == fixture.study.id)
+        #expect(model.timelineSections.flatMap(\.dicomStudies).map(\.id) == [fixture.study.id])
+        #expect(model.reviewingDICOMStudy == nil)
+    }
+
+    @Test
     func DICOMFolderSelectionSharesTheRootModalBoundaryAndLifecycleClearsImagingState() async throws {
         let pending = dicomSummary(state: .needsReview)
         let snapshot = TestLibrarySnapshot(
@@ -632,4 +794,55 @@ private func appModelViewerSession(studyID: DICOMStudy.ID) throws -> DICOMSliceS
             attributes: attributes
         )]
     )
+}
+
+@MainActor
+private struct TimelineImagingFixture {
+    let member: FamilyMember
+    let otherMember: FamilyMember
+    let record: HealthRecord
+    let study: DICOMStudySummary
+    let pending: DICOMStudySummary
+
+    init() throws {
+        member = try FamilyMember(displayName: "Synthetic timeline member")
+        otherMember = try FamilyMember(displayName: "Synthetic other timeline member")
+        record = try HealthRecord(
+            memberID: member.id,
+            attachmentID: UUID(),
+            importState: .confirmed,
+            conclusion: try SourceField(originalTranscription: "Synthetic timeline conclusion")
+        )
+        study = dicomSummary(
+            state: .confirmed,
+            memberID: member.id,
+            effectiveDate: Date(timeIntervalSinceReferenceDate: 100)
+        )
+        pending = dicomSummary(state: .needsReview)
+    }
+
+    func makeModel(
+        refreshedSnapshot: TestLibrarySnapshot? = nil,
+        dicomService: DICOMAppServiceSpy = DICOMAppServiceSpy()
+    ) -> AppModel {
+        AppModel(
+            service: AppServiceSpy(
+                snapshot: TestLibrarySnapshot(
+                    generation: 1,
+                    members: [member, otherMember],
+                    records: [record],
+                    drafts: [],
+                    dicomStudies: [pending, study]
+                ),
+                refreshedSnapshot: refreshedSnapshot,
+                originals: [
+                    record.id: OriginalDocumentPayload(
+                        data: Data([0x25, 0x50, 0x44, 0x46]),
+                        contentTypeIdentifier: "com.adobe.pdf"
+                    ),
+                ]
+            ),
+            dicomService: dicomService
+        )
+    }
 }

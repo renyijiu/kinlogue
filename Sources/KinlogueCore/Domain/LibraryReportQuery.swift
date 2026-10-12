@@ -79,9 +79,12 @@ package struct LibraryDraftSummary: Equatable, Identifiable, Sendable {
     package let memberID: UUID?
     package let failureCode: ImportFailureCode?
     package let sourceCount: Int
-    package init(id: UUID, state: ImportState, revision: UInt64, memberID: UUID?, failureCode: ImportFailureCode?, sourceCount: Int) {
+    /// The first source's file name, bounded for a list row; nil when the source has none.
+    package let displayName: String?
+    package init(id: UUID, state: ImportState, revision: UInt64, memberID: UUID?, failureCode: ImportFailureCode?, sourceCount: Int, displayName: String? = nil) {
         self.id = id; self.state = state; self.revision = revision; self.memberID = memberID
         self.failureCode = failureCode; self.sourceCount = sourceCount
+        self.displayName = displayName.map(LibraryMemberSummary.preview)
     }
 }
 

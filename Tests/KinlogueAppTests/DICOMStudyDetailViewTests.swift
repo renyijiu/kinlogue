@@ -5,9 +5,9 @@ import Testing
 @testable import KinlogueApp
 
 @MainActor
-struct DICOMLibraryViewTests {
+struct DICOMStudyDetailViewTests {
     @Test
-    func detailRefreshesWhenTheLibrarySelectionChanges() throws {
+    func timelineDetailRefreshesWhenTheImagingSelectionChanges() throws {
         let member = try FamilyMember(displayName: "Synthetic imaging member")
         let study = dicomSummary(
             state: .confirmed,
@@ -16,10 +16,11 @@ struct DICOMLibraryViewTests {
         )
         let model = DICOMLibraryModel()
         model.update(studies: [study], members: [LibraryMemberSummary(member)])
-        let hostingView = NSHostingView(rootView: DICOMLibraryDetailContainer(
-            model: model,
-            onReview: { _ in },
-            onViewImages: { _ in }
+        let hostingView = NSHostingView(rootView: TimelineDetailContainer(
+            dicomLibraryModel: model,
+            onReviewDICOM: { _ in },
+            onViewDICOMImages: { _ in },
+            recordDetail: { KinlogueTheme.surface }
         ))
         hostingView.frame = NSRect(x: 0, y: 0, width: 620, height: 480)
         let window = NSWindow(
@@ -43,7 +44,7 @@ struct DICOMLibraryViewTests {
         refresh(hostingView)
         let selectedPixels = try renderedPixels(of: hostingView)
 
-        let expectedView = NSHostingView(rootView: DICOMLibraryDetailView(
+        let expectedView = NSHostingView(rootView: DICOMStudyDetailView(
             study: study,
             memberLabel: model.memberLabel(for: study),
             onReview: { _ in },
@@ -67,10 +68,14 @@ struct DICOMLibraryViewTests {
 
         #expect(selectedPixels != emptyPixels)
         #expect(selectedPixels == (try renderedPixels(of: expectedView)))
+
+        model.select(nil)
+        refresh(hostingView)
+        #expect(try renderedPixels(of: hostingView) != selectedPixels)
     }
 
     @Test
-    func appShellKeepsTheImagingDetailSubscribedToLibrarySelection() throws {
+    func appShellKeepsTheTimelineDetailSubscribedToImagingSelection() throws {
         let source = try String(
             contentsOf: repositoryURL
                 .appendingPathComponent("Sources/KinlogueApp/Views/AppShellView.swift"),
@@ -78,10 +83,16 @@ struct DICOMLibraryViewTests {
         )
 
         #expect(source.contains(
-            "DICOMLibraryDetailContainer(\n"
-                + "                    model: model.dicomLibraryModel"
+            "TimelineDetailContainer(\n"
+                + "                    dicomLibraryModel: model.dicomLibraryModel"
+        ))
+        #expect(source.contains(
+            "TimelineView(\n"
+                + "                            comparisonModel: model.comparisonModel,\n"
+                + "                            dicomLibraryModel: model.dicomLibraryModel"
         ))
         #expect(!source.contains("study: model.dicomLibraryModel.selectedStudy"))
+        #expect(!source.contains("model.dicomLibraryModel.selectedStudyID"))
     }
 
     private func refresh(_ view: NSView) {

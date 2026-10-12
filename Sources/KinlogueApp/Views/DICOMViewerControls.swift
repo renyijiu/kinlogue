@@ -63,12 +63,12 @@ struct DICOMViewerControls: View {
 
             Text(AppLocalization.string("拖动：窗宽窗位 · Space/辅助拖动：平移 · 捏合或 Command-滚动：缩放 · 滚动或左右方向键：切片"))
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(KinlogueTheme.onVariant)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(AppLocalization.string("连续播放仅按顺序浏览空间切片，不代表真实时间动态影像。"))
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KinlogueTheme.onVariant)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 14)
@@ -125,7 +125,7 @@ struct DICOMViewerControls: View {
 
             Text(AppLocalization.string("共 \(model.series.count) 个序列，\(model.totalViewableSliceCount) 张可查看影像"))
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KinlogueTheme.onVariant)
                 .lineLimit(1)
 
             Button {
@@ -185,7 +185,7 @@ struct DICOMViewerControls: View {
             Text(AppLocalization.string("缩放 \(Int((model.zoomScale * 100).rounded()))%"))
         }
         .font(.caption.monospacedDigit())
-        .foregroundStyle(.secondary)
+        .foregroundStyle(KinlogueTheme.onVariant)
     }
 
     private var viewerActions: some View {

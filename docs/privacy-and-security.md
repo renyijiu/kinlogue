@@ -100,7 +100,11 @@
 - 不要在未确认可信网络前启动 LAN listener；不要把 `network.server` entitlement、可行性 marker 或 test-only client entitlement 扩大到不该有的 bundle。
 - 修改 `README.md`、`PRIVACY.md`、`packaging/Info.plist`、entitlements、验证脚本或网络行为时，必须一起检查本页和对应验收文档。
 
-README 的合成产品预览 `docs/assets/kinlogue-overview.jpg` 也经过逐文件审查；当前树门禁与历史门禁均按精确路径和固定 SHA-256 放行。历史中曾替换成未批准内容，即使后来恢复原图，历史门禁仍拒绝。
+README 的合成产品预览 `docs/assets/kinlogue-overview-2026-10.jpg` 也经过逐文件审查；当前树门禁与历史门禁均按精确路径和固定 SHA-256 放行。历史中曾替换成未批准内容，即使后来恢复原图，历史门禁仍拒绝。
+
+当前预览图使用带日期的文件名，是因为它在“同一路径可登记多条摘要”的规则合入之前更新，当时历史门禁对每个路径只认一个摘要。旧路径 `docs/assets/kinlogue-overview.jpg` 只为历史中的原图保留登记，当前树门禁不再接受该路径上的任何文件。今后更新预览图不需要再换文件名：替换文件后更新 `privacy-guard.sh` 中的预览图摘要，并在摘要清单里为同一路径追加一行。预览图必须只含合成数据；当前这张由测试进程用假数据服务渲染真实的 App 界面生成，没有启动 App，也没有截取屏幕。
+
+历史门禁的已审查摘要登记在 [`scripts/privacy-history-media-digests.txt`](../scripts/privacy-history-media-digests.txt)，每行是一组“摘要 + 精确路径”。已替换的应用图标仍留在可达历史中，所以同一路径可以登记多条摘要，每个历史版本都必须命中其中一条；完全重复的行、未列入门禁路径清单的路径，以及缺少任何一条摘要的路径都会让门禁失败。更换图标时只追加新行、保留旧行；图标母版和生成方式见 [`brand.md`](brand.md)。当前树门禁仍只按精确路径放行 AppIcon 位图，不校验其摘要。
 
 ## 未来安全升级边界
 

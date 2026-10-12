@@ -51,8 +51,7 @@ struct AppShellView: View {
         .background(KinlogueTheme.surface)
         .toolbarBackground(KinlogueTheme.surface, for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
-        .tint(KinlogueTheme.primary)
-        .preferredColorScheme(.light)
+        .kinlogueAppearance()
         .background(PrimaryWindowReader { window in
             lanInboxModel.configurePrimaryWindow(window)
         })
@@ -109,8 +108,8 @@ struct AppShellView: View {
                 onChooseFolder: { model.retryDICOMImportSelection() },
                 onComplete: {
                     let destination = await model.finishDICOMImport()
-                    if destination?.destination == .library {
-                        selectedSidebarSection = .imaging
+                    if destination?.destination == .timeline {
+                        selectedSidebarSection = .records
                     }
                 },
                 onClose: {
@@ -432,14 +431,12 @@ struct AppShellView: View {
                         members: model.members,
                         onOpenDuplicate: openDuplicateDestination
                     )
-                } else if selectedSidebarSection == .imaging {
-                    DICOMLibraryView(
-                        model: model.dicomLibraryModel,
-                        selectedMemberID: model.selectedMemberID
-                    )
                 } else {
                     VStack(spacing: 0) {
                         SearchFieldView(text: $model.searchText, isFocused: $isSearchFocused)
+                        if model.isTimelineFilterAvailable {
+                            TimelineFilterBar(filter: $model.timelineFilter)
+                        }
                         ComparisonSelectionBar(
                             model: model.comparisonModel,
                             onCompare: { Task { await model.openComparison() } }
@@ -447,17 +444,16 @@ struct AppShellView: View {
                         Divider()
                         TimelineView(
                             comparisonModel: model.comparisonModel,
+                            dicomLibraryModel: model.dicomLibraryModel,
                             sections: model.timelineSections,
                             searchResults: model.searchResults,
                             isSearching: !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                            filter: model.timelineFilter,
                             selectedRecordID: model.selectedRecordID,
+                            showsMemberLabels: model.selectedMemberID == nil,
                             memberLabel: model.memberLabel(for:),
-                            dicomMemberLabel: model.dicomLibraryModel.memberLabel(for:),
                             onSelect: { id in Task { await model.selectRecord(id) } },
-                            onSelectDICOM: { id in
-                                model.dicomLibraryModel.select(id)
-                                selectedSidebarSection = .imaging
-                            },
+                            onSelectDICOM: { id in model.selectDICOMStudy(id) },
                             onImport: { presentImporterIfAvailable() },
                             pageState: model.pageState, hasMore: model.hasMoreRecords,
                             hasDamage: !model.damagedItemIDs.isEmpty || !model.damagedMemberIDs.isEmpty,
@@ -466,6 +462,11 @@ struct AppShellView: View {
                         )
                     }
                     .background(KinlogueTheme.surface)
+                    // Runs each time this timeline is entered: at launch, on
+                    // returning from another section and on choosing a member.
+                    .task(id: model.selectedMemberID) {
+                        await model.openNewestRecordIfNothingIsOpen()
+                    }
                     .navigationTitle(model.selectedMemberID.flatMap { id in
                         LibraryMemberSummary.labels(model.members)[id]
                     } ?? AppLocalization.string("家庭时间线"))
@@ -475,32 +476,32 @@ struct AppShellView: View {
         } detail: {
             if selectedSidebarSection == .lanInbox {
                 LANPendingSelectionDetailView(model: lanInboxModel)
-            } else if selectedSidebarSection == .imaging {
-                DICOMLibraryDetailContainer(
-                    model: model.dicomLibraryModel,
-                    onReview: { model.presentDICOMReview($0) },
-                    onViewImages: openDICOMViewer
-                )
             } else {
-                RecordDetailView(
-                    record: model.selectedRecord,
-                    memberLabel: model.selectedRecord.map(model.memberLabel(for:)),
-                    original: model.originalDocument,
-                    isOriginalLoading: model.isOriginalLoading,
-                    originalSources: model.originalSources,
-                    selectedOriginalSourceID: model.selectedOriginalSourceID,
-                    onSelectOriginalSource: { sourceID in
-                        Task { await model.selectOriginalSource(sourceID) }
-                    },
-                    onOpenOriginal: { model.presentOriginalViewer() },
-                    onEdit: { model.presentRecordEditor() },
-                    onDelete: {
-                        if let record = model.selectedRecord {
-                            model.requestDeleteRecord(record)
+                TimelineDetailContainer(
+                    dicomLibraryModel: model.dicomLibraryModel,
+                    onReviewDICOM: { model.presentDICOMReview($0) },
+                    onViewDICOMImages: openDICOMViewer
+                ) {
+                    RecordDetailView(
+                        record: model.selectedRecord,
+                        memberLabel: model.selectedRecord.map(model.memberLabel(for:)),
+                        original: model.originalDocument,
+                        isOriginalLoading: model.isOriginalLoading,
+                        originalSources: model.originalSources,
+                        selectedOriginalSourceID: model.selectedOriginalSourceID,
+                        onSelectOriginalSource: { sourceID in
+                            Task { await model.selectOriginalSource(sourceID) }
+                        },
+                        onOpenOriginal: { model.presentOriginalViewer() },
+                        onEdit: { model.presentRecordEditor() },
+                        onDelete: {
+                            if let record = model.selectedRecord {
+                                model.requestDeleteRecord(record)
+                            }
                         }
-                    }
-                )
-                .background(KinlogueTheme.surface)
+                    )
+                    .background(KinlogueTheme.surface)
+                }
             }
         }
         .toolbar {
@@ -520,7 +521,7 @@ struct AppShellView: View {
                 Button {
                     model.presentDICOMImport()
                 } label: {
-                    Label(AppLocalization.string("导入医学影像"), systemImage: "waveform.path.ecg.rectangle")
+                    Label(AppLocalization.string("导入医学影像"), systemImage: "square.and.arrow.down.on.square")
                 }
                 .help(AppLocalization.string("导入医学影像"))
                 ComparisonToolbarItem(
@@ -565,6 +566,8 @@ struct AppShellView: View {
             hasMoreDrafts: model.hasMoreDrafts(state:),
             onLoadMoreDrafts: { state in Task { await model.loadNextDraftPage(state: state) } },
             onRetryDraftPage: { state in Task { await model.retryDraftPage(state: state) } },
+            reportRecognitionActivity: model.reportRecognitionActivity,
+            isReportRecognitionSlow: model.isReportRecognitionSlow,
             onAdd: { presentNewMemberEditorIfAvailable() },
             onOpenDraft: { presentReviewIfAvailable($0) },
             onRetryDraft: { id in Task { await model.retryDraft(id) } },
@@ -621,6 +624,7 @@ struct AppShellView: View {
             Button(AppLocalization.string("从数据备份恢复…")) {
                 restoreModel.present()
             }
+            .buttonStyle(.kinloguePrimary)
         }
     }
 
@@ -633,9 +637,11 @@ struct AppShellView: View {
             Button(AppLocalization.string("重试")) {
                 Task { hasCompletedStartup = await startupCoordinator.start() }
             }
+            .buttonStyle(.kinloguePrimary)
             Button(AppLocalization.string("从数据备份恢复…")) {
                 restoreModel.present()
             }
+            .buttonStyle(.kinlogueSecondary)
         }
     }
 

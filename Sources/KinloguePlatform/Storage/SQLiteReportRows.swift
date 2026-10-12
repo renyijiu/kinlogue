@@ -172,6 +172,15 @@ enum SQLiteReportRows {
         return value
     }
 
+    /// The file name of a draft's first source, for a list row. The source row's own hash is
+    /// verified; a name too long for a list row is left out instead of being copied.
+    static func firstSourceName(draftID: UUID, _ db: Database) throws -> String? {
+        guard let row = try SQLiteRows.fetchOne(db, sql: "SELECT \(SQLiteHotProjection.sql(sourceColumns, bounds: ["display_name": 1_024])) FROM report_sources WHERE draft_id = ? AND position = 0", arguments: [draftID.sqliteBytes]) else { throw SQLiteLibraryError.damaged }
+        guard !(row["oversized"] as Bool) else { return nil }
+        try verify(row, table: "report_sources", columns: sourceColumns)
+        return row["display_name"]
+    }
+
     static func sourcesHash(_ sources: ReportSources) throws -> Data {
         ContentDigest.sha256(try SQLiteEntityBudget.sourcesData(sources))
     }

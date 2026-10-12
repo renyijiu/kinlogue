@@ -990,6 +990,7 @@ struct LANPhoneAssetSafetyTests {
         ))
         #expect(verifier.contains("GRDB_GRDB.bundle"))
         for resource in [
+            "./$EXPECTED_ASSET_ARCHIVE_FILE",
             "./$EXPECTED_GRDB_RESOURCE_BUNDLE/PrivacyInfo.xcprivacy",
             "./$EXPECTED_ICON_FILE",
             "./$EXPECTED_PLATFORM_RESOURCE_BUNDLE/Info.plist",

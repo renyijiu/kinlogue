@@ -40,7 +40,9 @@ final class DICOMLibraryModel: ObservableObject {
 
     func select(_ id: DICOMStudy.ID?) {
         guard let id else {
-            selectedStudyID = nil
+            if selectedStudyID != nil {
+                selectedStudyID = nil
+            }
             return
         }
         guard studies.contains(where: { $0.id == id && $0.state == .confirmed }) else {

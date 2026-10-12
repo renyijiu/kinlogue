@@ -9,6 +9,7 @@
 - `swift build` / `swift test` 可使用 SwiftPM 和 Command Line Tools。
 - 完整 App bundle、签名、XPC 和安装验收要求 `/Applications/Xcode.app/Contents/Developer`。
 - Xcode 27 使用默认 Swift Build 引擎；DICOM 资源需要可调用的 Metal Toolchain。缺失时运行 `xcodebuild -downloadComponent MetalToolchain`，并用 `xcrun --sdk macosx metal --version` 验证；组件安装后定位缓存陈旧时可执行 `xcrun --kill-cache`。`build-app.sh` 在构建前检查组件，不自动下载或安装。 打包脚本接受旧引擎平铺资源与 Swift Build 的 `Contents/Resources` 两种布局，拒绝符号链接，并统一整理为现有最终包布局；Platform metadata、手机页面、ZIPFoundation 隐私清单和 App 本地化继续受原有精确资源白名单约束。
+- `build-app.sh` 用 Xcode 自带的 `actool` 把 [`packaging/Assets.xcassets`](../packaging/Assets.xcassets) 编译为主包的 `Contents/Resources/Assets.car`，并要求编译结果与 `Info.plist` 的 `NSAccentColorName` 一致后才复制和签名。`verify-app.sh` 的精确资源清单包含这个文件，并用 `assetutil --info` 确认归档里只有一个与 Primary 同值的不透明 sRGB 强调色；归档内嵌构建时间戳，因此按内容而不是固定哈希校验。
 - CI 在工具链准备阶段探测 Metal；缺失时显式下载官方 Metal Toolchain、清理 xcrun 定位缓存并再次验证。下载或复验失败会终止该 job，本机 `build-app.sh` 仍只检查组件。
 - 当前 CI 工具链和锁定依赖不证明 macOS 26/27 的独立机器兼容性。
 - `Package.resolved`、SwiftNIO、ZIPFoundation 和 DICOM-Swift 的精确版本由 package graph 与 bundle 门禁验证。
@@ -67,7 +68,7 @@ planner 将清单标识规范化为 SwiftPM 实际过滤标识，以完整 targe
 
 ### GitHub Actions
 
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) 在 main pull request、main push 和手工触发时依次运行 lint、隐私、全量测试、clean-source bundle 验证和同一 bundle 的 DICOM XPC 门禁。每个分区分别在 `macos-26` 和 `xcode-27` 上运行；macOS 26 是阻塞基线，Xcode 27 public-preview runner 的 job 使用 `continue-on-error`，失败仍显示但暂不阻塞基线。macOS 26 job 保留仓库规则要求的原有检查名，Xcode 27 job 显式增加后缀，避免矩阵自动命名让必需检查永久缺失。两个系统独立核对相同全局账本，不能把一个系统的分区算到另一个系统。镜像状态依据 [GitHub 官方镜像说明](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md)，远端运行结果须实际核对。质量 job 在这些门禁前运行 [`install-ci-ripgrep.sh`](../scripts/install-ci-ripgrep.sh)，只接受固定版本、固定 archive 名与固定 SHA-256 的 Apple Silicon 二进制；release package job 使用同一入口。workflow 使用最小 token 权限、固定 action SHA、30 分钟 job 上限，以及主测试/隔离门禁各自的 deadline。`pull_request_target` 被禁止。
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) 在 main pull request、main push 和手工触发时并行运行四个 job：质量 job 运行 lint、隐私门禁和主测试分区 `0/3`；bundle job 在自己的全新 checkout 上运行 clean-source bundle 验证和同一 bundle 的 DICOM XPC 门禁；另外两个 job 分别运行 `1/3` 与 `2/3` 测试分区。pull request 只在 `macos-26` 上运行这四个 job；main push 和手工触发时，每个 job 还在 `xcode-27` 上各运行一次。macOS 26 是阻塞基线，Xcode 27 public-preview runner 的 job 使用 `continue-on-error`，失败仍显示但暂不阻塞基线；合并前需要 Xcode 27 结果时，须对该分支手工触发 workflow。macOS 26 job 的检查名不带后缀，依次为 `Lint and test`、`Verify bundle and DICOM XPC`、`Complementary test partition` 和 `Dedicated LAN derived-artifact tests`；Xcode 27 job 显式增加后缀，避免矩阵自动命名让必需检查永久缺失。仓库规则实际要求哪些检查属于可变远端状态，须在托管平台核对。两个系统独立核对相同全局账本，不能把一个系统的分区算到另一个系统。镜像状态依据 [GitHub 官方镜像说明](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md)，远端运行结果须实际核对。质量 job 在这些门禁前运行 [`install-ci-ripgrep.sh`](../scripts/install-ci-ripgrep.sh)，只接受固定版本、固定 archive 名与固定 SHA-256 的 Apple Silicon 二进制；release package job 使用同一入口。workflow 使用最小 token 权限、固定 action SHA、30 分钟 job 上限，以及主测试/隔离门禁各自的 deadline。`pull_request_target` 被禁止。
 
 [`codeql.yml`](../.github/workflows/codeql.yml) 在独立 macOS runner 上以 manual build 分析 Swift，只有分析 job 取得 `security-events: write`；checkout 与 CodeQL action 均固定完整 SHA。Dependabot 同时维护 SwiftPM git 依赖和 GitHub Actions pin，更新仍必须经过相同 CI、隐私与人工 review，不能自动扩大依赖或权限边界。
 

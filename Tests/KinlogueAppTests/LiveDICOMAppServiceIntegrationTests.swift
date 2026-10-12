@@ -228,7 +228,7 @@ struct LiveDICOMAppServiceIntegrationTests {
         let duplicate = try await service.importDICOMDirectory(at: source)
         #expect(duplicate.studyID == imported.studyID)
         #expect(duplicate.wasExisting)
-        #expect(duplicate.destination == .library)
+        #expect(duplicate.destination == .timeline)
 
         await #expect(throws: AppServiceError.memberStillReferencedByDICOMStudy(studyCount: 1)) {
             try await service.deleteMember(id: member.id)

@@ -1,14 +1,78 @@
 import KinlogueCore
 import SwiftUI
 
+struct TimelineFilterBar: View {
+    @Binding var filter: AppTimelineFilter
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(AppTimelineFilter.allCases, id: \.self) { option in
+                let isSelected = filter == option
+                Button {
+                    filter = option
+                } label: {
+                    HStack(spacing: 4) {
+                        if isSelected {
+                            Image(systemName: "checkmark")
+                                .font(.caption2.weight(.bold))
+                                .accessibilityHidden(true)
+                        }
+                        Text(title(for: option))
+                    }
+                    .font(.subheadline.weight(.medium))
+                }
+                .buttonStyle(.kinlogueChip(isSelected: isSelected))
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(AppLocalization.string("时间线内容"))
+    }
+
+    private func title(for option: AppTimelineFilter) -> String {
+        switch option {
+        case .all: AppLocalization.string("全部")
+        case .reports: AppLocalization.string("报告")
+        case .imaging: AppLocalization.string("影像")
+        }
+    }
+}
+
+struct TimelineDetailContainer<RecordDetail: View>: View {
+    @ObservedObject var dicomLibraryModel: DICOMLibraryModel
+    let onReviewDICOM: (DICOMStudy.ID) -> Void
+    let onViewDICOMImages: (DICOMStudy.ID) -> Void
+    @ViewBuilder let recordDetail: () -> RecordDetail
+
+    var body: some View {
+        if let study = dicomLibraryModel.selectedStudy {
+            DICOMStudyDetailView(
+                study: study,
+                memberLabel: dicomLibraryModel.memberLabel(for: study),
+                onReview: onReviewDICOM,
+                onViewImages: onViewDICOMImages
+            )
+        } else {
+            recordDetail()
+        }
+    }
+}
+
 struct TimelineView: View {
     @ObservedObject var comparisonModel: ComparisonModel
+    @ObservedObject var dicomLibraryModel: DICOMLibraryModel
     let sections: [AppTimelineSection]
     let searchResults: [LibraryReportSummary]
     let isSearching: Bool
+    let filter: AppTimelineFilter
     let selectedRecordID: HealthRecord.ID?
+    /// False on one member's timeline, where every card would repeat the
+    /// member the window title already names.
+    let showsMemberLabels: Bool
     let memberLabel: (LibraryReportSummary) -> String
-    let dicomMemberLabel: (DICOMStudySummary) -> String
     let onSelect: (HealthRecord.ID) -> Void
     let onSelectDICOM: (DICOMStudy.ID) -> Void
     let onImport: () -> Void
@@ -29,11 +93,11 @@ struct TimelineView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if displayedEntriesAreEmpty {
             ContentUnavailableView {
-                Label(isSearching ? AppLocalization.string("没有匹配记录") : AppLocalization.string("还没有健康记录"), systemImage: "doc.text.magnifyingglass")
+                Label(emptyTitle, systemImage: emptySystemImage)
             } description: {
-                Text(isSearching ? AppLocalization.string("搜索只会查看已经确认的字段。") : AppLocalization.string("导入 PDF 或图片，确认后会出现在时间线。"))
+                Text(emptyDescription)
             } actions: {
-                if !isSearching {
+                if !isSearching, filter != .imaging {
                     Button(AppLocalization.string("导入第一份报告…"), action: onImport)
                         .buttonStyle(.kinloguePrimary)
                 }
@@ -42,12 +106,13 @@ struct TimelineView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if hasDamage { Text(AppLocalization.string("部分资料无法读取")).foregroundStyle(.secondary) }
+                    if hasDamage { Text(AppLocalization.string("部分资料无法读取")).foregroundStyle(KinlogueTheme.onVariant) }
                     if isSearching {
                         ForEach(searchResults) { record in
                             TimelineCard(
                                 record: record,
                                 memberLabel: memberLabel(record),
+                                showsMemberLabel: showsMemberLabels,
                                 isSelected: record.id == selectedRecordID,
                                 comparisonModel: comparisonModel,
                                 onSelect: onSelect
@@ -66,6 +131,7 @@ struct TimelineView: View {
                                     TimelineCard(
                                         record: record,
                                         memberLabel: memberLabel(record),
+                                        showsMemberLabel: showsMemberLabels,
                                         isSelected: record.id == selectedRecordID,
                                         comparisonModel: comparisonModel,
                                         onSelect: onSelect
@@ -73,7 +139,10 @@ struct TimelineView: View {
                                 case .dicomStudy(let study):
                                     DICOMTimelineCard(
                                         study: study,
-                                        memberLabel: dicomMemberLabel(study),
+                                        memberLabel: dicomLibraryModel.memberLabel(for: study),
+                                        showsMemberLabel: showsMemberLabels,
+                                        isSelected: study.id == dicomLibraryModel.selectedStudyID,
+                                        isSelectingComparison: comparisonModel.isSelecting,
                                         onSelect: onSelectDICOM
                                     )
                                 }
@@ -93,15 +162,43 @@ struct TimelineView: View {
             ProgressView(AppLocalization.string("正在载入记录…"))
         } else if pageState == .failed {
             Button(AppLocalization.string("重试载入"), action: onRetry)
+                .buttonStyle(.kinlogueSecondary)
                 .accessibilityHint(AppLocalization.string("重新载入当前查询"))
         } else if hasMore {
             Button(AppLocalization.string("载入更多记录"), action: onLoadMore)
+                .buttonStyle(.kinlogueSecondary)
                 .accessibilityHint(AppLocalization.string("载入下一页记录"))
         }
     }
 
     private var displayedEntriesAreEmpty: Bool {
         isSearching ? searchResults.isEmpty : sections.allSatisfy(\.entries.isEmpty)
+    }
+
+    private var emptyTitle: String {
+        if isSearching { return AppLocalization.string("没有匹配记录") }
+        return filter == .imaging
+            ? AppLocalization.string("还没有已确认的医学影像")
+            : AppLocalization.string("还没有健康记录")
+    }
+
+    private var emptySystemImage: String {
+        !isSearching && filter == .imaging
+            ? "waveform.path.ecg.rectangle"
+            : "doc.text.magnifyingglass"
+    }
+
+    private var emptyDescription: String {
+        switch (isSearching, filter == .imaging) {
+        case (true, true):
+            AppLocalization.string("医学影像不进入搜索。切换到“全部”或“报告”后再搜索。")
+        case (true, false):
+            AppLocalization.string("搜索只会查看已经确认的字段。")
+        case (false, true):
+            AppLocalization.string("导入 DICOM 文件夹并确认家庭成员与检查日期后，会显示在这里。")
+        case (false, false):
+            AppLocalization.string("导入 PDF 或图片，确认后会出现在时间线。")
+        }
     }
 
     private func sectionTitle(_ group: TimelineDateGroup) -> String {
@@ -116,6 +213,9 @@ struct TimelineView: View {
 private struct DICOMTimelineCard: View {
     let study: DICOMStudySummary
     let memberLabel: String
+    let showsMemberLabel: Bool
+    let isSelected: Bool
+    let isSelectingComparison: Bool
     let onSelect: (DICOMStudy.ID) -> Void
 
     var body: some View {
@@ -139,21 +239,25 @@ private struct DICOMTimelineCard: View {
                         )
                         .font(.headline)
                         Spacer()
-                        Text(memberLabel)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .kinlogueChip()
+                        if showsMemberLabel {
+                            Text(memberLabel)
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .kinlogueChip()
+                        }
                     }
                     Text(AppLocalization.string("保留 \(study.retainedObjectCount) 个对象"))
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KinlogueTheme.onVariant)
                 }
             }
-            .buttonStyle(.kinlogueCard(isHighlighted: false))
+            .buttonStyle(.kinlogueCard(isHighlighted: isSelected))
+            .disabled(isSelectingComparison)
             .accessibilityLabel(AppLocalization.string("医学影像检查"))
             .accessibilityValue(memberLabel)
-            .accessibilityHint(AppLocalization.string("查看影像"))
+            .accessibilityHint(AppLocalization.string("选择后可查看检查摘要"))
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
         }
     }
 }
@@ -161,6 +265,7 @@ private struct DICOMTimelineCard: View {
 private struct TimelineCard: View {
     let record: LibraryReportSummary
     let memberLabel: String
+    let showsMemberLabel: Bool
     let isSelected: Bool
     @ObservedObject var comparisonModel: ComparisonModel
     let onSelect: (HealthRecord.ID) -> Void
@@ -192,16 +297,18 @@ private struct TimelineCard: View {
                         Text(record.title ?? record.reportType ?? AppLocalization.string("健康记录"))
                             .font(.headline)
                         Spacer()
-                        Text(memberLabel)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .kinlogueChip()
+                        if showsMemberLabel {
+                            Text(memberLabel)
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .kinlogueChip()
+                        }
                     }
                     if let organization = record.organization {
                         Label(organization, systemImage: "building.2")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(KinlogueTheme.onVariant)
                             .lineLimit(1)
                     }
                     Text(record.conclusion ?? AppLocalization.string("原报告未提供结论"))

@@ -893,16 +893,6 @@
         }
       }
     },
-    "医学影像": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Medical Imaging"
-          }
-        }
-      }
-    },
     "医学影像切片画布": {
       "localizations": {
         "en": {
@@ -4585,16 +4575,6 @@
         }
       }
     },
-    "确认并加入医学影像库": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Confirm and Add to Imaging Library"
-          }
-        }
-      }
-    },
     "确认并加入时间线": {
       "localizations": {
         "en": {
@@ -4949,6 +4929,62 @@
           "stringUnit": {
             "state": "translated",
             "value": "Kinlogue processes data only on this Mac. It stays local by default; only after you explicitly enable data backup does Kinlogue write encrypted restore points to the folder you choose. Whether a cloud-drive client uploads that folder is controlled by that client. Only when you start Phone Upload does Kinlogue temporarily receive files from a browser on the same local network. The active library has no application-level encryption: report and medical-image originals, member information, and OCR results are stored as readable local files. People or software that can access this Mac user’s files, and Time Machine backups, APFS snapshots, or other copies containing the library, may read this content."
+          }
+        }
+      }
+    },
+    "待确认（%lld）": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Awaiting Review (%lld)"
+          }
+        }
+      }
+    },
+    "等待确认：%@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Awaiting review: %@"
+          }
+        }
+      }
+    },
+    "正在识别报告…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recognizing report…"
+          }
+        }
+      }
+    },
+    "正在识别报告（第 %lld/%lld 个）…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "new",
+            "value": "正在识别报告（第 %1$lld/%2$lld 个）…"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recognizing reports (%1$lld of %2$lld)…"
+          }
+        }
+      }
+    },
+    "识别仍在进行。系统首次识别需要准备识别模型，可能要等半分钟左右，之后会快很多；页数多的文件也需要更久。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recognition is still running. The first recognition prepares the system’s recognition model and can take about half a minute; later ones are much faster. Files with many pages also take longer."
           }
         }
       }
@@ -5613,6 +5649,16 @@
         }
       }
     },
+    "这项检查已在时间线中": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Study Is Already on the Timeline"
+          }
+        }
+      }
+    },
     "这组影像超出当前支持范围": {
       "localizations": {
         "en": {
@@ -5639,16 +5685,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Only correct source transcriptions or reassign the family member here. Originals do not change."
-          }
-        }
-      }
-    },
-    "这项检查已在医学影像库中": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This Study Is Already in the Imaging Library"
           }
         }
       }
@@ -5753,16 +5789,6 @@
         }
       }
     },
-    "选择一项医学影像检查": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Select an Imaging Study"
-          }
-        }
-      }
-    },
     "选择两条已确认记录进行比较": {
       "localizations": {
         "en": {
@@ -5809,6 +5835,56 @@
           "stringUnit": {
             "state": "translated",
             "value": "Select to view the study summary"
+          }
+        }
+      }
+    },
+    "时间线内容": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timeline Content"
+          }
+        }
+      }
+    },
+    "全部": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All"
+          }
+        }
+      }
+    },
+    "报告": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reports"
+          }
+        }
+      }
+    },
+    "影像": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imaging"
+          }
+        }
+      }
+    },
+    "医学影像不进入搜索。切换到“全部”或“报告”后再搜索。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medical images are not searchable. Switch to All or Reports to search."
           }
         }
       }

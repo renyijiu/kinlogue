@@ -53,39 +53,3 @@ struct DICOMLibraryModelTests {
         #expect(model.selectedStudyID == nil)
     }
 }
-
-struct DICOMLibrarySelectionNavigationTests {
-    @Test
-    func destinationUsesVisibleOrderAndStopsAtBoundaries() {
-        let first = UUID()
-        let second = UUID()
-        let third = UUID()
-        let visibleStudyIDs = [third, first, second]
-
-        #expect(DICOMLibrarySelectionNavigation.destination(
-            from: first,
-            step: .previous,
-            studyIDs: visibleStudyIDs
-        ) == third)
-        #expect(DICOMLibrarySelectionNavigation.destination(
-            from: first,
-            step: .next,
-            studyIDs: visibleStudyIDs
-        ) == second)
-        #expect(DICOMLibrarySelectionNavigation.destination(
-            from: third,
-            step: .previous,
-            studyIDs: visibleStudyIDs
-        ) == nil)
-        #expect(DICOMLibrarySelectionNavigation.destination(
-            from: second,
-            step: .next,
-            studyIDs: visibleStudyIDs
-        ) == nil)
-        #expect(DICOMLibrarySelectionNavigation.destination(
-            from: UUID(),
-            step: .next,
-            studyIDs: visibleStudyIDs
-        ) == nil)
-    }
-}

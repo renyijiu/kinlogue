@@ -15,6 +15,7 @@
 - 想公开源码或净化 Git 历史：读 [`privacy-and-security.md`](privacy-and-security.md) 和 [`testing-and-release.md`](testing-and-release.md)。
 - 想了解同步目录备份/恢复：读 [`backup-and-restore.md`](backup-and-restore.md)、实施计划和 [`acceptance/current-release.md`](acceptance/current-release.md)。
 - 想改界面或文案：读 [`design-system.md`](design-system.md) 和 [`localization.md`](localization.md)。
+- 想改名称、标语、应用图标或了解产品方向：读 [`brand.md`](brand.md)。
 
 当前最低系统已调整为 macOS 26，主要面向个人自用；Xcode 27 构建适配、CI Metal 组件准备、基线检查名兼容与 DICOM 崩溃恢复探针的重启等待预算见 [`testing-and-release.md`](testing-and-release.md)，转录编辑器的系统写作工具边界见 [`import-and-ocr.md`](import-and-ocr.md)；旧系统支持决策见 [`decisions.md`](decisions.md)，macOS 26/27 验收状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
 
@@ -24,15 +25,19 @@
 
 | 主题 | 稳定结论 | 权威页 |
 | --- | --- | --- |
-| 产品 | Mac 优先、单用户、多家庭成员的本机健康记录整理工具；不提供诊断 | [`project-overview.md`](project-overview.md) |
+| 产品 | Mac 优先、单用户操作、以人为单位并可照看全家的本机健康记录整理工具；不提供诊断 | [`project-overview.md`](project-overview.md) |
 | 隐私 | 活动 Vault 为 App Sandbox 内明文；外部恢复点认证加密；公开历史门禁覆盖已删除附件、凭据路径与恢复码；无账号、内置云同步、遥测或第三方崩溃 SDK | [`../PRIVACY.md`](../PRIVACY.md)、[`privacy-and-security.md`](privacy-and-security.md) |
 | 备份 | 用户选择目录、metadata-only 状态加载与自动关闭、自动开关、离线有界退避及已覆盖状态收敛、2–30 份本地保留、generation/keep 围栏的单扫描批量清理、app-private 跨进程 lease 与 witness 高水位线性发布、pending 设置恢复/确认放弃、LAN derived 完整恢复与 transient partial 排除、生产恢复事务逐 phase SIGKILL 收敛与 activation 后损坏回滚、手动备份、Finder 中显示恢复点和整库替换恢复；网盘远端状态未知 | [`backup-and-restore.md`](backup-and-restore.md) |
 | 报告 | 本机 OCR 只生成有来源候选；用户确认后才进入时间线、搜索和比较 | [`import-and-ocr.md`](import-and-ocr.md) |
 | LAN | 用户显式开启的临时普通 HTTP 会话，绑定所选 Mac 接口并在 HTTP 前拒绝非同 IPv4/IPv6 网络前缀对端，仍只适用于可信任私人网络；成功配对推进浏览器 session generation，手机轮询再以 mutation epoch、revision 与取消 tombstone 防止陈旧状态回退 | [`lan-upload.md`](lan-upload.md) |
 | DICOM | 底层 DICOM-Swift 固定为 1.5.0，codec 依赖和资源仅进入独立 Helper；受限的辅助能力；支持边界窄、非诊断，不代表产品转向通用影像工作站 | [`dicom.md`](dicom.md) |
-| 发布 | 源码仓库已公开，但尚未正式发布可下载产品；GitHub CI 在 macOS 26 基线和 Xcode 27 预览矩阵上各用三个互斥 runner 覆盖同一全局主测试账本，derived-artifact case 从已构建 XCTest inventory 动态发现并逐项有界执行，强制终止不得冒充成功；验收扫描所需 `ripgrep` 由固定版本与 SHA-256 的 CI 引导提供；版本 tag 还必须可从 canonical `main` 到达才能进入构建 | [`testing-and-release.md`](testing-and-release.md)、[`acceptance/current-release.md`](acceptance/current-release.md) |
+| 发布 | 源码仓库已公开，但尚未正式发布可下载产品；GitHub CI 在 pull request 上只运行 macOS 26 基线，main push 与手工触发时再加 Xcode 27 预览矩阵；每个系统用三个互斥 runner 覆盖同一全局主测试账本，另用一个独立 runner 并行验证 clean-source bundle 与 DICOM XPC，derived-artifact case 从已构建 XCTest inventory 动态发现并逐项有界执行，强制终止不得冒充成功；验收扫描所需 `ripgrep` 由固定版本与 SHA-256 的 CI 引导提供；版本 tag 还必须可从 canonical `main` 到达才能进入构建 | [`testing-and-release.md`](testing-and-release.md)、[`acceptance/current-release.md`](acceptance/current-release.md) |
 
 当前 Swift package 声明最低 Swift tools 6.2，使用 Swift 6 language mode；本机 Xcode 27 / Swift 6.4 构建说明见 [`testing-and-release.md`](testing-and-release.md)。只发布 `Kinlogue` App product；Core、Platform 与测试辅助程序保持为内部 target。持续集成以 GitHub Actions 为唯一当前入口，已经完成使命的 Codemagic 试验配置和 LAN feasibility host 只保留历史文档证据，不再进入构建图。
+
+当前候选抽取规则为 extraction version 5：标签与取值的配对、医院抬头兜底、表单名称和识别异体字的处理见 [`import-and-ocr.md`](import-and-ocr.md)；规则移植自 Go 预览的合成版式夹具，真实样本命中率尚未验证。
+
+当前报告界面在进入时间线时默认打开最新记录、在侧边栏为待确认草稿计数并显示文件名、在导入期间显示识别状态并解释首次识别的等待，报告复核页支持 Command-Return 确认；规则与未做的人工检查见 [`design-system.md`](design-system.md) 第 20–25 条。
 
 当前报告复核通过一次有界 Vault 快照取得同一 generation 的草稿、OCR、成员与首个原件；PDF 原件打开只发布页数，所选页 metadata 和 raster 在 actor 内按需读取。具体一致性与 UI 并发边界分别见 [`storage.md`](storage.md)、[`import-and-ocr.md`](import-and-ocr.md) 和 [`design-system.md`](design-system.md)。
 
@@ -40,11 +45,14 @@
 
 当前设置页支持对原备份目录重新授权，并保持手动备份忙碌状态；恢复 ViewModel 的迟到权限回调不会清理新恢复点。手机批量上传的本地排队状态也不会被 reservation 轮询覆盖。实现与回归入口分别见 [`backup-and-restore.md`](backup-and-restore.md) 和 [`lan-upload.md`](lan-upload.md)。
 
+界面配色统一由 `KinlogueTheme` 的语义令牌、共享按钮/列表行/信息卡样式和逐窗口亮色外观声明承担；页面文件不直接使用系统灰、系统状态色或圆角数值。规则、例外与源码门禁见 [`design-system.md`](design-system.md)。
+
 ## 当前专题
 
 ### 产品与架构
 
 - [`project-overview.md`](project-overview.md)：唯一当前产品契约、用户流程、边界和产品验收定义。
+- [`brand.md`](brand.md)：名称、定位、标语、应用图标母版，以及明确标注为未实现的健康助手方向。
 - [`architecture.md`](architecture.md)：target 图、运行时组装、跨层调用和并发边界。
 - [`architecture-review-2026-09-08.md`](architecture-review-2026-09-08.md)：公开 main 的完整设计/架构审查、已核实问题、最小改进与外部实践依据。
 - [`domain-and-data-model.md`](domain-and-data-model.md)：领域对象、状态机、来源和去重语义。

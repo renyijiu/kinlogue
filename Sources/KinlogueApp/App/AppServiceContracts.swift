@@ -76,10 +76,13 @@ struct DraftSummary: Identifiable, Equatable, Sendable {
     let revision: UInt64
     let failureCode: ImportFailureCode?
     let canRetryRecovery: Bool
+    /// The first original's file name, which tells waiting drafts apart.
+    let displayName: String?
 
     init(draft: LibraryDraftSummary, canRetryRecovery: Bool = false) {
         id = draft.id; state = draft.state; revision = draft.revision
         failureCode = draft.failureCode; self.canRetryRecovery = canRetryRecovery
+        displayName = draft.displayName
     }
 
     init(draft: ImportDraft, canRetryRecovery: Bool = false) {
@@ -88,6 +91,7 @@ struct DraftSummary: Identifiable, Equatable, Sendable {
         revision = draft.revision
         failureCode = draft.failureCode
         self.canRetryRecovery = canRetryRecovery
+        displayName = draft.sources.first.displayName
     }
 }
 
@@ -162,6 +166,12 @@ enum AppTimelineEntry: Identifiable, Equatable, Sendable {
     }
 }
 
+enum AppTimelineFilter: Hashable, CaseIterable, Sendable {
+    case all
+    case reports
+    case imaging
+}
+
 struct AppTimelineSection: Equatable, Sendable {
     let group: TimelineDateGroup
     let entries: [AppTimelineEntry]
@@ -217,7 +227,7 @@ struct AppDraftPage: Sendable {
 
 enum DICOMStudyDestination: Equatable, Sendable {
     case review
-    case library
+    case timeline
 }
 
 struct DICOMAppImportOutcome: Equatable, Sendable {

@@ -160,7 +160,8 @@ package actor SQLiteReportRepository: ImportDraftStore {
                     guard let status = ImportState(rawValue: row["state"]) else { throw SQLiteLibraryError.damaged }
                     let failure: String? = row["failure_code"]
                     items.append(LibraryDraftSummary(id: id, state: status, revision: UInt64(row["revision"] as Int64),
-                        memberID: try SQLiteReportRows.optionalUUID(row, "member_id"), failureCode: failure.flatMap(ImportFailureCode.init(rawValue:)), sourceCount: row["source_count"]))
+                        memberID: try SQLiteReportRows.optionalUUID(row, "member_id"), failureCode: failure.flatMap(ImportFailureCode.init(rawValue:)), sourceCount: row["source_count"],
+                        displayName: try SQLiteReportRows.firstSourceName(draftID: id, db)))
                 } catch { damaged.append(id) }
             }
             let next = try rows.count > limit ? rows.prefix(limit).last.map { row in

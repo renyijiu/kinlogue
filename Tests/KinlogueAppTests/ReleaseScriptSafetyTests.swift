@@ -459,10 +459,10 @@ struct ReleaseScriptSafetyTests {
             withIntermediateDirectories: true
         )
         let reviewedScreenshot = documentationAssets
-            .appendingPathComponent("kinlogue-overview.jpg")
+            .appendingPathComponent("kinlogue-overview-2026-10.jpg")
         try fileManager.copyItem(
             at: repositoryURL.appendingPathComponent(
-                "docs/assets/kinlogue-overview.jpg"
+                "docs/assets/kinlogue-overview-2026-10.jpg"
             ),
             to: reviewedScreenshot
         )
@@ -475,6 +475,21 @@ struct ReleaseScriptSafetyTests {
         #expect(tampered.status != 0)
         #expect(tampered.output.contains("checked-in report-like PDF or image"))
         try fileManager.removeItem(at: reviewedScreenshot)
+
+        // The retired preview path stays approved for history only: even the
+        // currently reviewed image is rejected there in the working tree.
+        let retiredScreenshot = documentationAssets
+            .appendingPathComponent("kinlogue-overview.jpg")
+        try fileManager.copyItem(
+            at: repositoryURL.appendingPathComponent(
+                "docs/assets/kinlogue-overview-2026-10.jpg"
+            ),
+            to: retiredScreenshot
+        )
+        let retired = try run(script, [], environment: environment)
+        #expect(retired.status != 0)
+        #expect(retired.output.contains("checked-in report-like PDF or image"))
+        try fileManager.removeItem(at: retiredScreenshot)
 
         let packaging = root.appendingPathComponent("packaging")
         try fileManager.createDirectory(at: packaging, withIntermediateDirectories: true)
@@ -523,7 +538,7 @@ struct ReleaseScriptSafetyTests {
 
     @Test
     func privacyHistoryGuardRejectsUnapprovedMediaAtAllowedPathAfterRestore() throws {
-        for mediaPath in ["packaging/AppIcon.png", "docs/assets/kinlogue-overview.jpg"] {
+        for mediaPath in ["packaging/AppIcon.png", "docs/assets/kinlogue-overview-2026-10.jpg"] {
             try assertPrivacyHistoryRejectsRestoredMedia(at: mediaPath)
         }
     }
@@ -562,6 +577,57 @@ struct ReleaseScriptSafetyTests {
         #expect(historical.status != 0)
         #expect(historical.output.contains("unapproved repository media"))
         #expect(!historical.output.contains(mediaPath))
+    }
+
+    @Test
+    func privacyHistoryGuardAcceptsEveryReviewedDigestOfAReplacedAsset() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("kinlogue-privacy-history-replaced-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: root) }
+
+        try makeMinimalPrivacyHistoryRepository(at: root)
+        let mediaPath = "packaging/AppIcon.png"
+        let icon = root.appendingPathComponent(mediaPath)
+        try fileManager.createDirectory(
+            at: icon.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        let previousPNG = try #require(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        ))
+        let previousDigest = "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
+        try previousPNG.write(to: icon, options: .atomic)
+        #expect(try git(["add", mediaPath], in: root).status == 0)
+        #expect(try git(["commit", "-m", "Add previous application icon"], in: root).status == 0)
+        try Data(contentsOf: repositoryURL.appendingPathComponent(mediaPath))
+            .write(to: icon, options: .atomic)
+        #expect(try git(["add", mediaPath], in: root).status == 0)
+        #expect(try git(["commit", "-m", "Replace application icon"], in: root).status == 0)
+
+        let script = root.appendingPathComponent("scripts/privacy-history-guard.sh")
+        let unreviewed = try run(script, ["--ref", "HEAD"])
+        #expect(unreviewed.status != 0)
+        #expect(unreviewed.output.contains("unapproved repository media"))
+
+        let manifestURL = root.appendingPathComponent("scripts/privacy-history-media-digests.txt")
+        let manifest = try contents("scripts/privacy-history-media-digests.txt")
+        try (manifest + "\(previousDigest)  \(mediaPath)\n").write(
+            to: manifestURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        let reviewed = try run(script, ["--ref", "HEAD"])
+        #expect(reviewed.status == 0)
+        #expect(reviewed.output.contains("Privacy history guard passed"))
+
+        try (manifest + "\(previousDigest)  packaging/Kinlogue.iconset/icon_16x16.png\n").write(
+            to: manifestURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        let reviewedForAnotherPath = try run(script, ["--ref", "HEAD"])
+        #expect(reviewedForAnotherPath.status != 0)
+        #expect(reviewedForAnotherPath.output.contains("unapproved repository media"))
     }
 
     @Test
@@ -639,7 +705,7 @@ struct ReleaseScriptSafetyTests {
             ["--ref", "HEAD"]
         )
         #expect(duplicate.status != 0)
-        #expect(duplicate.output.contains("duplicate path"))
+        #expect(duplicate.output.contains("duplicate entry"))
 
         try (manifest + String(repeating: "0", count: 64)
             + "  packaging/Unexpected.png\n").write(
@@ -654,8 +720,11 @@ struct ReleaseScriptSafetyTests {
         #expect(unexpected.status != 0)
         #expect(unexpected.output.contains("unexpected path"))
 
-        let incomplete = manifest.split(separator: "\n").dropLast().joined(separator: "\n")
-            + "\n"
+        let manifestLines = manifest.split(separator: "\n")
+        let droppedPath = try #require(manifestLines.last?.split(separator: " ").last)
+        let incomplete = manifestLines
+            .filter { !$0.hasSuffix("  " + droppedPath) }
+            .joined(separator: "\n") + "\n"
         try incomplete.write(to: manifestURL, atomically: true, encoding: .utf8)
         let incompleteResult = try run(
             root.appendingPathComponent("scripts/privacy-history-guard.sh"),

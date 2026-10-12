@@ -14,21 +14,22 @@ struct ComparisonSelectionBar: View {
                     .foregroundStyle(KinlogueTheme.primary)
                     .accessibilityLabel(AppLocalization.string("比较选择，已选择 \(model.selectionCountText)"))
                 if let error = model.errorMessage {
-                    Text(error)
+                    KinlogueStatusLabel(error, tone: .danger)
                         .font(.subheadline)
-                        .foregroundStyle(.red)
                 }
                 Spacer()
                 Button(AppLocalization.string("清空")) { model.clearSelection() }
+                    .buttonStyle(.kinlogueSecondary)
                     .disabled(model.selectedRecordIDs.isEmpty)
                 Button(AppLocalization.string("取消")) { model.cancelSelection() }
+                    .buttonStyle(.kinlogueSecondary)
                 Button(AppLocalization.string("比较"), action: onCompare)
                     .buttonStyle(.kinloguePrimary)
                     .disabled(!model.canCompare)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(KinlogueTheme.primary.opacity(0.09))
+            .background(KinlogueTheme.selection)
             .onChange(of: model.announcement) {
                 guard !model.announcement.isEmpty else { return }
                 announce(model.announcement)
@@ -79,10 +80,11 @@ struct ComparisonView: View {
                     Text(AppLocalization.string("并排查看历史原件"))
                         .font(.title2.weight(.semibold))
                     Text(AppLocalization.string("仅展示确认过的原文，不生成趋势、判断或建议。"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KinlogueTheme.onVariant)
                 }
                 Spacer()
                 Button(AppLocalization.string("关闭")) { model.closeComparison() }
+                    .buttonStyle(.kinlogueSecondary)
                     .keyboardShortcut(.cancelAction)
             }
             .padding(20)
@@ -119,7 +121,7 @@ struct ComparisonView: View {
             }
         }
         .frame(minWidth: 1080, minHeight: 720)
-        .background(KinlogueTheme.surface)
+        .kinlogueSheetCanvas()
         .onDisappear {
             if model.isPresented { model.closeComparison() }
         }
@@ -150,7 +152,7 @@ private struct ComparisonColumn: View {
                         Text(pane.timelineDate.map {
                             ReportDateSemantics.formatted($0, style: .medium)
                         } ?? AppLocalization.string("日期未知"))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(KinlogueTheme.onVariant)
                     }
                     Text(pane.title ?? AppLocalization.string("健康记录"))
                         .font(.title3.weight(.semibold))
@@ -199,7 +201,7 @@ private struct ComparisonColumn: View {
     private var conclusionText: some View {
         switch pane.conclusion {
         case .verbatim(let value): Text(value)
-        case .notProvided: Text(AppLocalization.string("原报告未提供结论")).foregroundStyle(.secondary)
+        case .notProvided: Text(AppLocalization.string("原报告未提供结论")).foregroundStyle(KinlogueTheme.onVariant)
         }
     }
 }

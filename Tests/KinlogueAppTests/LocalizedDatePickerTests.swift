@@ -41,6 +41,12 @@ struct LocalizedDatePickerTests {
         #expect(picker.datePickerStyle == .clockAndCalendar)
         #expect(picker.datePickerElements == [.yearMonthDay])
         #expect(!picker.presentsCalendarOverlay)
+        // The popover frames the calendar: no inner well and no
+        // system-accent focus ring around the only control.
+        #expect(!picker.isBezeled)
+        #expect(!picker.isBordered)
+        #expect(!picker.drawsBackground)
+        #expect(picker.focusRingType == .none)
         #expect(picker.isEnabled)
         #expect(picker.accessibilityLabel() == "manual date")
     }
@@ -97,7 +103,7 @@ struct LocalizedDatePickerTests {
     func productionDateLabelsDoNotFallBackToSwiftUIOrSystemLocale() throws {
         let viewNames = [
             "ComparisonView.swift",
-            "DICOMLibraryView.swift",
+            "DICOMStudyDetailView.swift",
             "DICOMStudyViewer.swift",
             "ImportReviewView.swift",
             "RecordDetailView.swift",

@@ -41,6 +41,7 @@ struct LocalizedDatePicker: View {
                 )
                 .fixedSize()
                 .padding(12)
+                .kinlogueAppearance()
             }
         }
     }
@@ -126,6 +127,13 @@ enum LocalizedDatePickerConfiguration {
         picker.datePickerStyle = .clockAndCalendar
         picker.datePickerElements = [.yearMonthDay]
         picker.presentsCalendarOverlay = false
+        // The calendar is the popover's only control, so the popover is its
+        // frame: no inner well, and no system-accent focus ring around it.
+        // The highlighted day remains the keyboard focus indicator.
+        picker.isBezeled = false
+        picker.isBordered = false
+        picker.drawsBackground = false
+        picker.focusRingType = .none
         picker.locale = locale
         picker.calendar = localizedCalendar
         picker.timeZone = localizedCalendar.timeZone

@@ -894,7 +894,7 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
         let study = try await studies.details(result.studyID).study
         return DICOMAppImportOutcome(
             studyID: result.studyID,
-            destination: study.state == .needsReview ? .review : .library,
+            destination: study.state == .needsReview ? .review : .timeline,
             wasExisting: result.wasExisting,
             viewableInstanceCount: result.viewableInstanceCount,
             inertObjectCount: result.inertObjectCount,

@@ -23,6 +23,10 @@ APP_BUNDLE="$DIST_DIRECTORY/Kinlogue.app"
 ICONSET_DIRECTORY="$REPO_DIR/packaging/Kinlogue.iconset"
 ICON_GENERATOR="$REPO_DIR/scripts/generate-icns.swift"
 APP_ICON="$APP_BUNDLE/Contents/Resources/Kinlogue.icns"
+ASSET_CATALOG="$REPO_DIR/packaging/Assets.xcassets"
+ASSET_COMPILE_DIRECTORY="$REPO_DIR/.build/asset-catalog"
+APP_ASSET_ARCHIVE="$APP_BUNDLE/Contents/Resources/Assets.car"
+ACCENT_COLOR_NAME="AccentColor"
 APP_RESOURCE_BUNDLE_NAME="Kinlogue_KinlogueApp.bundle"
 PLATFORM_RESOURCE_BUNDLE_NAME="Kinlogue_KinloguePlatform.bundle"
 ZIP_FOUNDATION_RESOURCE_BUNDLE_NAME="ZIPFoundation_ZIPFoundation.bundle"
@@ -78,6 +82,11 @@ for helper_source in \
   [[ -f "$helper_source" && ! -L "$helper_source" && -s "$helper_source" ]] \
     || fail "a DICOM Helper packaging source is missing, linked, or empty"
 done
+[[ -d "$ASSET_CATALOG" && ! -L "$ASSET_CATALOG" \
+    && -f "$ASSET_CATALOG/$ACCENT_COLOR_NAME.colorset/Contents.json" \
+    && -s "$ASSET_CATALOG/$ACCENT_COLOR_NAME.colorset/Contents.json" \
+    && -z "$(/usr/bin/find "$ASSET_CATALOG" -type l -print -quit)" ]] \
+  || fail "the accent color asset catalog is missing, linked, or incomplete"
 export DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"
 SDKROOT_INPUT="$($XCRUN_EXECUTABLE --sdk macosx --show-sdk-path)" \
   || fail "the selected Xcode SDK could not be resolved"
@@ -105,6 +114,7 @@ if [[ -n "$ISOLATED_SWIFTPM_ROOT" ]]; then
   DICOM_XCODE_DERIVED_DATA="$ISOLATED_SWIFTPM_ROOT/dicom-xcode-derived"
   DICOM_XCODE_PACKAGE_CACHE="$ISOLATED_SWIFTPM_ROOT/dicom-xcode-packages"
   MAIN_LINK_MAP="$ISOLATED_SWIFTPM_ROOT/Kinlogue-main-LinkMap.txt"
+  ASSET_COMPILE_DIRECTORY="$ISOLATED_SWIFTPM_ROOT/asset-catalog"
   SWIFTPM_RESOLVED_ARGUMENTS=(
     --scratch-path "$SWIFTPM_SCRATCH_DIR"
     --disable-dependency-cache
@@ -267,6 +277,33 @@ done
 /bin/cp -- \
   "$THIRD_PARTY_NOTICE_SOURCE" \
   "$APP_BUNDLE/Contents/Resources/$THIRD_PARTY_NOTICE_NAME"
+
+# The compiled accent color makes native focus rings, text selection and the
+# date picker follow the Warm Sanctuary primary instead of the system blue.
+# AppKit only reads it from Assets.car in the main bundle's Resources.
+[[ ! -L "$ASSET_COMPILE_DIRECTORY" ]] \
+  || fail "the asset catalog build directory must not be a symbolic link"
+/bin/mkdir -p "$ASSET_COMPILE_DIRECTORY"
+ASSET_COMPILED_ARCHIVE="$ASSET_COMPILE_DIRECTORY/Assets.car"
+ASSET_PARTIAL_INFO="$ASSET_COMPILE_DIRECTORY/partial-info.plist"
+/bin/rm -f -- "$ASSET_COMPILED_ARCHIVE" "$ASSET_PARTIAL_INFO"
+"$XCRUN_EXECUTABLE" actool "$ASSET_CATALOG" \
+  --compile "$ASSET_COMPILE_DIRECTORY" \
+  --platform macosx \
+  --minimum-deployment-target "$(/usr/bin/plutil -extract LSMinimumSystemVersion \
+    raw -expect string "$APP_BUNDLE/Contents/Info.plist")" \
+  --accent-color "$ACCENT_COLOR_NAME" \
+  --output-partial-info-plist "$ASSET_PARTIAL_INFO" \
+  --errors --warnings >/dev/null \
+  || fail "the accent color asset catalog could not be compiled"
+[[ -f "$ASSET_COMPILED_ARCHIVE" && ! -L "$ASSET_COMPILED_ARCHIVE" \
+    && -s "$ASSET_COMPILED_ARCHIVE" \
+    && "$(/usr/bin/plutil -extract NSAccentColorName raw -expect string \
+      "$ASSET_PARTIAL_INFO")" == "$ACCENT_COLOR_NAME" \
+    && "$(/usr/bin/plutil -extract NSAccentColorName raw -expect string \
+      "$APP_BUNDLE/Contents/Info.plist")" == "$ACCENT_COLOR_NAME" ]] \
+  || fail "the compiled accent color does not match the name declared in Info.plist"
+/bin/cp -- "$ASSET_COMPILED_ARCHIVE" "$APP_ASSET_ARCHIVE"
 
 DICOM_HELPER_BUNDLE="$APP_BUNDLE/Contents/XPCServices/$DICOM_HELPER_BUNDLE_NAME"
 /usr/bin/ditto "$DICOM_HELPER_BUILD_PRODUCT" "$DICOM_HELPER_BUNDLE"

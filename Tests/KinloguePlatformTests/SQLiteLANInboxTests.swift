@@ -44,6 +44,62 @@ func sqliteLANUploadPreprocessArchiveReopenKeepsOriginalAndReview() async throws
     #expect(try await next.loadDocument(draftID: id).reviewState?.title == "Synthetic report")
 }
 
+@Test
+func sqliteDraftPagesNameAWaitingDraftAfterItsFirstOriginal() async throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let kernel = try SQLiteLibraryStore(rootURL: root)
+    defer { try? kernel.close() }
+    let reports = SQLiteReportRepository(store: kernel)
+    let member = try FamilyMember(displayName: "Synthetic LAN member")
+    try await reports.saveMember(member, replacing: nil)
+    let inbox = try SQLiteLANInboxStore(store: kernel)
+    _ = try await inbox.initialize()
+    let session = UUID()
+    try await sqliteLANUpload(try sqliteLANImage(red: 120), session: session, inbox: inbox)
+    let item = try #require(try await inbox.loadSnapshot().items.first)
+    let coordinator = LANReportArchiveCoordinator(inbox: inbox,
+        preprocessor: LANItemPreprocessor(inbox: inbox, textExtractor: SQLiteLANTextExtractor()))
+    guard case let .accepted(named) = try await coordinator.archive(itemIDs: [item.id], memberID: member.id,
+        canonicalReportDate: Date(timeIntervalSince1970: 1_786_000_000), activeSessionID: session) else {
+        Issue.record("Expected a draft"); return
+    }
+    // A file staged from this Mac carries no name.
+    let bytes = Data("synthetic unnamed draft".utf8)
+    guard case .created(let unnamed) = try await reports.stage(ValidatedImportedFile(data: bytes, kind: .image,
+        contentTypeIdentifier: "public.png", sha256Digest: ContentDigest.sha256(bytes))) else {
+        Issue.record("Expected a staged draft"); return
+    }
+    let states = [ImportState.needsReview, .staging]
+
+    let page = try await reports.draftPage(states: states, limit: 100, cursor: nil)
+    #expect(page.damagedIDs.isEmpty)
+    #expect(page.items.first { $0.id == named }?.displayName == "synthetic.png")
+    #expect(page.items.contains { $0.id == unnamed && $0.displayName == nil })
+    #expect(try await reports.drafts().items.first { $0.id == named }?.displayName == "synthetic.png")
+
+    // A valid name too long for a list row is left out; the draft stays listed.
+    try kernel.write { db in
+        let row = try #require(try SQLiteRows.fetchOne(db,
+            sql: "SELECT * FROM report_sources WHERE draft_id = ? AND position = 0", arguments: [named.sqliteBytes]))
+        try SQLiteReportRows.put(db, table: "report_sources", columns: SQLiteReportRows.sourceColumns,
+            values: SQLiteReportRows.sourceColumns.map { column in
+                column == "display_name" ? String(repeating: "n", count: 1_025).databaseValue : row[column] as DatabaseValue
+            })
+    }
+    let long = try await reports.draftPage(states: states, limit: 100, cursor: nil)
+    #expect(long.damagedIDs.isEmpty)
+    #expect(long.items.contains { $0.id == named && $0.displayName == nil })
+
+    // A source row that no longer matches its hash marks only its own draft as damaged.
+    try kernel.write { db in
+        try db.execute(sql: "UPDATE report_sources SET display_name = 'tampered.png' WHERE draft_id = ?", arguments: [named.sqliteBytes])
+    }
+    let tampered = try await reports.draftPage(states: states, limit: 100, cursor: nil)
+    #expect(tampered.damagedIDs == [named])
+    #expect(tampered.items.map(\.id) == [unnamed])
+}
+
 private func sqliteLANUpload(_ data: Data, session: UUID = UUID(), remoteID: UUID = UUID(), inbox: SQLiteLANInboxStore) async throws {
     let metadata = try LANInboxTransportMetadata(displayName: LANInboxDisplayName(rawValue: "synthetic.png"), declaredByteCount: data.count)
     guard case let .sink(sink) = try await inbox.startItemUpload(transport: LANInboxTransportIdentity(sessionID: session, remoteFileID: remoteID), metadata: metadata, attemptRevision: 0) else { return }

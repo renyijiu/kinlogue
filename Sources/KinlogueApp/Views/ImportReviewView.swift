@@ -1,3 +1,4 @@
+import AppKit
 import KinlogueCore
 import SwiftUI
 
@@ -32,19 +33,27 @@ struct ImportReviewView: View {
                         .font(.title2.weight(.semibold))
                     Text(AppLocalization.string("识别结果只是转录建议，请对照左侧原件确认。"))
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KinlogueTheme.onVariant)
+                    if model.isRecognitionSlow {
+                        SlowRecognitionNotice()
+                    }
                 }
                 Spacer()
                 Button {
                     Task { await model.recognizeAgain() }
                 } label: {
-                    if model.isRecognitionInFlight {
-                        Label(AppLocalization.string("正在重新识别"), systemImage: "viewfinder")
-                    } else {
-                        Label(AppLocalization.string("重新识别并覆盖"), systemImage: "viewfinder")
+                    Group {
+                        if model.isRecognitionInFlight {
+                            Label(AppLocalization.string("正在重新识别"), systemImage: "viewfinder")
+                        } else {
+                            Label(AppLocalization.string("重新识别并覆盖"), systemImage: "viewfinder")
+                        }
                     }
+                    // Sized inside the label so the outlined shape, not just
+                    // the hit area, stays the same width in both states.
+                    .frame(minWidth: 118)
                 }
-                .frame(minWidth: 142)
+                .buttonStyle(.kinlogueSecondary)
                 .disabled(model.isLoading || model.isTerminalActionInFlight || model.isRecognitionInFlight)
                 .help(AppLocalization.string("使用新的本机识别结果覆盖当前字段"))
                 .accessibilityIdentifier("import-review-recognize-again")
@@ -105,7 +114,7 @@ struct ImportReviewView: View {
                                 if !model.dateCandidates.isEmpty {
                                     Text(AppLocalization.string("已识别到 \(model.dateCandidates.count) 个日期，请展开选择；也可以手动选择。"))
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(KinlogueTheme.onVariant)
                                 }
                             case .detected(let selectedID):
                                 SourceCaption(model.dateSourceDescriptions[selectedID])
@@ -116,7 +125,7 @@ struct ImportReviewView: View {
                                 )
                                 Text(AppLocalization.string("此日期由你手动选择，会明确标记为人工录入。"))
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(KinlogueTheme.onVariant)
                             }
 
                             ReviewTextField(
@@ -172,19 +181,20 @@ struct ImportReviewView: View {
                                     }
                                     Text(AppLocalization.string("只保留原报告印出的高低或箭头标记，不会按数值推断。"))
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(KinlogueTheme.onVariant)
                                 }
                             }
 
                             VStack(alignment: .leading, spacing: 7) {
                                 Text(AppLocalization.string("我的备注（可选）")).font(.headline)
                                 TextEditor(text: $model.userNote)
+                                    .scrollContentBackground(.hidden)
                                     .frame(minHeight: 90)
                                     .padding(8)
-                                    .background(KinlogueTheme.card, in: RoundedRectangle(cornerRadius: 10))
+                                    .kinlogueInputFrame()
                                 Text(AppLocalization.string("备注与原文转录分开保存，不进入比较。"))
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(KinlogueTheme.onVariant)
                             }
                         }
                         .padding(22)
@@ -199,26 +209,41 @@ struct ImportReviewView: View {
             HStack {
                 if model.loadFailed {
                     if let error = model.errorMessage {
-                        Text(error).foregroundStyle(.red).accessibilityLabel(AppLocalization.string("错误：\(error)"))
+                        KinlogueStatusLabel(error, tone: .danger)
+                            .accessibilityLabel(AppLocalization.string("错误：\(error)"))
                     }
                     Spacer()
                     Button(AppLocalization.string("关闭")) { model.closeReview() }
+                        .buttonStyle(.kinlogueSecondary)
                         .keyboardShortcut(.cancelAction)
                         .accessibilityIdentifier("import-review-close")
                 } else {
                     Button(AppLocalization.string("放弃导入…"), role: .destructive) { model.requestDiscard() }
+                        .buttonStyle(.kinlogueDestructive)
                         .disabled(model.isLoading || model.isTerminalActionInFlight || model.isRecognitionInFlight)
                         .accessibilityIdentifier("import-review-discard")
                     Spacer()
                     if let error = model.errorMessage {
-                        Text(error).foregroundStyle(.red).accessibilityLabel(AppLocalization.string("错误：\(error)"))
+                        KinlogueStatusLabel(error, tone: .danger)
+                            .accessibilityLabel(AppLocalization.string("错误：\(error)"))
                     }
                     Button(AppLocalization.string("稍后处理")) { Task { await model.deferReview() } }
                         .buttonStyle(.kinlogueSecondary)
                         .disabled(model.isLoading || model.isTerminalActionInFlight || model.isRecognitionInFlight)
                         .accessibilityIdentifier("import-review-defer")
-                    Button(AppLocalization.string("确认并加入时间线")) { Task { await model.confirm() } }
+                    Button(AppLocalization.string("确认并加入时间线")) {
+                        // The shortcut arrives before an input method commits
+                        // its text; confirming then would drop that text.
+                        if NSApp.currentEvent?.type == .keyDown,
+                           TextInputComposition.isActive(in: NSApp.keyWindow?.firstResponder) {
+                            return
+                        }
+                        Task { await model.confirm() }
+                    }
                         .buttonStyle(.kinloguePrimary)
+                        // Return adds a line in the transcription editors, so
+                        // the form is confirmed with Command-Return instead.
+                        .keyboardShortcut(.return, modifiers: .command)
                         .disabled(model.isLoading || model.isTerminalActionInFlight || model.isRecognitionInFlight)
                         .accessibilityIdentifier("import-review-confirm")
                 }
@@ -226,6 +251,7 @@ struct ImportReviewView: View {
             .padding(18)
         }
         .frame(minWidth: 960, minHeight: 680)
+        .kinlogueSheetCanvas()
         .confirmationDialog(
             AppLocalization.string("放弃这份导入？"),
             isPresented: $model.isDiscardConfirmationPresented
@@ -297,8 +323,7 @@ private struct ReviewTextEditor: View {
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: minimumHeight)
                 .padding(8)
-                .background(KinlogueTheme.card, in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(KinlogueTheme.outline))
+                .kinlogueInputFrame()
                 .accessibilityLabel(label)
                 .accessibilityHint(source ?? AppLocalization.string("请对照原件人工核对，可手动填写"))
             SourceCaption(source)
@@ -313,6 +338,6 @@ private struct SourceCaption: View {
     var body: some View {
         Text(value ?? AppLocalization.string("原报告未提供或未识别；可对照原件手动填写，保存后会标记为人工录入"))
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(KinlogueTheme.onVariant)
     }
 }

@@ -7,7 +7,7 @@ export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 SCRIPT_DIR=${0:A:h}
 REPO_DIR=${SCRIPT_DIR:h}
 SYNTHETIC_MARKER="KINLOGUE_FORBIDDEN""_SYNTHETIC_PHI"
-README_SCREENSHOT_SHA256="2b85ecf8cde2eefcb141f8937fe221c8f4ebb56a7ef829c440f250c50fdb4a80"
+README_SCREENSHOT_SHA256="ef3ca38662307fc80a5f6e875d12fd85db8c4388c196571b19a90dae07eae67e"
 FILE_LIST=""
 
 fail() {
@@ -103,7 +103,7 @@ is_allowed_repository_media_asset() {
       |./packaging/Kinlogue.iconset/icon_256x256@2x.png \
       |./packaging/Kinlogue.iconset/icon_512x512.png \
       |./packaging/Kinlogue.iconset/icon_512x512@2x.png) return 0 ;;
-    ./docs/assets/kinlogue-overview.jpg)
+    ./docs/assets/kinlogue-overview-2026-10.jpg)
       [[ "$(/usr/bin/shasum -a 256 -- "$1" | /usr/bin/awk '{ print $1 }')" \
           == "$README_SCREENSHOT_SHA256" ]]
       ;;

@@ -114,7 +114,8 @@ extension SQLiteReportRepository: LibraryReportStoring {
                     try SQLiteReportRows.verify(row, table: "import_drafts", columns: SQLiteReportRows.draftColumns)
                     guard let state = ImportState(rawValue: row["state"]) else { throw LibraryReportError.invalidDocument }
                     let failure: String? = row["failure_code"]
-                    items.append(LibraryDraftSummary(id: id, state: state, revision: UInt64(row["revision"] as Int64), memberID: try SQLiteReportRows.optionalUUID(row, "member_id"), failureCode: failure.flatMap(ImportFailureCode.init(rawValue:)), sourceCount: row["source_count"]))
+                    items.append(LibraryDraftSummary(id: id, state: state, revision: UInt64(row["revision"] as Int64), memberID: try SQLiteReportRows.optionalUUID(row, "member_id"), failureCode: failure.flatMap(ImportFailureCode.init(rawValue:)), sourceCount: row["source_count"],
+                        displayName: try SQLiteReportRows.firstSourceName(draftID: id, db)))
                 } catch let error as DatabaseError { throw error }
                 catch { damaged.append(id) }
             }

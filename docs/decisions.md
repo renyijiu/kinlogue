@@ -19,6 +19,7 @@
 | private-repo ad-hoc candidate | 版本 tag 可在 private GitHub 仓库发布未经 Developer ID 签名或 notarization 的 arm64 ad-hoc Pre-release，只供有仓库读取权限的授权测试者下载；面向公众的分发、Developer ID 和 notarization 均未执行。 | [release workflow](../.github/workflows/release.yml)、[`adhoc-candidate-install.md`](adhoc-candidate-install.md)、验收矩阵 |
 | DICOM exact 包的进程隔离 | DICOM-Swift 1.5.0 只链接进单独签名、无网络 entitlement、无 Vault-root 权限的 XPC Helper；主 App/Core/Platform 不 import/link `DicomCore`，只通过有界 Foundation IPC contract 交换一个只读 descriptor 与最小 DTO。 | [`2026-08-06-001`](plans/2026-08-06-001-feat-dicom-mri-viewer-plan.md) KTD1–KTD2、[`release 边界探针`](sources/2026-08-07-dicom-swift-1.3.3-release-boundary.md)、[1.5.0 依赖核对](sources/dicom-swift-1.5.0-dependency-review-2026-09-16.md) |
 | DICOM 是受限辅助能力 | DICOM 只帮助保存检查原件和查看明确支持的二维灰度 MR；不扩张为诊断、测量、PACS 或通用影像工作站。 | [`dicom.md`](dicom.md)、[`project-overview.md`](project-overview.md) |
+| 已确认影像只经时间线进入 | 已确认检查与报告共用成员时间线和右栏详情，侧边栏不设“医学影像”导航项；“只看影像”由时间线类型筛选承担。数据层隔离不变：影像仍不进入 OCR、搜索或比较。 | 用户 2026-10-11 决策、[`dicom.md`](dicom.md)、[`design-system.md`](design-system.md) |
 | 首发前 current-only | 项目未公开发布，只支持 catalog v3 与 ordering policy v2；开发期 v1/v2 reader/migrator、policy v1 和 predecessor/rollback 路径已删除。除恢复先前由用户明确发起、且已写入有效 durable deletion receipt 的整库删除外，旧开发 Vault、未知版本、未知非空目录和损坏布局继续非破坏性 fail closed；App 不自动迁移、覆盖或删除其字节，用户可在仓库外导出后手工重置。 | 用户 2026-08-12 决策、[`storage.md`](storage.md)、[`dicom.md`](dicom.md) |
 
 ## [2026-09-16] 最低系统调整为 macOS 26
@@ -26,6 +27,29 @@
 以个人自用为主要场景，停止支持 macOS 26 以下版本，避免继续承担旧系统兼容性维护。主 App、DICOM Helper、XPC 验证宿主及构建门禁统一要求 macOS 26.0；不再保留 macOS 14/15 的当前验收义务。依据见 [`Package.swift`](../Package.swift)、[`Info.plist`](../packaging/Info.plist) 和[当前候选证据](acceptance/current-release.md)。
 
 这次调整只改变运行系统下限，不迁移资料库、不改变备份格式，也不表示 macOS 26/27 已完成安装与人工验收。旧系统用户不能运行新构建；若需退回旧构建，仍须先核实资料格式兼容性。历史计划、来源笔记和已绑定工件的验收记录保留原系统范围，当前系统矩阵以候选账本为准。
+
+## [2026-10-11] 品牌定位改为以人为单位、一人管全家
+
+**问题**：产品计划从健康记录整理延伸为健康助手（接入运动数据和模型问答）。需要判断“续页 / Kinlogue”的名称、标语和图标是否仍然适用，以及文档现在应当写到哪一步。
+
+**选择**（用户 2026-10-11 决策）：
+
+- 定位为“个人维度，但可以管理整个家庭”：以人为单位组织资料，一位使用者统一照看全家。这与现有的单一操作员、多家庭成员实现一致。
+- 保留“续页”和“Kinlogue”两个名称；`Kin` 的释义从“家人”改为“自己和家人”。
+- 应用图标沿用“纸页 + 连续的线 + 节点”的意象，改由矢量母版生成，并使用精确的品牌母色。
+- 健康助手只记录为方向。运动数据、模型问答和相应的隐私承诺改写都未实现，不进入当前产品契约。
+
+**未选择的替代方案**：
+
+- 改名。`Kinlogue` 已写入 bundle identifier、Application Support 目录名和 `.kinloguebackup` 扩展名，改名需要迁移；而现有名称在新定位下仍然成立。
+- 去掉纸页、只保留线索的图标。纸页代表“有来源的原件”，是产品区别于一般健康问答应用的地方。
+- 现在就把“健康助手”“有据可问”写成当前标语。这会把未实现的能力写成现状，并与“不提供诊断、趋势判断或治疗建议”的承诺冲突。
+
+**影响的代码/文档**：[`README.md`](../README.md)、[`project-overview.md`](project-overview.md)、新增的 [`brand.md`](brand.md)、[`design-system.md`](design-system.md)、[`index.md`](index.md)；`packaging/AppIcon.svg`、`packaging/AppIcon-small.svg`、`packaging/AppIcon.png`、`packaging/Kinlogue.iconset/` 和 `scripts/render-app-icon.swift`。为了让被替换的图标位图通过历史隐私门禁，`scripts/privacy-history-guard.sh` 改为允许同一路径登记多条已审查摘要，见 [`privacy-and-security.md`](privacy-and-security.md)。App 内文案、`PRIVACY.md`、Info.plist 和本地化资源没有变化。
+
+**迁移/回滚**：不涉及资料库、备份格式、bundle identifier 或用户数据。回滚图标只需恢复旧位图；摘要清单只追加，不需要回退。
+
+**验证门禁**：历史隐私门禁的回归测试、当前树隐私门禁和文档门禁见 [`log.md`](log.md)。图标在 macOS 26/27 的 Dock、Finder 中的实际显示，以及深色或着色外观，尚未人工核对。
 
 ## 已被 supersede 的早期决策
 
@@ -46,6 +70,7 @@
 3. 锁屏、屏保、睡眠、快速用户切换、网络路径变化、退出/唤醒的安装后人工回执。
 4. 真实私有样本 OCR 抽检与键盘/VoiceOver 检查。
 5. 未来是否加入应用层加密、Keychain、可验证明文到加密迁移、备份/恢复或云同步；在决策完成前保持当前边界。
+6. 是否以及如何引入运动数据和模型问答（数据来源、本机或联网、非诊断边界、隐私承诺改写）；在决策完成前，HealthKit、互联网服务、趋势分析和诊断性输出继续属于当前明确不做。待决事项见 [`brand.md`](brand.md)。
 
 ## 决策更新规则
 

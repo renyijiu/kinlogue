@@ -87,7 +87,7 @@ package actor LegacyLibraryQueryAdapter: LibraryReportStoring, LibraryDICOMStori
         let scope = "drafts:" + Set(states.map(\.rawValue)).sorted().joined(separator: ",")
         try validate(cursor, revision: revision, scope: scope, memberID: nil)
         let drafts = catalog.importDrafts.filter { states.contains($0.state) && (cursor == nil || $0.id.uuidString > cursor!.lastID.uuidString) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        let items = drafts.prefix(limit).map { LibraryDraftSummary(id: $0.id, state: $0.state, revision: $0.revision, memberID: $0.memberID, failureCode: $0.failureCode, sourceCount: $0.sources.count) }
+        let items = drafts.prefix(limit).map { LibraryDraftSummary(id: $0.id, state: $0.state, revision: $0.revision, memberID: $0.memberID, failureCode: $0.failureCode, sourceCount: $0.sources.count, displayName: $0.sources.first.displayName) }
         return LibraryDraftPage(revision: revision, items: items, nextCursor: drafts.count > limit ? items.last.map { LibraryQueryCursor(libraryID: revision.libraryID, commitID: revision.commitID, openEpoch: epoch, scope: scope, memberID: nil, lastID: $0.id, lastDate: nil) } : nil)
     }
     package func reviewContent(draftID: UUID) async throws -> LibraryReviewSnapshot {
