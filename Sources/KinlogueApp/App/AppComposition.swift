@@ -14,14 +14,9 @@ struct AppComposition {
     var libraryObserver: AppLibraryObservationCoordinator? = nil
     var integrityCoordinator: AppIntegrityCoordinator? = nil
 
-    static func makeDefault() -> Self {
-        do {
-            return makeDefault(identity: try AppRuntimeIdentity.current())
-        } catch {
-            return makeUnavailable()
-        }
-    }
-
+    /// The JSON composition. The GUI no longer builds it: `AppStartupCoordinator.makeDefault()`
+    /// opens the SQLite library and publishes `makeOpened`. It remains for tests of the JSON
+    /// services, which the installed acceptance phases still use.
     static func makeDefault(identity: AppRuntimeIdentity) -> Self {
         do {
             let services = try LiveAppServiceEnvironment.makeDefault(identity: identity)

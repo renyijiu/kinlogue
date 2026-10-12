@@ -138,6 +138,7 @@ struct KinlogueThemeSourceTests {
             "Sources/KinlogueApp/Views/AppShellView.swift",
             "Sources/KinlogueApp/Views/DICOMStudyViewer.swift",
             "Sources/KinlogueApp/Views/LocalizedDatePicker.swift",
+            "Sources/KinlogueApp/Views/SQLiteAppLaunchView.swift",
         ] {
             #expect(try read(path).contains(".kinlogueAppearance()"), "missing: \(path)")
         }

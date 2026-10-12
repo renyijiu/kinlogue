@@ -37,6 +37,42 @@ struct SQLiteAppStartupTests {
     }
 
     @Test
+    func launchCreatesASQLiteLibraryThatTheNextLaunchReopens() async throws {
+        let fixture = try SQLStartupFixture()
+        defer { fixture.remove() }
+        let root = fixture.identity.sourceVault.rootURL
+        let first = AppStartupCoordinator(identity: fixture.identity)
+        first.acknowledgeStorageDisclosure()
+        #expect(await first.start())
+        let model = try #require(first.composition?.appModel)
+        #expect(model.phase == .ready)
+        #expect(await model.createMember(displayName: "Synthetic launch member", disambiguationLabel: nil))
+        #expect(Set(try FileManager.default.contentsOfDirectory(atPath: root.path)) == ["library.sqlite", "originals"])
+        await first.shutdown()
+
+        let second = AppStartupCoordinator(identity: fixture.identity)
+        second.acknowledgeStorageDisclosure()
+        #expect(await second.start())
+        #expect(second.composition?.appModel.members.map(\.displayName) == ["Synthetic launch member"])
+        await second.shutdown()
+    }
+
+    @Test
+    func launchWithoutARuntimeIdentityReportsTheLibraryAsUnavailable() async {
+        let startup = AppStartupCoordinator(identity: nil)
+        // Nothing is attempted before the storage disclosure is accepted.
+        #expect(!(await startup.start()))
+        #expect(startup.candidateFailure == nil && startup.composition == nil)
+
+        startup.acknowledgeStorageDisclosure()
+        #expect(!(await startup.start()))
+        #expect(startup.candidateFailure == .unavailable)
+        #expect(startup.composition != nil && startup.composition?.appModel.phase != .ready)
+        #expect(startup.seedRestoreService == nil && startup.database == nil)
+        await startup.shutdown()
+    }
+
+    @Test
     func coldReadyReadsNoOriginalBytesAndInspectionAccountsForLaterReads() async throws {
         let fixture = try SQLStartupFixture()
         defer { fixture.remove() }

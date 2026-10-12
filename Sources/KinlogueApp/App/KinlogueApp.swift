@@ -26,23 +26,14 @@ enum KinlogueApp {
 }
 
 private struct KinlogueGUIApp: App {
-    @StateObject private var model: AppModel
-    @StateObject private var deletionModel: VaultDeletionModel
-    @StateObject private var lanInboxModel: LANInboxModel
-    @StateObject private var backupModel: BackupModel
-    @StateObject private var restoreModel: RestoreModel
-    private let startupCoordinator: AppStartupCoordinator
+    /// Owns the library for the whole launch. Models exist only once the storage disclosure is
+    /// accepted and the SQLite library has opened, so the scenes read them from here.
+    @StateObject private var startup: AppStartupCoordinator
     @AppStorage(AppLocalization.languagePreferenceKey)
     private var selectedLanguage = AppLanguage.system
 
     init() {
-        let composition = AppComposition.makeDefault()
-        _model = StateObject(wrappedValue: composition.appModel)
-        _deletionModel = StateObject(wrappedValue: composition.deletionModel)
-        _lanInboxModel = StateObject(wrappedValue: composition.lanInboxModel)
-        _backupModel = StateObject(wrappedValue: composition.backupModel)
-        _restoreModel = StateObject(wrappedValue: composition.restoreModel)
-        startupCoordinator = composition.startupCoordinator
+        _startup = StateObject(wrappedValue: AppStartupCoordinator.makeDefault())
     }
 
     var body: some Scene {
@@ -50,15 +41,7 @@ private struct KinlogueGUIApp: App {
             AppLocalization.string("续页", language: selectedLanguage),
             id: "main"
         ) {
-            AppShellView(
-                model: model,
-                deletionModel: deletionModel,
-                lanInboxModel: lanInboxModel,
-                backupModel: backupModel,
-                restoreModel: restoreModel,
-                startupCoordinator: startupCoordinator,
-                selectedLanguage: $selectedLanguage
-            )
+            SQLiteAppLaunchView(startup: startup, selectedLanguage: $selectedLanguage)
                 .frame(minWidth: 920, minHeight: 620)
                 .environment(\.locale, AppLocalization.locale(for: selectedLanguage))
                 .environment(\.calendar, AppLocalization.calendar(for: selectedLanguage))
@@ -91,7 +74,7 @@ private struct KinlogueGUIApp: App {
             id: DICOMViewerWindowScene.id,
             for: DICOMStudy.ID.self
         ) { $studyID in
-            if let studyID {
+            if let studyID, let model = startup.composition?.appModel {
                 DICOMStudyViewerContainer(
                     model: model.makeDICOMStudyViewerModel(studyID: studyID)
                 )

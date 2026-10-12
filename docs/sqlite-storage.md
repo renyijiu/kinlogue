@@ -1,6 +1,6 @@
 # SQLite 存储内核（开发中）
 
-本分支按 [重构计划](plans/2026-10-10-2322-refactor-sqlite-architecture-plan.md) 增加 Platform 内核；`AppComposition` 仍选择 JSON `PlaintextVault` 和 `PlaintextLANInboxStore`。本页描述已存在的内核、报告/OCR、LAN、规范化 DICOM、逻辑备份/恢复与原件导出数据库链路，不表示生产 App 已切换；LAN 已通过注入的真实 Receiver 和 App service 验证，DICOM 已通过真实 scanner/indexer 与数据库链路验证，生产 composition 仍选 JSON。候选门禁见 [当前验收账本](acceptance/current-release.md)。
+本分支按 [重构计划](plans/2026-10-10-2322-refactor-sqlite-architecture-plan.md) 增加 Platform 内核。正式界面入口从 2026-10-12 起打开 SQLite 资料库：[`KinlogueApp`](../Sources/KinlogueApp/App/KinlogueApp.swift) 只通过 `AppStartupCoordinator.makeDefault()` 和 [启动页](../Sources/KinlogueApp/Views/SQLiteAppLaunchView.swift) 取得资料库，不再构造 JSON `PlaintextVault`。本页描述内核、报告/OCR、LAN、规范化 DICOM、逻辑备份/恢复与原件导出的数据库链路。切换只完成了界面入口：安装验收的各阶段仍运行 JSON 服务，JSON 代码也还没有删除；macOS 26、安装后的 App 和人工门禁未执行，见 [当前验收账本](acceptance/current-release.md)。
 
 ## 连接与单实例
 
@@ -28,9 +28,9 @@ stage、报告/LAN 发布与 DICOM 发布共用原件 stat snapshot：既有完�
 
 pin 固定 descriptor 和文件身份，不在快照捕获时读取全部原件。实际 `withVerifiedDescriptor` 消费前后执行内容与身份验证；pin 释放前阻止物理回收和 owner 关闭。数据库/目录/owner inode 在访问边界复核，根被替换后旧句柄失败关闭。每次成功打开数据库生成新的运行 epoch，跨长 I/O 的目标读取与分页游标绑定该 epoch；即使同一个库、同一提交重新打开，旧请求也被拒绝。
 
-## 候选启动与空闲完整性巡检
+## 启动与空闲完整性巡检
 
-[SQLiteAppStartup](../Sources/KinlogueApp/App/SQLiteAppStartup.swift) 的构造不访问资料库；用户接受明文说明后，才准备可信父目录、取得单实例 owner，依次收敛恢复事务、capture/preflight 和严格删除 receipt，再打开数据库。报告、LAN、DICOM、备份/恢复、导出和删除共用该 owner 与 lifecycle。第二实例被拒后可重试；旧 JSON、未知 schema 或坏数据库保留原件，仅提供持有同一 owner 的备份恢复入口。未知恢复 receipt 不能授权恢复或删除。生产入口尚未选择此候选。
+[SQLiteAppStartup](../Sources/KinlogueApp/App/SQLiteAppStartup.swift) 的构造不访问资料库；用户接受明文说明后，才准备可信父目录、取得单实例 owner，依次收敛恢复事务、capture/preflight 和严格删除 receipt，再打开数据库。报告、LAN、DICOM、备份/恢复、导出和删除共用该 owner 与 lifecycle。第二实例被拒后可重试；旧 JSON、未知 schema 或坏数据库保留原件，仅提供持有同一 owner 的备份恢复入口。未知恢复 receipt 不能授权恢复或删除。界面入口只走这条链路；取不到可信运行时身份时同样得到一个启动协调器，它报告资料库不可用而不解析其他位置。
 
 [完整性巡检](../Sources/KinloguePlatform/Storage/SQLiteLibraryIntegrityScrubber.swift) 在 Ready 后由 [AppIntegrityCoordinator](../Sources/KinlogueApp/App/AppIntegrityCoordinator.swift) 等待空闲两秒再启动。它使用可取消的结构检查、每批 16 个主键、既有严格实体 codec 与单原件流式校验；不创建全库逻辑 spool。前台任务会取消并等待巡检真正结束，并发等待者等待同一任务。完成后的普通读取不重复触发巡检；提交或激活重新使覆盖失效。设置页展示未检查、等待、进度、不完整及完成时间/损坏数量；发生 revision 变化只算未完成，不把旧版本检查冒充当前完整性。
 
@@ -38,7 +38,7 @@ pin 固定 descriptor 和文件身份，不在快照捕获时读取全部原件�
 
 巡检隔离已打开的报告或草稿后，刷新会关闭该项详情、原件、编辑和比较；草稿复核实例同步关闭并释放原件。迟到错误受请求身份和选中 ID 约束，不关闭后来打开的页面；无关良好项仍可读取。真实 SQLite/LAN/Viewer 回归见 [SQLiteIntegrityAppTests](../Tests/KinlogueAppTests/SQLiteIntegrityAppTests.swift)。
 
-[候选验收入口](../Sources/KinlogueApp/App/SQLiteCandidateAcceptanceProbe.swift) 只允许受验收身份和 inode receipt 约束的合成空根，真实 production 身份拒绝该 phase。它覆盖实际候选启动、service 查询、原件 ZIP、删除与 owner 释放；单报告 Debug 实测 Ready 前原件读取为零，不代表近上限、安装 App、OS 冷缓存或所有崩溃恢复路径达标。LAN 初始化现已改用首批 100 项查询；独立规模探针的数据库打开至首批摘要不读取原件，安装 App Ready 仍须单独验收。
+[SQLite 验收入口](../Sources/KinlogueApp/App/SQLiteCandidateAcceptanceProbe.swift)（代码中仍叫 candidate，`run-acceptance.sh` 尚未调用它）只允许受验收身份和 inode receipt 约束的合成空根，真实 production 身份拒绝该 phase。它覆盖实际启动、service 查询、原件 ZIP、删除与 owner 释放；单报告 Debug 实测 Ready 前原件读取为零，不代表近上限、安装 App、OS 冷缓存或所有崩溃恢复路径达标。LAN 初始化现已改用首批 100 项查询；独立规模探针的数据库打开至首批摘要不读取原件，安装 App Ready 仍须单独验收。
 
 ## 报告、OCR 与窄查询
 
@@ -116,4 +116,4 @@ DICOM 导入先登记活动 operation，覆盖扫描、索引和原件间隙；�
 
 [内核测试](../Tests/KinloguePlatformTests/SQLiteLibraryStoreTests.swift) 覆盖配置回读、schema/外键、事务回滚、未知格式、摘要损坏、初始化恢复、staged/live/deleting 与 pin。[真实进程测试](../Tests/KinlogueStorageProcessTests/SQLiteProcessCoordinationTests.swift) 使用生产内核，在第二 owner、SIGKILL 和重开边界验收。
 
-stage/publish 的长字节 I/O 已移出 admission，参数化测试覆盖无关写入继续、同原件竞争、取消清理和重入时 root/row/path 身份变化；这些内核故意阻塞的测试 worker 使用独立 OS Thread，避免占满 Swift cooperative executor。[报告集成测试](../Tests/KinloguePlatformTests/LibraryQueryIntegrationTests.swift) 覆盖复核/确认/编辑、完整字段搜索、有界摘要、损坏隔离、取消、epoch、共享原件与带 pin 删除。[LAN 数据库测试](../Tests/KinloguePlatformTests/SQLiteLANInboxTests.swift) 与真实 Receiver、App service、socket 回压和子进程强退测试已覆盖上传/OCR/归档、scope 时序及恢复。[DICOM 数据库测试](../Tests/KinloguePlatformTests/SQLiteDICOMTests.swift) 覆盖真实导入、去重、损坏隔离、Viewer、取消和资源边界，另有 5 个真实强退交接窗口。U3 仍须在 macOS 26 上取证。[逻辑备份测试](../Tests/KinloguePlatformTests/SQLiteLogicalBackupTests.swift)、[捕获测试](../Tests/KinloguePlatformTests/SQLiteLogicalCaptureTests.swift) 和 [恢复进程测试](../Tests/KinlogueStorageProcessTests/SQLiteLogicalRestoreProcessTests.swift) 已验证冻结格式、真实加密发布、恢复后编辑、取消/空间边界及 19 个 root/capture 故障场景；相关 App service 使用实际共享 owner 链路。App 按需查询和数据库提交观察已通过真实 SQL service 注入测试；生产仍通过临时 JSON 适配器使用同一目的型契约。搜索规模延迟仍未达到门槛；LAN 的 Platform 首批 100 项近上限 p95 为 7.648 ms，真实 service/model 分页回归通过，安装 App 计时仍待验证。近上限、约 9.76 GiB 原件及 20,001 个原件的完整发布/严格恢复已通过独立探针，存储打开至首批摘要与短操作数值门槛通过，口径见 [规模闭环](storage-refactor-measurement-2026-10-11.md#sqlite-完整规模闭环)；App/系统门禁仍待验证；候选启动、恢复/删除、任务排空和巡检已接通并通过真实链路定向回归，全部门禁就绪后再一次切换生产。开发 schema 尚可调整，不提供旧 JSON 或旧实验 SQLite 的自动迁移。当前生产 JSON 的启动全原件校验、整份 catalog 保存与搜索物化仍存在。
+stage/publish 的长字节 I/O 已移出 admission，参数化测试覆盖无关写入继续、同原件竞争、取消清理和重入时 root/row/path 身份变化；这些内核故意阻塞的测试 worker 使用独立 OS Thread，避免占满 Swift cooperative executor。[报告集成测试](../Tests/KinloguePlatformTests/LibraryQueryIntegrationTests.swift) 覆盖复核/确认/编辑、完整字段搜索、有界摘要、损坏隔离、取消、epoch、共享原件与带 pin 删除。[LAN 数据库测试](../Tests/KinloguePlatformTests/SQLiteLANInboxTests.swift) 与真实 Receiver、App service、socket 回压和子进程强退测试已覆盖上传/OCR/归档、scope 时序及恢复。[DICOM 数据库测试](../Tests/KinloguePlatformTests/SQLiteDICOMTests.swift) 覆盖真实导入、去重、损坏隔离、Viewer、取消和资源边界，另有 5 个真实强退交接窗口。U3 仍须在 macOS 26 上取证。[逻辑备份测试](../Tests/KinloguePlatformTests/SQLiteLogicalBackupTests.swift)、[捕获测试](../Tests/KinloguePlatformTests/SQLiteLogicalCaptureTests.swift) 和 [恢复进程测试](../Tests/KinlogueStorageProcessTests/SQLiteLogicalRestoreProcessTests.swift) 已验证冻结格式、真实加密发布、恢复后编辑、取消/空间边界及 19 个 root/capture 故障场景；相关 App service 使用实际共享 owner 链路。App 按需查询和数据库提交观察已通过真实 SQL service 注入测试；界面现在直接使用 SQLite 实现，临时 JSON 适配器只剩 JSON 服务的测试和安装验收阶段在用。搜索在 macOS 27 的近上限探针上低于门槛，见 [搜索复测](storage-search-measurement-2026-10-12.md)；LAN 的 Platform 首批 100 项近上限 p95 为 7.648 ms，真实 service/model 分页回归通过，安装 App 计时仍待验证。近上限、约 9.76 GiB 原件及 20,001 个原件的完整发布/严格恢复已通过独立探针，存储打开至首批摘要与短操作数值门槛通过，口径见 [规模闭环](storage-refactor-measurement-2026-10-11.md#sqlite-完整规模闭环)；App/系统门禁仍待验证；启动、恢复/删除、任务排空和巡检已接通并通过真实链路定向回归。界面入口已切换，macOS 26、安装后的 App 与人工门禁尚未执行，安装验收阶段也还没有改到 SQLite 上。开发 schema 尚可调整，不提供旧 JSON 或旧实验 SQLite 的自动迁移。当前生产 JSON 的启动全原件校验、整份 catalog 保存与搜索物化仍存在。

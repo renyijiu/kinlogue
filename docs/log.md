@@ -1512,3 +1512,13 @@
 - **行为变化**：搜索首页不再提前结束扫描，命中很多的查询首页从约 12 ms 变为约 35 ms。报告缺少搜索行、字节与摘要不符时仍作为损坏项返回。
 - **测试**：新增 9 项声明（预筛键 5 项、Core 的 NUL 结尾词 1 项、缓存有效性 / 结果次序 / 缓存预算 3 项），既有取消测试改为在新的搜索行语句上暂停。主清单 1251 tests / 98 suites；改动后的完整 `scripts/test.sh` 在 macOS 27.0.1 上退出码 0，隔离的 derived XCTest、验收扫描、storage process、DICOM 导入集成和两条 LAN 用例全部通过。传入实际清单的 `scripts/lint.sh`（warnings-as-errors 构建、文档、package graph）、`scripts/privacy-guard.sh` 与 `git diff --check` 通过。
 - **未执行**：macOS 26、安装后的 App 计时、OS 冷缓存、不含字母或数字的搜索词、超过缓存预算的资料库都没有测量。生产 composition 在本条记录时仍选择 JSON。
+
+## [2026-10-12] feat/sqlite | 正式界面入口切换到 SQLite 资料库
+
+- **用户决定与范围**：用户要求在固定提交、合入 main 和解决搜索性能之后切换 selector。本次只切换界面入口：[`KinlogueApp`](../Sources/KinlogueApp/App/KinlogueApp.swift) 持有 `AppStartupCoordinator.makeDefault()`，主窗口以 [`SQLiteAppLaunchView`](../Sources/KinlogueApp/Views/SQLiteAppLaunchView.swift) 为根，影像查看窗口从同一协调器取模型。界面不再构造 JSON composition；`AppComposition` 里解析当前用户身份的无参 JSON 入口已删除，只留给定身份的版本供测试和验收阶段使用。没有改 schema、存储格式或 entitlement。
+- **启动行为**：接受存储说明之前不访问资料库；之后取得单实例 owner、收敛恢复与删除 receipt、打开数据库并发布 composition。取不到可信运行时身份时协调器报告资料库不可用，不解析其他位置。启动页补上共享外观、背景和按钮样式。
+- **对已有资料的影响**：已有的 JSON 资料库不会被转换、清空或写入，启动页显示“资料库格式不受支持或已损坏”，旧格式恢复点也被新 reader 拒绝。这是计划里 current-only 的既定取舍；本分支没有离线转换，已有 JSON 资料只能由切换前的构建读取。
+- **没有随入口一起切换的部分**：`SyntheticAcceptanceRunner` 的 seed、restart、强制终止和 cleanup，以及安装 LAN 探针和 DICOM 安装验收，仍然运行 JSON 服务；`run-acceptance.sh` 没有调用 SQLite 验收入口。因此安装验收目前不覆盖界面实际使用的存储。JSON 生产代码、旧 manifest 路径和临时查询适配器也没有删除。计划中 U7 的这部分和 U10 仍未完成。
+- **测试**：新增三项声明：两次启动之间 SQLite 资料库持久存在且根目录只有 `library.sqlite` 与 `originals`；没有运行时身份时报告不可用且不创建任何东西；源码断言界面入口只经由启动协调器、不引用 JSON composition，并且存储说明先于任何打开动作。既有测试继续覆盖第二实例被拒后重试、坏数据库保留字节并提供同 owner 恢复、旧 JSON 原样保留。用临时测试把存储说明、旧资料库失败页、不可用页和空资料库主界面离屏渲染后目视检查，随后删除该测试。
+- **验证**：macOS 27.0.1 / Xcode 27 上，切换后的完整 `scripts/test.sh` 退出码 0，主清单 1254 tests / 98 suites，隔离的 derived XCTest、验收扫描、storage process、DICOM 导入集成和两条 LAN 用例全部通过。传入实际清单的 `scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。
+- **未执行**：切换后的 App bundle 没有重新构建、安装或运行；界面只做了离屏渲染，没有真实窗口、键盘或 VoiceOver 检查；macOS 26 的 SQLite engine、安装后的 Ready 时间与内存、真实手机和人工 OCR 门禁都没有执行。计划把这些列为切换的前置门禁，本次是在它们缺失的情况下按用户要求完成代码切换，验收账本保持 `not-verified` / `pendingManual`。

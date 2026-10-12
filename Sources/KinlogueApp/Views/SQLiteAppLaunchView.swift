@@ -1,7 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Candidate launch surface; production selects this only after the cutover gates pass.
+/// The main window's root. Nothing touches the library before the storage disclosure is
+/// accepted; after that it shows the opening state, a failure with its recovery actions, or
+/// the app shell on the opened SQLite library.
 struct SQLiteAppLaunchView: View {
     @ObservedObject var startup: AppStartupCoordinator
     @Binding var selectedLanguage: AppLanguage
@@ -24,6 +26,9 @@ struct SQLiteAppLaunchView: View {
                 ProgressView(AppLocalization.string("正在打开资料库…"))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(KinlogueTheme.surface)
+        .kinlogueAppearance()
         .task(id: acknowledged) {
             guard acknowledged else { return }
             startup.acknowledgeStorageDisclosure()
@@ -52,11 +57,16 @@ private struct SQLiteStartupFailureView: View {
         } description: {
             Text(failure.message)
         } actions: {
-            if failure.canRetry { Button(AppLocalization.string("重试")) { Task { await retry() } } }
+            if failure.canRetry {
+                Button(AppLocalization.string("重试")) { Task { await retry() } }
+                    .buttonStyle(.kinloguePrimary)
+            }
             if canRestore && failure != .restartRequired {
                 Button(AppLocalization.string("从数据备份恢复…")) { restore.present() }
+                    .buttonStyle(.kinlogueSecondary)
             }
             Button(AppLocalization.string("退出")) { NSApplication.shared.terminate(nil) }
+                .buttonStyle(.kinlogueSecondary)
         }
         .sheet(isPresented: Binding(get: { restore.isPresented }, set: { if !$0 { Task { await restore.cancel() } } })) {
             RestoreBackupView(model: restore)

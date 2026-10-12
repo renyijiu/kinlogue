@@ -79,6 +79,6 @@ activation 的安装探针按生产事务契约逐 phase 固定终态，不再�
 
 ## SQLite 开发路径
 
-生产 composition 当前仍使用上文 JSON source。本分支已实现 [SQLite logical-v1](sqlite-storage.md#逻辑恢复点与原件导出)：恢复点保存 schema 解耦的领域记录和原件，完整保留 OCR 复核、LAN 历史回执及 DICOM 图。短暂持锁生成的应用自有数据库副本只是内部捕获工件，不进入恢复点。后续合法编辑不使已捕获版本失效；外部容器继续使用既有流式加密、回读、排他发布和 witness。
+界面入口的备份与恢复现在使用 [SQLite logical-v1](sqlite-storage.md#逻辑恢复点与原件导出)，上文的 JSON source 只剩测试在用：恢复点保存 schema 解耦的领域记录和原件，完整保留 OCR 复核、LAN 历史回执及 DICOM 图。短暂持锁生成的应用自有数据库副本只是内部捕获工件，不进入恢复点。后续合法编辑不使已捕获版本失效；外部容器继续使用既有流式加密、回读、排他发布和 witness。
 
 SQLite 恢复在本应用创建的新库中重建并严格验证逻辑记录和原件，整库事务共享单实例 owner；新 reader 明确拒绝旧 JSON checkpoint，不自动迁移或改写。真实 service、冻结 wire 夹具和 19 个 root/capture 故障场景已通过本机定向回归。独立探针已完成近上限、约 9.76 GiB 原件与 20,001 个原件的真实加密发布及严格恢复；三档分别用时 35.393/86.389/15.710 秒和 173.388/293.429/160.168 秒。每档只运行一次完整闭环，不声称 p95。实际条目下界、内存、FD、admission 与验证边界见 [实测记录](storage-refactor-measurement-2026-10-11.md#sqlite-完整规模闭环)；App/系统及 macOS 26 验证仍待完成。

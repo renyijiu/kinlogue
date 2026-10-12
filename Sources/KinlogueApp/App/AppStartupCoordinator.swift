@@ -12,6 +12,9 @@ final class AppStartupCoordinator: ObservableObject {
     @Published var candidateFailure: SQLiteStartupFailure?
     @Published var isOpening = false
     var candidateStartingTask: Task<Bool, Never>?
+    /// True for the coordinator that opens the library for the GUI; false for the one a
+    /// composition uses to order its own services.
+    private let launchesLibrary: Bool
     var identity: AppRuntimeIdentity?
     var disclosureAccepted = false
     var context: SQLiteStartupContext?
@@ -24,10 +27,18 @@ final class AppStartupCoordinator: ObservableObject {
     var openingFailure: (any Error)?
     var shutdownRequested = false
 
-    init(identity: AppRuntimeIdentity) {
+    /// Without an identity the launch still has a coordinator; its start reports the library
+    /// as unavailable instead of resolving any other location.
+    init(identity: AppRuntimeIdentity?) {
         self.identity = identity
+        launchesLibrary = true
         reconcileRestore = { false }; startStorage = { false }; startScheduler = {}
         startProcessing = {}; reconcileLibrary = {}
+    }
+
+    /// The GUI's only way to a library: the SQLite library under the trusted runtime identity.
+    static func makeDefault() -> AppStartupCoordinator {
+        AppStartupCoordinator(identity: try? AppRuntimeIdentity.current())
     }
 
     func publish(_ composition: AppComposition?) { self.composition = composition }
@@ -55,6 +66,7 @@ final class AppStartupCoordinator: ObservableObject {
         startScheduler: @escaping StartScheduler,
         reconcileLibrary: @escaping StartScheduler = {}
     ) {
+        launchesLibrary = false
         self.reconcileRestore = reconcileRestore
         self.startStorage = startStorage
         self.startScheduler = startScheduler
@@ -63,14 +75,14 @@ final class AppStartupCoordinator: ObservableObject {
     }
 
     func reconcile() async {
-        if identity != nil { await composition?.startupCoordinator.reconcile(); return }
+        if launchesLibrary { await composition?.startupCoordinator.reconcile(); return }
         guard case .started = state else { return }
         await reconcileLibrary()
     }
 
     @discardableResult
     func start() async -> Bool {
-        if identity != nil { return await startSQLiteCandidate() }
+        if launchesLibrary { return await startSQLiteCandidate() }
         switch state {
         case .started:
             return true

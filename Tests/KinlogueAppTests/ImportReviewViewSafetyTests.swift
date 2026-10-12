@@ -274,6 +274,31 @@ struct AppShellPresentationSafetyTests {
     }
 
     @Test
+    func guiEntryOpensTheSQLiteLibraryAndNeverBuildsTheJSONComposition() throws {
+        func source(_ path: String) throws -> String {
+            try String(contentsOf: appShellURL.deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent(path), encoding: .utf8)
+        }
+        let entry = try source("App/KinlogueApp.swift")
+        let composition = try source("App/AppComposition.swift")
+        let launch = try source("Views/SQLiteAppLaunchView.swift")
+
+        #expect(entry.contains("AppStartupCoordinator.makeDefault()"))
+        #expect(entry.contains("SQLiteAppLaunchView(startup: startup"))
+        #expect(entry.contains("startup.composition?.appModel"))
+        #expect(!entry.contains("AppComposition"))
+        #expect(!entry.contains("PlaintextVault"))
+        // The JSON composition exists only for an explicit identity, never the user's own library.
+        #expect(!composition.contains("static func makeDefault() -> Self"))
+        #expect(!composition.contains("AppRuntimeIdentity.current()"))
+        // Nothing opens before the disclosure is accepted.
+        let disclosure = try #require(launch.range(of: "StorageDisclosureView { acknowledged = true }"))
+        let start = try #require(launch.range(of: "startup.acknowledgeStorageDisclosure()"))
+        #expect(disclosure.lowerBound < start.lowerBound)
+        #expect(launch.contains("guard acknowledged else { return }"))
+    }
+
+    @Test
     func modalWorkflowsUseStablePresentationOwners() throws {
         let source = try String(contentsOf: appShellURL, encoding: .utf8)
         let backupAndRestore = try String(contentsOf: backupAndRestoreURL, encoding: .utf8)

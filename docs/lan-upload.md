@@ -195,6 +195,6 @@ LAN 预处理现在由 composition 持有的 `AppProcessingCoordinator` 调度�
 
 ## SQLite 开发路径
 
-[SQLite LAN 仓库](sqlite-storage.md#lan-事务与上传归属) 已通过真实 Receiver、App service、HTTP 回压和强退恢复测试；生产 composition 仍为 JSON。数据库路径登记上传文件归属，完成后保留同一 inode；OCR 写入独立表，归档以单事务转移原件引用、创建草稿并写回执。scope 撤销与最终提交串行，实际 descriptor 关闭后释放活动 ownership；停止临时接收不关闭共享库。
+[SQLite LAN 仓库](sqlite-storage.md#lan-事务与上传归属) 已通过真实 Receiver、App service、HTTP 回压和强退恢复测试，界面入口现在使用它；安装 LAN 验收探针仍运行 JSON inbox。数据库路径登记上传文件归属，完成后保留同一 inode；OCR 写入独立表，归档以单事务转移原件引用、创建草稿并写回执。scope 撤销与最终提交串行，实际 descriptor 关闭后释放活动 ownership；停止临时接收不关闭共享库。
 
 新路径保留现有上传、识别和队列预算；所选 OCR 组合先累计 128 MiB 读取上限，LAN source 与报告 OCR 分别限制 32/16 MiB，超限不移除队列原件。最近 5,000 个完成归档命令可幂等重放；终态只绑定相关会话和内容，缺失 transport receipt 不阻止合法归档。SQL 屏幕改为每页最多 100 项，全队列数量和原件内容字节单独聚合；它不读取全部 OCR 或历史回执，也不声称已验证未读内容或精确归属共享数据库物理字节。预览严格查询所选项，初始化与删除不再生成丢弃的全量快照。App processing owner 独立遍历工作页，未显示的项也继续处理；完整扫描后才清理尝试记录。页外选择按每批最多 32 项核对，仍支持超过 32 项批量删除，归档保留原有上限。迟到页面在刷新、修改和整库撤销后不能覆盖当前状态。生产组装尚未切换；近上限 Platform 首批 100 项 p95 为 7.648 ms，实际 App 安装计时尚待完成，见 [规模证据](storage-refactor-measurement-2026-10-11.md#lan-首批-100-项分页复测)。

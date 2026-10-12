@@ -159,4 +159,4 @@ Vision 输出可能随 macOS 版本变化；测试应优先断言 anchor、顺�
 
 ## SQLite 开发链路
 
-[报告/OCR 数据库仓库](sqlite-storage.md#报告ocr-与窄查询) 已实现 `ImportDraftStore` 的处理、复核、确认和丢弃事务。`confirm` / `discard` 不再强制返回 `VaultCatalog`；App 已通过目的型查询接口读取有界 header、草稿页和单项复核；当前临时 JSON adapter 内部仍读取旧快照。SQLite 的完整 `ImportDraftDocument` 与用户 `reviewState` 保存在独立表，复核修改不写新 OCR 文件；原件仍是受 pin 和引用保护的文件。新增[真实数据库测试](../Tests/KinloguePlatformTests/LibraryQueryIntegrationTests.swift) 覆盖该路径，App composition 尚未切换，本文上方 JSON 启动与提交行为仍是生产事实。
+[报告/OCR 数据库仓库](sqlite-storage.md#报告ocr-与窄查询) 已实现 `ImportDraftStore` 的处理、复核、确认和丢弃事务。`confirm` / `discard` 不再强制返回 `VaultCatalog`；App 已通过目的型查询接口读取有界 header、草稿页和单项复核；界面入口使用 SQLite 实现，临时 JSON adapter 只供 JSON 服务的测试和安装验收阶段。SQLite 的完整 `ImportDraftDocument` 与用户 `reviewState` 保存在独立表，复核修改不写新 OCR 文件；原件仍是受 pin 和引用保护的文件。新增[真实数据库测试](../Tests/KinloguePlatformTests/LibraryQueryIntegrationTests.swift) 覆盖该路径，App composition 尚未切换，本文上方 JSON 启动与提交行为仍是生产事实。
