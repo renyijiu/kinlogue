@@ -13,6 +13,7 @@ actor LibraryLifecycleCoordinator {
 
     private enum State {
         case active
+        case revocationRequested
         case revoking
         case revoked
     }
@@ -20,6 +21,7 @@ actor LibraryLifecycleCoordinator {
     private var state: State = .active
     private var hooks: [UUID: RevocationHook] = [:]
     private var activeOperationCount = 0
+    private var integrityActivity: (@Sendable (Bool) async -> Void)?
     private var operationWaiters: [CheckedContinuation<Void, Never>] = []
     private var revocationWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -27,9 +29,16 @@ actor LibraryLifecycleCoordinator {
         guard state == .active else { throw LibraryLifecycleCoordinatorError.revoked }
     }
 
+    func isIdle() -> Bool { state == .active && activeOperationCount == 0 }
+
     func register(id: UUID, hook: @escaping RevocationHook) throws {
         try requireActive()
         hooks[id] = hook
+    }
+
+    func observeIntegrityActivity(_ handler: @escaping @Sendable (Bool) async -> Void) throws {
+        try requireActive()
+        integrityActivity = handler
     }
 
     func withActiveOperation<Result: Sendable>(
@@ -37,8 +46,19 @@ actor LibraryLifecycleCoordinator {
     ) async throws -> Result {
         try requireActive()
         activeOperationCount += 1
-        defer { finishActiveOperation() }
-        return try await operation()
+        await integrityActivity?(true)
+        do {
+            let result = try await operation()
+            await finishActiveOperation()
+            return result
+        } catch {
+            await finishActiveOperation()
+            throw error
+        }
+    }
+
+    func requestRevocation() {
+        if state == .active { state = .revocationRequested }
     }
 
     func revoke() async {
@@ -50,7 +70,7 @@ actor LibraryLifecycleCoordinator {
                 revocationWaiters.append(continuation)
             }
             return
-        case .active:
+        case .active, .revocationRequested:
             state = .revoking
         }
         let callbacks = Array(hooks.values)
@@ -71,13 +91,14 @@ actor LibraryLifecycleCoordinator {
         for waiter in waiters { waiter.resume() }
     }
 
-    private func finishActiveOperation() {
+    private func finishActiveOperation() async {
         precondition(activeOperationCount > 0)
         activeOperationCount -= 1
         guard activeOperationCount == 0 else { return }
         let waiters = operationWaiters
         operationWaiters.removeAll()
         for waiter in waiters { waiter.resume() }
+        if state == .active { await integrityActivity?(false) }
     }
 }
 

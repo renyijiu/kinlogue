@@ -19,7 +19,7 @@ public struct DICOMIndexedObject: Equatable, Sendable {
 }
 
 public struct DICOMIndexedStudyProposal: Equatable, Sendable {
-    public let study: DICOMStudy
+    public let study: DICOMStudyHeader
     public let index: DICOMStudyIndex
     public let objects: [DICOMIndexedObject]
     public let ignoredDuplicateCount: Int
@@ -270,12 +270,10 @@ public struct DICOMStudyIndexer: Sendable {
                 byteCount: $0.attachment.byteCount
             )
         })
-        let indexObjectID = UUID()
-        let study = try DICOMStudy(
+        let study = try DICOMStudyHeader(
             id: studyID,
             state: .needsReview,
             fingerprint: fingerprint,
-            indexObjectID: indexObjectID,
             attachmentIDs: indexedObjects.map(\.attachment.id)
         )
         let index = try DICOMStudyIndex(

@@ -52,6 +52,7 @@ struct BackupCompositionTests {
         let coordinator = AppStartupCoordinator(
             reconcileRestore: { await events.append("restore-reconcile"); return true },
             startStorage: { await events.append("storage-start"); return true },
+            startProcessing: { await events.append("processing-start") },
             startScheduler: { await events.append("scheduler-start") }
         )
 
@@ -60,6 +61,7 @@ struct BackupCompositionTests {
         #expect(await events.values == [
             "restore-reconcile",
             "storage-start",
+            "processing-start",
             "scheduler-start",
         ])
     }

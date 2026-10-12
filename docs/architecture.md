@@ -10,6 +10,7 @@ flowchart LR
   Platform["KinloguePlatform\nfilesystem / OCR / LAN / Apple frameworks"]
   App["KinlogueApp\nSwiftUI + AppKit composition root"]
   NIO["SwiftNIO 2.101.3"]
+  SQLite["GRDB 7.11.1 + system SQLite\nexperimental kernel"]
   Apple["PDFKit / Vision / ImageIO / AppKit"]
   IPC["KinlogueDICOMIPC\nFoundation-only bounded DTO"]
   Helper["KinlogueDICOMDecoderHelper.xpc\nindependent App Sandbox"]
@@ -17,6 +18,7 @@ flowchart LR
   Core --> Platform
   Core --> App
   Platform --> App
+  SQLite --> Platform
   NIO --> Platform
   Apple --> Platform
   IPC --> Platform
@@ -29,7 +31,8 @@ flowchart LR
 | Target | 类型 | 责任 | 依赖 |
 | --- | --- | --- | --- |
 | `KinlogueCore` | internal library target | 领域模型、状态机、import/LAN 协议、DICOM study/index、catalog v3、查询、fingerprint、backup contract/retention 和平台无关验证 | Foundation |
-| `KinloguePlatform` | internal library target | `PlaintextVault`、原子文件、删除、PDF/Image OCR、LAN receiver/inbox、流式原始文件 ZIP、加密 backup container/restore transaction、内嵌手机资源 | `KinlogueCore`、ZIPFoundation `0.9.20`、SwiftNIO `NIOCore/NIOHTTP1/NIOPosix`、CryptoKit 与 Apple frameworks |
+| `KinloguePlatform` | internal library target | `PlaintextVault`、原子文件、删除、PDF/Image OCR、LAN receiver/inbox、流式原始文件 ZIP、加密 backup container/restore transaction、内嵌手机资源 | `KinlogueCore`、GRDB `7.11.1`、`KinlogueSQLiteConfiguration`、ZIPFoundation `0.9.20`、SwiftNIO `NIOCore/NIOHTTP1/NIOPosix`、CryptoKit 与 Apple frameworks |
+| `KinlogueSQLiteConfiguration` | internal C target | SQLite connection 配置与回读的最小 varargs bridge | 系统 sqlite3 |
 | `KinlogueDICOMIPC` | library | Foundation-only、有界 request/response DTO、固定错误码和 descriptor-only NSXPC contract | Foundation |
 | `KinlogueDICOMDecoderHelper` | non-published executable / XPC service | 在独立 sandbox 中把只读 descriptor 有界复制到写入前已 unlink 的匿名临时文件，并只解码受支持的单帧 MR 对象 | `KinlogueDICOMIPC`、exact `DicomCore` 1.5.0 |
 | `KinlogueDICOMTestSupport` / `KinlogueDICOMXPCProbe` | non-published test support | 生成无身份 Explicit VR Little Endian MR fixture，并验证真实 embedded XPC round-trip | Foundation、`KinloguePlatform`（probe） |
@@ -55,7 +58,7 @@ Helper 的 descriptor contract、watchdog、资源打包、slice memory、Viewer
 4. `AppRuntimeIdentity.current()` 从系统 Application Support 和签名 bundle 信息解析生产或隔离验收身份，不接受任意环境变量或用户路径。
 5. 生产 Vault 根目录是 `~/Library/Application Support/Kinlogue/Vault`；验收根目录是 `~/Library/Application Support/Kinlogue/Acceptance/<runID>/SourceVault`。
 6. 环境组装 current-format `PlaintextVault`、`VaultImportDraftStore`、报告 `ImportWorkflow`、`DICOMImportWorkflow`、按 presentation 创建的 `DICOMSliceService`、本机 OCR、`LiveLANInboxService` 和共享生命周期协调器。
-7. `AppComposition` 同时构造 backup configuration store、`LiveBackupService` 和 seed-only restore stack，但不会因构造而创建备份身份；`AppStartupCoordinator` 先收敛 restore receipt，再启动普通存储，最后启动自动备份调度。
+7. `AppComposition` 同时构造 backup configuration store、`LiveBackupService` 和 seed-only restore stack，但不会因构造而创建备份身份；`AppStartupCoordinator` 先收敛 restore receipt，再启动普通存储，存储 Ready 后由 composition 持有的 `AppProcessingCoordinator` 在后台恢复中断的报告 OCR，随后启动自动备份调度；OCR 不再阻塞 Ready。JSON 存储完整校验仍在 Ready 之前。
 
 ### 全部原始文件导出链
 
@@ -171,3 +174,11 @@ sequenceDiagram
 3. View 只负责呈现和用户意图；不要在 View 中读取文件、计算 fingerprint、构造 HTTP 请求或直接修改 catalog。
 4. 任何新持久化字段都要说明 generation、版本拒绝/升级策略、孤儿清理、恢复和隐私影响，并更新 [`storage.md`](storage.md)。
 5. 任何新网络 endpoint 都要先验证 session/authorization，再解析 body 或映射远端 ID；日志只能使用 allowlist 事件码。
+
+## SQLite 重构中的边界
+
+生产 composition 仍组装 JSON Vault/inbox。Platform 新增 [SQLite 内核](sqlite-storage.md)，GRDB 及系统 SQLite 的配置 shim 仅由 Platform 依赖；Core 仍只依赖 Foundation，DICOM Helper 的独立 package 图保持不变。新内核只有一份 lifetime owner，旧 JSON 跨进程 lease 暂时保留至整体切换。
+
+`AppProcessingCoordinator` 由 `AppComposition` 持有并负责启动恢复与 LAN preprocessing 的任务、失败抑制、取消和 drain。`LANInboxModel` 只负责请求和界面观察，替换 presentation 不取消正在进行的处理；失败的自动处理需要明确重试。恢复完成后逐项刷新 App snapshot。`LiveAppService` 将持久化失败绑定到具体恢复 attempt，快照提供内存中的重试资格；Sidebar 继续使用现有本地化重试入口，删除仍限于 durable failed 状态。旧失败不能覆盖新的处理任务。整库恢复/删除通过共享 lifecycle 撤销 owner，拒绝迟到结果。
+
+App 已使用 [目的型查询和提交观察](sqlite-storage.md#app-查询与提交观察)：header、分页、按 ID 详情和比较不再通过 App 常驻全量 catalog；各读取由模型持有并在破坏性生命周期排空。当前 production 仍经临时 JSON adapter 内部读取旧 catalog，[SQLite 候选启动](sqlite-storage.md#候选启动与空闲完整性巡检) 已将一个 owner、数据库和 lifecycle 组装到报告、LAN、DICOM、备份/恢复、导出与删除；默认生产入口仍选 JSON。候选真实 service 测试不能替代最终规模、系统和安装门禁。

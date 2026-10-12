@@ -525,9 +525,10 @@ func malformedDeletionReceiptDoesNotAuthorizeDeletingALegacyVault() async throws
 @Test(arguments: [
     PlaintextVaultTransactionFault.afterObjects,
     .afterManifestCommit,
-])
+], [false, true])
 func interruptedPlaintextCommitReopensAtACompleteGeneration(
-    fault: PlaintextVaultTransactionFault
+    fault: PlaintextVaultTransactionFault,
+    buildingUnderLease: Bool
 ) async throws {
     let root = plaintextVaultTestRoot()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -549,12 +550,14 @@ func interruptedPlaintextCommitReopensAtACompleteGeneration(
         attachments: [attachment]
     )
 
+    let request = try VaultCommitRequest(
+        expectedGeneration: initial.generation,
+        catalog: next,
+        writes: [VaultObjectWrite(reference: reference, plaintext: bytes)]
+    )
     await #expect(throws: VaultError.injectedFailure) {
-        _ = try await vault.commit(try VaultCommitRequest(
-            expectedGeneration: initial.generation,
-            catalog: next,
-            writes: [VaultObjectWrite(reference: reference, plaintext: bytes)]
-        ))
+        if buildingUnderLease { _ = try await vault.commit(updating: { _ in request }) }
+        else { _ = try await vault.commit(request) }
     }
 
     let reopened = try PlaintextVault(rootURL: root)

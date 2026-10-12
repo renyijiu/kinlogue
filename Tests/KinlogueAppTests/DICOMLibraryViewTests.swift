@@ -15,7 +15,7 @@ struct DICOMLibraryViewTests {
             effectiveDate: Date(timeIntervalSinceReferenceDate: 100)
         )
         let model = DICOMLibraryModel()
-        model.update(studies: [study], members: [member])
+        model.update(studies: [study], members: [LibraryMemberSummary(member)])
         let hostingView = NSHostingView(rootView: DICOMLibraryDetailContainer(
             model: model,
             onReview: { _ in },

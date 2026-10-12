@@ -111,7 +111,7 @@ final class VaultProcessLock: @unchecked Sendable {
         }
     }
 
-    private func openValidatedDescriptor(at lockURL: URL) throws -> Int32 {
+    func openValidatedDescriptor(at lockURL: URL) throws -> Int32 {
         let parentURL = lockURL.deletingLastPathComponent()
         let parentDescriptor = Darwin.open(
             parentURL.path,

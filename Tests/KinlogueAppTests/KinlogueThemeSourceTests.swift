@@ -197,7 +197,7 @@ struct KinlogueThemeSourceTests {
     @Test
     func primaryActionsUseTheSharedInteractionStyle() throws {
         let primaryActionPaths = [
-            "Sources/KinlogueApp/Views/AppShellView.swift",
+            "Sources/KinlogueApp/Views/StorageDisclosureView.swift",
             "Sources/KinlogueApp/Views/ComparisonView.swift",
             "Sources/KinlogueApp/Views/ImportReviewView.swift",
             "Sources/KinlogueApp/Views/LANInboxView.swift",
@@ -207,7 +207,7 @@ struct KinlogueThemeSourceTests {
             "Sources/KinlogueApp/Views/TimelineView.swift",
         ]
         let secondaryActionPaths = [
-            "Sources/KinlogueApp/Views/AppShellView.swift",
+            "Sources/KinlogueApp/Views/StorageDisclosureView.swift",
             "Sources/KinlogueApp/Views/ImportReviewView.swift",
             "Sources/KinlogueApp/Views/LANReceiverSheet.swift",
         ]
@@ -219,7 +219,14 @@ struct KinlogueThemeSourceTests {
             #expect(try read(path).contains(".buttonStyle(.kinlogueSecondary)"), "missing: \(path)")
         }
 
-        let sources = try primaryActionPaths.map(read).joined(separator: "\n")
+        let launchPaths = [
+            "Sources/KinlogueApp/Views/AppShellView.swift",
+            "Sources/KinlogueApp/Views/SQLiteAppLaunchView.swift",
+        ]
+        for path in launchPaths {
+            #expect(try read(path).contains("StorageDisclosureView {"), "missing disclosure: \(path)")
+        }
+        let sources = try (primaryActionPaths + launchPaths).map(read).joined(separator: "\n")
         #expect(!sources.contains(".buttonStyle(.borderedProminent)"))
         #expect(!sources.contains(".tint(KinlogueTheme.sage)"))
     }

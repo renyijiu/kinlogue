@@ -107,3 +107,9 @@ ad-hoc 签名适用于本机开发和知情测试者手动安装，但没有 Dev
 - Developer ID、notarization 和任何需要用户接受系统提示的发布动作。
 
 报告状态只使用 `passed`、`pendingManual`、`notExecuted` 和 `blocked`。任何 `passed` 都必须绑定具体 revision、工件和环境，不能从历史低层测试推断当前候选已通过。
+
+## 存储规模探针
+
+[`run-storage-scale-probe.sh`](../scripts/run-storage-scale-probe.sh) 复用非发布 `KinlogueStorageProcessFixture` 的合成数据入口，规模性能不进入主测试清单。`--tier reports-1000 --tier reports-20000 --tier photos-20000` 分别测小库、近对象上限与约 10 GiB 原件；只在受控临时目录生成数据并由脚本清理，执行前预留源库、恢复点和恢复库同时存在的容量。操作采样仍为 7 次，输出 min/median/max，不作为生产 p95 验收。`--tier capacity-20000` 使用完整 20,000 Vault 对象、约 9.77 GiB 原件，再增加 durable inbox blob 与有效派生文档，验证两个旧容量边界及严格恢复；该档不重复操作采样。昂贵的 inbox 增长测量须显式传 `--inbox`。
+
+备份路径的旧“每条目完整目录复核 × 条目数”估算已不适用于修复后实现；探针现执行完整 publication、seed-only prepare、strict activation 和 reconcile，报告实际毫秒数。另输出独立去重 lookup，区分算法成本与 JSON load/commit 成本。样本机、档位、数据形状和实测/估算区别必须随结果记录；不默认运行昂贵的 `--all`。

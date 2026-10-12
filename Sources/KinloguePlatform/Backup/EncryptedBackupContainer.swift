@@ -73,16 +73,28 @@ public struct BackupContainerEntrySource: Sendable {
 public final class BackupContainerOpenedEntrySource: @unchecked Sendable {
     private let reader: @Sendable (UInt64, Int) throws -> Data
     private let closer: @Sendable () -> Void
+    private let onDigestMismatch: @Sendable () -> Void
     private let lock = NSLock()
     private var isClosed = false
 
-    public init(
+    public convenience init(
         read: @escaping @Sendable (UInt64, Int) throws -> Data,
         close: @escaping @Sendable () -> Void = {}
     ) {
+        self.init(read: read, close: close, onDigestMismatch: {})
+    }
+
+    init(
+        read: @escaping @Sendable (UInt64, Int) throws -> Data,
+        close: @escaping @Sendable () -> Void,
+        onDigestMismatch: @escaping @Sendable () -> Void
+    ) {
         reader = read
         closer = close
+        self.onDigestMismatch = onDigestMismatch
     }
+
+    func reportDigestMismatch() { onDigestMismatch() }
 
     public func read(offset: UInt64, maximumByteCount: Int) throws -> Data {
         guard maximumByteCount >= 0,
@@ -190,8 +202,10 @@ public struct EncryptedBackupContainerWriteResult: Sendable {
 
 public struct EncryptedBackupContainerWriter: Sendable {
     private let randomBytes: @Sendable (Int) -> Data
+    private let formatVersion: BackupFormatVersion
 
     public init() {
+        formatVersion = .current
         randomBytes = { count in
             var generator = SystemRandomNumberGenerator()
             return Data((0..<count).map { _ in UInt8.random(in: .min ... .max, using: &generator) })
@@ -199,8 +213,12 @@ public struct EncryptedBackupContainerWriter: Sendable {
     }
 
     /// Test-only seam. It is internal and therefore unavailable to App composition.
-    init(randomBytes: @escaping @Sendable (Int) -> Data) {
+    init(
+        randomBytes: @escaping @Sendable (Int) -> Data,
+        formatVersion: BackupFormatVersion = .current
+    ) {
         self.randomBytes = randomBytes
+        self.formatVersion = formatVersion
     }
 
     public func write(
@@ -214,12 +232,17 @@ public struct EncryptedBackupContainerWriter: Sendable {
         guard sequence >= signer.authorization.sequenceFloor else {
             throw BackupContainerError.trustFailure
         }
+        guard entries.count <= BackupFormatLimits.maximumEntryCount(for: formatVersion) else {
+            throw BackupContainerError.resourceLimit
+        }
         let ordered = entries.sorted { $0.path < $1.path }
         var manifestEntries: [BackupManifestEntry] = []
         manifestEntries.reserveCapacity(ordered.count)
         var nextFrame: UInt64 = 0
         for source in ordered {
-            let frameCount = try Self.frameCount(for: source.plaintextByteCount)
+            let frameCount = try mapContractError {
+                try BackupManifestEntry.requiredFrameCount(for: source.plaintextByteCount)
+            }
             manifestEntries.append(try BackupManifestEntry(
                 kind: source.kind,
                 path: source.path,
@@ -233,7 +256,7 @@ public struct EncryptedBackupContainerWriter: Sendable {
             nextFrame = advanced.partialValue
         }
         let manifest = try mapContractError {
-            try BackupManifest(revisionPair: revisionPair, entries: manifestEntries)
+            try BackupManifest(formatVersion: formatVersion, revisionPair: revisionPair, entries: manifestEntries)
         }
         guard nextFrame <= UInt64(UInt32.max),
               nextFrame <= UInt64(BackupFormatLimits.maximumFrameCount) else {
@@ -244,6 +267,7 @@ public struct EncryptedBackupContainerWriter: Sendable {
         let noncePrefix = checkedRandom(count: 4)
         let dekBytes = checkedRandom(count: 32)
         let prologue = try BackupCheckpointPrologue(
+            formatVersion: formatVersion,
             setID: signer.descriptor.setID,
             checkpointID: checkpointID,
             deviceID: signer.authorization.deviceID,
@@ -293,6 +317,7 @@ public struct EncryptedBackupContainerWriter: Sendable {
 
         let body = ContainerBodyWriter(sink: sink)
         try body.append(ContainerFormat.header(
+            formatVersion: formatVersion,
             frameCount: UInt32(nextFrame),
             manifestPlaintextByteCount: UInt32(manifestBytes.count),
             descriptorByteCount: signer.descriptor.canonicalBytes.count,
@@ -322,7 +347,7 @@ public struct EncryptedBackupContainerWriter: Sendable {
             defer { opened.close() }
             var offset: UInt64 = 0
             var sourceHasher = SHA256()
-            let expectedFrames = try Self.frameCount(for: source.plaintextByteCount)
+            let expectedFrames = try BackupManifestEntry.requiredFrameCount(for: source.plaintextByteCount)
             for _ in 0..<expectedFrames {
                 try Task.checkCancellation()
                 let remaining = source.plaintextByteCount - offset
@@ -377,9 +402,11 @@ public struct EncryptedBackupContainerWriter: Sendable {
             } catch {
                 throw BackupContainerError.sourceIntegrityFailure
             }
-            guard offset == source.plaintextByteCount,
-                  trailing.isEmpty,
-                  Data(sourceHasher.finalize()) == source.plaintextDigest else {
+            guard offset == source.plaintextByteCount, trailing.isEmpty else {
+                throw BackupContainerError.sourceIntegrityFailure
+            }
+            guard Data(sourceHasher.finalize()) == source.plaintextDigest else {
+                opened.reportDigestMismatch()
                 throw BackupContainerError.sourceIntegrityFailure
             }
         }
@@ -407,6 +434,7 @@ public struct EncryptedBackupContainerWriter: Sendable {
         )
 
         let unsignedFooter = try BackupCheckpointFooter(
+            formatVersion: formatVersion,
             descriptorDigest: descriptorDigest,
             authorizationDigest: authorizationDigest,
             prologueDigest: BackupCrypto.digest(prologue.canonicalBytes),
@@ -416,6 +444,7 @@ public struct EncryptedBackupContainerWriter: Sendable {
         )
         let signature = try signer.signature(for: unsignedFooter.signatureTranscript.canonicalBytes)
         let footer = try BackupCheckpointFooter(
+            formatVersion: formatVersion,
             descriptorDigest: descriptorDigest,
             authorizationDigest: authorizationDigest,
             prologueDigest: BackupCrypto.digest(prologue.canonicalBytes),
@@ -467,21 +496,7 @@ public struct EncryptedBackupContainerWriter: Sendable {
         preconditionFailure("Backup random source returned an invalid length")
     }
 
-    private static func frameCount(for byteCount: UInt64) throws -> UInt32 {
-        guard byteCount <= BackupFormatLimits.maximumPlaintextByteCount else {
-            throw BackupContainerError.resourceLimit
-        }
-        if byteCount == 0 { return 1 }
-        let chunk = UInt64(BackupFormatLimits.maximumFramePlaintextByteCount)
-        let adjusted = byteCount.addingReportingOverflow(chunk - 1)
-        guard !adjusted.overflow else { throw BackupContainerError.arithmeticOverflow }
-        let count = adjusted.partialValue / chunk
-        guard count <= UInt64(UInt32.max),
-              count <= UInt64(BackupFormatLimits.maximumFrameCount) else {
-            throw BackupContainerError.resourceLimit
-        }
-        return UInt32(count)
-    }
+
 }
 
 private final class ContainerBodyWriter {
@@ -533,6 +548,7 @@ enum ContainerFormat {
     static let maximumFooterByteCount = 512
 
     static func header(
+        formatVersion: BackupFormatVersion = .current,
         frameCount: UInt32,
         manifestPlaintextByteCount: UInt32,
         descriptorByteCount: Int,
@@ -542,9 +558,9 @@ enum ContainerFormat {
         noncePrefix: Data
     ) -> Data {
         var data = magic
-        append(UInt16(1), to: &data)
-        append(UInt16(0), to: &data)
-        append(UInt16(0), to: &data)
+        append(formatVersion.major, to: &data)
+        append(formatVersion.minor, to: &data)
+        append(formatVersion.minimumReaderMinor, to: &data)
         append(BackupCryptoSuite.v1.rawValue, to: &data)
         append(UInt32(BackupFormatLimits.maximumFramePlaintextByteCount), to: &data)
         append(frameCount, to: &data)
@@ -599,8 +615,14 @@ enum BackupContainerTestInspector {
             let start = Int(offset)
             return Data(data[start..<min(data.count, start + count)])
         }
-        return try BackupContainerParser.parse(source: source).frames.map {
-            Int($0.headerOffset)..<Int($0.tagOffset + UInt64(ContainerFormat.authenticationTagByteCount))
+        let parsed = try BackupContainerParser.parse(source: source)
+        var offset = parsed.framesOffset
+        return try (0..<parsed.header.frameCount).map { index in
+            let layout = try BackupContainerFrameLayout.read(
+                source: source, offset: offset, expectedIndex: UInt64(index)
+            )
+            offset = layout.endOffset
+            return Int(layout.headerOffset)..<Int(layout.endOffset)
         }
     }
 }

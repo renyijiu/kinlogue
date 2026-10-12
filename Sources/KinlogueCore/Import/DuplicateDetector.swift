@@ -12,14 +12,16 @@ public enum DuplicateDetector {
         records: [HealthRecord],
         drafts: [ImportDraft]
     ) -> DuplicateImport? {
+        guard let attachmentsByID = try? ReportFingerprint.validatedAttachmentsByID(attachments) else {
+            return nil
+        }
         let record = records
             .filter { $0.importState == .confirmed }
             .filter { (try? ReportFingerprint(
                 sources: $0.sources,
-                attachments: attachments
+                attachmentsByID: attachmentsByID
             )) == fingerprint }
-            .sorted(by: stableIDPrecedes)
-            .first
+            .min(by: stableIDPrecedes)
         if let record {
             return .record(record.id)
         }
@@ -27,10 +29,9 @@ public enum DuplicateDetector {
             .filter { $0.state == .needsReview }
             .filter { (try? ReportFingerprint(
                 sources: $0.sources,
-                attachments: attachments
+                attachmentsByID: attachmentsByID
             )) == fingerprint }
-            .sorted(by: stableIDPrecedes)
-            .first
+            .min(by: stableIDPrecedes)
         if let draft {
             return .draft(draft.id)
         }

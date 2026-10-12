@@ -1349,3 +1349,39 @@ private final class PartialFixture: @unchecked Sendable {
         }
     }
 }
+
+@Test(arguments: ["initialization", "success", "abort", "deinit"])
+func sqliteLANSinkCloseNotificationFollowsActualCloseExactlyOnce(ending: String) async throws {
+    let fixture = try PartialFixture()
+    defer { fixture.destroy() }
+    let recorder = SinkCloseRecorder()
+    let policy = try LANInboxAdmissionPolicy()
+    let permit = try policy.acquireUploadPermit()
+    let closed: @Sendable () -> Void = { recorder.record(isClosed: fcntl(fixture.descriptor, F_GETFD) == -1 && errno == EBADF) }
+    if ending == "initialization" {
+        #expect(throws: LANInboxError.invalidState) {
+            _ = try LANUploadSink(attemptID: fixture.attemptID, descriptor: fixture.descriptor, declaredByteCount: -1,
+                uploadPermit: permit, cleanup: fixture.cleanup, publish: { _, _ in }, failureInjector: .none, descriptorDidClose: closed)
+        }
+    } else {
+        var sink: LANUploadSink? = try LANUploadSink(attemptID: fixture.attemptID, descriptor: fixture.descriptor, declaredByteCount: 0,
+            uploadPermit: permit, cleanup: fixture.cleanup, publish: { _, _ in #expect(recorder.count == 0) }, failureInjector: .none, descriptorDidClose: closed)
+        if ending == "success" { _ = try await sink!.finish(); _ = try await sink!.finish(); await sink!.cancel() }
+        if ending == "abort" { await sink!.cancel(); await sink!.cancel() }
+        sink = nil
+    }
+    for _ in 0..<200 where recorder.count == 0 { try await Task.sleep(for: .milliseconds(5)) }
+    #expect(recorder.count == 1)
+    #expect(recorder.wasClosed)
+    #expect(policy.currentUsage.activeUploadCount == 0)
+}
+
+// SAFETY: the lock protects observations from the sink's IO thread.
+private final class SinkCloseRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+    private var closed = false
+    var count: Int { lock.withLock { calls } }
+    var wasClosed: Bool { lock.withLock { closed } }
+    func record(isClosed: Bool) { lock.withLock { calls += 1; closed = isClosed } }
+}

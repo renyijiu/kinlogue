@@ -481,6 +481,61 @@ func processingDraftCanBeReacquiredAfterAStoreRestartAndRejectsTheOldLease() asy
     #expect(try await restartedStore.loadDocument(draftID: draftID) == document)
 }
 
+@Test(arguments: [ImportState.processing, .needsReview, .failed], [false, true])
+func processingTransitionRejectsDraftReplacedBeforeCommit(
+    transition: ImportState,
+    deleted: Bool
+) async throws {
+    let root = temporaryImportVaultRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let vault = try PlaintextVault(rootURL: root)
+    _ = try await vault.initialize()
+    let otherStore = VaultImportDraftStore(vault: vault)
+    let bytes = Data("SYNTHETIC-PROCESSING-RACE".utf8)
+    guard case .created(let draftID) = try await otherStore.stage(ValidatedImportedFile(
+        data: bytes, kind: .image, contentTypeIdentifier: "public.png",
+        sha256Digest: ContentDigest.sha256(bytes)
+    )) else { Issue.record("Expected a synthetic draft"); return }
+    let oldLease = try await otherStore.beginProcessing(draftID: draftID, attemptID: UUID())
+    let newerAttemptID = UUID()
+    let racingStore = VaultImportDraftStore(vault: vault, processingWillCommit: { _ in
+        if deleted {
+            _ = try await otherStore.discard(draftID: draftID, expectedRevision: oldLease.revision)
+        } else {
+            _ = try await otherStore.beginProcessing(draftID: draftID, attemptID: newerAttemptID)
+        }
+    })
+    do {
+        switch transition {
+        case .processing:
+            _ = try await racingStore.beginProcessing(draftID: draftID, attemptID: UUID())
+        case .needsReview:
+            try await racingStore.completeProcessing(
+                lease: oldLease,
+                document: ImportDraftDocument(blocks: [], candidates: ReportCandidates())
+            )
+        case .failed:
+            try await racingStore.failProcessing(lease: oldLease, failureCode: .textExtractionFailed)
+        default:
+            Issue.record("Unexpected test transition")
+        }
+        Issue.record("The replaced draft must reject the old transition")
+    } catch {
+        if deleted { #expect(error as? VaultImportDraftStoreError == .draftNotFound) }
+        else { #expect(error as? ImportDraftError == .staleAttempt) }
+    }
+    let catalog = try await vault.loadValidatedCatalog()
+    if deleted {
+        #expect(catalog.importDrafts.isEmpty)
+    } else {
+        let draft = try #require(catalog.importDrafts.first)
+        #expect(draft.state == .processing)
+        #expect(draft.attemptID == newerAttemptID)
+        #expect(draft.revision == oldLease.revision + 1)
+        #expect(draft.documentObjectID == nil)
+    }
+}
+
 @Test
 func failedDraftIsNotAutomaticallyResumedButExplicitRetryStillProcessesIt() async throws {
     let root = temporaryImportVaultRoot()

@@ -67,12 +67,16 @@ private actor LANInboxChangeObservationService: LANInboxServicing {
                 pendingUploadCount: 0,
                 pendingByteCount: 0,
                 metadataByteCount: 0
-            )
+            ),
+            openEpoch: UUID()
         )
     }
 
     func recordChange() { generation &+= 1 }
     func endReceivingExternally() { receiving = false }
+    func loadItems(ids: [UUID]) async throws -> [LANInboxItem] { [] }
+    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxScreenSnapshot { screen }
+    func processingPage(cursor: LANInboxPageCursor?) async throws -> LANInboxPage { screen.page }
     func initialize() async throws -> LANInboxScreenSnapshot { screen }
     func refresh() async throws -> LANInboxScreenSnapshot {
         refreshCallCount += 1
@@ -96,10 +100,11 @@ private actor LANInboxChangeObservationService: LANInboxServicing {
     func stopReceiving() async { receiving = false }
     func isReceiving() async -> Bool { receiving }
     func changeGeneration() async -> UInt64 { generation }
-    func preprocess(itemID: LANInboxItem.ID) async throws {}
+    func preprocess(itemID: LANInboxItem.ID, expectedRevision: UInt64? = nil) async throws {}
     func delete(itemID: LANInboxItem.ID, expectedRevision: UInt64) async throws {}
     func archive(
         itemIDs: [LANInboxItem.ID],
+        expectedRevisions: [UInt64]?,
         memberID: FamilyMember.ID,
         canonicalReportDate: Date
     ) async throws -> LANReportArchiveResult {

@@ -36,10 +36,16 @@ public enum LANArchivePreparationOutcome: Equatable, Sendable {
 }
 
 public struct LANInboxSnapshotAndStorageSummary: Sendable {
+    public let damagedItemIDs: [UUID]
+    public let damagedReceiptIDs: [UUID]
+    public let damagedTerminalIDs: [UUID]
+    public let damagedUploadIDs: [UUID]
     public let snapshot: LANInboxSnapshot
     public let storage: LANInboxStorageSummary
 
-    public init(snapshot: LANInboxSnapshot, storage: LANInboxStorageSummary) {
+    public init(snapshot: LANInboxSnapshot, storage: LANInboxStorageSummary,
+                damagedItemIDs: [UUID] = [], damagedReceiptIDs: [UUID] = [], damagedTerminalIDs: [UUID] = [], damagedUploadIDs: [UUID] = []) {
+        self.damagedItemIDs = damagedItemIDs; self.damagedReceiptIDs = damagedReceiptIDs; self.damagedTerminalIDs = damagedTerminalIDs; self.damagedUploadIDs = damagedUploadIDs
         self.snapshot = snapshot
         self.storage = storage
     }
@@ -47,9 +53,9 @@ public struct LANInboxSnapshotAndStorageSummary: Sendable {
 
 public struct LANInboxPublicationGuard: Equatable, Sendable {
     public let runtimeGeneration: UUID
-    fileprivate let token: UUID
+    let token: UUID
 
-    fileprivate init(runtimeGeneration: UUID, token: UUID) {
+    init(runtimeGeneration: UUID, token: UUID) {
         self.runtimeGeneration = runtimeGeneration
         self.token = token
     }
@@ -970,7 +976,7 @@ public actor PlaintextLANInboxStore: LANInboxRepository {
         }
     }
 
-    func withVerifiedItemSourceContent<Result: Sendable>(
+    package func withVerifiedItemSourceContent<Result: Sendable>(
         itemID: LANInboxItem.ID,
         _ body: @escaping @Sendable (Int32) throws -> Result
     ) async throws -> Result {

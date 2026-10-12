@@ -113,6 +113,7 @@ final class DICOMVaultImportSession: @unchecked Sendable {
     let operationID: UUID
     let vaultID: UUID
     let revision: VaultRevision
+    let indexObjectID = UUID()
     let stagingOwnership: VaultDICOMStagingOwnership
     fileprivate let lease: VaultMutationLease
 
@@ -654,6 +655,28 @@ public actor PlaintextVault: VaultStore {
 
         try prepareForVaultAccess()
         let current = try resolveManifest(cleanupOrphans: true)
+        return try commit(request, against: current)
+    }
+
+    /// Builds a small catalog mutation against the current head while holding
+    /// the same lease as publication. Callers prepare OCR and object bytes first.
+    func commit(
+        updating buildRequest: @Sendable (VaultCatalog) throws -> VaultCommitRequest
+    ) async throws -> VaultCatalog {
+        let lease = try await mutationCoordinator.acquire()
+        defer { lease.release() }
+        try Task.checkCancellation()
+        try prepareForVaultAccess()
+        let current = try resolveManifest(cleanupOrphans: true)
+        let request = try buildRequest(current.catalog)
+        try Task.checkCancellation()
+        return try commit(request, against: current)
+    }
+
+    private func commit(
+        _ request: VaultCommitRequest,
+        against current: PlaintextVaultManifest
+    ) throws -> VaultCatalog {
         guard request.expectedGeneration == current.catalog.generation else {
             throw VaultError.mutationConflict
         }
@@ -994,6 +1017,7 @@ public actor PlaintextVault: VaultStore {
         staging: VaultDICOMStudyStaging,
         metrics: DICOMImportMetricsRecorder? = nil
     ) async throws -> VaultDICOMStudyCommitOutcome {
+        let study = try proposal.study.legacyStudy(indexObjectID: session.indexObjectID)
         try mutationCoordinator.withValidatedLease(session.lease) {}
         try prepareForVaultAccess()
         let current = try resolveManifest(
@@ -1006,7 +1030,7 @@ public actor PlaintextVault: VaultStore {
             throw VaultError.mutationConflict
         }
         if let existing = current.catalog.dicomStudies.first(where: {
-            $0.fingerprint == proposal.study.fingerprint
+            $0.fingerprint == study.fingerprint
         }) {
             _ = try? dicomImportJournal.reconcile(
                 vaultID: current.catalog.vaultID,
@@ -1019,8 +1043,8 @@ public actor PlaintextVault: VaultStore {
               proposal.objects.allSatisfy({
                 $0.staged.ownership == session.stagingOwnership
               }),
-              Set(proposal.objects.map(\.attachment.id)) == Set(proposal.study.attachmentIDs),
-              proposal.index.studyID == proposal.study.id else {
+              Set(proposal.objects.map(\.attachment.id)) == Set(study.attachmentIDs),
+              proposal.index.studyID == study.id else {
             throw VaultError.mutationConflict
         }
 
@@ -1035,7 +1059,7 @@ public actor PlaintextVault: VaultStore {
             records: current.catalog.records,
             attachments: current.catalog.attachments + proposal.objects.map(\.attachment),
             importDrafts: current.catalog.importDrafts,
-            dicomStudies: current.catalog.dicomStudies + [proposal.study]
+            dicomStudies: current.catalog.dicomStudies + [study]
         ).validated()
         try validateDICOMStudyEvolution(from: current.catalog, to: catalog)
 
@@ -1045,7 +1069,7 @@ public actor PlaintextVault: VaultStore {
         guard indexData.count <= maximumByteCount(for: .record) else {
             throw VaultError.resourceLimitExceeded
         }
-        let indexReference = VaultObjectReference(id: proposal.study.indexObjectID, kind: .record)
+        let indexReference = VaultObjectReference(id: study.indexObjectID, kind: .record)
         let indexWrite = VaultObjectWrite(reference: indexReference, plaintext: indexData)
         let currentMetadata = Dictionary(uniqueKeysWithValues: current.objects.map {
             ($0.reference, $0)
@@ -1140,7 +1164,7 @@ public actor PlaintextVault: VaultStore {
             tolerateRemovalFailures: true
         )
         session.release()
-        return .accepted(catalog, try head(for: manifest), proposal.study.id)
+        return .accepted(catalog, try head(for: manifest), study.id)
     }
 
     public func destroy() async throws {

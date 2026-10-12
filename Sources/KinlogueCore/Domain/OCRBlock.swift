@@ -157,8 +157,13 @@ public struct OCRBlock: Codable, Identifiable, Hashable, Sendable {
               filePageNumber <= source.pageCount else {
             throw DomainValidationError.invalidCatalogReference
         }
-        return try Self(
-            id: id,
+        return try attributed(to: source, blockID: id)
+    }
+
+    /// Assigns extractor output to its authoritative source and clears transient page projection.
+    public func attributed(to source: ReportSource, blockID: ID) throws -> Self {
+        try Self(
+            id: blockID,
             sourceID: source.id,
             attachmentID: source.attachmentID,
             filePageNumber: filePageNumber,

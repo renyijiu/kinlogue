@@ -454,3 +454,64 @@ private actor LiveBackupRepositoryOpener: BackupRepositoryOpening {
         return result
     }
 }
+
+@Test
+func sqliteLogicalLiveBackupAndRestoreServicesDrainBeforeClosingDatabase() async throws {
+    let base = FileManager.default.temporaryDirectory.appendingPathComponent("KinlogueSQLiteLiveBackup-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    let selected = base.appendingPathComponent("selected", isDirectory: true)
+    try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
+    let root = base.appendingPathComponent("Vault")
+    let owner = try SQLiteLibraryOwner(rootURL: root)
+    let database = try SQLiteLibraryStore(owner: owner)
+    defer { try? database.close() }
+    let repository = SQLiteReportRepository(store: database)
+    let member = try FamilyMember(displayName: "Synthetic captured service member")
+    try await repository.saveMember(member, replacing: nil)
+    let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
+    let configuration = BackupLocalConfigurationStore(rootURL: base.appendingPathComponent("BackupIdentity"))
+    let backup = LiveBackupService(store: database, configurationStore: configuration,
+        requiresSelectedDirectoryScope: true, destinationAuthority: BackupDestinationAuthority(bookmarks: bookmarks), selectedDirectoryScope: bookmarks)
+    let recoveryCode = try await backup.beginSetup(selectedParent: selected)
+    try await backup.completeSetup(recoveryCodeReentry: recoveryCode, independentlySaved: true)
+    _ = try await backup.backUpNow()
+    let destination = selected.appendingPathComponent(BackupDestinationAuthority.repositoryDirectoryName)
+    let checkpoint = try #require(FileManager.default.contentsOfDirectory(at: destination, includingPropertiesForKeys: nil).first { $0.pathExtension == "kinloguebackup" })
+    let later: FamilyMember = { var value = member; value.displayName = "Synthetic later service member"; return value }()
+    try await repository.saveMember(later, replacing: member)
+    let lifecycle = LibraryLifecycleCoordinator()
+    let transaction = try BackupRestoreTransaction(owner: owner)
+    let restore = BackupRestoreService(verifier: try BackupRestoreVerifier(owner: owner), transaction: transaction,
+        configurationStore: configuration, operationCoordinator: await backup.operationCoordinator, lifecycle: lifecycle, database: database)
+    let prepared = try await restore.prepare(checkpointURL: checkpoint, recoveryCode: recoveryCode)
+    let (entered, enteredContinuation) = AsyncStream<Void>.makeStream()
+    let (release, releaseContinuation) = AsyncStream<Void>.makeStream()
+    let (revoked, revokedContinuation) = AsyncStream<Void>.makeStream()
+    try await lifecycle.register(id: UUID()) {
+        #expect((try? database.state()) != nil)
+        revokedContinuation.yield(())
+    }
+    let active = Task {
+        try await lifecycle.withActiveOperation { () async throws -> Void in
+            enteredContinuation.yield(())
+            for await _ in release { break }
+            #expect(try await repository.member(member.id) == later)
+        }
+    }
+    for await _ in entered { break }
+    let activation = Task { try await restore.activateAfterConfirmation(prepared) }
+    for await _ in revoked { break }
+    #expect((try? database.state()) != nil)
+    releaseContinuation.yield(())
+    try await active.value
+    #expect(try await activation.value.requiresApplicationRestart)
+    #expect((try? database.state()) == nil)
+    #expect(try await configuration.load() == nil)
+    #expect(throws: SQLiteLibraryError.occupied) { _ = try SQLiteLibraryStore(rootURL: root) }
+    #expect(try await transaction.reconcile() == .committed)
+    let reopened = try SQLiteLibraryStore(owner: owner)
+    defer { try? reopened.close() }
+    #expect(try await SQLiteReportRepository(store: reopened).member(member.id) == member)
+    #expect(bookmarks.startCount == bookmarks.stopCount)
+}

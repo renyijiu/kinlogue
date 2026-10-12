@@ -117,24 +117,23 @@ public enum RecordQuery {
         member: FamilyMember?,
         dateFormatter: ISO8601DateFormatter
     ) -> Bool {
-        if member?.displayName.localizedCaseInsensitiveContains(term) == true
-            || member?.disambiguationLabel?.localizedCaseInsensitiveContains(term) == true
-            || record.title?.transcription.localizedCaseInsensitiveContains(term) == true
-            || record.organization?.transcription.localizedCaseInsensitiveContains(term) == true
-            || record.department?.transcription.localizedCaseInsensitiveContains(term) == true
-            || record.reportType?.transcription.localizedCaseInsensitiveContains(term) == true
-            || record.reportedResults?.transcription.localizedCaseInsensitiveContains(term) == true
-            || record.conclusion?.transcription.localizedCaseInsensitiveContains(term) == true {
-            return true
-        }
-        if record.abnormalItems.contains(where: {
-            $0.transcription.localizedCaseInsensitiveContains(term)
-        }) {
-            return true
-        }
-        guard let timelineDate = record.timelineDate else { return false }
-        return dateFormatter.string(from: timelineDate)
-            .localizedCaseInsensitiveContains(term)
+        matchesSearchTerm(term, fields: searchableFields(record: record, dateFormatter: dateFormatter)
+            + [member?.displayName, member?.disambiguationLabel].compactMap { $0 })
+    }
+
+    package static func matchesSearchTerm(_ term: String, fields: [String]) -> Bool {
+        fields.contains { $0.localizedCaseInsensitiveContains(term) }
+    }
+
+    package static func searchableFields(record: HealthRecord) -> [String] {
+        searchableFields(record: record, dateFormatter: ISO8601DateFormatter())
+    }
+
+    private static func searchableFields(record: HealthRecord, dateFormatter: ISO8601DateFormatter) -> [String] {
+        [record.title, record.organization, record.department, record.reportType, record.reportedResults, record.conclusion]
+            .compactMap { $0?.transcription }
+            + record.abnormalItems.map(\.transcription)
+            + (record.timelineDate.map { [dateFormatter.string(from: $0)] } ?? [])
     }
 
     private static func normalizedName(_ value: String) -> String {

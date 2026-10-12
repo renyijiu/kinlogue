@@ -245,7 +245,7 @@ struct RecordEditViewLayoutTests {
     ) throws -> NSHostingView<RecordEditView> {
         let hostingView = NSHostingView(rootView: RecordEditView(
             record: record,
-            members: [member],
+            members: [LibraryMemberSummary(member)],
             original: OriginalDocumentPayload(
                 data: try OriginalDocumentTestFixture.pdfData(),
                 contentTypeIdentifier: "com.adobe.pdf",

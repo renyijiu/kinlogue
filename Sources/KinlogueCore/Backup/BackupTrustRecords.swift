@@ -13,6 +13,7 @@ public enum BackupTranscriptRole: UInt16, CaseIterable, Hashable, Sendable {
     case checkpointCommitSignature = 10
 }
 
+// Keep root derivation and identity transcripts stable; signed/AAD fields bind checkpoint versions.
 public struct BackupCanonicalTranscript: Hashable, Sendable {
     public static let magic = Data("KLGTRN01".utf8)
     public static let productIdentifier = "com.kinlogue.backup"
@@ -23,7 +24,7 @@ public struct BackupCanonicalTranscript: Hashable, Sendable {
     public let fields: [Data]
 
     public init(
-        formatVersion: BackupFormatVersion = .current,
+        formatVersion: BackupFormatVersion = .legacy,
         role: BackupTranscriptRole,
         fields: [Data]
     ) throws {
@@ -96,7 +97,7 @@ public struct BackupSetDescriptor: Hashable, Sendable {
     public let rootSignature: Data
 
     public init(
-        formatVersion: BackupFormatVersion = .current,
+        formatVersion: BackupFormatVersion = .legacy,
         suite: BackupCryptoSuite = .v1,
         setID: BackupSetID,
         recoverySigningPublicKey: Data,
@@ -168,7 +169,7 @@ public struct BackupDeviceAuthorization: Hashable, Sendable {
     public let rootSignature: Data
 
     public init(
-        formatVersion: BackupFormatVersion = .current,
+        formatVersion: BackupFormatVersion = .legacy,
         suite: BackupCryptoSuite = .v1,
         descriptorDigest: Data,
         setID: BackupSetID,
@@ -247,7 +248,7 @@ public struct BackupHPKEEnvelope: Hashable, Sendable {
     public let sealedKey: Data
 
     public init(
-        formatVersion: BackupFormatVersion = .current,
+        formatVersion: BackupFormatVersion = .legacy,
         suite: BackupCryptoSuite = .v1,
         encapsulatedKey: Data,
         sealedKey: Data
@@ -309,13 +310,9 @@ public struct BackupCiphertextCommitment: Hashable, Sendable {
         digest: Data,
         ciphertextByteCount: UInt64
     ) throws {
-        let maximum = BackupFormatLimits.maximumPlaintextByteCount.addingReportingOverflow(
-            BackupFormatLimits.targetFormatAllowanceByteCount
-        )
-        guard !maximum.overflow,
-              digest.count == 32,
+        guard digest.count == 32,
               ciphertextByteCount > 0,
-              ciphertextByteCount <= maximum.partialValue else {
+              ciphertextByteCount <= BackupFormatLimits.maximumContainerByteCount(for: .current) else {
             throw BackupContractError.invalidField
         }
         self.algorithm = algorithm
@@ -383,6 +380,13 @@ public struct BackupCheckpointFooter: Hashable, Sendable {
               envelopeDigest.count == 32,
               deviceSignature.count == 64 else {
             throw BackupContractError.invalidLength
+        }
+        let maximumCommitment = formatVersion == .legacy
+            ? BackupFormatLimits.maximumPlaintextByteCount(for: .legacy)
+                + BackupFormatLimits.targetFormatAllowanceByteCount
+            : BackupFormatLimits.maximumContainerByteCount(for: formatVersion)
+        guard commitment.ciphertextByteCount <= maximumCommitment else {
+            throw BackupContractError.resourceLimit
         }
         self.formatVersion = formatVersion
         self.suite = suite

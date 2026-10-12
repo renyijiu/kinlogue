@@ -15,19 +15,17 @@ public enum DICOMSliceServiceError: Error, Equatable, Sendable {
 }
 
 public struct DICOMVaultSessionToken: Hashable, Sendable {
-    public let vaultID: UUID
-    public let generation: UInt64
-    public let commitID: UUID
-    public let catalogDigest: Data
-
+    enum Identity: Hashable, Sendable {
+        case legacy(vaultID: UUID, generation: UInt64, commitID: UUID, catalogDigest: Data)
+        case sqlite(libraryID: UUID, epoch: UUID, studyID: UUID, contentRevision: UInt64, seriesID: UUID, seriesHash: Data)
+    }
+    let identity: Identity
     public init(vaultID: UUID, revision: VaultRevision) throws {
-        guard revision.catalogDigest.count == 32 else {
-            throw DICOMSliceServiceError.integrityFailure
-        }
-        self.vaultID = vaultID
-        generation = revision.generation
-        commitID = revision.commitID
-        catalogDigest = revision.catalogDigest
+        guard revision.catalogDigest.count == 32 else { throw DICOMSliceServiceError.integrityFailure }
+        identity = .legacy(vaultID: vaultID, generation: revision.generation, commitID: revision.commitID, catalogDigest: revision.catalogDigest)
+    }
+    init(libraryID: UUID, epoch: UUID, studyID: UUID, contentRevision: UInt64, seriesID: UUID, seriesHash: Data) {
+        identity = .sqlite(libraryID: libraryID, epoch: epoch, studyID: studyID, contentRevision: contentRevision, seriesID: seriesID, seriesHash: seriesHash)
     }
 }
 
@@ -253,6 +251,12 @@ public actor DICOMSliceService {
         budget = runtime.budget
         cache = runtime.cache
         scheduler = runtime.scheduler
+    }
+
+    package init(repository: SQLiteDICOMRepository, decoder: any DICOMFrameDecoding = DICOMDecoderAdapter()) {
+        let runtime = DICOMSliceRuntime.shared
+        source = SQLiteDICOMSliceSource(repository: repository, decoder: decoder)
+        budget = runtime.budget; cache = runtime.cache; scheduler = runtime.scheduler
     }
 
     init(
@@ -714,7 +718,14 @@ public actor DICOMSliceService {
         )
     }
 
-    private func map(_ error: Error) -> DICOMSliceServiceError {
+    private func map(_ error: Error) -> Error {
+        if let error = error as? SQLiteLibraryError {
+            return error == .invalidOriginal ? DICOMSliceServiceError.integrityFailure : error
+        }
+        return mapSliceError(error)
+    }
+
+    private func mapSliceError(_ error: Error) -> DICOMSliceServiceError {
         if let error = error as? DICOMSliceServiceError { return error }
         if error is CancellationError { return .cancelled }
         if let error = error as? DICOMDecoderAdapterError {

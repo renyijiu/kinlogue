@@ -4,7 +4,7 @@ This audit covers production declarations under `Sources/`. It records why the
 remaining compiler escape hatches are safe, what invariant must remain true,
 and how repository automation detects unreviewed additions.
 
-<!-- concurrency-inventory: unchecked=67 files=35 dicom=10 core=0 unsafe=2 -->
+<!-- concurrency-inventory: unchecked=82 files=45 dicom=10 core=0 unsafe=2 -->
 
 ## Current inventory
 
@@ -12,16 +12,47 @@ and how repository automation detects unreviewed additions.
 | --- | --- | --- |
 | `KinlogueCore` | 0 unchecked declarations | Domain values and state machines remain checked `Sendable`. |
 | `KinloguePlatform/DICOM` | 10 `@unchecked Sendable` declarations | Lock-protected pixel/reply/budget state, actor-backed runtime services, and one scanner-owned descriptor lease with structured concurrent read-only use. |
-| LAN and storage platform code | 33 `@unchecked Sendable` declarations | Private locks/serial queues, actor confinement, SwiftNIO event-loop confinement, or immutable task-local error transport. |
-| Original export orchestration and capability probes | 7 `@unchecked Sendable` declarations | Lock-protected cancellation/progress and probe metrics; one exporter-owned descriptor whose close lifetime is structured and idempotent. |
-| Encrypted backup and restore | 16 `@unchecked Sendable` declarations | Immutable service authority, actor/cross-process serialization, lock-protected configuration/history/metrics and publication leases, and structured descriptor lifetimes. |
+| LAN and storage platform code | 42 `@unchecked Sendable` declarations | Private locks/serial queues, actor confinement, SwiftNIO event-loop confinement, or immutable task-local error transport. |
+| Original export orchestration and capability probes | 10 `@unchecked Sendable` declarations | Lock-protected cancellation/progress and probe metrics; one exporter-owned descriptor whose close lifetime is structured and idempotent. |
+| Encrypted backup and restore | 19 `@unchecked Sendable` declarations | Immutable service authority, actor/cross-process serialization, lock-protected configuration/history/metrics and publication leases, and structured descriptor lifetimes. |
+| App backup destination authority | 1 `@unchecked Sendable` declaration | Immutable authority context with synchronized access. |
 | DICOM XPC Helper | 2 `nonisolated(unsafe)` properties | One private lock protects both process-lifecycle collections. |
 
-The inventory is 66 unchecked conformances across 35 files, plus two unsafe
+The inventory is 82 unchecked conformances across 45 files, plus two unsafe
 static properties in the Helper. The audit found no demonstrated data race.
 Three immutable/stateless wrappers (`LANManualReadHandler`,
 `LANInboundBytesHandler`, and `LANUploadSink.PendingReservations`) use checked
 `Sendable` conformance and must not gain unsynchronized mutable state.
+
+The SQLite kernel adds two unchecked owners: `SQLiteLibraryStore` serializes
+connection/lifetime/pin admission with a lock around GRDB's serial queue;
+`SQLiteOriginalPin` serializes descriptor consumption and idempotent release,
+retaining the store until its pin is released. `SQLiteReportQueryCancellation`
+keeps the query cancellation flag behind a private lock across the Swift task
+and GRDB queue; it never interrupts another query. `SQLiteLANScopes` protects its token set with a private lock; scope creation/revocation and final publication also share database admission, so revocation cannot acknowledge before an in-flight commit completes. These are development paths.
+DICOM active-operation IDs use the same admission lock and cover scanner/indexer
+and gaps between staged originals; recovery skips them and owner close rejects
+while they remain. Async SQLite decoding retains one private pin and an owned
+FileHandle across await; no pin lock crosses await, and a post-validation failure
+also closes the duplicate descriptor. This adds no unchecked declarations.
+App recovery and LAN task ownership stays on the main actor.
+SQLiteCommitNotifications protects bounded stream continuations with its own lock;
+yield/finish happen after database admission has been released. The search
+Predicate retains immutable CF strings and one captured locale across synchronous
+worker lanes; LaneResults locks one result per lane, and concurrentPerform drains
+all lanes before the database read ends. App observation and request registries
+are main-actor owned and drain before destructive lifecycle work.
+The shared SQLiteLibraryOwner protects its single connection claim with a lock
+while retaining immutable filesystem authority across root replacement. Logical
+backup spool, original pin ownership, per-reader descriptors and cancellation
+have private locks; descriptor reads finish before close, and batch pin release
+leaves the wrapper lock before entering store admission. The capture progress
+handler is confined to one synchronous serialized connection scope and uninstalled
+before its retained context ends. Probe phase and FD/footprint metrics return
+locked snapshots and never expose mutable collections. SQLiteOriginalReadMetrics
+uses a private lock for application pread-byte counts; it does not measure kernel
+disk traffic. Integrity quarantine stays under database admission, while the App
+idle task and cancellation/drain identity stay on MainActor.
 
 ## Safety mechanisms
 

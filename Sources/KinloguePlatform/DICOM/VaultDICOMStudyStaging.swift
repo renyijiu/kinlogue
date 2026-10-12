@@ -302,7 +302,7 @@ public struct VaultDICOMStudyStaging: Sendable {
             throw DICOMImportError.integrityFailure
         }
         let descriptor = filename.withCString {
-            openat(operationDescriptor, $0, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            openat(operationDescriptor, $0, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
         }
         guard descriptor >= 0 else { throw DICOMImportError.integrityFailure }
         defer { Darwin.close(descriptor) }
@@ -363,6 +363,22 @@ public struct VaultDICOMStudyStaging: Sendable {
         return try body(descriptor)
     }
 
+    /// The caller may transfer this exact inode; source directory ownership remains verified.
+    func withOwnedStagedDescriptor<T>(_ object: VaultDICOMStagedObject,
+                                      _ body: (Int32, Int32, String) throws -> T) throws -> T {
+        let operation = try openOperationDirectory(ownership: object.ownership)
+        defer { Darwin.close(operation) }
+        let file = try openStagedFile(object, operationDescriptor: operation)
+        defer { Darwin.close(file) }
+        var metadata = stat(), named = stat()
+        let name = object.stagingID.uuidString.lowercased() + ".data"
+        guard fstat(file, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFREG,
+              metadata.st_size == object.byteCount, metadata.st_nlink == 1,
+              fstatat(operation, name, &named, AT_SYMLINK_NOFOLLOW) == 0,
+              sameFileIdentity(metadata, named) else { throw DICOMImportError.integrityFailure }
+        return try body(operation, file, name)
+    }
+
     func validateCapacity(uniqueStagedBytes: Int) throws {
         try requireCapacity(
             uniqueStagedBytes: uniqueStagedBytes,
@@ -404,7 +420,7 @@ public struct VaultDICOMStudyStaging: Sendable {
                 stagingID: stagingID
             )
             let descriptor = name.withCString {
-                openat(operationDescriptor, $0, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+                openat(operationDescriptor, $0, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
             }
             guard descriptor >= 0 else { throw DICOMImportError.integrityFailure }
             defer { Darwin.close(descriptor) }
@@ -471,7 +487,7 @@ public struct VaultDICOMStudyStaging: Sendable {
                 throw DICOMImportError.integrityFailure
             }
             let fileDescriptor = name.withCString {
-                openat(operationDescriptor, $0, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+                openat(operationDescriptor, $0, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
             }
             guard fileDescriptor >= 0 else { throw DICOMImportError.integrityFailure }
             var opened = stat(), finalName = stat()
@@ -674,7 +690,7 @@ public struct VaultDICOMStudyStaging: Sendable {
             stagingID: object.stagingID
         ) else { throw DICOMImportError.integrityFailure }
         return filename.withCString {
-            openat(operationDescriptor, $0, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            openat(operationDescriptor, $0, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
         }
     }
 

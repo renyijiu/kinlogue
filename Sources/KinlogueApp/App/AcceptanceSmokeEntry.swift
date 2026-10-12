@@ -12,6 +12,7 @@ enum AcceptanceSmokePhase: String, CaseIterable, Sendable {
     case forcedReady = "forced-ready"
     case afterForce = "after-force"
     case cleanup
+    case sqliteCandidate = "sqlite-candidate"
 
     private static let argumentPrefix = "--acceptance-phase="
 

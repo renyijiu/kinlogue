@@ -59,12 +59,19 @@ public struct ReportFingerprint: Codable, Hashable, Sendable {
     }
 
     public init(sources: ReportSources, attachments: [Attachment]) throws {
+        try self.init(sources: sources, attachmentsByID: Self.validatedAttachmentsByID(attachments))
+    }
+
+    static func validatedAttachmentsByID(_ attachments: [Attachment]) throws -> [Attachment.ID: Attachment] {
         guard Set(attachments.map(\.id)).count == attachments.count else {
             throw DomainValidationError.invalidCatalogReference
         }
-        let byID = Dictionary(uniqueKeysWithValues: attachments.map { ($0.id, $0) })
+        return Dictionary(uniqueKeysWithValues: attachments.map { ($0.id, $0) })
+    }
+
+    init(sources: ReportSources, attachmentsByID: [Attachment.ID: Attachment]) throws {
         let digests = try sources.elements.map { source -> SourceDigest in
-            guard let attachment = byID[source.attachmentID] else {
+            guard let attachment = attachmentsByID[source.attachmentID] else {
                 throw DomainValidationError.invalidCatalogReference
             }
             return try SourceDigest(

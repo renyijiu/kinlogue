@@ -46,6 +46,20 @@ struct AcceptanceRunOwnershipTests {
     }
 
     @Test
+    func cleanupRefusesALiveSQLiteOwnerAndReleasesItsExactIdleLocks() throws {
+        let fixture = try AcceptanceOwnershipFixture()
+        defer { fixture.remove() }
+        let ownership = try fixture.claim()
+        let root = fixture.runRoot.appendingPathComponent("SourceVault")
+        var owner: SQLiteLibraryOwner? = try SQLiteLibraryOwner(rootURL: root)
+        #expect(throws: SyntheticAcceptanceError.unsafeCleanupTarget) { try ownership.releaseAfterVaultRemoval() }
+        try owner?.validate()
+        owner = nil
+        try ownership.releaseAfterVaultRemoval()
+        #expect(!FileManager.default.fileExists(atPath: fixture.runRoot.path))
+    }
+
+    @Test
     func aPreexistingRunRootIsRejectedWithoutDeletingItsContents() throws {
         let fixture = try AcceptanceOwnershipFixture()
         defer { fixture.remove() }

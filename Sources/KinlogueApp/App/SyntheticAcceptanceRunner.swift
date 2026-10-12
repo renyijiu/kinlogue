@@ -413,6 +413,8 @@ struct SyntheticAcceptanceRunner: Sendable {
                 try await verifyAfterRestart(code: .afterForceComplete)
             case .cleanup:
                 try await cleanup()
+            case .sqliteCandidate:
+                try await SQLiteCandidateAcceptanceProbe.run(request: request).emit()
             }
             return .exit(Self.successExitCode)
         } catch let error as InstalledLANAcceptanceProbeError {

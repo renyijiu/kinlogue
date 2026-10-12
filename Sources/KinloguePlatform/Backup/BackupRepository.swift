@@ -185,9 +185,7 @@ public final class BackupRepository: @unchecked Sendable {
     private static let finalSuffix = ".kinloguebackup"
     private static let legacyMutationLockName = ".kinlogue-publication.lock"
     private static let maximumCheckpointByteCount =
-        BackupFormatLimits.maximumPlaintextByteCount
-        + BackupFormatLimits.targetFormatAllowanceByteCount
-        + 1 * 1_024 * 1_024
+        BackupFormatLimits.maximumContainerByteCount(for: .current)
 
     public let repositoryURL: URL
     public let expectedIdentity: BackupFilesystemIdentity

@@ -26,6 +26,12 @@ App 不解释像素、不生成测量或医学结论。DICOM 自由文本和像�
 
 每次 reopen 都实读并验证 index 版本、study ID、Series/instance 顺序、attachment 集合、fingerprint 和 UID digest 冲突。缺失、digest/length 不符、图不闭合或未知版本都 fail closed，不暴露部分检查。更完整的布局和恢复规则见 [`storage.md`](storage.md)。
 
+## SQLite 开发路径
+
+上述 JSON/manifest 仍是正式 App 的组装。开发中的 [SQLite DICOM 仓库](sqlite-storage.md#规范化-dicom-与按序列读取) 已将影像图规范化为四张表，并复用真实 scanner/indexer 与 decoder；无 index 文件或 study BLOB。活动导入保护 scanner/原件交接，完整图与原件 live 状态在一个事务提交；同卷 inode 接管保持既有导入 I/O 与磁盘预算。
+
+SQLite 的列表/详情/序列读取按用途分开，坏 header 显式返回 ID；严格读与确认前验证完整目标图。Viewer 使用 open epoch、study revision 和目标 series hash，拒绝相关变化而不因无关报告提交失效；异常文件类型不会阻塞打开。App 层按需模型已通过真实 SQLite Viewer 的目标变更/无关提交/关闭库回归；当前正式 Viewer 仍由 composition 选择上文 JSON 路径，统一开库与整库替换绑定留待 U7。SQLite Viewer 未缓存解码目前执行 4 次 pin hash 加 decoder 读取，首切片/浏览性能及真实 XPC 安装矩阵尚未由本单元验证。
+
 ## XPC 解码边界
 
 主 App、Core 和 Platform 不链接 `DicomCore`。主进程先有界校验 Part 10 envelope，只向独立签名的 sandbox XPC Helper 传只读 descriptor 和小型请求。Helper 没有网络、用户文件或 Vault-root entitlement；它先验证 descriptor 为只读 regular file、长度与有界请求一致，再以最多 1 MiB 的块复制到 `mkstemp` 创建后立即 `unlink` 的匿名文件，并验证源文件 EOF。空文件必须先移除目录项，才允许写入任何原件字节。锁定版本 decoder 通过 Darwin `/dev/fd` 别名读取这份有界快照，只返回有界的单帧 raw sample 与几何 DTO；crash 或硬 watchdog 退出时，内核回收匿名文件，不会遗留具名明文原件，也不需要扫描清理其他目录。
@@ -75,3 +81,5 @@ Viewer 的 metadata、decode 和 canvas publish 都带 generation/session/render
 - 文件夹导入契约：[`sources/2026-08-07-dicom-folder-import-contract.md`](sources/2026-08-07-dicom-folder-import-contract.md)
 - Slice service 契约：[`sources/2026-08-07-dicom-slice-service-contract.md`](sources/2026-08-07-dicom-slice-service-contract.md)
 - App flow 与 Viewer：[`sources/2026-08-07-dicom-app-flow-contract.md`](sources/2026-08-07-dicom-app-flow-contract.md)、[`sources/2026-08-07-dicom-viewer-ui-contract.md`](sources/2026-08-07-dicom-viewer-ui-contract.md)
+
+SQLite 导入成功收尾和取消只回收本 operation 的非 live 原件；真实交错测试验证另一份报告已 staged、尚未 publish 的原件继续可发布。活动导入及替换 inode 的文件保留，未知文件不作为清理所有权。细节见 [SQLite 原件生命周期](sqlite-storage.md#原件事务与恢复)。

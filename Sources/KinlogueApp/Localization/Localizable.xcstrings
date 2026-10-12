@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "zh-Hans",
   "strings": {
+    "%@ / %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ / %2$@"
+          }
+        }
+      }
+    },
     "%@ · %@": {
       "localizations": {
         "zh-Hans": {
@@ -69,6 +79,34 @@
         }
       }
     },
+    "%lld 个唯一原件 · 实际占用 %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$lld 个唯一原件 · 实际占用 %2$@"
+          }
+        },
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Unique original: %1$lld · Disk usage: %2$@"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Unique originals: %1$lld · Disk usage: %2$@"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld 个文件": {
       "localizations": {
         "en": {
@@ -87,6 +125,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "MR · %lld × %lld · %lld 张": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MR · %1$lld × %2$lld · %3$lld slices"
           }
         }
       }
@@ -141,12 +189,42 @@
         }
       }
     },
+    "一个文件夹只能导入一次检查": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import one study folder at a time"
+          }
+        }
+      }
+    },
     "上一个原件": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Previous original"
+          }
+        }
+      }
+    },
+    "上一个序列": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous Series"
+          }
+        }
+      }
+    },
+    "上一张": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous Slice"
           }
         }
       }
@@ -191,6 +269,26 @@
         }
       }
     },
+    "下一个序列": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next Series"
+          }
+        }
+      }
+    },
+    "下一张": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next Slice"
+          }
+        }
+      }
+    },
     "下一页": {
       "localizations": {
         "en": {
@@ -201,12 +299,42 @@
         }
       }
     },
+    "不包含 OCR、转录、备注、目录或草稿。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Does not include OCR, transcriptions, notes, catalog data, or drafts."
+          }
+        }
+      }
+    },
+    "不包含健康内容的恢复点概要": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore point summary without health content"
+          }
+        }
+      }
+    },
     "不支持预览或归档": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Preview and filing are unsupported"
+          }
+        }
+      }
+    },
+    "不支持预览，原件仍保留": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview unsupported; original retained"
           }
         }
       }
@@ -231,6 +359,26 @@
         }
       }
     },
+    "临时空间估算": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated temporary space"
+          }
+        }
+      }
+    },
+    "二维医学影像查看器": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2D Medical Image Viewer"
+          }
+        }
+      }
+    },
     "二维码不可用": {
       "localizations": {
         "en": {
@@ -241,12 +389,32 @@
         }
       }
     },
+    "仅供查看本机原始影像，不提供诊断、测量或医学解释。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "For viewing local original images only. No diagnosis, measurements, or medical interpretation are provided."
+          }
+        }
+      }
+    },
     "仅展示确认过的原文，不生成趋势、判断或建议。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Only confirmed source text is shown. No trends, judgments, or advice are generated."
+          }
+        }
+      }
+    },
+    "从恢复点恢复…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore from Restore Point…"
           }
         }
       }
@@ -271,12 +439,72 @@
         }
       }
     },
+    "从数据备份恢复": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore from Data Backup"
+          }
+        }
+      }
+    },
+    "从数据备份恢复…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore from Data Backup…"
+          }
+        }
+      }
+    },
     "从续页删除": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Delete from Kinlogue"
+          }
+        }
+      }
+    },
+    "从续页删除影像检查": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Imaging Study from Kinlogue"
+          }
+        }
+      }
+    },
+    "作为 1 份报告": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As One Report"
+          }
+        }
+      }
+    },
+    "作为 1 份报告加入待确认": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add as One Report for Review"
+          }
+        }
+      }
+    },
+    "使用新的本机识别结果覆盖当前字段": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace current fields with new on-device recognition results"
           }
         }
       }
@@ -291,12 +519,62 @@
         }
       }
     },
+    "保存数据备份恢复码": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save the Backup Recovery Code"
+          }
+        }
+      }
+    },
     "保留": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Keep"
+          }
+        }
+      }
+    },
+    "保留 %lld 个对象": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld retained objects"
+          }
+        }
+      }
+    },
+    "保留但暂不可查看的对象": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retained Objects Not Currently Viewable"
+          }
+        }
+      }
+    },
+    "保留的恢复点数量": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore points to keep"
+          }
+        }
+      }
+    },
+    "保留空间估算": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated retained space"
           }
         }
       }
@@ -337,6 +615,60 @@
           "stringUnit": {
             "state": "translated",
             "value": "All Records"
+          }
+        }
+      }
+    },
+    "共 %lld 个原件；顺序只影响这次报告。": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld original; the order only affects this report."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld originals; the order only affects this report."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "共 %lld 个序列，%lld 张可查看影像": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld series · %2$lld viewable slices"
+          }
+        }
+      }
+    },
+    "共 %lld 个文件，%@": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld file, %2$@"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld files, %2$@"
+                }
+              }
+            }
           }
         }
       }
@@ -391,6 +723,26 @@
         }
       }
     },
+    "切片位置": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Slice position"
+          }
+        }
+      }
+    },
+    "切片顺序警告：使用回退顺序": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Slice order warning: fallback order is in use"
+          }
+        }
+      }
+    },
     "删除家庭成员": {
       "localizations": {
         "en": {
@@ -411,12 +763,42 @@
         }
       }
     },
+    "删除待确认项 %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete pending item %@"
+          }
+        }
+      }
+    },
     "删除所选…": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Delete Selected…"
+          }
+        }
+      }
+    },
+    "删除所选待确认项？": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Pending Queue Selection?"
+          }
+        }
+      }
+    },
+    "删除本机接收副本": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Received Copies"
           }
         }
       }
@@ -471,6 +853,26 @@
         }
       }
     },
+    "删除这项医学影像检查？": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete This Imaging Study?"
+          }
+        }
+      }
+    },
+    "删除这项影像检查…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete This Imaging Study…"
+          }
+        }
+      }
+    },
     "加入等待确认": {
       "localizations": {
         "en": {
@@ -481,12 +883,82 @@
         }
       }
     },
+    "加密目录备份": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted Folder Backup"
+          }
+        }
+      }
+    },
+    "医学影像": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medical Imaging"
+          }
+        }
+      }
+    },
+    "医学影像切片画布": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medical image slice canvas"
+          }
+        }
+      }
+    },
+    "医学影像检查": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imaging Study"
+          }
+        }
+      }
+    },
     "医院": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Hospital"
+          }
+        }
+      }
+    },
+    "单个恢复点估算": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated per restore point"
+          }
+        }
+      }
+    },
+    "压缩包位于续页资料库之外，请妥善保管。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The ZIP is outside the Kinlogue library. Keep it secure."
+          }
+        }
+      }
+    },
+    "压缩包验证失败，未发布不完整的导出。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ZIP verification failed. No incomplete export was published."
           }
         }
       }
@@ -533,6 +1005,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Original Unavailable"
+          }
+        }
+      }
+    },
+    "原件与已有报告相同，未重复创建。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This selection matches an existing report, so no duplicate was created."
           }
         }
       }
@@ -623,6 +1105,16 @@
         }
       }
     },
+    "原始文件已导出": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Originals Exported"
+          }
+        }
+      }
+    },
     "原报告未提供或未识别；可对照原件手动填写": {
       "localizations": {
         "en": {
@@ -693,12 +1185,52 @@
         }
       }
     },
+    "另一项资料库操作正在进行。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another library operation is in progress."
+          }
+        }
+      }
+    },
+    "另保留 %lld 个暂不可查看对象": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld additional objects retained but not currently viewable"
+          }
+        }
+      }
+    },
+    "只会导出已确认报告和医学影像的原始文件，并按家庭成员和日期排列。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only originals from confirmed reports and medical images will be exported, organized by family member and date."
+          }
+        }
+      }
+    },
     "只保留原报告印出的高低或箭头标记，不会按数值推断。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Keep only high, low, or arrow markings printed in the original report. Values are never interpreted."
+          }
+        }
+      }
+    },
+    "只删除待确认队列中的所选原件；已经归档到报告的原件不受影响。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the pending queue selection is deleted; originals already archived into reports are unaffected."
           }
         }
       }
@@ -719,6 +1251,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Copies the address only, not the verification code"
+          }
+        }
+      }
+    },
+    "只显示受支持的本机二维 MR 切片；影像不会进入 OCR、搜索或比较。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only supported local 2D MR slices are shown. Images are not included in OCR, search, or comparison."
           }
         }
       }
@@ -753,6 +1295,16 @@
         }
       }
     },
+    "只确认归属成员与检查日期；续页不会从影像推断诊断或结论。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm only the family member and study date. Kinlogue does not infer diagnoses or conclusions from images."
+          }
+        }
+      }
+    },
     "可以归档": {
       "localizations": {
         "en": {
@@ -763,12 +1315,52 @@
         }
       }
     },
+    "可单独重试或删除，不影响其他资料": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry or delete individually without affecting other items"
+          }
+        }
+      }
+    },
+    "可单选一个原件，或多选后在这里确认报告页序。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select one original, or select multiple and confirm their report order here."
+          }
+        }
+      }
+    },
+    "可查看影像": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Viewable Images"
+          }
+        }
+      }
+    },
     "可查看文件状态、顺序和支持的原件预览。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "View file status and order, and preview supported originals."
+          }
+        }
+      }
+    },
+    "可选择并归档": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready to select and archive"
           }
         }
       }
@@ -793,12 +1385,42 @@
         }
       }
     },
+    "合并的重复对象": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapsed Duplicate Objects"
+          }
+        }
+      }
+    },
     "同名时会自动显示区分标签或本地短标识。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "A distinguishing label or short local identifier appears automatically when names match."
+          }
+        }
+      }
+    },
+    "向上平移": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pan Up"
+          }
+        }
+      }
+    },
+    "向下平移": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pan Down"
           }
         }
       }
@@ -813,22 +1435,12 @@
         }
       }
     },
-    "向后移动 %@": {
+    "向右平移": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Move %@ later"
-          }
-        }
-      }
-    },
-    "向左旋转": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Rotate Left"
+            "value": "Pan Right"
           }
         }
       }
@@ -843,12 +1455,52 @@
         }
       }
     },
+    "向后移动 %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move %@ later"
+          }
+        }
+      }
+    },
+    "向左平移": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pan Left"
+          }
+        }
+      }
+    },
+    "向左旋转": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rotate Left"
+          }
+        }
+      }
+    },
     "含不支持的文件": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Contains Unsupported Files"
+          }
+        }
+      }
+    },
+    "回退顺序": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fallback order"
           }
         }
       }
@@ -873,6 +1525,16 @@
         }
       }
     },
+    "在访达中显示": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show in Finder"
+          }
+        }
+      }
+    },
     "填写仅供自己查看的备注，不会作为原报告内容": {
       "localizations": {
         "en": {
@@ -889,6 +1551,56 @@
           "stringUnit": {
             "state": "translated",
             "value": "Processing failed; retry available"
+          }
+        }
+      }
+    },
+    "备份期间资料库发生变化，续页会稍后重试。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The library changed during backup. Kinlogue will try again later."
+          }
+        }
+      }
+    },
+    "备份目录当前不可用，请连接存储或恢复网盘目录后重试。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The backup folder is unavailable. Reconnect the storage or cloud-drive folder, then try again."
+          }
+        }
+      }
+    },
+    "备份目录身份发生变化，已暂停写入。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The backup folder identity changed, so writing is paused."
+          }
+        }
+      }
+    },
+    "备份设置尚未完成。若你仍保存原恢复码，可以继续完成；续页不会生成新的恢复码。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup setup is incomplete. If you still have the original recovery code, you can continue; Kinlogue will not generate a new one."
+          }
+        }
+      }
+    },
+    "备份验证未完成，请检查目录后重试。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup verification did not finish. Check the folder and try again."
           }
         }
       }
@@ -923,6 +1635,22 @@
         }
       }
     },
+    "失败的导入": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Failed imports"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "失败的导入"
+          }
+        }
+      }
+    },
     "好": {
       "localizations": {
         "en": {
@@ -939,6 +1667,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "To continue, enter this phrase exactly:"
+          }
+        }
+      }
+    },
+    "完整回输恢复码": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Re-enter the complete recovery code"
+          }
+        }
+      }
+    },
+    "完整性校验失败": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Integrity check failed"
           }
         }
       }
@@ -1023,12 +1771,32 @@
         }
       }
     },
+    "导入 DICOM 文件夹并确认家庭成员与检查日期后，会显示在这里。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import a DICOM folder and confirm the family member and study date to show it here."
+          }
+        }
+      }
+    },
     "导入 PDF 或图片，确认后会出现在时间线。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Import a PDF or image. It appears on the timeline after confirmation."
+          }
+        }
+      }
+    },
+    "导入医学影像": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import Medical Images"
           }
         }
       }
@@ -1049,6 +1817,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Import Report…"
+          }
+        }
+      }
+    },
+    "导入时源文件发生变化，请重试": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A source file changed during import. Try again."
           }
         }
       }
@@ -1083,12 +1861,192 @@
         }
       }
     },
+    "导出": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export"
+          }
+        }
+      }
+    },
+    "导出全部原始文件": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export All Original Files"
+          }
+        }
+      }
+    },
+    "导出内容为未加密副本，不包含 OCR、备注或草稿。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The export is an unencrypted copy and does not include OCR, notes, or drafts."
+          }
+        }
+      }
+    },
+    "导出原始文件…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Originals…"
+          }
+        }
+      }
+    },
+    "导出后文件由您保管；删除续页资料库不会删除已导出的副本。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You are responsible for the exported files. Deleting the Kinlogue library will not delete exported copies."
+          }
+        }
+      }
+    },
+    "导出已取消": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Cancelled"
+          }
+        }
+      }
+    },
+    "导出文件可能已经写入，但无法确认磁盘同步状态。请检查所选位置后再决定是否重试。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The export may have been written, but its disk sync status could not be confirmed. Check the selected location before retrying."
+          }
+        }
+      }
+    },
+    "导出期间资料库发生变化，未生成不完整的压缩包。请重试。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The library changed during export. No incomplete ZIP was published. Try again."
+          }
+        }
+      }
+    },
+    "导出未完成": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Incomplete"
+          }
+        }
+      }
+    },
+    "导出未完成，可以稍后重试。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The export did not finish. You can try again later."
+          }
+        }
+      }
+    },
+    "导出的压缩包包含未加密的健康资料": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The exported ZIP contains unencrypted health information"
+          }
+        }
+      }
+    },
+    "导出进度": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Progress"
+          }
+        }
+      }
+    },
+    "将 %@ 向前移动": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move %@ forward"
+          }
+        }
+      }
+    },
+    "将 %@ 向后移动": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move %@ backward"
+          }
+        }
+      }
+    },
     "将删除续页当前资料库中的家庭成员、健康记录和本地原件。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "This deletes family members, health records, and local originals from the current Kinlogue library."
+          }
+        }
+      }
+    },
+    "将已确认报告和医学影像的原始文件按家庭成员与日期整理为一个 ZIP 压缩包。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Organize originals from confirmed reports and medical images into one ZIP by family member and date."
+          }
+        }
+      }
+    },
+    "尚无已验证的本地恢复点": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No locally verified restore point yet"
+          }
+        }
+      }
+    },
+    "尚未确认家庭成员与检查日期": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Family member and study date not yet confirmed"
+          }
+        }
+      }
+    },
+    "尚未配置数据备份。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Data backup is not configured."
           }
         }
       }
@@ -1119,6 +2077,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Left"
+          }
+        }
+      }
+    },
+    "已作为 1 份报告加入待确认。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Added as one report for review."
           }
         }
       }
@@ -1189,6 +2157,36 @@
         }
       }
     },
+    "已处理 %lld / %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld of %2$@ processed"
+          }
+        }
+      }
+    },
+    "已完成 %lld%%": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld%% complete"
+          }
+        }
+      }
+    },
+    "已显示第 %lld 张，共 %lld 张": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Showing slice %1$lld of %2$lld"
+          }
+        }
+      }
+    },
     "已清空比较选择，当前 0/2": {
       "localizations": {
         "en": {
@@ -1229,6 +2227,28 @@
         }
       }
     },
+    "已选 %lld 个原件，作为 1 份报告": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld original selected as one report"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld originals selected as one report"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "已选择第 %lld 条记录，当前 %@": {
       "localizations": {
         "zh-Hans": {
@@ -1245,12 +2265,52 @@
         }
       }
     },
+    "已验证的恢复点概要": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verified Restore Point Summary"
+          }
+        }
+      }
+    },
     "并排查看历史原件": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Compare Historical Originals Side by Side"
+          }
+        }
+      }
+    },
+    "序列 %lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Series %lld"
+          }
+        }
+      }
+    },
+    "序列 %lld / %lld · 当前 %lld 张 · 共 %lld 张": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Series %1$lld of %2$lld · %3$lld slices · %4$lld total"
+          }
+        }
+      }
+    },
+    "序列 %lld，%lld 张": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Series %1$lld, %2$lld slices"
           }
         }
       }
@@ -1275,6 +2335,16 @@
         }
       }
     },
+    "归档后会生成一份待确认报告；在报告中确认前不会进入时间线。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archiving creates one report for review; it won't appear in the timeline until confirmed."
+          }
+        }
+      }
+    },
     "归档给": {
       "localizations": {
         "en": {
@@ -1291,6 +2361,146 @@
           "stringUnit": {
             "state": "translated",
             "value": "Current zoom: %lld%%"
+          }
+        }
+      }
+    },
+    "当前影像切片加载失败，可以重试": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current image slice could not be loaded. You can retry."
+          }
+        }
+      }
+    },
+    "当前版本暂不提供影像切片查看；可以管理已确认检查，且不会主动渲染不支持的对象。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current version does not provide slice viewing. You can manage confirmed studies, and unsupported objects are not rendered automatically."
+          }
+        }
+      }
+    },
+    "当前资料库不会因验证失败而被替换。你可以取消后重新选择恢复点。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A verification failure will not replace the current library. Cancel and choose a restore point again."
+          }
+        }
+      }
+    },
+    "影像导入已取消": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imaging Import Cancelled"
+          }
+        }
+      }
+    },
+    "影像导入未完成": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imaging Import Was Not Completed"
+          }
+        }
+      }
+    },
+    "影像导入未完成，可以稍后重试": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The imaging import was not completed. You can try again later."
+          }
+        }
+      }
+    },
+    "影像已从内存中释放，可以重试当前切片": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The image was released from memory. You can retry the current slice."
+          }
+        }
+      }
+    },
+    "影像已安全导入本机资料库": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Images Imported to the Local Library"
+          }
+        }
+      }
+    },
+    "影像序列": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Image Series"
+          }
+        }
+      }
+    },
+    "影像序列 · 共 %lld 个序列，%lld 张": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Image series · %1$lld series, %2$lld slices"
+          }
+        }
+      }
+    },
+    "影像序列列表": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Image series list"
+          }
+        }
+      }
+    },
+    "影像数量或大小超出当前支持范围": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The image count or size exceeds the current limits"
+          }
+        }
+      }
+    },
+    "影像查看器加载失败": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The image viewer could not be loaded"
+          }
+        }
+      }
+    },
+    "彻底删除": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permanently Delete"
           }
         }
       }
@@ -1315,6 +2525,46 @@
         }
       }
     },
+    "待确认影像": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imaging to Review"
+          }
+        }
+      }
+    },
+    "待确认队列": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pending Queue"
+          }
+        }
+      }
+    },
+    "待确认队列暂时无法刷新。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The pending queue can't be refreshed right now."
+          }
+        }
+      }
+    },
+    "必须由你明确选择，影像内容不会自动决定归属": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You must choose explicitly; image content does not assign a family member"
+          }
+        }
+      }
+    },
     "必须由你确认，识别结果不会自动归档": {
       "localizations": {
         "en": {
@@ -1325,12 +2575,122 @@
         }
       }
     },
+    "忽略的非 DICOM 文件": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignored Non-DICOM Files"
+          }
+        }
+      }
+    },
+    "恢复已完成。请退出并重新打开续页。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore is complete. Quit and reopen Kinlogue."
+          }
+        }
+      }
+    },
+    "恢复未完成。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore did not finish."
+          }
+        }
+      }
+    },
+    "恢复点不完整或已损坏，当前资料库没有变化。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The restore point is incomplete or damaged. The current library was not changed."
+          }
+        }
+      }
+    },
+    "恢复点可能已写入，但无法确认本地同步状态。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The restore point may have been written, but local sync status could not be confirmed."
+          }
+        }
+      }
+    },
+    "恢复码": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recovery code"
+          }
+        }
+      }
+    },
+    "恢复码不完整或与本次设置不一致。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The recovery code is incomplete or does not match this setup."
+          }
+        }
+      }
+    },
+    "恢复码是读取加密恢复点所必需的。请把它完整保存在密码管理器或其他独立位置；续页无法替你找回。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The recovery code is required to read encrypted restore points. Save it in full in a password manager or another independent location; Kinlogue cannot recover it for you."
+          }
+        }
+      }
+    },
+    "恢复码显示在屏幕上。为避免旁人通过辅助功能听到，续页不会朗读这段敏感内容。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The recovery code is visible on screen. Kinlogue will not read this sensitive content aloud through accessibility features."
+          }
+        }
+      }
+    },
+    "恢复码错误，或恢复点未通过身份验证。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The recovery code is incorrect, or the restore point failed authentication."
+          }
+        }
+      }
+    },
     "我了解，继续": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "I Understand, Continue"
+          }
+        }
+      }
+    },
+    "我已将恢复码完整保存在独立位置": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I saved the complete recovery code in an independent location"
           }
         }
       }
@@ -1365,6 +2725,26 @@
         }
       }
     },
+    "所选位置没有足够空间完成备份。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected location does not have enough space to finish the backup."
+          }
+        }
+      }
+    },
+    "所选位置没有足够空间完成导出。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected location does not have enough space to finish the export."
+          }
+        }
+      }
+    },
     "所选原件暂时无法打开": {
       "localizations": {
         "en": {
@@ -1375,12 +2755,52 @@
         }
       }
     },
+    "所选文件夹中没有可导入的 DICOM 影像": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No importable DICOM images were found in the selected folder"
+          }
+        }
+      }
+    },
+    "所选目录": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected folder"
+          }
+        }
+      }
+    },
+    "所选目录中的恢复点已完整验证": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A restore point in the selected folder was fully verified"
+          }
+        }
+      }
+    },
     "所选记录无法比较": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "The selected records cannot be compared"
+          }
+        }
+      }
+    },
+    "所选资料未能加入待确认，资料仍保留在队列中。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selection couldn't be added for review. It remains in the queue."
           }
         }
       }
@@ -1415,6 +2835,26 @@
         }
       }
     },
+    "手机上传的唯一原件会出现在这里；处理完后队列会恢复为空。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unique originals uploaded from your phone appear here. The queue is empty again once they are processed."
+          }
+        }
+      }
+    },
+    "手机上传项目": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Phone upload items"
+          }
+        }
+      }
+    },
     "手机上传（接收中）": {
       "localizations": {
         "en": {
@@ -1445,16 +2885,6 @@
         }
       }
     },
-    "查看手机接收状态": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "View Phone Receiving Status"
-          }
-        }
-      }
-    },
     "打开原件并确认识别字段": {
       "localizations": {
         "en": {
@@ -1471,6 +2901,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Open confirmed fields and originals"
+          }
+        }
+      }
+    },
+    "扩大窗宽": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Widen Window Width"
           }
         }
       }
@@ -1505,6 +2945,46 @@
         }
       }
     },
+    "报告页序": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Report Page Order"
+          }
+        }
+      }
+    },
+    "报告顺序": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Report Order"
+          }
+        }
+      }
+    },
+    "拖动调节窗宽窗位；按住空格或使用辅助拖动平移；滚动切换切片。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drag to adjust window and level; hold Space or use a secondary drag to pan; scroll to change slices."
+          }
+        }
+      }
+    },
+    "拖动：窗宽窗位 · Space/辅助拖动：平移 · 捏合或 Command-滚动：缩放 · 滚动或左右方向键：切片": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drag: window/level · Space or secondary drag: pan · Pinch or Command-scroll: zoom · Scroll or arrow keys: slices"
+          }
+        }
+      }
+    },
     "按下以切换比较选择": {
       "localizations": {
         "en": {
@@ -1515,12 +2995,42 @@
         }
       }
     },
+    "按右侧显示的顺序创建一份待确认报告": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create one report in the order shown on the right"
+          }
+        }
+      }
+    },
     "接收中": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Receiving"
+          }
+        }
+      }
+    },
+    "提供窗宽窗位和平移的键盘操作": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Provides keyboard controls for window, level, and pan"
+          }
+        }
+      }
+    },
+    "提高窗位": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raise Window Level"
           }
         }
       }
@@ -1565,12 +3075,42 @@
         }
       }
     },
+    "播放速度": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Playback Speed"
+          }
+        }
+      }
+    },
+    "操作未完成，可以稍后重试": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The operation was not completed. You can try again later."
+          }
+        }
+      }
+    },
     "收到的报告": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Received Report"
+          }
+        }
+      }
+    },
+    "放大": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zoom In"
           }
         }
       }
@@ -1605,6 +3145,36 @@
         }
       }
     },
+    "放弃并重新配置": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abandon and Set Up Again"
+          }
+        }
+      }
+    },
+    "放弃未完成的备份设置？": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abandon Incomplete Backup Setup?"
+          }
+        }
+      }
+    },
+    "放弃未完成的设置…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abandon Incomplete Setup…"
+          }
+        }
+      }
+    },
     "放弃这份失败的导入": {
       "localizations": {
         "en": {
@@ -1635,6 +3205,36 @@
         }
       }
     },
+    "数据备份": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Data Backup"
+          }
+        }
+      }
+    },
+    "数据管理": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Data Management"
+          }
+        }
+      }
+    },
+    "文件夹中包含无法读取或暂不支持的 DICOM 文件": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The folder contains DICOM files that cannot be read or are not currently supported"
+          }
+        }
+      }
+    },
     "文件无法读取": {
       "localizations": {
         "en": {
@@ -1661,6 +3261,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "File Order"
+          }
+        }
+      }
+    },
+    "新恢复点已保留，但旧恢复点暂未清理。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The new restore point was kept, but old restore points have not been cleaned up yet."
+          }
+        }
+      }
+    },
+    "无法使用所选备份目录，请重新选择。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected backup folder cannot be used. Choose it again."
+          }
+        }
+      }
+    },
+    "无法使用所选导出位置，请选择其他位置。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected export location cannot be used. Choose another location."
           }
         }
       }
@@ -1725,6 +3355,16 @@
         }
       }
     },
+    "无法打开手机上传待确认队列，请稍后重试。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't open the pending mobile uploads. Try again later."
+          }
+        }
+      }
+    },
     "无法打开资料库": {
       "localizations": {
         "en": {
@@ -1745,12 +3385,68 @@
         }
       }
     },
+    "无法显示当前影像切片": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current image slice cannot be displayed"
+          }
+        }
+      }
+    },
     "无法添加家庭成员，请稍后再试。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Unable to add the family member. Try again later."
+          }
+        }
+      }
+    },
+    "无法证明哪个恢复点最新，已暂停写入和清理。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kinlogue cannot prove which restore point is newest, so writing and cleanup are paused."
+          }
+        }
+      }
+    },
+    "无法读取家庭成员": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t load the family member"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法读取家庭成员"
+          }
+        }
+      }
+    },
+    "无法读取所选恢复点，请确认文件已下载到本机后重试。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected restore point cannot be read. Make sure it is downloaded to this Mac and try again."
+          }
+        }
+      }
+    },
+    "无法读取所选文件夹": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected folder could not be read"
           }
         }
       }
@@ -1771,6 +3467,32 @@
           "stringUnit": {
             "state": "translated",
             "value": "Unable to read this Mac's local network addresses."
+          }
+        }
+      }
+    },
+    "无法读取这项影像检查": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Imaging Study Could Not Be Read"
+          }
+        }
+      }
+    },
+    "无法载入记录": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t load records"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法载入记录"
           }
         }
       }
@@ -1815,6 +3537,16 @@
         }
       }
     },
+    "暂停播放": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause Playback"
+          }
+        }
+      }
+    },
     "最多只能选择两条记录": {
       "localizations": {
         "en": {
@@ -1825,12 +3557,62 @@
         }
       }
     },
+    "最近本地验证": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last local verification"
+          }
+        }
+      }
+    },
+    "有资料未能完成本机识别，可单独重试。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One or more items couldn't be processed on this Mac. Retry each failed item individually."
+          }
+        }
+      }
+    },
+    "未分配家庭成员": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Family Member Assigned"
+          }
+        }
+      }
+    },
     "未加入比较": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Not added to comparison"
+          }
+        }
+      }
+    },
+    "未发布不完整的压缩包。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No incomplete ZIP was published."
+          }
+        }
+      }
+    },
+    "未注明日期": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undated"
           }
         }
       }
@@ -1855,12 +3637,52 @@
         }
       }
     },
+    "本地恢复点": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local restore point"
+          }
+        }
+      }
+    },
+    "本地恢复点已过期或需要处理": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The local restore point is overdue or needs attention"
+          }
+        }
+      }
+    },
+    "本机备份身份不可用，需要重新设置新的备份。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Mac's backup identity is unavailable. Set up a new backup."
+          }
+        }
+      }
+    },
     "本机文字识别": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "On-device text recognition"
+          }
+        }
+      }
+    },
+    "本机没有足够空间安全恢复这份资料库。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Mac does not have enough space to restore this library safely."
           }
         }
       }
@@ -2001,6 +3823,36 @@
         }
       }
     },
+    "查看影像": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View Images"
+          }
+        }
+      }
+    },
+    "查看手机接收状态": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View Phone Receiving Status"
+          }
+        }
+      }
+    },
+    "查看第 %lld 个原件": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View original %lld"
+          }
+        }
+      }
+    },
     "标题": {
       "localizations": {
         "en": {
@@ -2011,12 +3863,32 @@
         }
       }
     },
+    "检查内容": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Study Contents"
+          }
+        }
+      }
+    },
     "检查日期": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Exam Date"
+            "value": "Study Date"
+          }
+        }
+      }
+    },
+    "检查索引和不再共享的本机 DICOM 原件会被删除；最初选择的源文件夹不会被修改。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The study index and local DICOM originals that are no longer shared will be deleted. The originally selected source folder is not modified."
           }
         }
       }
@@ -2071,12 +3943,42 @@
         }
       }
     },
+    "正在保存压缩包，请勿关闭续页…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saving ZIP. Do not close Kinlogue…"
+          }
+        }
+      }
+    },
+    "正在准备加密备份…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing Encrypted Backup…"
+          }
+        }
+      }
+    },
     "正在准备原件…": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Preparing Original…"
+          }
+        }
+      }
+    },
+    "正在准备导出…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing Export…"
           }
         }
       }
@@ -2097,6 +3999,56 @@
           "stringUnit": {
             "state": "translated",
             "value": "Deleting Local Library…"
+          }
+        }
+      }
+    },
+    "正在加载影像切片": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading image slice"
+          }
+        }
+      }
+    },
+    "正在加载影像切片…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading image slice…"
+          }
+        }
+      }
+    },
+    "正在取消并清理暂存…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelling and cleaning up staging…"
+          }
+        }
+      }
+    },
+    "正在取消并清理未完成的导出…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelling and cleaning up the unfinished export…"
+          }
+        }
+      }
+    },
+    "正在复制原始文件…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copying Originals…"
           }
         }
       }
@@ -2141,12 +4093,52 @@
         }
       }
     },
+    "正在替换本机资料库…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replacing Local Library…"
+          }
+        }
+      }
+    },
+    "正在本机扫描、复制并验证影像…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scanning, copying, and validating images on this Mac…"
+          }
+        }
+      }
+    },
     "正在本机识别": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Recognizing On Device"
+          }
+        }
+      }
+    },
+    "正在检查可导出的原始文件…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking for originals to export…"
+          }
+        }
+      }
+    },
+    "正在等待选择保存位置…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for a save location…"
           }
         }
       }
@@ -2181,6 +4173,16 @@
         }
       }
     },
+    "正在读取本机影像索引…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading the local imaging index…"
+          }
+        }
+      }
+    },
     "正在读取本机草稿…": {
       "localizations": {
         "en": {
@@ -2201,6 +4203,98 @@
         }
       }
     },
+    "正在载入 %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在载入 %@"
+          }
+        }
+      }
+    },
+    "正在载入记录…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading records…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在载入记录…"
+          }
+        }
+      }
+    },
+    "正在重新识别": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Re-recognizing"
+          }
+        }
+      }
+    },
+    "正在验证压缩包…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifying ZIP…"
+          }
+        }
+      }
+    },
+    "正在验证恢复点…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifying Restore Point…"
+          }
+        }
+      }
+    },
+    "正在验证恢复码…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifying Recovery Code…"
+          }
+        }
+      }
+    },
+    "此序列缺少完整空间几何，当前使用持久化的回退顺序。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This series is missing complete spatial geometry. Its persisted fallback order is being used."
+          }
+        }
+      }
+    },
+    "此恢复点需要更新版本的续页。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This restore point requires a newer version of Kinlogue."
+          }
+        }
+      }
+    },
     "此操作不可撤销": {
       "localizations": {
         "en": {
@@ -2217,6 +4311,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "You selected this date manually. It is explicitly marked as manual entry."
+          }
+        }
+      }
+    },
+    "此阶段可以取消；当前资料库不会被替换。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can cancel at this stage; the current library will not be replaced."
+          }
+        }
+      }
+    },
+    "每秒 %lld 张": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld slices per second"
           }
         }
       }
@@ -2291,16 +4405,6 @@
         }
       }
     },
-    "彻底删除": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Permanently Delete"
-          }
-        }
-      }
-    },
     "没有匹配记录": {
       "localizations": {
         "en": {
@@ -2311,12 +4415,42 @@
         }
       }
     },
+    "没有可导出的原始文件": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Originals to Export"
+          }
+        }
+      }
+    },
+    "没有可查看序列": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Viewable Series"
+          }
+        }
+      }
+    },
     "没有可用的局域网地址。请连接 Wi-Fi 或有线网络后重试。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "No local network address is available. Connect to Wi-Fi or a wired network and try again."
+          }
+        }
+      }
+    },
+    "没有待确认项": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Pending Items"
           }
         }
       }
@@ -2381,6 +4515,16 @@
         }
       }
     },
+    "源文件不会被修改；取消时会清理未发布的本机暂存。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source files are not modified. Cancelling removes unpublished local staging."
+          }
+        }
+      }
+    },
     "源文件不会被删除；续页中的失败草稿会被移除。": {
       "localizations": {
         "en": {
@@ -2401,6 +4545,56 @@
         }
       }
     },
+    "目录当前不可用": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Folder currently unavailable"
+          }
+        }
+      }
+    },
+    "确认医学影像检查": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm Imaging Study"
+          }
+        }
+      }
+    },
+    "确认后的报告和医学影像原件会出现在这里。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Originals from confirmed reports and medical images will appear here."
+          }
+        }
+      }
+    },
+    "确认家庭成员与检查日期": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm the family member and study date"
+          }
+        }
+      }
+    },
+    "确认并加入医学影像库": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm and Add to Imaging Library"
+          }
+        }
+      }
+    },
     "确认并加入时间线": {
       "localizations": {
         "en": {
@@ -2417,6 +4611,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Confirm Report Information"
+          }
+        }
+      }
+    },
+    "确认替换本机资料库": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm Replace Local Library"
           }
         }
       }
@@ -2481,6 +4685,56 @@
         }
       }
     },
+    "窗位 %@ · 窗宽 %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Window level %1$@ · width %2$@"
+          }
+        }
+      }
+    },
+    "窗宽窗位尚未加载": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Window and level not loaded"
+          }
+        }
+      }
+    },
+    "立即使地址和验证码失效，已完成上传的待确认项会保留": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invalidate the address and code immediately; completed pending uploads are retained"
+          }
+        }
+      }
+    },
+    "立即创建加密恢复点": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create an encrypted restore point now"
+          }
+        }
+      }
+    },
+    "立即备份": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back Up Now"
+          }
+        }
+      }
+    },
     "第 %lld 个文件，%@，%@": {
       "localizations": {
         "zh-Hans": {
@@ -2509,6 +4763,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Item %1$lld of %2$lld"
+          }
+        }
+      }
+    },
+    "第 %lld 张，共 %lld 张": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Slice %1$lld of %2$lld"
           }
         }
       }
@@ -2569,6 +4833,56 @@
         }
       }
     },
+    "管理续页的显示语言和本机数据。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manage Kinlogue's display language and local data."
+          }
+        }
+      }
+    },
+    "继续": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue"
+          }
+        }
+      }
+    },
+    "继续并选择位置…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue and Choose Location…"
+          }
+        }
+      }
+    },
+    "继续未完成的备份设置": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue Incomplete Backup Setup"
+          }
+        }
+      }
+    },
+    "继续未完成的备份设置…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue Incomplete Backup Setup…"
+          }
+        }
+      }
+    },
     "继续确认": {
       "localizations": {
         "en": {
@@ -2599,12 +4913,72 @@
         }
       }
     },
+    "续页会把加密恢复点写入你选择的具体目录。该目录可以由阿里云盘、百度网盘或其他桌面客户端同步。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kinlogue writes encrypted restore points to the specific folder you choose. Aliyun Drive, Baidu Netdisk, or another desktop client can sync that folder."
+          }
+        }
+      }
+    },
+    "续页原始文件.zip": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kinlogue Originals.zip"
+          }
+        }
+      }
+    },
     "续页只在这台 Mac 上处理和保存资料，不会发送到云端或外部服务。只有在你主动开启“手机上传”时，才会临时接收同一局域网内浏览器发送的资料。当前版本不提供应用层加密：报告和医学影像原件、成员资料及 OCR 结果以可读取的本地文件保存。能够访问此 Mac 用户资料的人员或软件，以及包含资料库的 Time Machine 备份、APFS 快照或其他副本，可能读取这些内容。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Kinlogue processes and stores data only on this Mac and does not send it to cloud or external services. It temporarily accepts browser uploads on the same local network only when you explicitly start Phone Uploads. This version does not provide application-level encryption: report and medical imaging originals, family member data, and OCR results are stored as readable local files. People or software with access to this Mac user's data, as well as Time Machine backups, APFS snapshots, or other copies containing the library, may be able to read them."
+          }
+        }
+      }
+    },
+    "续页只在这台 Mac 上处理资料。默认保存在本机；只有在你明确启用数据备份后，续页才会将加密恢复点写入你选择的目录。该目录是否被网盘客户端上传由对应客户端决定。只有在你主动开启“手机上传”时，才会临时接收同一局域网内浏览器发送的资料。活动资料库不提供应用层加密：报告和医学影像原件、成员资料及 OCR 结果以可读取的本地文件保存。能够访问此 Mac 用户资料的人员或软件，以及包含资料库的 Time Machine 备份、APFS 快照或其他副本，可能读取这些内容。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kinlogue processes data only on this Mac. It stays local by default; only after you explicitly enable data backup does Kinlogue write encrypted restore points to the folder you choose. Whether a cloud-drive client uploads that folder is controlled by that client. Only when you start Phone Upload does Kinlogue temporarily receive files from a browser on the same local network. The active library has no application-level encryption: report and medical-image originals, member information, and OCR results are stored as readable local files. People or software that can access this Mac user’s files, and Time Machine backups, APFS snapshots, or other copies containing the library, may read this content."
+          }
+        }
+      }
+    },
+    "续页只能验证所选目录里的本地恢复点，无法证明网盘客户端已经上传。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kinlogue can verify only the local restore point in the selected folder. It cannot prove that a cloud-drive client uploaded it."
+          }
+        }
+      }
+    },
+    "续页没有权限写入所选位置，请重新选择。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kinlogue does not have permission to write to the selected location. Choose it again."
+          }
+        }
+      }
+    },
+    "续页需要你重新选择备份目录。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kinlogue needs you to choose the backup folder again."
           }
         }
       }
@@ -2639,6 +5013,26 @@
         }
       }
     },
+    "编辑归属与日期": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit Assignment and Date"
+          }
+        }
+      }
+    },
+    "缩小": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zoom Out"
+          }
+        }
+      }
+    },
     "缩小原件": {
       "localizations": {
         "en": {
@@ -2649,12 +5043,82 @@
         }
       }
     },
+    "缩小窗宽": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Narrow Window Width"
+          }
+        }
+      }
+    },
+    "缩放 %lld%%": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zoom %lld%%"
+          }
+        }
+      }
+    },
+    "网盘同步状态未知": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud-drive sync status unknown"
+          }
+        }
+      }
+    },
+    "网盘状态": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud-drive status"
+          }
+        }
+      }
+    },
+    "自动备份": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic backup"
+          }
+        }
+      }
+    },
+    "自动备份默认关闭。设置时会生成一份必须独立保存的恢复码。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic backup is off by default. Setup generates a recovery code that must be saved independently."
+          }
+        }
+      }
+    },
     "若手机无法打开，请确认两台设备没有使用访客网络隔离，并检查 macOS 防火墙是否允许续页接收入站连接。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "If your phone cannot open the address, confirm neither device uses an isolated guest network and check that the macOS firewall allows incoming connections to Kinlogue."
+          }
+        }
+      }
+    },
+    "解密后大小": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Decrypted size"
           }
         }
       }
@@ -2675,6 +5139,32 @@
           "stringUnit": {
             "state": "translated",
             "value": "The record and originals no longer shared by other records will no longer be visible in Kinlogue. The originally selected source file is not deleted."
+          }
+        }
+      }
+    },
+    "记录暂时无法打开": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This record can’t be opened right now"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "记录暂时无法打开"
+          }
+        }
+      }
+    },
+    "设置": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings"
           }
         }
       }
@@ -2715,6 +5205,26 @@
         }
       }
     },
+    "该成员仍关联 %lld 项医学影像检查。请先重分配或删除这些检查后再试。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This family member is still linked to %lld imaging studies. Reassign or delete those studies, then try again."
+          }
+        }
+      }
+    },
+    "语言": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Language"
+          }
+        }
+      }
+    },
     "请先确认仅在可信任的私人局域网中使用。": {
       "localizations": {
         "en": {
@@ -2725,12 +5235,52 @@
         }
       }
     },
+    "请先确认恢复码已保存在独立位置。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm that the recovery code is saved in an independent location first."
+          }
+        }
+      }
+    },
     "请先选择家庭成员": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Select a family member first"
+          }
+        }
+      }
+    },
+    "请先选择家庭成员和报告日期": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select a family member and report date first"
+          }
+        }
+      }
+    },
+    "请先选择有效的家庭成员和检查日期": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select a valid family member and study date first"
+          }
+        }
+      }
+    },
+    "请勿退出续页。操作完成后必须重新启动。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Do not quit Kinlogue. You must restart after this operation finishes."
           }
         }
       }
@@ -2835,6 +5385,16 @@
         }
       }
     },
+    "请选择报告或影像资料中可核实的检查日期": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a study date you can verify from the report or imaging material"
+          }
+        }
+      }
+    },
     "资料已发生变化，请刷新后重试。": {
       "localizations": {
         "en": {
@@ -2875,12 +5435,110 @@
         }
       }
     },
+    "资料库替换已进入收敛阶段。请退出并重新打开续页；在重新启动前不要继续使用当前窗口。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library replacement has entered recovery convergence. Quit and reopen Kinlogue; do not continue using this window before restarting."
+          }
+        }
+      }
+    },
+    "资料库替换未完成，请重新启动续页以安全收敛。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library replacement did not finish. Restart Kinlogue so it can converge safely."
+          }
+        }
+      }
+    },
+    "跟随系统": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System Default"
+          }
+        }
+      }
+    },
+    "载入下一页记录": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Load the next page of records"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "载入下一页记录"
+          }
+        }
+      }
+    },
+    "载入更多 %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Load more %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "载入更多 %@"
+          }
+        }
+      }
+    },
+    "载入更多记录": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Load more records"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "载入更多记录"
+          }
+        }
+      }
+    },
+    "输入你在首次设置时独立保存的完整恢复码。续页会继续使用原有备份身份，不会生成新的恢复码。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter the complete recovery code you saved independently during initial setup. Kinlogue will continue using the existing backup identity and will not generate a new recovery code."
+          }
+        }
+      }
+    },
     "还没有健康记录": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "No Health Records Yet"
+          }
+        }
+      }
+    },
+    "还没有已确认的医学影像": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Confirmed Medical Images Yet"
           }
         }
       }
@@ -2895,12 +5553,72 @@
         }
       }
     },
+    "这会替换而不是合并当前资料库，并移除本机备份设置。外部恢复点会保留。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This replaces rather than merges the current library and removes local backup settings. External restore points are kept."
+          }
+        }
+      }
+    },
+    "这会移除本机保存的未完成备份身份。已有外部文件不会被删除；之后可以选择目录并生成新的恢复码。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This removes the incomplete backup identity saved on this Mac. Existing external files are not deleted; afterward, you can choose a folder and generate a new recovery code."
+          }
+        }
+      }
+    },
     "这台 Mac 的地址": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "This Mac's Address"
+          }
+        }
+      }
+    },
+    "这是提供给医生查看的副本，不是资料库备份，不能用于恢复续页。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This is a copy for sharing with a doctor, not a library backup, and cannot restore Kinlogue."
+          }
+        }
+      }
+    },
+    "这条记录已在其他窗口中发生变化，当前修改无法保存。请关闭编辑页。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This record changed in another window, so these edits cannot be saved. Close the editor."
+          }
+        }
+      }
+    },
+    "这条记录已在其他窗口中更新。重新载入最新版本会替换此页未保存的修改。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This record was updated in another window. Reloading the latest version will replace unsaved edits on this page."
+          }
+        }
+      }
+    },
+    "这组影像超出当前支持范围": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This image set is outside the currently supported range"
           }
         }
       }
@@ -2925,6 +5643,46 @@
         }
       }
     },
+    "这项检查已在医学影像库中": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Study Is Already in the Imaging Library"
+          }
+        }
+      }
+    },
+    "这项检查没有可查看的影像序列": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This study has no viewable image series"
+          }
+        }
+      }
+    },
+    "连续播放": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play Slices"
+          }
+        }
+      }
+    },
+    "连续播放仅按顺序浏览空间切片，不代表真实时间动态影像。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continuous playback only steps through spatial slices in order; it is not a true time-resolved dynamic image."
+          }
+        }
+      }
+    },
     "退出": {
       "localizations": {
         "en": {
@@ -2945,12 +5703,62 @@
         }
       }
     },
+    "退出续页": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quit Kinlogue"
+          }
+        }
+      }
+    },
+    "适合窗口": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fit"
+          }
+        }
+      }
+    },
+    "选择": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose"
+          }
+        }
+      }
+    },
+    "选择一个已下载到本机的 .kinloguebackup 恢复点。恢复会先完整验证，不会在确认前修改当前资料库。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a .kinloguebackup restore point downloaded to this Mac. Kinlogue verifies it fully and will not change the current library before confirmation."
+          }
+        }
+      }
+    },
     "选择一条记录": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Select a Record"
+          }
+        }
+      }
+    },
+    "选择一项医学影像检查": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select an Imaging Study"
           }
         }
       }
@@ -2975,12 +5783,42 @@
         }
       }
     },
+    "选择后可与其他原件组成一份报告": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select to combine with other originals into one report"
+          }
+        }
+      }
+    },
     "选择后可在详情区查看、排序或移除文件": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Select to view, reorder, or remove files in the detail area"
+          }
+        }
+      }
+    },
+    "选择后可查看检查摘要": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select to view the study summary"
+          }
+        }
+      }
+    },
+    "选择备份目录…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Backup Folder…"
           }
         }
       }
@@ -2995,12 +5833,62 @@
         }
       }
     },
+    "选择待确认资料": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select Pending Items"
+          }
+        }
+      }
+    },
+    "选择恢复点…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Restore Point…"
+          }
+        }
+      }
+    },
+    "选择数据备份目录": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Data Backup Folder"
+          }
+        }
+      }
+    },
+    "选择界面语言": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select the interface language"
+          }
+        }
+      }
+    },
     "选择记录后显示原件": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Select a record to show originals"
+          }
+        }
+      }
+    },
+    "通用": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "General"
           }
         }
       }
@@ -3015,6 +5903,32 @@
         }
       }
     },
+    "部分原始文件已损坏或发生变化，导出未完成。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some originals are damaged or changed, so the export did not finish."
+          }
+        }
+      }
+    },
+    "部分资料无法读取": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some items couldn’t be read"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "部分资料无法读取"
+          }
+        }
+      }
+    },
     "采样日期": {
       "localizations": {
         "en": {
@@ -3025,32 +5939,12 @@
         }
       }
     },
-    "重试": {
+    "重新授权原备份目录…": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Retry"
-          }
-        }
-      }
-    },
-    "重试处理 %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Retry processing %@"
-          }
-        }
-      }
-    },
-    "重试未完成，可以稍后再试": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Retry incomplete. Try again later."
+            "value": "Reauthorize Original Backup Folder…"
           }
         }
       }
@@ -3065,16 +5959,6 @@
         }
       }
     },
-    "重新载入最新版本": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reload Latest Version"
-          }
-        }
-      }
-    },
     "重新识别并覆盖": {
       "localizations": {
         "en": {
@@ -3085,22 +5969,130 @@
         }
       }
     },
-    "正在重新识别": {
+    "重新载入 %@": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Re-recognizing"
+            "value": "Reload %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新载入 %@"
           }
         }
       }
     },
-    "使用新的本机识别结果覆盖当前字段": {
+    "重新载入当前查询": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Replace current fields with new on-device recognition results"
+            "value": "Retry the current query"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新载入当前查询"
+          }
+        }
+      }
+    },
+    "重新载入最新版本": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reload Latest Version"
+          }
+        }
+      }
+    },
+    "重新选择文件夹…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Another Folder…"
+          }
+        }
+      }
+    },
+    "重置": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset"
+          }
+        }
+      }
+    },
+    "重试": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry"
+          }
+        }
+      }
+    },
+    "重试…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try Again…"
+          }
+        }
+      }
+    },
+    "重试处理 %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry processing %@"
+          }
+        }
+      }
+    },
+    "重试当前切片": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry Current Slice"
+          }
+        }
+      }
+    },
+    "重试未完成，可以稍后再试": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry incomplete. Try again later."
+          }
+        }
+      }
+    },
+    "重试载入": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry loading"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试载入"
           }
         }
       }
@@ -3111,6 +6103,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Error: %@"
+          }
+        }
+      }
+    },
+    "键盘调整": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keyboard Adjustments"
+          }
+        }
+      }
+    },
+    "降低窗位": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lower Window Level"
           }
         }
       }
@@ -3145,6 +6157,26 @@
         }
       }
     },
+    "验证并启用备份": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify and Enable Backup"
+          }
+        }
+      }
+    },
+    "验证并完成设置": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify and Complete Setup"
+          }
+        }
+      }
+    },
     "验证码": {
       "localizations": {
         "en": {
@@ -3175,458 +6207,6 @@
         }
       }
     },
-    "设置": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Settings"
-          }
-        }
-      }
-    },
-    "数据管理": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Data Management"
-          }
-        }
-      }
-    },
-    "管理续页的显示语言和本机数据。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Manage Kinlogue's display language and local data."
-          }
-        }
-      }
-    },
-    "选择界面语言": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Select the interface language"
-          }
-        }
-      }
-    },
-    "跟随系统": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "System Default"
-          }
-        }
-      }
-    },
-    "通用": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "General"
-          }
-        }
-      }
-    },
-    "语言": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Language"
-          }
-        }
-      }
-    },
-    "无法打开手机上传待确认队列，请稍后重试。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Couldn't open the pending mobile uploads. Try again later."
-          }
-        }
-      }
-    },
-    "待确认队列暂时无法刷新。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The pending queue can't be refreshed right now."
-          }
-        }
-      }
-    },
-    "所选资料未能加入待确认，资料仍保留在队列中。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The selection couldn't be added for review. It remains in the queue."
-          }
-        }
-      }
-    },
-    "有资料未能完成本机识别，可单独重试。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "One or more items couldn't be processed on this Mac. Retry each failed item individually."
-          }
-        }
-      }
-    },
-    "删除待确认项 %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Delete pending item %@"
-          }
-        }
-      }
-    },
-    "可选择并归档": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ready to select and archive"
-          }
-        }
-      }
-    },
-    "不支持预览，原件仍保留": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Preview unsupported; original retained"
-          }
-        }
-      }
-    },
-    "完整性校验失败": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Integrity check failed"
-          }
-        }
-      }
-    },
-    "选择待确认资料": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Select Pending Items"
-          }
-        }
-      }
-    },
-    "可单选一个原件，或多选后在这里确认报告页序。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Select one original, or select multiple and confirm their report order here."
-          }
-        }
-      }
-    },
-    "作为 1 份报告": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "As One Report"
-          }
-        }
-      }
-    },
-    "共 %lld 个原件；顺序只影响这次报告。": {
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld original; the order only affects this report."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld originals; the order only affects this report."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "报告页序": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Report Page Order"
-          }
-        }
-      }
-    },
-    "查看第 %lld 个原件": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "View original %lld"
-          }
-        }
-      }
-    },
-    "将 %@ 向前移动": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Move %@ forward"
-          }
-        }
-      }
-    },
-    "将 %@ 向后移动": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Move %@ backward"
-          }
-        }
-      }
-    },
-    "归档后会生成一份待确认报告；在报告中确认前不会进入时间线。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Archiving creates one report for review; it won't appear in the timeline until confirmed."
-          }
-        }
-      }
-    },
-    "报告顺序": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Report Order"
-          }
-        }
-      }
-    },
-    "立即使地址和验证码失效，已完成上传的待确认项会保留": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Invalidate the address and code immediately; completed pending uploads are retained"
-          }
-        }
-      }
-    },
-    "没有待确认项": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No Pending Items"
-          }
-        }
-      }
-    },
-    "手机上传的唯一原件会出现在这里；处理完后队列会恢复为空。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Unique originals uploaded from your phone appear here. The queue is empty again once they are processed."
-          }
-        }
-      }
-    },
-    "选择后可与其他原件组成一份报告": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Select to combine with other originals into one report"
-          }
-        }
-      }
-    },
-    "可单独重试或删除，不影响其他资料": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Retry or delete individually without affecting other items"
-          }
-        }
-      }
-    },
-    "删除所选待确认项？": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Delete Pending Queue Selection?"
-          }
-        }
-      }
-    },
-    "删除本机接收副本": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Delete Received Copies"
-          }
-        }
-      }
-    },
-    "只删除待确认队列中的所选原件；已经归档到报告的原件不受影响。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Only the pending queue selection is deleted; originals already archived into reports are unaffected."
-          }
-        }
-      }
-    },
-    "待确认队列": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pending Queue"
-          }
-        }
-      }
-    },
-    "%lld 个唯一原件 · 实际占用 %@": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "new",
-            "value": "%1$lld 个唯一原件 · 实际占用 %2$@"
-          }
-        },
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "Unique original: %1$lld · Disk usage: %2$@"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "Unique originals: %1$lld · Disk usage: %2$@"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "已选 %lld 个原件，作为 1 份报告": {
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld original selected as one report"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld originals selected as one report"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "作为 1 份报告加入待确认": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add as One Report for Review"
-          }
-        }
-      }
-    },
-    "请先选择家庭成员和报告日期": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Select a family member and report date first"
-          }
-        }
-      }
-    },
-    "按右侧显示的顺序创建一份待确认报告": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Create one report in the order shown on the right"
-          }
-        }
-      }
-    },
-    "已作为 1 份报告加入待确认。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Added as one report for review."
-          }
-        }
-      }
-    },
-    "原件与已有报告相同，未重复创建。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This selection matches an existing report, so no duplicate was created."
-          }
-        }
-      }
-    },
     "，第 %@ 页": {
       "localizations": {
         "en": {
@@ -3647,264 +6227,234 @@
         }
       }
     },
-    "一个文件夹只能导入一次检查": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Import one study folder at a time"}}}},
-    "正在本机扫描、复制并验证影像…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Scanning, copying, and validating images on this Mac…"}}}},
-    "源文件不会被修改；取消时会清理未发布的本机暂存。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Source files are not modified. Cancelling removes unpublished local staging."}}}},
-    "正在取消并清理暂存…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Cancelling and cleaning up staging…"}}}},
-    "影像导入已取消": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Imaging Import Cancelled"}}}},
-    "影像导入未完成": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Imaging Import Was Not Completed"}}}},
-    "影像导入未完成，可以稍后重试": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The imaging import was not completed. You can try again later."}}}},
-    "重新选择文件夹…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose Another Folder…"}}}},
-    "继续": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Continue"}}}},
-    "这条记录已在其他窗口中发生变化，当前修改无法保存。请关闭编辑页。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This record changed in another window, so these edits cannot be saved. Close the editor."}}}},
-    "这条记录已在其他窗口中更新。重新载入最新版本会替换此页未保存的修改。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This record was updated in another window. Reloading the latest version will replace unsaved edits on this page."}}}},
-    "这项检查已在医学影像库中": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This Study Is Already in the Imaging Library"}}}},
-    "影像已安全导入本机资料库": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Images Imported to the Local Library"}}}},
-    "可查看影像": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Viewable Images"}}}},
-    "保留但暂不可查看的对象": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Retained Objects Not Currently Viewable"}}}},
-    "忽略的非 DICOM 文件": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Ignored Non-DICOM Files"}}}},
-    "合并的重复对象": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Collapsed Duplicate Objects"}}}},
-    "无法读取所选文件夹": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The selected folder could not be read"}}}},
-    "所选文件夹中没有可导入的 DICOM 影像": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No importable DICOM images were found in the selected folder"}}}},
-    "文件夹中包含无法读取或暂不支持的 DICOM 文件": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The folder contains DICOM files that cannot be read or are not currently supported"}}}},
-    "这组影像超出当前支持范围": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This image set is outside the currently supported range"}}}},
-    "影像数量或大小超出当前支持范围": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The image count or size exceeds the current limits"}}}},
-    "导入时源文件发生变化，请重试": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"A source file changed during import. Try again."}}}},
-    "医学影像": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Medical Imaging"}}}},
-    "导入医学影像": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Import Medical Images"}}}},
-    "待确认影像": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Imaging to Review"}}}},
-    "医学影像检查": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Imaging Study"}}}},
-    "确认家庭成员与检查日期": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Confirm the family member and study date"}}}},
-    "确认医学影像检查": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Confirm Imaging Study"}}}},
-    "只确认归属成员与检查日期；续页不会从影像推断诊断或结论。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Confirm only the family member and study date. Kinlogue does not infer diagnoses or conclusions from images."}}}},
-    "正在读取本机影像索引…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Reading the local imaging index…"}}}},
-    "无法读取这项影像检查": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This Imaging Study Could Not Be Read"}}}},
-    "删除这项影像检查…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Delete This Imaging Study…"}}}},
-    "操作未完成，可以稍后重试": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The operation was not completed. You can try again later."}}}},
-    "确认并加入医学影像库": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Confirm and Add to Imaging Library"}}}},
-    "删除这项医学影像检查？": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Delete This Imaging Study?"}}}},
-    "从续页删除影像检查": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Delete Imaging Study from Kinlogue"}}}},
-    "检查索引和不再共享的本机 DICOM 原件会被删除；最初选择的源文件夹不会被修改。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The study index and local DICOM originals that are no longer shared will be deleted. The originally selected source folder is not modified."}}}},
-    "检查内容": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Study Contents"}}}},
-    "影像序列": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Image Series"}}}},
-    "共 %lld 个序列，%lld 张可查看影像": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"%1$lld series · %2$lld viewable slices"}}}},
-    "影像序列 · 共 %lld 个序列，%lld 张": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Image series · %1$lld series, %2$lld slices"}}}},
-    "必须由你明确选择，影像内容不会自动决定归属": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"You must choose explicitly; image content does not assign a family member"}}}},
-    "检查日期": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Study Date"}}}},
-    "请选择报告或影像资料中可核实的检查日期": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose a study date you can verify from the report or imaging material"}}}},
-    "请先选择有效的家庭成员和检查日期": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Select a valid family member and study date first"}}}},
-    "未分配家庭成员": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No Family Member Assigned"}}}},
-    "还没有已确认的医学影像": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No Confirmed Medical Images Yet"}}}},
-    "导入 DICOM 文件夹并确认家庭成员与检查日期后，会显示在这里。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Import a DICOM folder and confirm the family member and study date to show it here."}}}},
-    "保留 %lld 个对象": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"%lld retained objects"}}}},
-    "选择后可查看检查摘要": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Select to view the study summary"}}}},
-    "当前版本暂不提供影像切片查看；可以管理已确认检查，且不会主动渲染不支持的对象。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The current version does not provide slice viewing. You can manage confirmed studies, and unsupported objects are not rendered automatically."}}}},
-    "编辑归属与日期": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Edit Assignment and Date"}}}},
-    "选择一项医学影像检查": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Select an Imaging Study"}}}},
-    "该成员仍关联 %lld 项医学影像检查。请先重分配或删除这些检查后再试。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This family member is still linked to %lld imaging studies. Reassign or delete those studies, then try again."}}}},
-    "查看影像": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"View Images"}}}},
-    "只显示受支持的本机二维 MR 切片；影像不会进入 OCR、搜索或比较。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Only supported local 2D MR slices are shown. Images are not included in OCR, search, or comparison."}}}},
-    "二维医学影像查看器": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"2D Medical Image Viewer"}}}},
-    "仅供查看本机原始影像，不提供诊断、测量或医学解释。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"For viewing local original images only. No diagnosis, measurements, or medical interpretation are provided."}}}},
-    "另保留 %lld 个暂不可查看对象": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"%lld additional objects retained but not currently viewable"}}}},
-    "没有可查看序列": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No Viewable Series"}}}},
-    "影像序列列表": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Image series list"}}}},
-    "序列 %lld，%lld 张": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Series %1$lld, %2$lld slices"}}}},
-    "正在加载影像切片…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading image slice…"}}}},
-    "正在加载影像切片": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading image slice"}}}},
-    "这项检查没有可查看的影像序列": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This study has no viewable image series"}}}},
-    "无法显示当前影像切片": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The current image slice cannot be displayed"}}}},
-    "重试当前切片": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Retry Current Slice"}}}},
-    "此序列缺少完整空间几何，当前使用持久化的回退顺序。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This series is missing complete spatial geometry. Its persisted fallback order is being used."}}}},
-    "切片顺序警告：使用回退顺序": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Slice order warning: fallback order is in use"}}}},
-    "MR · %lld × %lld · %lld 张": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"MR · %1$lld × %2$lld · %3$lld slices"}}}},
-    "序列 %lld": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Series %lld"}}}},
-    "序列 %lld / %lld · 当前 %lld 张 · 共 %lld 张": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Series %1$lld of %2$lld · %3$lld slices · %4$lld total"}}}},
-    "上一个序列": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Previous Series"}}}},
-    "下一个序列": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Next Series"}}}},
-    "连续播放": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Play Slices"}}}},
-    "暂停播放": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Pause Playback"}}}},
-    "每秒 %lld 张": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"%lld slices per second"}}}},
-    "播放速度": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Playback Speed"}}}},
-    "回退顺序": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Fallback order"}}}},
-    "医学影像切片画布": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Medical image slice canvas"}}}},
-    "拖动调节窗宽窗位；按住空格或使用辅助拖动平移；滚动切换切片。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Drag to adjust window and level; hold Space or use a secondary drag to pan; scroll to change slices."}}}},
-    "上一张": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Previous Slice"}}}},
-    "切片位置": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Slice position"}}}},
-    "第 %lld 张，共 %lld 张": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Slice %1$lld of %2$lld"}}}},
-    "下一张": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Next Slice"}}}},
-    "窗位 %@ · 窗宽 %@": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Window level %1$@ · width %2$@"}}}},
-    "窗宽窗位尚未加载": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Window and level not loaded"}}}},
-    "缩放 %lld%%": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Zoom %lld%%"}}}},
-    "缩小": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Zoom Out"}}}},
-    "放大": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Zoom In"}}}},
-    "适合窗口": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Fit"}}}},
-    "重置": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Reset"}}}},
-    "拖动：窗宽窗位 · Space/辅助拖动：平移 · 捏合或 Command-滚动：缩放 · 滚动或左右方向键：切片": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Drag: window/level · Space or secondary drag: pan · Pinch or Command-scroll: zoom · Scroll or arrow keys: slices"}}}},
-    "连续播放仅按顺序浏览空间切片，不代表真实时间动态影像。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Continuous playback only steps through spatial slices in order; it is not a true time-resolved dynamic image."}}}},
-    "影像查看器加载失败": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The image viewer could not be loaded"}}}},
-    "影像已从内存中释放，可以重试当前切片": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The image was released from memory. You can retry the current slice."}}}},
-    "已显示第 %lld 张，共 %lld 张": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Showing slice %1$lld of %2$lld"}}}},
-    "当前影像切片加载失败，可以重试": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The current image slice could not be loaded. You can retry."}}}},
-    "键盘调整": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Keyboard Adjustments"}}}},
-    "降低窗位": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Lower Window Level"}}}},
-    "提高窗位": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Raise Window Level"}}}},
-    "缩小窗宽": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Narrow Window Width"}}}},
-    "扩大窗宽": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Widen Window Width"}}}},
-    "向左平移": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Pan Left"}}}},
-    "向右平移": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Pan Right"}}}},
-    "向上平移": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Pan Up"}}}},
-    "向下平移": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Pan Down"}}}},
-    "提供窗宽窗位和平移的键盘操作": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Provides keyboard controls for window, level, and pan"}}}},
-    "尚未确认家庭成员与检查日期": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Family member and study date not yet confirmed"}}}},
-    "导出全部原始文件": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Export All Original Files"}}}},
-    "将已确认报告和医学影像的原始文件按家庭成员与日期整理为一个 ZIP 压缩包。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Organize originals from confirmed reports and medical images into one ZIP by family member and date."}}}},
-    "导出内容为未加密副本，不包含 OCR、备注或草稿。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The export is an unencrypted copy and does not include OCR, notes, or drafts."}}}},
-    "导出原始文件…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Export Originals…"}}}},
-    "正在检查可导出的原始文件…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Checking for originals to export…"}}}},
-    "正在等待选择保存位置…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Waiting for a save location…"}}}},
-    "正在取消并清理未完成的导出…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Cancelling and cleaning up the unfinished export…"}}}},
-    "导出已取消": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Export Cancelled"}}}},
-    "未发布不完整的压缩包。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No incomplete ZIP was published."}}}},
-    "没有可导出的原始文件": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No Originals to Export"}}}},
-    "确认后的报告和医学影像原件会出现在这里。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Originals from confirmed reports and medical images will appear here."}}}},
-    "导出未完成": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Export Incomplete"}}}},
-    "导出未完成，可以稍后重试。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The export did not finish. You can try again later."}}}},
-    "导出的压缩包包含未加密的健康资料": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The exported ZIP contains unencrypted health information"}}}},
-    "只会导出已确认报告和医学影像的原始文件，并按家庭成员和日期排列。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Only originals from confirmed reports and medical images will be exported, organized by family member and date."}}}},
-    "不包含 OCR、转录、备注、目录或草稿。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Does not include OCR, transcriptions, notes, catalog data, or drafts."}}}},
-    "这是提供给医生查看的副本，不是资料库备份，不能用于恢复续页。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This is a copy for sharing with a doctor, not a library backup, and cannot restore Kinlogue."}}}},
-    "导出后文件由您保管；删除续页资料库不会删除已导出的副本。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"You are responsible for the exported files. Deleting the Kinlogue library will not delete exported copies."}}}},
-    "导出进度": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Export Progress"}}}},
-    "已完成 %lld%%": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"%lld%% complete"}}}},
-    "已处理 %lld / %@": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"%1$lld of %2$@ processed"}}}},
-    "%@ / %@": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"%1$@ / %2$@"}}}},
-    "原始文件已导出": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Originals Exported"}}}},
-    "共 %lld 个文件，%@": {
+    "资料库正由另一个续页进程使用。请关闭该进程后重试。": {
       "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another Kinlogue process is using this library. Close that process and try again."
+          }
+        }
+      }
+    },
+    "资料库格式不受支持或已损坏。现有内容已保留；你可以从数据备份恢复，或退出后检查资料库。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The library format is unsupported or damaged. Existing contents have been preserved. Restore from a data backup, or quit and inspect the library."
+          }
+        }
+      }
+    },
+    "上一次资料库操作尚未核实完成。现有内容已保留；请退出并保留资料库及恢复记录，暂时无法继续恢复。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The previous library operation could not be verified. Existing contents have been preserved. Quit and keep the library and its recovery records; restoration is unavailable for now."
+          }
+        }
+      }
+    },
+    "暂时无法打开资料库。请稍后重试，或退出后检查本机存储。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The library cannot be opened right now. Try again later, or quit and check local storage."
+          }
+        }
+      }
+    },
+    "本次资料库操作已停止。请退出并重新打开续页，再检查资料库状态。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The library operation has stopped. Quit and reopen Kinlogue, then check the library status."
+          }
+        }
+      }
+    },
+    "正在打开资料库…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening library…"
+          }
+        }
+      }
+    },
+    "资料库完整性检查未通过。当前操作已停止；你可以从数据备份恢复，或退出后检查资料库。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The library integrity check failed. Operations have stopped. Restore from a data backup, or quit and inspect the library."
+          }
+        }
+      }
+    },
+    "资料库完整性巡检": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library integrity inspection"
+          }
+        }
+      }
+    },
+    "尚未巡检": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not inspected"
+          }
+        }
+      }
+    },
+    "尚未巡检，等待空闲时开始": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not inspected; waiting for idle time"
+          }
+        }
+      }
+    },
+    "正在巡检": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inspection in progress"
+          }
+        }
+      }
+    },
+    "已检查项目": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Items checked"
+          }
+        }
+      }
+    },
+    "巡检未完成，将在空闲时继续": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inspection incomplete; it will continue when idle"
+          }
+        }
+      }
+    },
+    "本次巡检已完成": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This inspection is complete"
+          }
+        }
+      }
+    },
+    "完成时间": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completed at"
+          }
+        }
+      }
+    },
+    "已隔离的损坏项目": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Damaged items isolated"
+          }
+        }
+      }
+    },
+    "完整性检查未通过，资料库操作已停止": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Integrity check failed; library operations have stopped"
+          }
+        }
+      }
+    },
+    "无法加载更多待确认项，请重试。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More pending items could not be loaded. Try again."
+          }
+        }
+      }
+    },
+    "正在加载待确认队列…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading pending queue…"
+          }
+        }
+      }
+    },
+    "加载更多待确认项": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Load more pending items"
+          }
+        }
+      }
+    },
+    "%lld 个唯一原件 · 原件内容 %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$lld 个唯一原件 · 原件内容 %2$@"
+          }
+        },
         "en": {
           "variations": {
             "plural": {
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%1$lld file, %2$@"
+                  "value": "Unique original: %1$lld · Source content: %2$@"
                 }
               },
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%1$lld files, %2$@"
+                  "value": "Unique originals: %1$lld · Source content: %2$@"
                 }
               }
             }
           }
         }
       }
-    },
-    "压缩包位于续页资料库之外，请妥善保管。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The ZIP is outside the Kinlogue library. Keep it secure."}}}},
-    "继续并选择位置…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Continue and Choose Location…"}}}},
-    "重试…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Try Again…"}}}},
-    "在访达中显示": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Show in Finder"}}}},
-    "正在准备导出…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Preparing Export…"}}}},
-    "正在复制原始文件…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Copying Originals…"}}}},
-    "正在验证压缩包…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Verifying ZIP…"}}}},
-    "正在保存压缩包，请勿关闭续页…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Saving ZIP. Do not close Kinlogue…"}}}},
-    "未注明日期": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Undated"}}}},
-    "续页原始文件.zip": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Kinlogue Originals.zip"}}}},
-    "导出": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Export"}}}},
-    "无法使用所选导出位置，请选择其他位置。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The selected export location cannot be used. Choose another location."}}}},
-    "所选位置没有足够空间完成导出。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The selected location does not have enough space to finish the export."}}}},
-    "续页没有权限写入所选位置，请重新选择。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Kinlogue does not have permission to write to the selected location. Choose it again."}}}},
-    "导出期间资料库发生变化，未生成不完整的压缩包。请重试。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The library changed during export. No incomplete ZIP was published. Try again."}}}},
-    "部分原始文件已损坏或发生变化，导出未完成。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Some originals are damaged or changed, so the export did not finish."}}}},
-    "压缩包验证失败，未发布不完整的导出。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"ZIP verification failed. No incomplete export was published."}}}},
-    "导出文件可能已经写入，但无法确认磁盘同步状态。请检查所选位置后再决定是否重试。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The export may have been written, but its disk sync status could not be confirmed. Check the selected location before retrying."}}}},
-    "不包含健康内容的恢复点概要": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Restore point summary without health content"}}}},
-    "临时空间估算": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Estimated temporary space"}}}},
-    "从恢复点恢复…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Restore from Restore Point…"}}}},
-    "从数据备份恢复": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Restore from Data Backup"}}}},
-    "从数据备份恢复…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Restore from Data Backup…"}}}},
-    "保存数据备份恢复码": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Save the Backup Recovery Code"}}}},
-    "保留的恢复点数量": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Restore points to keep"}}}},
-    "保留空间估算": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Estimated retained space"}}}},
-    "加密目录备份": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Encrypted Folder Backup"}}}},
-    "单个恢复点估算": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Estimated per restore point"}}}},
-    "另一项资料库操作正在进行。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Another library operation is in progress."}}}},
-    "备份期间资料库发生变化，续页会稍后重试。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The library changed during backup. Kinlogue will try again later."}}}},
-    "备份目录当前不可用，请连接存储或恢复网盘目录后重试。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The backup folder is unavailable. Reconnect the storage or cloud-drive folder, then try again."}}}},
-    "备份目录身份发生变化，已暂停写入。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The backup folder identity changed, so writing is paused."}}}},
-    "备份设置尚未完成。若你仍保存原恢复码，可以继续完成；续页不会生成新的恢复码。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Backup setup is incomplete. If you still have the original recovery code, you can continue; Kinlogue will not generate a new one."}}}},
-    "备份验证未完成，请检查目录后重试。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Backup verification did not finish. Check the folder and try again."}}}},
-    "完整回输恢复码": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Re-enter the complete recovery code"}}}},
-    "尚无已验证的本地恢复点": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No locally verified restore point yet"}}}},
-    "尚未配置数据备份。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Data backup is not configured."}}}},
-    "已验证的恢复点概要": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Verified Restore Point Summary"}}}},
-    "当前资料库不会因验证失败而被替换。你可以取消后重新选择恢复点。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"A verification failure will not replace the current library. Cancel and choose a restore point again."}}}},
-    "恢复已完成。请退出并重新打开续页。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Restore is complete. Quit and reopen Kinlogue."}}}},
-    "恢复未完成。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Restore did not finish."}}}},
-    "恢复点不完整或已损坏，当前资料库没有变化。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The restore point is incomplete or damaged. The current library was not changed."}}}},
-    "恢复点可能已写入，但无法确认本地同步状态。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The restore point may have been written, but local sync status could not be confirmed."}}}},
-    "恢复码": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Recovery code"}}}},
-    "恢复码不完整或与本次设置不一致。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The recovery code is incomplete or does not match this setup."}}}},
-    "恢复码是读取加密恢复点所必需的。请把它完整保存在密码管理器或其他独立位置；续页无法替你找回。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The recovery code is required to read encrypted restore points. Save it in full in a password manager or another independent location; Kinlogue cannot recover it for you."}}}},
-    "恢复码显示在屏幕上。为避免旁人通过辅助功能听到，续页不会朗读这段敏感内容。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The recovery code is visible on screen. Kinlogue will not read this sensitive content aloud through accessibility features."}}}},
-    "恢复码错误，或恢复点未通过身份验证。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The recovery code is incorrect, or the restore point failed authentication."}}}},
-    "放弃并重新配置": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Abandon and Set Up Again"}}}},
-    "放弃未完成的备份设置？": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Abandon Incomplete Backup Setup?"}}}},
-    "放弃未完成的设置…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Abandon Incomplete Setup…"}}}},
-    "我已将恢复码完整保存在独立位置": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"I saved the complete recovery code in an independent location"}}}},
-    "所选位置没有足够空间完成备份。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The selected location does not have enough space to finish the backup."}}}},
-    "所选目录": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Selected folder"}}}},
-    "所选目录中的恢复点已完整验证": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"A restore point in the selected folder was fully verified"}}}},
-    "手机上传项目": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Phone upload items"}}}},
-    "数据备份": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Data Backup"}}}},
-    "新恢复点已保留，但旧恢复点暂未清理。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The new restore point was kept, but old restore points have not been cleaned up yet."}}}},
-    "无法使用所选备份目录，请重新选择。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The selected backup folder cannot be used. Choose it again."}}}},
-    "无法证明哪个恢复点最新，已暂停写入和清理。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Kinlogue cannot prove which restore point is newest, so writing and cleanup are paused."}}}},
-    "无法读取所选恢复点，请确认文件已下载到本机后重试。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The selected restore point cannot be read. Make sure it is downloaded to this Mac and try again."}}}},
-    "最近本地验证": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Last local verification"}}}},
-    "本地恢复点": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Local restore point"}}}},
-    "本地恢复点已过期或需要处理": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The local restore point is overdue or needs attention"}}}},
-    "本机备份身份不可用，需要重新设置新的备份。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This Mac's backup identity is unavailable. Set up a new backup."}}}},
-    "本机没有足够空间安全恢复这份资料库。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This Mac does not have enough space to restore this library safely."}}}},
-    "正在准备加密备份…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Preparing Encrypted Backup…"}}}},
-    "正在替换本机资料库…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Replacing Local Library…"}}}},
-    "正在验证恢复点…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Verifying Restore Point…"}}}},
-    "正在验证恢复码…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Verifying Recovery Code…"}}}},
-    "此恢复点需要更新版本的续页。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This restore point requires a newer version of Kinlogue."}}}},
-    "此阶段可以取消；当前资料库不会被替换。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"You can cancel at this stage; the current library will not be replaced."}}}},
-    "目录当前不可用": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Folder currently unavailable"}}}},
-    "确认替换本机资料库": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Confirm Replace Local Library"}}}},
-    "立即创建加密恢复点": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Create an encrypted restore point now"}}}},
-    "立即备份": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Back Up Now"}}}},
-    "续页会把加密恢复点写入你选择的具体目录。该目录可以由阿里云盘、百度网盘或其他桌面客户端同步。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Kinlogue writes encrypted restore points to the specific folder you choose. Aliyun Drive, Baidu Netdisk, or another desktop client can sync that folder."}}}},
-    "续页只能验证所选目录里的本地恢复点，无法证明网盘客户端已经上传。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Kinlogue can verify only the local restore point in the selected folder. It cannot prove that a cloud-drive client uploaded it."}}}},
-    "续页需要你重新选择备份目录。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Kinlogue needs you to choose the backup folder again."}}}},
-    "网盘同步状态未知": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Cloud-drive sync status unknown"}}}},
-    "网盘状态": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Cloud-drive status"}}}},
-    "自动备份": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Automatic backup"}}}},
-    "自动备份默认关闭。设置时会生成一份必须独立保存的恢复码。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Automatic backup is off by default. Setup generates a recovery code that must be saved independently."}}}},
-    "解密后大小": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Decrypted size"}}}},
-    "请先确认恢复码已保存在独立位置。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Confirm that the recovery code is saved in an independent location first."}}}},
-    "请勿退出续页。操作完成后必须重新启动。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Do not quit Kinlogue. You must restart after this operation finishes."}}}},
-    "资料库替换未完成，请重新启动续页以安全收敛。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Library replacement did not finish. Restart Kinlogue so it can converge safely."}}}},
-    "资料库替换已进入收敛阶段。请退出并重新打开续页；在重新启动前不要继续使用当前窗口。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Library replacement has entered recovery convergence. Quit and reopen Kinlogue; do not continue using this window before restarting."}}}},
-    "这会替换而不是合并当前资料库，并移除本机备份设置。外部恢复点会保留。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This replaces rather than merges the current library and removes local backup settings. External restore points are kept."}}}},
-    "这会移除本机保存的未完成备份身份。已有外部文件不会被删除；之后可以选择目录并生成新的恢复码。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This removes the incomplete backup identity saved on this Mac. Existing external files are not deleted; afterward, you can choose a folder and generate a new recovery code."}}}},
-    "退出续页": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Quit Kinlogue"}}}},
-    "选择": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose"}}}},
-    "选择一个已下载到本机的 .kinloguebackup 恢复点。恢复会先完整验证，不会在确认前修改当前资料库。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose a .kinloguebackup restore point downloaded to this Mac. Kinlogue verifies it fully and will not change the current library before confirmation."}}}},
-    "选择备份目录…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose Backup Folder…"}}}},
-    "重新授权原备份目录…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Reauthorize Original Backup Folder…"}}}},
-    "选择恢复点…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose Restore Point…"}}}},
-    "选择数据备份目录": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose Data Backup Folder"}}}},
-    "继续未完成的备份设置": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Continue Incomplete Backup Setup"}}}},
-    "继续未完成的备份设置…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Continue Incomplete Backup Setup…"}}}},
-    "输入你在首次设置时独立保存的完整恢复码。续页会继续使用原有备份身份，不会生成新的恢复码。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Enter the complete recovery code you saved independently during initial setup. Kinlogue will continue using the existing backup identity and will not generate a new recovery code."}}}},
-    "验证并完成设置": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Verify and Complete Setup"}}}},
-    "验证并启用备份": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Verify and Enable Backup"}}}},
-    "续页只在这台 Mac 上处理资料。默认保存在本机；只有在你明确启用数据备份后，续页才会将加密恢复点写入你选择的目录。该目录是否被网盘客户端上传由对应客户端决定。只有在你主动开启“手机上传”时，才会临时接收同一局域网内浏览器发送的资料。活动资料库不提供应用层加密：报告和医学影像原件、成员资料及 OCR 结果以可读取的本地文件保存。能够访问此 Mac 用户资料的人员或软件，以及包含资料库的 Time Machine 备份、APFS 快照或其他副本，可能读取这些内容。": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Kinlogue processes data only on this Mac. It stays local by default; only after you explicitly enable data backup does Kinlogue write encrypted restore points to the folder you choose. Whether a cloud-drive client uploads that folder is controlled by that client. Only when you start Phone Upload does Kinlogue temporarily receive files from a browser on the same local network. The active library has no application-level encryption: report and medical-image originals, member information, and OCR results are stored as readable local files. People or software that can access this Mac user’s files, and Time Machine backups, APFS snapshots, or other copies containing the library, may read this content."}}}}
+    }
   },
   "version": "1.0"
 }

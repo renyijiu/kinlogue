@@ -68,6 +68,10 @@ OCR 输出预算：最多 4,096 blocks；单 block UTF-8 最多 64 KiB；总文�
 
 ## 候选字段与来源
 
+本地重新识别、LAN 预处理与 Core 单来源兼容归属共用 [`OCRBlock.attributed(to:blockID:)`](../Sources/KinlogueCore/Domain/OCRBlock.swift) 的字段构造。本地保留 extractor block ID，LAN 按既有顺序生成新 ID；两者用持久来源覆盖 extractor 自带的归属，保留文件内页码并清除临时报告页投影。已有归属的 Core 校验仍拒绝身份不符或越界，不重新指派。文件验证、平台 OCR 和候选抽取原本就已共享，各入口继续拥有各自提交和失败规则。
+
+[真实 SQLite 对照测试](../Tests/KinlogueAppTests/SQLiteOCRAttributionIntegrationTests.swift) 覆盖相同合成 PDF 的本地导入/重新识别及 LAN 上传/预处理/归档，核对文本、来源引用、ID 分配、手工日期/备注和失败后的显式重试。这是行为与维护性证据，不是 OCR 性能或混合任务内存达标证据。
+
 `ReportCandidateExtractor` 只做可重复的候选抽取，例如成员名、机构、科室、报告类型、标题、日期候选、reported results、conclusion 和 abnormal items。它不生成 OCR 中不存在的 conclusion。当前 extraction version 4 在保留既有标签的基础上，覆盖以下保守别名：
 
 | 候选字段 | 支持的常见标签示例 |
@@ -112,7 +116,7 @@ OCR 输出预算：最多 4,096 blocks；单 block UTF-8 最多 64 KiB；总文�
 
 ## 失败、重试和幂等
 
-`ImportDraft` 的 processing 使用 `revision + attemptID` lease：旧任务完成、失败或取消后，不能覆盖一个新 attempt。启动时只自动恢复 `.staging` 和中断的 `.processing`；失败 draft 保持失败状态，只有用户显式 retry 才回到 processing，无法处理的 draft 可以明确 discard。待确认页的手动 OCR 只接受当前 `needsReview` revision，并通过 `saveReview` 原子发布新的 OCR document；过期页面不能覆盖较新的保存结果。
+`ImportDraft` 的 processing 使用 `revision + attemptID` lease：旧任务完成、失败或取消后，不能覆盖一个新 attempt。JSON 完整性校验通过并发布 Ready 后，App-owned `AppProcessingCoordinator` 在后台只自动恢复 `.staging` 和中断的 `.processing`，每个终态自动刷新 App snapshot；durable `.failed` 只有用户显式 retry 才回到 processing，并允许显式 discard。若开始或完成处理的持久化失败，App 保留绑定原 draft/attempt 的内存失败标记，在 durable `.staging` / `.processing` 上提供现有重试入口，不伪造持久状态、不自动循环、不放宽 discard。新 attempt、成功终态或删除使旧失败标记失效；取消和 lifecycle 撤销不添加重试标记。待确认页的手动 OCR 只接受当前 `needsReview` revision，并通过 `saveReview` 原子发布新的 OCR document；过期页面不能覆盖较新的保存结果。
 
 存储侧先持久化原件/草稿，再写 OCR document，最后把引用完整的 catalog generation 原子发布。重启读取会保留结构完整的 `.needsReview` / `.failed` 供用户处理，只把 `.staging` / `.processing` 交给自动恢复，不返回 dangling source reference。
 
@@ -134,3 +138,9 @@ Vision 输出可能随 macOS 版本变化；测试应优先断言 anchor、顺�
 ## 系统写作工具边界
 
 报告复核中的逐字转录编辑器通过 SwiftUI `writingToolsBehavior(.disabled)` 禁用系统写作工具；已确认记录的原生多行编辑器（结果、结论与个人备注）设置 `NSTextView.writingToolsBehavior = .none`。用户仍可手动编辑和撤销，原件及确认门不变。这只限制这些编辑器的系统写作入口，不承诺阻止用户复制、截图或在其他应用处理内容。实现见 [`ImportReviewView`](../Sources/KinlogueApp/Views/ImportReviewView.swift)、[`RecordEditView`](../Sources/KinlogueApp/Views/RecordEditView.swift)，回归见 [`ImportReviewViewSafetyTests`](../Tests/KinlogueAppTests/ImportReviewViewSafetyTests.swift)、[`RecordEditViewLayoutTests`](../Tests/KinlogueAppTests/RecordEditViewLayoutTests.swift)。
+
+精确去重在一次 `DuplicateDetector.find` 中只验证并建立一次附件 ID 索引，所有报告/草稿复用该索引。仍按完整来源多重集（摘要和长度）匹配；确认记录优先，同类以稳定 UUID 选中，非法引用和重复 metadata 的行为不变。该修复不消除 JSON 目录加载和整份提交成本。
+
+## SQLite 开发链路
+
+[报告/OCR 数据库仓库](sqlite-storage.md#报告ocr-与窄查询) 已实现 `ImportDraftStore` 的处理、复核、确认和丢弃事务。`confirm` / `discard` 不再强制返回 `VaultCatalog`；App 已通过目的型查询接口读取有界 header、草稿页和单项复核；当前临时 JSON adapter 内部仍读取旧快照。SQLite 的完整 `ImportDraftDocument` 与用户 `reviewState` 保存在独立表，复核修改不写新 OCR 文件；原件仍是受 pin 和引用保护的文件。新增[真实数据库测试](../Tests/KinloguePlatformTests/LibraryQueryIntegrationTests.swift) 覆盖该路径，App composition 尚未切换，本文上方 JSON 启动与提交行为仍是生产事实。

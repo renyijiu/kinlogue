@@ -27,17 +27,16 @@ public struct BackupTrustVerifier: Sendable {
         trustedDescriptor: BackupSetDescriptor
     ) throws -> BackupPublicContainerVerification {
         guard parsed.descriptor.canonicalBytes == trustedDescriptor.canonicalBytes,
-              parsed.header.version == .current,
               parsed.header.suite == .v1,
-              parsed.descriptor.formatVersion == .current,
+              parsed.descriptor.formatVersion == .legacy,
               parsed.descriptor.suite == .v1,
-              parsed.authorization.formatVersion == .current,
+              parsed.authorization.formatVersion == .legacy,
               parsed.authorization.suite == .v1,
-              parsed.prologue.formatVersion == .current,
+              parsed.prologue.formatVersion == parsed.header.version,
               parsed.prologue.suite == .v1,
-              parsed.envelope.formatVersion == .current,
+              parsed.envelope.formatVersion == .legacy,
               parsed.envelope.suite == .v1,
-              parsed.footer.formatVersion == .current,
+              parsed.footer.formatVersion == parsed.header.version,
               parsed.footer.suite == .v1 else {
             throw BackupContainerError.trustFailure
         }
@@ -106,7 +105,7 @@ struct ParsedBackupContainer: Sendable {
     let encryptedManifestOffset: UInt64
     let encryptedManifestByteCount: Int
     let encryptedManifestTagOffset: UInt64
-    let frames: [BackupContainerFrameLayout]
+    let framesOffset: UInt64
     let bodyByteCount: UInt64
     let bodyDigest: Data
     let footer: BackupCheckpointFooter
@@ -132,6 +131,39 @@ struct BackupContainerFrameLayout: Sendable {
     let ciphertextOffset: UInt64
     let ciphertextByteCount: Int
     let tagOffset: UInt64
+
+    var endOffset: UInt64 { tagOffset + UInt64(ContainerFormat.authenticationTagByteCount) }
+
+    init(header: Data, offset: UInt64, expectedIndex: UInt64) throws {
+        guard Data(header.prefix(4)) == ContainerFormat.frameMagic else {
+            throw BackupContainerError.invalidFormat
+        }
+        let index: UInt64 = BackupContainerParser.integer(header, at: 4)
+        let plaintext = Int(BackupContainerParser.integer(header, at: 12) as UInt32)
+        let ciphertext = Int(BackupContainerParser.integer(header, at: 16) as UInt32)
+        guard index == expectedIndex,
+              plaintext <= BackupFormatLimits.maximumFramePlaintextByteCount,
+              ciphertext == plaintext else { throw BackupContainerError.invalidFormat }
+        let size = UInt64(ContainerFormat.frameHeaderByteCount + ciphertext
+            + ContainerFormat.authenticationTagByteCount)
+        let end = offset.addingReportingOverflow(size)
+        guard !end.overflow else { throw BackupContainerError.arithmeticOverflow }
+        self.index = index
+        plaintextByteCount = plaintext
+        headerOffset = offset
+        ciphertextOffset = offset + UInt64(ContainerFormat.frameHeaderByteCount)
+        ciphertextByteCount = ciphertext
+        tagOffset = end.partialValue - UInt64(ContainerFormat.authenticationTagByteCount)
+    }
+
+    static func read(
+        source: BackupContainerByteSource, offset: UInt64, expectedIndex: UInt64
+    ) throws -> Self {
+        let header = try exactRead(source: source, offset: offset, count: ContainerFormat.frameHeaderByteCount)
+        let layout = try Self(header: header, offset: offset, expectedIndex: expectedIndex)
+        guard layout.endOffset <= source.byteCount else { throw BackupContainerError.invalidFormat }
+        return layout
+    }
 }
 
 enum BackupContainerParser {
@@ -166,7 +198,9 @@ enum BackupContainerParser {
         guard manifest == expectedManifest else { throw BackupContainerError.outputFailure }
     }
 
-    static func readHeader(source: BackupContainerByteSource) throws -> BackupContainerHeader {
+    static func readHeader(
+        source: BackupContainerByteSource, readerMinor: UInt16 = 1
+    ) throws -> BackupContainerHeader {
         let raw = try exactRead(
             source: source,
             offset: 0,
@@ -180,7 +214,7 @@ enum BackupContainerParser {
         let minimumReaderMinor: UInt16 = integer(raw, at: 12)
         let version: BackupFormatVersion
         do {
-            version = try .init(major: major, minor: minor, minimumReaderMinor: minimumReaderMinor)
+            version = try .init(major: major, minor: minor, minimumReaderMinor: minimumReaderMinor, readerMinor: readerMinor)
         } catch {
             throw BackupContainerError.unsupportedVersion
         }
@@ -196,9 +230,9 @@ enum BackupContainerParser {
         let prologueByteCount = Int(integer(raw, at: 36) as UInt32)
         let envelopeByteCount = Int(integer(raw, at: 40) as UInt32)
         guard chunkByteCount == UInt32(BackupFormatLimits.maximumFramePlaintextByteCount),
-              frameCount <= BackupFormatLimits.maximumFrameCount,
+              frameCount <= BackupFormatLimits.maximumFrameCount(for: version),
               manifestByteCount > 0,
-              manifestByteCount <= BackupFormatLimits.maximumCanonicalManifestByteCount,
+              manifestByteCount <= BackupFormatLimits.maximumCanonicalManifestByteCount(for: version),
               descriptorByteCount > 0,
               descriptorByteCount <= ContainerFormat.maximumDescriptorByteCount,
               authorizationByteCount > 0,
@@ -226,18 +260,10 @@ enum BackupContainerParser {
         source: BackupContainerByteSource,
         requiresFooter: Bool
     ) throws -> ParsedBackupContainer {
-        let maximumBody = BackupFormatLimits.maximumPlaintextByteCount.addingReportingOverflow(
-            BackupFormatLimits.targetFormatAllowanceByteCount
-        )
-        guard !maximumBody.overflow else { throw BackupContainerError.arithmeticOverflow }
-        let maximumFile = maximumBody.partialValue.addingReportingOverflow(
-            UInt64(4 + ContainerFormat.maximumFooterByteCount)
-        )
-        guard !maximumFile.overflow,
-              source.byteCount <= maximumFile.partialValue else {
+        let header = try readHeader(source: source)
+        guard source.byteCount <= BackupFormatLimits.maximumContainerByteCount(for: header.version) else {
             throw BackupContainerError.resourceLimit
         }
-        let header = try readHeader(source: source)
         var cursor = ContainerCursor(source: source)
         _ = try cursor.read(count: ContainerFormat.fixedHeaderByteCount, commit: true)
         let descriptor = try mapContractError {
@@ -265,38 +291,30 @@ enum BackupContainerParser {
         let encryptedManifestTagOffset = cursor.offset
         try cursor.skip(count: ContainerFormat.authenticationTagByteCount, commit: true)
 
-        var frames: [BackupContainerFrameLayout] = []
-        frames.reserveCapacity(header.frameCount)
+        let framesOffset = cursor.offset
+        let minimumFramesSize = UInt64(header.frameCount) * UInt64(
+            ContainerFormat.frameHeaderByteCount + ContainerFormat.authenticationTagByteCount
+        )
+        guard framesOffset <= source.byteCount,
+              minimumFramesSize <= source.byteCount - framesOffset else {
+            throw BackupContainerError.invalidFormat
+        }
+        var plaintextByteCount: UInt64 = 0
         for expectedIndex in 0..<header.frameCount {
             try Task.checkCancellation()
             let headerOffset = cursor.offset
-            let frameHeader = try cursor.read(
-                count: ContainerFormat.frameHeaderByteCount,
-                commit: true
+            let frameHeader = try cursor.read(count: ContainerFormat.frameHeaderByteCount, commit: true)
+            let frame = try BackupContainerFrameLayout(
+                header: frameHeader, offset: headerOffset, expectedIndex: UInt64(expectedIndex)
             )
-            guard Data(frameHeader.prefix(4)) == ContainerFormat.frameMagic else {
-                throw BackupContainerError.invalidFormat
+            let next = plaintextByteCount.addingReportingOverflow(UInt64(frame.plaintextByteCount))
+            guard !next.overflow,
+                  next.partialValue <= BackupFormatLimits.maximumPlaintextByteCount(for: header.version) else {
+                throw BackupContainerError.resourceLimit
             }
-            let index: UInt64 = integer(frameHeader, at: 4)
-            let plaintextByteCount = Int(integer(frameHeader, at: 12) as UInt32)
-            let ciphertextByteCount = Int(integer(frameHeader, at: 16) as UInt32)
-            guard index == UInt64(expectedIndex),
-                  plaintextByteCount <= BackupFormatLimits.maximumFramePlaintextByteCount,
-                  ciphertextByteCount == plaintextByteCount else {
-                throw BackupContainerError.invalidFormat
-            }
-            let ciphertextOffset = cursor.offset
-            try cursor.skip(count: ciphertextByteCount, commit: true)
-            let tagOffset = cursor.offset
+            plaintextByteCount = next.partialValue
+            try cursor.skip(count: frame.ciphertextByteCount, commit: true)
             try cursor.skip(count: ContainerFormat.authenticationTagByteCount, commit: true)
-            frames.append(.init(
-                index: index,
-                plaintextByteCount: plaintextByteCount,
-                headerOffset: headerOffset,
-                ciphertextOffset: ciphertextOffset,
-                ciphertextByteCount: ciphertextByteCount,
-                tagOffset: tagOffset
-            ))
         }
         let bodyByteCount = cursor.offset
         let bodyDigest = cursor.finalizeCommitment()
@@ -323,6 +341,7 @@ enum BackupContainerParser {
                 throw BackupContainerError.trailingBytes
             }
             footer = try BackupCheckpointFooter(
+                formatVersion: header.version,
                 descriptorDigest: Data(repeating: 0, count: 32),
                 authorizationDigest: Data(repeating: 0, count: 32),
                 prologueDigest: Data(repeating: 0, count: 32),
@@ -340,7 +359,7 @@ enum BackupContainerParser {
             encryptedManifestOffset: encryptedManifestOffset,
             encryptedManifestByteCount: header.manifestPlaintextByteCount,
             encryptedManifestTagOffset: encryptedManifestTagOffset,
-            frames: frames,
+            framesOffset: framesOffset,
             bodyByteCount: bodyByteCount,
             bodyDigest: bodyDigest,
             footer: footer,
@@ -348,7 +367,7 @@ enum BackupContainerParser {
         )
     }
 
-    private static func integer<T: FixedWidthInteger>(_ data: Data, at offset: Int) -> T {
+    static func integer<T: FixedWidthInteger>(_ data: Data, at offset: Int) -> T {
         data[offset..<(offset + MemoryLayout<T>.size)].reduce(T.zero) {
             ($0 << 8) | T($1)
         }
@@ -380,6 +399,7 @@ private struct ContainerCursor {
         guard count >= 0 else { throw BackupContainerError.invalidFormat }
         var remaining = count
         while remaining > 0 {
+            try Task.checkCancellation()
             let batch = min(remaining, BackupFormatLimits.maximumFramePlaintextByteCount)
             _ = try read(count: batch, commit: commit)
             remaining -= batch

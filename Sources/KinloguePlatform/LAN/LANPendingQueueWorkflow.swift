@@ -13,7 +13,7 @@ public struct LANInboxPreviewPayload: Equatable, Sendable {
 
 /// Item-oriented use cases shared by the Mac surface and launch recovery.
 public actor LANPendingQueueWorkflow {
-    private let inbox: PlaintextLANInboxStore
+    private let inbox: any LANPendingItemStoring
     private let preprocessor: LANItemPreprocessor
     private let archiveCoordinator: LANReportArchiveCoordinator
 
@@ -27,19 +27,25 @@ public actor LANPendingQueueWorkflow {
         self.archiveCoordinator = archiveCoordinator
     }
 
+    package init(inbox: any LANPendingItemStoring, preprocessor: LANItemPreprocessor, archiveCoordinator: LANReportArchiveCoordinator) {
+        self.inbox = inbox; self.preprocessor = preprocessor; self.archiveCoordinator = archiveCoordinator
+    }
+
     @discardableResult
-    public func preprocess(itemID: LANInboxItem.ID) async throws -> LANInboxItem {
-        try await preprocessor.preprocess(itemID: itemID)
+    public func preprocess(itemID: LANInboxItem.ID, expectedRevision: UInt64? = nil) async throws -> LANInboxItem {
+        try await preprocessor.preprocess(itemID: itemID, expectedRevision: expectedRevision)
     }
 
     public func archive(
         itemIDs: [LANInboxItem.ID],
+        expectedRevisions: [UInt64]? = nil,
         memberID: FamilyMember.ID,
         canonicalReportDate: Date,
         activeSessionID: UUID? = nil
     ) async throws -> LANReportArchiveResult {
         try await archiveCoordinator.archive(
             itemIDs: itemIDs,
+            expectedRevisions: expectedRevisions,
             memberID: memberID,
             canonicalReportDate: canonicalReportDate,
             activeSessionID: activeSessionID
@@ -50,8 +56,8 @@ public actor LANPendingQueueWorkflow {
     public func loadPreview(
         itemID: LANInboxItem.ID
     ) async throws -> LANInboxPreviewPayload {
-        let snapshot = try await inbox.loadSnapshot()
-        guard let item = snapshot.item(id: itemID), item.isReviewable else {
+        let items = try await inbox.loadItems(ids: [itemID])
+        guard let item = items.first, item.isReviewable else {
             throw LANInboxError.invalidState
         }
         let validator = ImportedFileValidator()
@@ -70,9 +76,9 @@ public actor LANPendingQueueWorkflow {
     }
 
     /// Re-enters durable archive intents. Stored items are scheduled by the
-    /// Mac queue model so startup is not blocked by a large OCR backlog.
+    /// App processing coordinator so startup is not blocked by a large OCR backlog.
     public func resumeInterruptedWork() async {
-        guard let snapshot = try? await inbox.loadSnapshot() else { return }
+        guard let snapshot = try? await inbox.archiveRecoverySnapshot() else { return }
         await archiveCoordinator.reconcileTerminalStaging(in: snapshot)
         for intent in snapshot.archiveIntents {
             _ = try? await archiveCoordinator.archive(

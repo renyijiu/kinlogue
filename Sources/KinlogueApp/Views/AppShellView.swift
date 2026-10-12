@@ -11,6 +11,7 @@ struct AppShellView: View {
     @ObservedObject private var backupModel: BackupModel
     @ObservedObject private var restoreModel: RestoreModel
     private let startupCoordinator: AppStartupCoordinator
+    private let integrityCoordinator: AppIntegrityCoordinator?
     @State private var selectedSidebarSection = AppSidebarSection.records
     @State private var hasCompletedStartup = false
     @Binding private var selectedLanguage: AppLanguage
@@ -26,7 +27,8 @@ struct AppShellView: View {
         backupModel: BackupModel,
         restoreModel: RestoreModel,
         startupCoordinator: AppStartupCoordinator,
-        selectedLanguage: Binding<AppLanguage>
+        selectedLanguage: Binding<AppLanguage>,
+        integrityCoordinator: AppIntegrityCoordinator? = nil
     ) {
         self.model = model
         self.deletionModel = deletionModel
@@ -34,6 +36,7 @@ struct AppShellView: View {
         self.backupModel = backupModel
         self.restoreModel = restoreModel
         self.startupCoordinator = startupCoordinator
+        self.integrityCoordinator = integrityCoordinator
         _selectedLanguage = selectedLanguage
     }
 
@@ -201,7 +204,7 @@ struct AppShellView: View {
         }
         .modifier(ComparisonSheetModifier(
             model: model.comparisonModel,
-            memberLabels: RecordQuery.selectionLabels(for: model.members),
+            memberLabels: LibraryMemberSummary.labels(model.members),
             onDismiss: { model.presentationDidEnd() }
         ))
         .alert(item: Binding(
@@ -226,11 +229,11 @@ struct AppShellView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             guard hasCompletedStartup else { return }
-            Task { await backupModel.handleAppEvent(.activation) }
+            Task { await startupCoordinator.reconcile(); await backupModel.handleAppEvent(.activation) }
         }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
             guard hasCompletedStartup else { return }
-            Task { await backupModel.handleAppEvent(.wake) }
+            Task { await startupCoordinator.reconcile(); await backupModel.handleAppEvent(.wake) }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             backupModel.cancelForApplicationTermination()
@@ -283,26 +286,7 @@ struct AppShellView: View {
     }
 
     private var storageDisclosure: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Label(AppLocalization.string("本机资料存储说明"), systemImage: "externaldrive")
-                .font(.title2.bold())
-            Text(AppLocalization.string("续页只在这台 Mac 上处理资料。默认保存在本机；只有在你明确启用数据备份后，续页才会将加密恢复点写入你选择的目录。该目录是否被网盘客户端上传由对应客户端决定。只有在你主动开启“手机上传”时，才会临时接收同一局域网内浏览器发送的资料。活动资料库不提供应用层加密：报告和医学影像原件、成员资料及 OCR 结果以可读取的本地文件保存。能够访问此 Mac 用户资料的人员或软件，以及包含资料库的 Time Machine 备份、APFS 快照或其他副本，可能读取这些内容。"))
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button(AppLocalization.string("退出")) {
-                    NSApplication.shared.terminate(nil)
-                }
-                .buttonStyle(.kinlogueSecondary)
-                Spacer()
-                Button(AppLocalization.string("我了解，继续")) {
-                    hasAcknowledgedStorageDisclosure = true
-                }
-                .buttonStyle(.kinloguePrimary)
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(32)
-        .frame(minWidth: 520, idealWidth: 560, maxWidth: 620)
+        StorageDisclosureView { hasAcknowledgedStorageDisclosure = true }
     }
 
     private var appNavigation: some View {
@@ -389,7 +373,8 @@ struct AppShellView: View {
                 onChooseBackupDirectory: chooseBackupDirectory,
                 onRestoreBackup: restoreModel.present,
                 onExportOriginals: model.presentOriginalExport,
-                onDeleteVault: model.presentVaultDeletion
+                onDeleteVault: model.presentVaultDeletion,
+                integrityCoordinator: integrityCoordinator
             )
         }
     }
@@ -473,12 +458,16 @@ struct AppShellView: View {
                                 model.dicomLibraryModel.select(id)
                                 selectedSidebarSection = .imaging
                             },
-                            onImport: { presentImporterIfAvailable() }
+                            onImport: { presentImporterIfAvailable() },
+                            pageState: model.pageState, hasMore: model.hasMoreRecords,
+                            hasDamage: !model.damagedItemIDs.isEmpty || !model.damagedMemberIDs.isEmpty,
+                            onLoadMore: { Task { await model.loadNextRecordsPage() } },
+                            onRetry: { Task { await model.retryRecordsPage() } }
                         )
                     }
                     .background(KinlogueTheme.surface)
                     .navigationTitle(model.selectedMemberID.flatMap { id in
-                        RecordQuery.selectionLabels(for: model.members)[id]
+                        LibraryMemberSummary.labels(model.members)[id]
                     } ?? AppLocalization.string("家庭时间线"))
                 }
             }
@@ -572,6 +561,10 @@ struct AppShellView: View {
             reviewQueue: model.reviewQueue,
             backgroundDrafts: model.backgroundDrafts,
             busyDraftIDs: model.busyDraftIDs,
+            draftLoadingStates: model.draftLoadingStates, draftFailedStates: model.draftFailedStates,
+            hasMoreDrafts: model.hasMoreDrafts(state:),
+            onLoadMoreDrafts: { state in Task { await model.loadNextDraftPage(state: state) } },
+            onRetryDraftPage: { state in Task { await model.retryDraftPage(state: state) } },
             onAdd: { presentNewMemberEditorIfAvailable() },
             onOpenDraft: { presentReviewIfAvailable($0) },
             onRetryDraft: { id in Task { await model.retryDraft(id) } },
@@ -592,15 +585,15 @@ struct AppShellView: View {
     }
 
     private func presentReviewIfAvailable(_ id: ImportDraft.ID) {
-        model.presentReviewDraft(id)
+        Task { await model.presentReviewDraft(id) }
     }
 
     private func presentNewMemberEditorIfAvailable() {
         model.presentNewMemberEditor()
     }
 
-    private func presentMemberEditorIfAvailable(_ member: FamilyMember) {
-        model.presentMemberEditor(member)
+    private func presentMemberEditorIfAvailable(_ member: LibraryMemberSummary) {
+        Task { await model.presentMemberEditor(member) }
     }
 
     private func openDICOMViewer(_ studyID: DICOMStudy.ID) {
@@ -612,7 +605,7 @@ struct AppShellView: View {
         switch destination.kind {
         case .importDraft:
             selectedSidebarSection = .records
-            model.presentReviewDraft(destination.id)
+            Task { await model.presentReviewDraft(destination.id) }
         case .healthRecord:
             selectedSidebarSection = .records
             Task { await model.selectRecord(destination.id) }
@@ -650,7 +643,15 @@ struct AppShellView: View {
         ContentUnavailableView {
             Label(AppLocalization.string("需要重新启动续页"), systemImage: "arrow.clockwise.circle")
         } description: {
-            Text(AppLocalization.string("资料库删除结果尚未确认。请退出并重新打开续页后检查；原资料可能仍保留在磁盘上。"))
+            if model.restartRequiredForIntegrity {
+                Text(AppLocalization.string("资料库完整性检查未通过。当前操作已停止；你可以从数据备份恢复，或退出后检查资料库。"))
+            } else {
+                Text(AppLocalization.string("资料库删除结果尚未确认。请退出并重新打开续页后检查；原资料可能仍保留在磁盘上。"))
+            }
+        } actions: {
+            if model.restartRequiredForIntegrity {
+                Button(AppLocalization.string("从数据备份恢复…")) { restoreModel.present() }
+            }
         }
     }
 

@@ -9,30 +9,30 @@ struct ComparisonModelTests {
     @Test
     func selectionIsOrderedCappedAtTwoAndRejectsAThird() throws {
         let records = try (0..<3).map { _ in try makeRecord(state: .confirmed) }
-        let service = AppServiceSpy(snapshot: .empty)
+        let service = AppServiceSpy(snapshot: TestLibrarySnapshot(records: records))
         let model = ComparisonModel(service: service)
-        model.updateAvailableRecords(records)
         model.startSelection()
 
-        #expect(model.toggle(records[1]) == .selected(count: 1))
-        #expect(model.toggle(records[0]) == .selected(count: 2))
-        #expect(model.toggle(records[2]) == .limitReached)
+        #expect(model.toggle(LibraryReportSummary(record: records[1])) == .selected(count: 1))
+        #expect(model.toggle(LibraryReportSummary(record: records[0])) == .selected(count: 2))
+        #expect(model.toggle(LibraryReportSummary(record: records[2])) == .limitReached)
         #expect(model.selectedRecordIDs == [records[1].id, records[0].id])
         #expect(model.selectionCountText == "2/2")
         #expect(model.announcement == AppLocalization.string("最多只能选择两条记录"))
     }
 
     @Test
-    func unconfirmedRecordCannotBeSelectedOrLoaded() async throws {
+    func unconfirmedRecordCannotBeLoadedForComparison() async throws {
         let draft = try makeRecord(state: .needsReview)
         let confirmed = try makeRecord(state: .confirmed)
-        let service = AppServiceSpy(snapshot: .empty)
+        let service = AppServiceSpy(snapshot: TestLibrarySnapshot(records: [draft, confirmed]))
         let model = ComparisonModel(service: service)
-        model.updateAvailableRecords([draft, confirmed])
         model.startSelection()
-
-        #expect(model.toggle(draft) == .ineligible)
-        #expect(model.selectedRecordIDs.isEmpty)
+        _ = model.toggle(LibraryReportSummary(record: draft))
+        _ = model.toggle(LibraryReportSummary(record: confirmed))
+        await model.openComparison()
+        #expect(!model.isPresented)
+        #expect(model.comparison == nil)
         #expect(await service.originalLoadCallIDs.isEmpty)
     }
 
@@ -43,17 +43,16 @@ struct ComparisonModelTests {
         let leftBytes = Data([1, 2, 3])
         let rightBytes = Data([4, 5, 6])
         let service = AppServiceSpy(
-            snapshot: .empty,
+            snapshot: TestLibrarySnapshot(records: [left, right]),
             originals: [
                 left.id: OriginalDocumentPayload(data: leftBytes, contentTypeIdentifier: "public.png"),
                 right.id: OriginalDocumentPayload(data: rightBytes, contentTypeIdentifier: "public.png"),
             ]
         )
         let model = ComparisonModel(service: service)
-        model.updateAvailableRecords([left, right])
         model.startSelection()
-        _ = model.toggle(left)
-        _ = model.toggle(right)
+        _ = model.toggle(LibraryReportSummary(record: left))
+        _ = model.toggle(LibraryReportSummary(record: right))
 
         await model.openComparison()
 
@@ -75,7 +74,7 @@ struct ComparisonModelTests {
         let left = try makeRecord(state: .confirmed)
         let right = try makeRecord(state: .confirmed)
         let service = AppServiceSpy(
-            snapshot: .empty,
+            snapshot: TestLibrarySnapshot(records: [left, right]),
             originals: [
                 left.id: OriginalDocumentPayload(data: Data([1]), contentTypeIdentifier: "public.png"),
                 right.id: OriginalDocumentPayload(data: Data([2]), contentTypeIdentifier: "public.png"),
@@ -83,10 +82,9 @@ struct ComparisonModelTests {
             originalLoadDelay: .milliseconds(100)
         )
         let model = ComparisonModel(service: service)
-        model.updateAvailableRecords([left, right])
         model.startSelection()
-        _ = model.toggle(left)
-        _ = model.toggle(right)
+        _ = model.toggle(LibraryReportSummary(record: left))
+        _ = model.toggle(LibraryReportSummary(record: right))
 
         let firstOpen = Task { await model.openComparison() }
         while await service.originalLoadCallIDs.count < 2 { await Task.yield() }
@@ -106,17 +104,16 @@ struct ComparisonModelTests {
         let left = try makeRecord(state: .confirmed)
         let right = try makeRecord(state: .confirmed)
         let service = AppServiceSpy(
-            snapshot: .empty,
+            snapshot: TestLibrarySnapshot(records: [left, right]),
             originals: [left.id: OriginalDocumentPayload(
                 data: Data([9]),
                 contentTypeIdentifier: "public.png"
             )]
         )
         let model = ComparisonModel(service: service)
-        model.updateAvailableRecords([left, right])
         model.startSelection()
-        _ = model.toggle(left)
-        _ = model.toggle(right)
+        _ = model.toggle(LibraryReportSummary(record: left))
+        _ = model.toggle(LibraryReportSummary(record: right))
 
         await model.openComparison()
 
@@ -145,17 +142,16 @@ struct ComparisonModelTests {
         let left = try makeRecord(state: .confirmed)
         let right = try makeRecord(state: .confirmed)
         let service = AppServiceSpy(
-            snapshot: .empty,
+            snapshot: TestLibrarySnapshot(records: [left, right]),
             originals: [left.id: OriginalDocumentPayload(
                 data: Data([9]),
                 contentTypeIdentifier: "public.png"
             )]
         )
         let model = ComparisonModel(service: service)
-        model.updateAvailableRecords([left, right])
         model.startSelection()
-        _ = model.toggle(left)
-        _ = model.toggle(right)
+        _ = model.toggle(LibraryReportSummary(record: left))
+        _ = model.toggle(LibraryReportSummary(record: right))
         await model.openComparison()
 
         #expect(model.errorMessage == "部分原件暂时无法打开")
@@ -174,7 +170,7 @@ struct ComparisonModelTests {
         let left = try makeRecord(state: .confirmed)
         let right = try makeRecord(state: .confirmed)
         let service = AppServiceSpy(
-            snapshot: .empty,
+            snapshot: TestLibrarySnapshot(records: [left, right]),
             originals: [
                 left.id: OriginalDocumentPayload(data: Data([1]), contentTypeIdentifier: "public.png"),
                 right.id: OriginalDocumentPayload(data: Data([2]), contentTypeIdentifier: "public.png"),
@@ -182,10 +178,9 @@ struct ComparisonModelTests {
             originalLoadDelay: .milliseconds(200)
         )
         let model = ComparisonModel(service: service)
-        model.updateAvailableRecords([left, right])
         model.startSelection()
-        _ = model.toggle(left)
-        _ = model.toggle(right)
+        _ = model.toggle(LibraryReportSummary(record: left))
+        _ = model.toggle(LibraryReportSummary(record: right))
 
         let opening = Task { await model.openComparison() }
         while await service.originalLoadCallIDs.isEmpty { await Task.yield() }
@@ -206,7 +201,7 @@ struct ComparisonModelTests {
         let left = try makeRecord(state: .confirmed, sources: leftSources)
         let right = try makeRecord(state: .confirmed, sources: rightSources)
         let service = AppServiceSpy(
-            snapshot: .empty,
+            snapshot: TestLibrarySnapshot(records: [left, right]),
             originals: [
                 left.id: OriginalDocumentPayload(data: Data([1]), contentTypeIdentifier: "public.png"),
                 right.id: OriginalDocumentPayload(data: Data([2]), contentTypeIdentifier: "public.png"),
@@ -219,10 +214,9 @@ struct ComparisonModelTests {
             ]
         )
         let model = ComparisonModel(service: service)
-        model.updateAvailableRecords([left, right])
         model.startSelection()
-        _ = model.toggle(left)
-        _ = model.toggle(right)
+        _ = model.toggle(LibraryReportSummary(record: left))
+        _ = model.toggle(LibraryReportSummary(record: right))
 
         await model.openComparison()
         await model.selectOriginalSource(leftSources.elements[1].id, side: .left)
@@ -241,7 +235,7 @@ struct ComparisonModelTests {
         let rightGate = OriginalLoadGate()
         let navigationGate = OriginalLoadGate()
         let service = AppServiceSpy(
-            snapshot: .empty,
+            snapshot: TestLibrarySnapshot(records: [left, right]),
             originals: [
                 left.id: OriginalDocumentPayload(data: Data([1]), contentTypeIdentifier: "public.png"),
                 right.id: OriginalDocumentPayload(data: Data([2]), contentTypeIdentifier: "public.png"),
@@ -256,10 +250,9 @@ struct ComparisonModelTests {
             sourceOriginalLoadGates: [leftSources.elements[1].id: navigationGate]
         )
         let model = ComparisonModel(service: service)
-        model.updateAvailableRecords([left, right])
         model.startSelection()
-        _ = model.toggle(left)
-        _ = model.toggle(right)
+        _ = model.toggle(LibraryReportSummary(record: left))
+        _ = model.toggle(LibraryReportSummary(record: right))
 
         let opening = Task { await model.openComparison() }
         while model.leftLoadState != .loaded || model.rightLoadState != .loading {
@@ -284,10 +277,9 @@ struct ComparisonModelTests {
     @Test
     func escapeCancelClearsSelectionAndReturnsToNormalMode() throws {
         let record = try makeRecord(state: .confirmed)
-        let model = ComparisonModel(service: AppServiceSpy(snapshot: .empty))
-        model.updateAvailableRecords([record])
+        let model = ComparisonModel(service: AppServiceSpy(snapshot: TestLibrarySnapshot(records: [record])))
         model.startSelection()
-        _ = model.toggle(record)
+        _ = model.toggle(LibraryReportSummary(record: record))
 
         model.cancelSelection()
 

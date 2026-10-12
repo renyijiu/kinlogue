@@ -134,6 +134,14 @@ public actor DICOMImportMetricsRecorder {
         maximumAddedDiskBytes = max(maximumAddedDiskBytes, addedDiskBytes)
     }
 
+    func recordAttachmentAdoption(byteCount: Int) {
+        promotedBytes += byteCount
+    }
+
+    func recordPublicationValidation(digest: Data, byteCount: Int) {
+        recordManagedFullRead(digest: digest, byteCount: byteCount)
+    }
+
     func recordIndexPromotion(byteCount: Int) {
         addedDiskBytes += byteCount
         maximumAddedDiskBytes = max(maximumAddedDiskBytes, addedDiskBytes)

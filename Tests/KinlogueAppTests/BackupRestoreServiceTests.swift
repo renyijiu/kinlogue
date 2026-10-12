@@ -57,7 +57,7 @@ struct BackupRestoreServiceTests {
         ))
 
         #expect(try await service.reconcileBeforeStartingServices() == .committed)
-        #expect(await events.values == ["reconcile-preflights", "reconcile"])
+        #expect(await events.values == ["reconcile", "reconcile-preflights"])
     }
 
     @Test

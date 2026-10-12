@@ -35,11 +35,13 @@ struct PlaintextVaultDeletionTransaction: Sendable {
     let quarantineURL: URL
 
     private let failureInjector: (@Sendable (PlaintextVaultTransactionFault) -> Bool)?
+    private let strictReceipt: Bool
     private let canonicalRootPath: String
 
     init(
         rootURL: URL,
-        failureInjector: (@Sendable (PlaintextVaultTransactionFault) -> Bool)? = nil
+        failureInjector: (@Sendable (PlaintextVaultTransactionFault) -> Bool)? = nil,
+        strictReceipt: Bool = false
     ) throws {
         let root = try PlaintextVaultLayout(rootURL: rootURL).rootURL
         let canonicalPath = root.resolvingSymlinksInPath().standardizedFileURL
@@ -58,6 +60,7 @@ struct PlaintextVaultDeletionTransaction: Sendable {
             ".kinlogue-vault-deletion-\(suffix).quarantine",
             isDirectory: true
         )
+        self.strictReceipt = strictReceipt
         self.failureInjector = failureInjector
         canonicalRootPath = canonicalPath
     }
@@ -101,6 +104,7 @@ struct PlaintextVaultDeletionTransaction: Sendable {
                 throw VaultError.invalidCatalog
             }
         } catch {
+            if strictReceipt { throw VaultError.invalidCatalog }
             // An interrupted receipt write cannot have renamed the active root.
             // When no quarantine exists, discard only this deterministic,
             // app-owned receipt and leave the active vault untouched.

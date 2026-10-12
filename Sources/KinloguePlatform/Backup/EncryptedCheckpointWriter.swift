@@ -323,7 +323,7 @@ private final class CheckpointWorkFile: @unchecked Sendable {
 // SAFETY: All collaborators and injected closures are immutable Sendable
 // values; each write owns its work file and otherwise delegates to actors.
 public final class EncryptedCheckpointWriter: @unchecked Sendable {
-    private let source: PlaintextLibraryBackupSource
+    private let source: CheckpointLibrarySource
     private let configurationStore: BackupLocalConfigurationStore
     private let containerWriter: EncryptedBackupContainerWriter
     private let eventHandler: @Sendable (EncryptedCheckpointWriterEvent) async throws -> Void
@@ -333,7 +333,7 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
         source: PlaintextLibraryBackupSource,
         configurationStore: BackupLocalConfigurationStore
     ) {
-        self.source = source
+        self.source = .legacy(source)
         self.configurationStore = configurationStore
         containerWriter = .init()
         eventHandler = { _ in }
@@ -347,11 +347,27 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
         eventHandler: @escaping @Sendable (EncryptedCheckpointWriterEvent) async throws -> Void = { _ in },
         writeFailureInjector: @escaping @Sendable (EncryptedCheckpointWritePhase) -> Int32? = { _ in nil }
     ) {
-        self.source = source
+        self.source = .legacy(source)
         self.configurationStore = configurationStore
         self.containerWriter = containerWriter
         self.eventHandler = eventHandler
         self.writeFailureInjector = writeFailureInjector
+    }
+
+    package init(source: CheckpointLibrarySource, configurationStore: BackupLocalConfigurationStore) {
+        self.source = source; self.configurationStore = configurationStore
+        containerWriter = .init(); eventHandler = { _ in }; writeFailureInjector = { _ in nil }
+    }
+    init(source: CheckpointLibrarySource, configurationStore: BackupLocalConfigurationStore,
+         containerWriter: EncryptedBackupContainerWriter,
+         eventHandler: @escaping @Sendable (EncryptedCheckpointWriterEvent) async throws -> Void = { _ in },
+         writeFailureInjector: @escaping @Sendable (EncryptedCheckpointWritePhase) -> Int32? = { _ in nil }) {
+        self.source = source; self.configurationStore = configurationStore; self.containerWriter = containerWriter
+        self.eventHandler = eventHandler; self.writeFailureInjector = writeFailureInjector
+    }
+
+    package convenience init(source: SQLiteLogicalBackupSource, configurationStore: BackupLocalConfigurationStore) {
+        self.init(source: .logical(source), configurationStore: configurationStore)
     }
 
     func write(
@@ -370,6 +386,7 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
             }
             try await validateConfiguration(configuration, sequence: sequence)
             let plan = try await source.prepare()
+            defer { plan.release() }
             let repositoryDescriptor = Darwin.open(
                 repositoryURL.path,
                 O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
@@ -391,7 +408,7 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
                 )
                 try Self.validateCapacity(
                     repositoryDescriptor: repositoryDescriptor,
-                    plaintextByteCount: plan.totalPlaintextByteCount
+                    containerByteCount: try plan.maximumContainerByteCount
                 )
                 work = try CheckpointWorkFile(
                     repositoryURL: repositoryURL,
@@ -451,7 +468,7 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
             let containerResult: EncryptedBackupContainerWriteResult
             do {
                 containerResult = try await containerWriter.write(
-                    entries: await source.containerSources(for: plan),
+                    entries: try await source.containerSources(for: plan),
                     revisionPair: plan.revisionPair,
                     sequence: sequence,
                     signer: signer,
@@ -521,7 +538,7 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
             } catch {
                 throw EncryptedCheckpointWriterError.publicationIndeterminate
             }
-            let maximumOpen = await source.maximumSimultaneousOpenFileCount
+            let maximumOpen = await source.maximumSimultaneousOpenFileCount(for: plan)
             work.close()
             return EncryptedCheckpointWriteResult(
                 finalLeafName: publication.leafName,
@@ -537,6 +554,16 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
         } catch let error as EncryptedCheckpointWriterError {
             work?.close()
             throw error
+        } catch let error as SQLiteLogicalBackupError {
+            work?.close()
+            switch error {
+            case .capacityInsufficient: throw EncryptedCheckpointWriterError.capacityInsufficient
+            case .resourceLimit: throw EncryptedCheckpointWriterError.resourceLimit
+            default: throw EncryptedCheckpointWriterError.sourceChanged
+            }
+        } catch SQLiteLibraryError.ioFailure(ENOSPC) {
+            work?.close()
+            throw EncryptedCheckpointWriterError.capacityInsufficient
         } catch PlaintextLibraryBackupSourceError.sourceChanged {
             work?.close()
             throw EncryptedCheckpointWriterError.sourceChanged
@@ -623,7 +650,7 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
 
     private static func validateCapacity(
         repositoryDescriptor: Int32,
-        plaintextByteCount: UInt64
+        containerByteCount: UInt64
     ) throws {
         var filesystem = statfs()
         guard fstatfs(repositoryDescriptor, &filesystem) == 0 else {
@@ -632,14 +659,10 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
         let blocks = UInt64(filesystem.f_bavail)
         let blockSize = UInt64(filesystem.f_bsize)
         let available = blocks.multipliedReportingOverflow(by: blockSize)
-        let withAllowance = plaintextByteCount.addingReportingOverflow(
-            BackupFormatLimits.targetFormatAllowanceByteCount
-        )
-        let required = withAllowance.partialValue.addingReportingOverflow(
+        let required = containerByteCount.addingReportingOverflow(
             BackupFormatLimits.capacityHeadroomByteCount
         )
         guard !available.overflow,
-              !withAllowance.overflow,
               !required.overflow,
               available.partialValue >= required.partialValue else {
             throw EncryptedCheckpointWriterError.capacityInsufficient

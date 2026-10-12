@@ -75,12 +75,19 @@ struct DraftSummary: Identifiable, Equatable, Sendable {
     let state: ImportState
     let revision: UInt64
     let failureCode: ImportFailureCode?
+    let canRetryRecovery: Bool
 
-    init(draft: ImportDraft) {
+    init(draft: LibraryDraftSummary, canRetryRecovery: Bool = false) {
+        id = draft.id; state = draft.state; revision = draft.revision
+        failureCode = draft.failureCode; self.canRetryRecovery = canRetryRecovery
+    }
+
+    init(draft: ImportDraft, canRetryRecovery: Bool = false) {
         id = draft.id
         state = draft.state
         revision = draft.revision
         failureCode = draft.failureCode
+        self.canRetryRecovery = canRetryRecovery
     }
 }
 
@@ -90,19 +97,22 @@ struct DICOMStudySummary: Identifiable, Equatable, Sendable {
     let retainedObjectCount: Int
     let confirmedMemberID: FamilyMember.ID?
     let effectiveDate: Date?
+    let contentRevision: UInt64
 
     init(
         id: DICOMStudy.ID,
         state: DICOMStudyState,
         retainedObjectCount: Int,
         confirmedMemberID: FamilyMember.ID?,
-        effectiveDate: Date?
+        effectiveDate: Date?,
+        contentRevision: UInt64 = 0
     ) {
         self.id = id
         self.state = state
         self.retainedObjectCount = retainedObjectCount
         self.confirmedMemberID = confirmedMemberID
         self.effectiveDate = effectiveDate
+        self.contentRevision = contentRevision
     }
 
     init(study: DICOMStudy) {
@@ -114,6 +124,11 @@ struct DICOMStudySummary: Identifiable, Equatable, Sendable {
             effectiveDate: study.effectiveDate
         )
     }
+    init(study: LibraryDICOMStudySummary) {
+        self.init(id: study.id, state: study.state, retainedObjectCount: study.retainedObjectCount,
+                  confirmedMemberID: study.confirmedMemberID, effectiveDate: study.effectiveDate,
+                  contentRevision: study.contentRevision)
+    }
 }
 
 enum AppTimelineEntry: Identifiable, Equatable, Sendable {
@@ -122,7 +137,7 @@ enum AppTimelineEntry: Identifiable, Equatable, Sendable {
         case dicomStudy(DICOMStudy.ID)
     }
 
-    case record(HealthRecord)
+    case record(LibraryReportSummary)
     case dicomStudy(DICOMStudySummary)
 
     var id: ID {
@@ -151,7 +166,7 @@ struct AppTimelineSection: Equatable, Sendable {
     let group: TimelineDateGroup
     let entries: [AppTimelineEntry]
 
-    var records: [HealthRecord] {
+    var records: [LibraryReportSummary] {
         entries.compactMap {
             guard case .record(let record) = $0 else { return nil }
             return record
@@ -176,27 +191,28 @@ struct DICOMSeriesSummary: Identifiable, Equatable, Sendable {
 }
 
 struct AppSnapshot: Equatable, Sendable {
-    let generation: UInt64
-    let members: [FamilyMember]
-    let records: [HealthRecord]
-    let drafts: [DraftSummary]
+    let revision: LibraryRevision
+    let members: [LibraryMemberSummary]
     let dicomStudies: [DICOMStudySummary]
+    let reportCount: Int
+    let draftCount: Int
+    let damagedMemberIDs: [UUID]
+    let damagedStudyIDs: [UUID]
+    var generation: UInt64 { revision.generation }
 
-    init(
-        generation: UInt64 = 0,
-        members: [FamilyMember],
-        records: [HealthRecord],
-        drafts: [DraftSummary],
-        dicomStudies: [DICOMStudySummary] = []
-    ) {
-        self.generation = generation
-        self.members = members
-        self.records = records
-        self.drafts = drafts
-        self.dicomStudies = dicomStudies
+    init(header: LibraryHeader) {
+        revision = header.revision; members = header.members
+        dicomStudies = header.studies.map(DICOMStudySummary.init)
+        reportCount = header.reportCount; draftCount = header.draftCount
+        damagedMemberIDs = header.damagedMemberIDs; damagedStudyIDs = header.damagedStudyIDs
     }
+}
 
-    static let empty = AppSnapshot(generation: 0, members: [], records: [], drafts: [])
+struct AppDraftPage: Sendable {
+    let revision: LibraryRevision
+    let items: [DraftSummary]
+    let nextCursor: LibraryQueryCursor?
+    let damagedIDs: [UUID]
 }
 
 enum DICOMStudyDestination: Equatable, Sendable {
@@ -226,7 +242,7 @@ struct DICOMStudyViewerContent: Equatable, Sendable {
 
 struct DICOMStudyReviewContent: Equatable, Sendable {
     let viewerContent: DICOMStudyViewerContent
-    let selectableMembers: [FamilyMember]
+    let selectableMembers: [LibraryMemberSummary]
 
     var study: DICOMStudySummary { viewerContent.study }
     var viewableInstanceCount: Int { viewerContent.viewableInstanceCount }
@@ -258,6 +274,7 @@ extension DICOMSliceService: DICOMSliceViewing {}
 
 struct SaveDICOMStudyCommand: Equatable, Sendable {
     let studyID: DICOMStudy.ID
+    let expectedRevision: UInt64
     let memberID: FamilyMember.ID
     let effectiveDate: Date
 }
@@ -290,9 +307,10 @@ enum AppImportOutcome: Equatable, Sendable {
 }
 
 struct ImportReviewContent: Equatable, Sendable {
+    let revision: LibraryRevision
     let draft: ImportDraft
     let document: ImportDraftDocument
-    let members: [FamilyMember]
+    let members: [LibraryMemberSummary]
     let original: OriginalDocumentPayload
 }
 
@@ -394,10 +412,17 @@ struct OriginalDocumentPayload: Equatable, Sendable {
 }
 
 protocol AppDataServicing: Sendable {
+    func timelinePage(memberID: UUID?, cursor: LibraryQueryCursor?) async throws -> LibraryTimelinePage
+    func reportPage(query: String, memberID: UUID?, cursor: LibraryQueryCursor?) async throws -> LibraryReportPage
+    func draftPage(states: [ImportState], cursor: LibraryQueryCursor?) async throws -> AppDraftPage
+    func loadRecords(ids: [UUID]) async throws -> LibraryRecordSelection
+    func loadMember(id: UUID) async throws -> FamilyMember
+    func loadDraft(id: UUID) async throws -> ImportDraft
+
     func bootstrap() async throws -> AppSnapshot
     func refresh() async throws -> AppSnapshot
     func createMember(displayName: String, disambiguationLabel: String?) async throws -> AppSnapshot
-    func updateMember(_ member: FamilyMember) async throws -> AppSnapshot
+    func updateMember(_ member: FamilyMember, replacing expected: FamilyMember) async throws -> AppSnapshot
     func archiveMember(id: FamilyMember.ID) async throws -> AppSnapshot
     func deleteMember(id: FamilyMember.ID) async throws -> AppSnapshot
     func importFile(at url: URL) async throws -> AppImportOutcome
@@ -406,7 +431,9 @@ protocol AppDataServicing: Sendable {
     func recognizeReview(_ command: RecognizeReviewCommand) async throws -> RecognizedReviewContent
     func loadReviewOriginal(
         draftID: ImportDraft.ID,
-        sourceID: ReportSource.ID
+        sourceID: ReportSource.ID,
+        expectedRevision: UInt64,
+        expectedLibrary: LibraryRevision
     ) async throws -> OriginalDocumentPayload
     func confirmDraft(_ command: ConfirmDraftCommand) async throws -> AppSnapshot
     func updateRecord(_ command: UpdateRecordCommand) async throws -> AppSnapshot
@@ -415,6 +442,8 @@ protocol AppDataServicing: Sendable {
     func discardDraft(_ command: DiscardDraftCommand) async throws -> AppSnapshot
     func loadOriginal(
         recordID: HealthRecord.ID,
-        sourceID: ReportSource.ID
+        sourceID: ReportSource.ID,
+        expectedRevision: UInt64,
+        expectedLibrary: LibraryRevision
     ) async throws -> OriginalDocumentPayload
 }

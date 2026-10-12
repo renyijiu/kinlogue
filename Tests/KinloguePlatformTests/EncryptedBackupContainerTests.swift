@@ -179,6 +179,7 @@ func cancellationRetryNeverReusesCheckpointOrNoncePrefix() async throws {
 @Test
 func semanticGoldenVectorFreezesCanonicalAadAndCommitmentDomains() throws {
     let prologue = try BackupCheckpointPrologue(
+        formatVersion: .legacy,
         setID: .init(bytes: Data((1...16).map(UInt8.init))),
         checkpointID: .init(bytes: Data((17...32).map(UInt8.init))),
         deviceID: .init(bytes: Data((33...48).map(UInt8.init))),
@@ -311,4 +312,106 @@ private final class LockedEntryLifecycle: @unchecked Sendable {
 
 private extension Data {
     var hex: String { map { String(format: "%02x", $0) }.joined() }
+}
+
+@Test(arguments: [BackupFormatVersion.legacy, BackupFormatVersion.current])
+func capacityContainerRetainsLegacyIdentityAndVersionBoundaries(_ version: BackupFormatVersion) async throws {
+    let fixture = try ContainerFixture(payloadByteCount: 300_000)
+    let output = LockedBytes()
+    let writer = EncryptedBackupContainerWriter(
+        randomBytes: { Data(repeating: 0x71, count: $0) }, formatVersion: version
+    )
+    let result = try await writer.write(
+        entries: fixture.sources, revisionPair: fixture.revisionPair, sequence: 9,
+        signer: fixture.signer,
+        sink: .init(write: { output.append($0) }, readBackSource: output.source)
+    )
+    #expect(fixture.enrollment.descriptor.formatVersion == .legacy)
+    #expect(fixture.enrollment.authorization.formatVersion == .legacy)
+    #expect(result.manifest.formatVersion == version)
+    let restored = LockedEntries()
+    let read = try BackupContainerReader().read(
+        source: output.source(), recoverySeed: fixture.recoverySeed, sink: restored.sink
+    )
+    #expect(read.manifest == result.manifest)
+    #expect(restored.value(for: "objects/payload.bin") == fixture.payload)
+    if version == .legacy {
+        #expect(try BackupContainerParser.readHeader(source: output.source(), readerMinor: 0).version == .legacy)
+    } else {
+        #expect(throws: BackupContainerError.unsupportedVersion) {
+            _ = try BackupContainerParser.readHeader(source: output.source(), readerMinor: 0)
+        }
+    }
+}
+
+@Test
+func capacityContainerRejectsHugeForgedFrameCountWithoutReadingPayload() async throws {
+    let fixture = try ContainerFixture(payloadByteCount: 0)
+    let output = LockedBytes()
+    _ = try await fixture.writer.write(
+        entries: fixture.sources, revisionPair: fixture.revisionPair, sequence: 9,
+        signer: fixture.signer,
+        sink: .init(write: { output.append($0) }, readBackSource: output.source)
+    )
+    var bytes = output.data
+    var encodedCount = Data()
+    ContainerFormat.append(UInt32(BackupFormatLimits.maximumFrameCount), to: &encodedCount)
+    bytes.replaceSubrange(20..<24, with: encodedCount)
+    #expect(throws: BackupContainerError.invalidFormat) {
+        _ = try BackupContainerParser.parse(source: LockedBytes(bytes).source())
+    }
+}
+
+@Test
+func capacityFrameBudgetKeepsManifestNonceSeparateAndRejectsOverflow() throws {
+    let lastFrame = UInt64(BackupFormatLimits.maximumFrameCount - 1)
+    #expect(try BackupCrypto.payloadCounter(frameIndex: lastFrame) == lastFrame + 1)
+    let prefix = Data(repeating: 0x81, count: 4)
+    #expect(try BackupCrypto.nonce(prefix: prefix, counter: 0).bytes
+        != BackupCrypto.nonce(prefix: prefix, counter: lastFrame + 1).bytes)
+    #expect(throws: BackupContainerError.counterOverflow) {
+        _ = try BackupCrypto.payloadCounter(frameIndex: UInt64.max)
+    }
+    #expect(ContainerFormat.fixedHeaderByteCount + ContainerFormat.maximumDescriptorByteCount
+        + ContainerFormat.maximumAuthorizationByteCount + ContainerFormat.maximumPrologueByteCount
+        + ContainerFormat.maximumEnvelopeByteCount + ContainerFormat.authenticationTagByteCount
+        + 4 + ContainerFormat.maximumFooterByteCount <= 4_096)
+    #expect(BackupFormatLimits.maximumEntryCount == PlaintextVaultResourcePolicy.maximumObjectCount
+        + LANInboxSnapshot.maximumBlobCount + LANInboxSnapshot.maximumItemCount + 2)
+}
+
+@Test
+func capacityContainerRoundTripsTwentyThousandObjectsAndDurableInboxLeaves() async throws {
+    let fixture = try ContainerFixture(payloadByteCount: 0)
+    let emptyDigest = Data(SHA256.hash(data: Data()))
+    var sources = fixture.sources
+    for index in 0..<19_999 {
+        sources.append(.init(
+            kind: .vaultObject, path: String(format: "objects/extra-%05d", index),
+            plaintextByteCount: 0, plaintextDigest: emptyDigest, read: { _, _ in Data() }
+        ))
+    }
+    sources.append(.init(
+        kind: .lanInboxBlob, path: "lan-inbox/blobs/synthetic",
+        plaintextByteCount: 0, plaintextDigest: emptyDigest, read: { _, _ in Data() }
+    ))
+    sources.append(.init(
+        kind: .lanInboxDerivedArtifact, path: "lan-inbox/derived/synthetic",
+        plaintextByteCount: 0, plaintextDigest: emptyDigest, read: { _, _ in Data() }
+    ))
+    let output = LockedBytes()
+    let result = try await fixture.writer.write(
+        entries: sources, revisionPair: fixture.revisionPair, sequence: 9,
+        signer: fixture.signer,
+        sink: .init(write: { output.append($0) }, readBackSource: output.source)
+    )
+    let restored = LockedEntryLifecycle()
+    let read = try BackupContainerReader().read(
+        source: output.source(), recoverySeed: fixture.recoverySeed, sink: restored.sink
+    )
+    #expect(read.manifest == result.manifest)
+    #expect(read.manifest.entryCount == 20_004)
+    #expect(restored.finishedPaths == read.manifest.entries.map(\.path))
+    #expect(restored.maximumActiveEntryCount == 1)
+    #expect(UInt64(output.data.count) <= result.manifest.maximumContainerByteCount)
 }

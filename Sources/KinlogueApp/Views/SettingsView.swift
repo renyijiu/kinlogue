@@ -11,6 +11,7 @@ struct SettingsView: View {
     let onRestoreBackup: () -> Void
     let onExportOriginals: () -> Void
     let onDeleteVault: () -> Void
+    var integrityCoordinator: AppIntegrityCoordinator? = nil
     @State private var isAbandonPendingBackupConfirmationPresented = false
 
     var body: some View {
@@ -71,6 +72,10 @@ struct SettingsView: View {
                     Label(AppLocalization.string("数据管理"), systemImage: "externaldrive")
                         .font(.title2.weight(.semibold))
                         .foregroundStyle(KinlogueTheme.primary)
+
+                    if let integrityCoordinator {
+                        settingsCard { LibraryIntegrityStatusView(inspector: integrityCoordinator) }
+                    }
 
                     settingsCard {
                         HStack(spacing: 24) {

@@ -72,7 +72,7 @@ enum SidebarNavigationStep {
 }
 
 struct MemberSidebarView: View {
-    let members: [FamilyMember]
+    let members: [LibraryMemberSummary]
     @Binding var selectedMemberID: FamilyMember.ID?
     @Binding var selectedSection: AppSidebarSection
     let lanInboxItemCount: Int
@@ -81,18 +81,23 @@ struct MemberSidebarView: View {
     let reviewQueue: [DraftSummary]
     let backgroundDrafts: [DraftSummary]
     let busyDraftIDs: Set<ImportDraft.ID>
+    let draftLoadingStates: Set<ImportState>
+    let draftFailedStates: Set<ImportState>
+    let hasMoreDrafts: (ImportState) -> Bool
+    let onLoadMoreDrafts: (ImportState) -> Void
+    let onRetryDraftPage: (ImportState) -> Void
     let onAdd: () -> Void
     let onOpenDraft: (ImportDraft.ID) -> Void
     let onRetryDraft: (ImportDraft.ID) -> Void
     let onDiscardDraft: (ImportDraft.ID) -> Void
     let onOpenDICOMStudy: (DICOMStudy.ID) -> Void
-    let onEdit: (FamilyMember) -> Void
-    let onDelete: (FamilyMember) -> Void
+    let onEdit: (LibraryMemberSummary) -> Void
+    let onDelete: (LibraryMemberSummary) -> Void
     @State private var hoveredSidebarSelection: MemberSidebarSelection?
     @FocusState private var focusedSidebarSelection: MemberSidebarSelection?
 
     var body: some View {
-        let selectionLabels = RecordQuery.selectionLabels(for: members)
+        let selectionLabels = LibraryMemberSummary.labels( members)
 
         VStack(spacing: 0) {
             List {
@@ -187,7 +192,7 @@ struct MemberSidebarView: View {
                 }
 
                 Section(AppLocalization.string("家人")) {
-                    ForEach(RecordQuery.selectableMembers(from: members)) { member in
+                    ForEach(LibraryMemberSummary.selectable( members)) { member in
                         let selectionLabel = selectionLabels[member.id] ?? member.displayName
                         let selection = MemberSidebarSelection.member(member.id)
                         HStack {
@@ -249,7 +254,7 @@ struct MemberSidebarView: View {
                     }
                 }
 
-                if !reviewQueue.isEmpty {
+                if !reviewQueue.isEmpty || draftLoadingStates.contains(.needsReview) || draftFailedStates.contains(.needsReview) || hasMoreDrafts(.needsReview) {
                     Section(AppLocalization.string("待确认")) {
                         ForEach(reviewQueue) { draft in
                             SidebarActionButton {
@@ -265,6 +270,7 @@ struct MemberSidebarView: View {
                             }
                             .accessibilityHint(AppLocalization.string("打开原件并确认识别字段"))
                         }
+                        draftPageControls(.needsReview)
                     }
                 }
 
@@ -293,20 +299,22 @@ struct MemberSidebarView: View {
                 if !backgroundDrafts.isEmpty {
                     Section(AppLocalization.string("导入状态")) {
                         ForEach(backgroundDrafts) { draft in
-                            if draft.state == .failed {
+                            if draft.state == .failed || draft.canRetryRecovery {
                                 HStack {
                                     Button { onRetryDraft(draft.id) } label: {
                                         Label(AppLocalization.string("识别失败，点按重试"), systemImage: "arrow.clockwise.circle")
                                     }
                                     .buttonStyle(.plain)
                                     .disabled(busyDraftIDs.contains(draft.id))
-                                    Spacer()
-                                    Button(role: .destructive) { onDiscardDraft(draft.id) } label: {
-                                        Image(systemName: "trash")
+                                    if draft.state == .failed {
+                                        Spacer()
+                                        Button(role: .destructive) { onDiscardDraft(draft.id) } label: {
+                                            Image(systemName: "trash")
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .accessibilityLabel(AppLocalization.string("放弃这份失败的导入"))
+                                        .disabled(busyDraftIDs.contains(draft.id))
                                     }
-                                    .buttonStyle(.borderless)
-                                    .accessibilityLabel(AppLocalization.string("放弃这份失败的导入"))
-                                    .disabled(busyDraftIDs.contains(draft.id))
                                 }
                                 .selectionDisabled()
                             } else {
@@ -316,6 +324,9 @@ struct MemberSidebarView: View {
                             }
                         }
                     }
+                }
+                ForEach([ImportState.failed, .processing, .staging], id: \.self) { state in
+                    draftPageControls(state)
                 }
             }
             .listStyle(.sidebar)
@@ -351,6 +362,21 @@ struct MemberSidebarView: View {
         .background(KinlogueTheme.surface)
         .navigationTitle(AppLocalization.string("续页"))
         .accessibilityLabel(AppLocalization.string("家庭成员与待确认资料"))
+    }
+
+    @ViewBuilder private func draftPageControls(_ state: ImportState) -> some View {
+        let title = switch state {
+        case .needsReview: AppLocalization.string("待确认")
+        case .failed: AppLocalization.string("失败的导入")
+        default: AppLocalization.string("导入状态")
+        }
+        if draftLoadingStates.contains(state) {
+            ProgressView(AppLocalization.string("正在载入 \(title)"))
+        } else if draftFailedStates.contains(state) {
+            Button(AppLocalization.string("重新载入 \(title)")) { onRetryDraftPage(state) }
+        } else if hasMoreDrafts(state) {
+            Button(AppLocalization.string("载入更多 \(title)")) { onLoadMoreDrafts(state) }
+        }
     }
 
     private func selectSidebar(_ selection: MemberSidebarSelection) {
@@ -410,7 +436,7 @@ struct MemberSidebarView: View {
         case .down: step = .next
         default: return
         }
-        let memberIDs = RecordQuery.selectableMembers(from: members).map(\.id)
+        let memberIDs = LibraryMemberSummary.selectable( members).map(\.id)
         guard let next = selection.moving(step, memberIDs: memberIDs) else { return }
         selectSidebar(next)
     }

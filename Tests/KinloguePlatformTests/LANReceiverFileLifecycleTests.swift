@@ -6,11 +6,11 @@ import Testing
 
 @Suite("LAN receiver file lifecycle", .serialized)
 struct LANReceiverFileLifecycleTests {
-    @Test
-    func interruptionRetrySaveReplayAndReservedCancellationStayFileScoped() async throws {
-        let fixture = try await LANInboxStoreTestFixture.make()
+    @Test(arguments: [false, true])
+    func interruptionRetrySaveReplayAndReservedCancellationStayFileScoped(sqlite: Bool) async throws {
+        let fixture = try await LANReceiverBackendFixture.make(sqlite: sqlite)
         defer { fixture.destroy() }
-        let receiver = LANReceiver(rootURL: fixture.rootURL, session: LANSession())
+        let receiver = LANReceiver(rootURL: fixture.rootURL, session: LANSession(), store: fixture.injectedStore)
         defer { Task { await receiver.stop() } }
         let (_, authorization) = try await startAndAuthorize(receiver)
         let bytes = Data("synthetic receiver lifecycle".utf8)
@@ -94,15 +94,16 @@ struct LANReceiverFileLifecycleTests {
         #expect(!(await receiver.isActive))
     }
 
-    @Test
-    func cancellationAfterDurablePublicationReportsConflictAndProjectsSaved() async throws {
-        let fixture = try await LANInboxStoreTestFixture.make()
+    @Test(arguments: [false, true])
+    func cancellationAfterDurablePublicationReportsConflictAndProjectsSaved(sqlite: Bool) async throws {
+        let fixture = try await LANReceiverBackendFixture.make(sqlite: sqlite)
         defer { fixture.destroy() }
         let gate = FilePublicationGate()
         let receiver = LANReceiver(
             rootURL: fixture.rootURL,
             session: LANSession(),
-            fileUploadPublishedHook: { await gate.arriveAndWaitForRelease() }
+            fileUploadPublishedHook: { await gate.arriveAndWaitForRelease() },
+            store: fixture.injectedStore
         )
         defer { Task { await receiver.stop() } }
         let (_, authorization) = try await startAndAuthorize(receiver)

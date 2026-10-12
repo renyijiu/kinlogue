@@ -18,6 +18,8 @@
 
 当前最低系统已调整为 macOS 26，主要面向个人自用；Xcode 27 构建适配、CI Metal 组件准备、基线检查名兼容与 DICOM 崩溃恢复探针的重启等待预算见 [`testing-and-release.md`](testing-and-release.md)，转录编辑器的系统写作工具边界见 [`import-and-ocr.md`](import-and-ocr.md)；旧系统支持决策见 [`decisions.md`](decisions.md)，macOS 26/27 验收状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
 
+本分支已开始 [SQLite 与架构重构计划](plans/2026-10-10-2322-refactor-sqlite-architecture-plan.md)：生产路径先修复备份和去重、收拢 App 任务；[SQLite 内核与报告/OCR、LAN、DICOM 仓库](sqlite-storage.md) 已拆开原件长 I/O 与数据库 admission，补齐原件 hash 到提交间的身份/时间戳围栏与按操作清理，并实现局部复核、摘要分页、单事务 LAN 归档、规范化 DICOM、schema 解耦的逻辑备份/严格恢复与原件导出。App 按需契约、SQL 提交观察和文本保真已接通可注入服务，生产仍为 JSON；统一 SQLite 候选启动、恢复/删除排空和空闲完整性巡检已实现，并补齐局部损坏页面关闭、全局故障 LAN 停机及 DICOM 读取前长度边界；LAN 首批 100 项查询和独立后台工作分页已接通，Platform 近上限 p95 为 7.648 ms；独立规模探针已完成近上限、约 9.76 GiB 原件及 20,001 原件的完整发布/严格恢复，存储启动和短操作数值门槛通过；本地/LAN OCR 的来源归属构造已共享并通过真实数据库对照；搜索门槛、生产选择切换及 App/系统和混合负载验收仍待完成。 [首批实测](storage-refactor-measurement-2026-10-11.md) 分开记录前置修复收益和未达成的最终门槛。
+
 ## 当前边界
 
 | 主题 | 稳定结论 | 权威页 |
@@ -50,6 +52,7 @@
 
 ### 平台与用户能力
 
+- [`sqlite-storage.md`](sqlite-storage.md)：实验 SQLite 内核、报告/OCR、LAN 与规范化 DICOM 事务、逻辑备份/恢复、实体字节预算、窄查询、单实例、完整性和原件生命周期；生产切换门禁。
 - [`storage.md`](storage.md)：Vault/inbox 布局、原子提交、恢复、删除和导出。
 - [`backup-and-restore.md`](backup-and-restore.md)：加密恢复点、目录授权、自动化、保留和整库恢复。
 - [`import-and-ocr.md`](import-and-ocr.md)：报告文件校验、本机 OCR、候选抽取和人工确认。

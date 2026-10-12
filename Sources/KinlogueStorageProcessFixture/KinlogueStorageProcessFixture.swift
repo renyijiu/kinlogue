@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import KinlogueCore
 import KinlogueDICOMIPC
-@_spi(KinlogueStorageProcessFixture) import KinloguePlatform
+@_spi(Testing) @_spi(KinlogueStorageProcessFixture) import KinloguePlatform
 
 @main
 enum KinlogueStorageProcessFixture {
@@ -10,6 +10,12 @@ enum KinlogueStorageProcessFixture {
         let arguments = Array(CommandLine.arguments.dropFirst())
         if arguments.first == "--backup-capability" {
             Darwin.exit(await BackupCapabilityProbe.run(
+                arguments: Array(arguments.dropFirst())
+            ))
+        }
+
+        if arguments.first == "--storage-scale" {
+            Darwin.exit(await StorageScaleProbe.run(
                 arguments: Array(arguments.dropFirst())
             ))
         }
@@ -50,6 +56,7 @@ private final class FixtureRuntime {
     }
 
     private var loadedCatalog: LoadedCatalog?
+    private var sqliteStore: SQLiteLibraryStore?
 
     func handle(_ command: FixtureCommand) async throws -> Action {
         switch command.operation {
@@ -62,6 +69,131 @@ private final class FixtureRuntime {
                 ok: true,
                 protocolVersion: FixtureProtocol.version
             ))
+        case .openSQLite:
+            guard sqliteStore == nil else { throw FixtureError.invalidCommand }
+            sqliteStore = try SQLiteLibraryStore(rootURL: FixtureRoot.validate(command.rootPath))
+            FixtureProtocol.write(.init(event: .sqliteOpened, ok: true))
+        case .suspendSQLite:
+            guard let sqliteStore else { throw FixtureError.invalidCommand }
+            try sqliteStore.closeDatabaseForReplacement()
+            FixtureProtocol.write(.init(event: .sqliteSuspended, ok: true))
+        case .closeSQLite:
+            try sqliteStore?.close()
+            sqliteStore = nil
+            FixtureProtocol.write(.init(event: .sqliteClosed, ok: true))
+        case .holdSQLiteLogicalCapture:
+            let phases: [SQLiteLogicalCapturePhase] = [.directoryCreated, .receiptDurable, .copyStep, .logicalValidation]
+            guard let variant = command.variant, (1...phases.count).contains(variant) else { throw FixtureError.invalidCommand }
+            let store = try SQLiteLibraryStore(rootURL: FixtureRoot.validate(command.rootPath))
+            defer { try? store.close() }
+            let source = SQLiteLogicalBackupSource(store: store, captureHook: { phase in
+                if phase == phases[variant - 1] {
+                    FixtureProtocol.write(.init(event: .leaseHeld, ok: true))
+                    _ = readLine(strippingNewline: true)
+                    throw CancellationError()
+                }
+            })
+            let snapshot = try await source.prepare()
+            snapshot.release()
+        case .holdSQLiteLogicalRestore:
+            let points: [BackupRestoreTransactionFault] = [.afterIntent, .afterWriterReset, .afterOldRootMove, .afterNewRootActivation, .afterValidation, .afterCommit]
+            guard let variant = command.variant, (1...points.count).contains(variant) else { throw FixtureError.invalidCommand }
+            let root = try FixtureRoot.validate(command.rootPath)
+            let owner = try SQLiteLibraryOwner(rootURL: root)
+            let verifier = try BackupRestoreVerifier(owner: owner)
+            let parent = root.deletingLastPathComponent()
+            let code = try String(contentsOf: parent.appendingPathComponent("logical-recovery.txt"), encoding: .utf8)
+            let prepared = try await verifier.prepare(checkpointURL: parent.appendingPathComponent("logical.kinloguebackup"), recoveryCode: code)
+            let transaction = try BackupRestoreTransaction(owner: owner, failureInjector: { point in
+                guard point == points[variant - 1] else { return false }
+                FixtureProtocol.write(.init(event: .leaseHeld, ok: true))
+                _ = readLine(strippingNewline: true)
+                return true
+            })
+            _ = try await transaction.activate(prepared: prepared, resetWriter: {})
+            throw FixtureError.invalidCommand
+        case .holdSQLiteInitialization:
+            let points: [SQLiteInitializationFaultPoint] = [
+                .afterReceipt, .afterOriginalsDirectory, .afterDatabaseCreation, .afterSchemaCommit,
+            ]
+            guard let variant = command.variant, (1...points.count).contains(variant) else {
+                throw FixtureError.invalidCommand
+            }
+            let point = points[variant - 1]
+            let store = try SQLiteLibraryStore(rootURL: FixtureRoot.validate(command.rootPath),
+                initializationFault: { current in
+                    guard current == point else { return false }
+                    FixtureProtocol.write(.init(event: .leaseHeld, ok: true))
+                    _ = readLine(strippingNewline: true)
+                    return true
+                })
+            try store.close()
+            throw FixtureError.invalidCommand
+        case .holdSQLiteLANUpload:
+            let points: [SQLiteOriginalFaultPoint] = [.afterRegistration, .afterIdentityCommit, .afterRename, .afterLiveCommit]
+            guard let variant = command.variant, (1...5).contains(variant) else { throw FixtureError.invalidCommand }
+            let store = try SQLiteLibraryStore(rootURL: FixtureRoot.validate(command.rootPath), originalFault: { current in
+                guard variant <= points.count, current == points[variant - 1] else { return false }
+                FixtureProtocol.write(.init(event: .leaseHeld, ok: true))
+                _ = readLine(strippingNewline: true)
+                return true
+            })
+            let inbox = try SQLiteLANInboxStore(store: store)
+            let bytes = Data("synthetic SQLite LAN upload".utf8)
+            let metadata = try LANInboxTransportMetadata(displayName: LANInboxDisplayName(rawValue: "synthetic.bin"), declaredByteCount: bytes.count)
+            guard case let .sink(sink) = try await inbox.startItemUpload(transport: LANInboxTransportIdentity(sessionID: UUID(), remoteFileID: UUID()), metadata: metadata, attemptRevision: 0) else { throw FixtureError.invalidCommand }
+            if variant == 5 {
+                try await sink.write(Data(bytes.prefix(3))).value
+                FixtureProtocol.write(.init(event: .leaseHeld, ok: true))
+                _ = readLine(strippingNewline: true)
+            } else {
+                try await sink.write(bytes).value
+                _ = try await sink.finish()
+            }
+            throw FixtureError.invalidCommand
+        case .holdSQLiteDICOMImport:
+            let points: [SQLiteOriginalFaultPoint] = [.afterRegistration, .afterIdentityCommit, .afterRename, .afterLiveCommit]
+            guard let variant = command.variant, (1...5).contains(variant) else { throw FixtureError.invalidCommand }
+            let root = try FixtureRoot.validate(command.rootPath)
+            let store = try SQLiteLibraryStore(rootURL: root, originalFault: { point in
+                guard variant > 1, point == points[variant - 2] else { return false }
+                FixtureProtocol.write(.init(event: .leaseHeld, ok: true))
+                _ = readLine(strippingNewline: true)
+                return true
+            })
+            let repository = try SQLiteDICOMRepository(store: store)
+            let workflow = try DICOMImportWorkflow(repository: repository, decoder: BlockingProcessDICOMDecoder(blocks: variant == 1))
+            _ = try await workflow.importDirectory(root.deletingLastPathComponent().appendingPathComponent("DICOMSource"), securityScope: .notRequiredForTesting)
+            throw FixtureError.invalidCommand
+        case .holdSQLiteOriginal:
+            let points: [SQLiteOriginalFaultPoint] = [
+                .afterRegistration, .afterIdentityCommit, .afterFileSync, .afterRename,
+                .afterLiveCommit, .afterDeletingCommit, .afterUnlink,
+            ]
+            guard let variant = command.variant, (1...points.count).contains(variant) else {
+                throw FixtureError.invalidCommand
+            }
+            let point = points[variant - 1]
+            let root = try FixtureRoot.validate(command.rootPath)
+            let store = try SQLiteLibraryStore(rootURL: root, originalFault: { current in
+                guard current == point else { return false }
+                FixtureProtocol.write(.init(event: .leaseHeld, ok: true))
+                _ = readLine(strippingNewline: true)
+                return true
+            })
+            defer { try? store.close() }
+            let bytes = Data("synthetic SQLite original".utf8)
+            let input = root.deletingLastPathComponent().appendingPathComponent("SQLiteInput")
+            try bytes.write(to: input, options: .withoutOverwriting)
+            let descriptor = Darwin.open(input.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            guard descriptor >= 0 else { throw FixtureError.invalidRoot }
+            defer { Darwin.close(descriptor) }
+            let operation = UUID()
+            let id = try store.stageOriginal(copyingFrom: descriptor, byteCount: bytes.count,
+                sha256: ContentDigest.sha256(bytes), contentType: "application/octet-stream", operationID: operation)
+            try store.publishOriginal(id, operationID: operation)
+            try store.deleteOriginal(id)
+            throw FixtureError.invalidCommand
         case .initialize:
             let rootURL = try FixtureRoot.validate(command.rootPath)
             let catalog = try await PlaintextVault(rootURL: rootURL).initialize()
@@ -444,6 +576,7 @@ private enum FixtureRoot {
 private enum FixtureOperation: String, Codable {
     case handshake
     case initialize
+    case openSQLite, suspendSQLite, closeSQLite, holdSQLiteOriginal, holdSQLiteInitialization, holdSQLiteLANUpload, holdSQLiteDICOMImport, holdSQLiteLogicalRestore, holdSQLiteLogicalCapture
     case loadCatalog
     case commitLoadedCatalog
     case barrierCommitLoadedCatalog
@@ -467,6 +600,7 @@ private struct FixtureCommand: Codable {
 private enum FixtureEvent: String, Codable {
     case handshake
     case initialized
+    case sqliteOpened, sqliteSuspended, sqliteClosed
     case catalogLoaded
     case catalogCommitted
     case catalogCommitAttempting
@@ -483,12 +617,15 @@ private enum FixtureEvent: String, Codable {
 }
 
 private actor BlockingProcessDICOMDecoder: DICOMFrameDecoding {
+    let blocks: Bool
+    init(blocks: Bool = true) { self.blocks = blocks }
     func decode(
         descriptor: FileHandle,
         declaredByteCount: Int
     ) async throws -> KinlogueDICOMDecodedFrame {
         _ = descriptor
         _ = declaredByteCount
+        if blocks {
         FixtureProtocol.write(.init(event: .leaseHeld, ok: true))
         guard let line = readLine(strippingNewline: true),
               line.utf8.count <= FixtureProtocol.maximumLineByteCount,
@@ -496,6 +633,7 @@ private actor BlockingProcessDICOMDecoder: DICOMFrameDecoding {
               let command = try? JSONDecoder().decode(FixtureCommand.self, from: data),
               command.operation == .release else {
             throw FixtureError.invalidCommand
+        }
         }
         return KinlogueDICOMDecodedFrame(
             transferSyntaxUID: KinlogueDICOMSupportedObject.explicitVRLittleEndian,
@@ -535,9 +673,11 @@ private enum FixtureFailureCode: String, Codable {
     case injectedFailure
     case resourceLimitExceeded
     case storageFailure
+    case occupied
 
     init(_ error: any Error) {
         switch error {
+        case SQLiteLibraryError.occupied: self = .occupied
         case FixtureError.invalidCommand: self = .invalidCommand
         case FixtureError.invalidRoot: self = .invalidRoot
         case FixtureError.catalogNotLoaded: self = .catalogNotLoaded

@@ -15,7 +15,7 @@ struct DICOMAppModelTests {
             memberID: member.id,
             effectiveDate: Date(timeIntervalSinceReferenceDate: 100)
         )
-        let snapshot = AppSnapshot(
+        let snapshot = TestLibrarySnapshot(
             generation: 3,
             members: [member],
             records: [],
@@ -41,7 +41,7 @@ struct DICOMAppModelTests {
     @Test
     func DICOMFolderSelectionSharesTheRootModalBoundaryAndLifecycleClearsImagingState() async throws {
         let pending = dicomSummary(state: .needsReview)
-        let snapshot = AppSnapshot(
+        let snapshot = TestLibrarySnapshot(
             generation: 1,
             members: [],
             records: [],
@@ -177,14 +177,14 @@ struct DICOMAppModelTests {
         let pending = dicomSummary(state: .needsReview)
         let model = AppModel(
             service: AppServiceSpy(
-                snapshot: AppSnapshot(
+                snapshot: TestLibrarySnapshot(
                     generation: 1,
                     members: [],
                     records: [],
                     drafts: [],
                     dicomStudies: [pending]
                 ),
-                refreshedSnapshot: AppSnapshot(
+                refreshedSnapshot: TestLibrarySnapshot(
                     generation: 2,
                     members: [],
                     records: [],
@@ -210,14 +210,14 @@ struct DICOMAppModelTests {
         let registry = DICOMViewerRegistry()
         let model = AppModel(
             service: AppServiceSpy(
-                snapshot: AppSnapshot(
+                snapshot: TestLibrarySnapshot(
                     generation: 1,
                     members: [],
                     records: [],
                     drafts: [],
                     dicomStudies: [confirmed]
                 ),
-                refreshedSnapshot: AppSnapshot(
+                refreshedSnapshot: TestLibrarySnapshot(
                     generation: 2,
                     members: [],
                     records: [],
@@ -247,7 +247,7 @@ struct DICOMAppModelTests {
         let study = dicomSummary(state: .confirmed)
         let registry = DICOMViewerRegistry()
         let model = AppModel(
-            service: AppServiceSpy(snapshot: AppSnapshot(
+            service: AppServiceSpy(snapshot: TestLibrarySnapshot(
                 members: [],
                 records: [],
                 drafts: [],
@@ -277,7 +277,7 @@ struct DICOMAppModelTests {
         let registry = DICOMViewerRegistry()
         let model = AppModel(
             service: AppServiceSpy(
-                snapshot: AppSnapshot(
+                snapshot: TestLibrarySnapshot(
                     generation: 1,
                     members: [],
                     records: [],
@@ -333,14 +333,14 @@ struct DICOMAppModelTests {
         )
         let model = AppModel(
             service: AppServiceSpy(
-                snapshot: AppSnapshot(
+                snapshot: TestLibrarySnapshot(
                     generation: 1,
                     members: [],
                     records: [],
                     drafts: [],
                     dicomStudies: [original]
                 ),
-                refreshedSnapshot: AppSnapshot(
+                refreshedSnapshot: TestLibrarySnapshot(
                     generation: 2,
                     members: [],
                     records: [],
@@ -363,18 +363,18 @@ struct DICOMAppModelTests {
     }
 
     @Test
-    func refreshRevokesViewerForAnUnrelatedCatalogGenerationChange() async {
+    func refreshKeepsViewerForAnUnrelatedCatalogGenerationChange() async {
         let study = dicomSummary(state: .confirmed)
         let model = AppModel(
             service: AppServiceSpy(
-                snapshot: AppSnapshot(
+                snapshot: TestLibrarySnapshot(
                     generation: 1,
                     members: [],
                     records: [],
                     drafts: [],
                     dicomStudies: [study]
                 ),
-                refreshedSnapshot: AppSnapshot(
+                refreshedSnapshot: TestLibrarySnapshot(
                     generation: 2,
                     members: [],
                     records: [],
@@ -391,8 +391,8 @@ struct DICOMAppModelTests {
 
         await model.refresh()
 
-        #expect(viewer.phase == .closed)
-        #expect(dismissal.count == 1)
+        #expect(viewer.phase != .closed)
+        #expect(dismissal.count == 0)
         #expect(model.dicomLibraryModel.studies == [study])
     }
 
@@ -413,14 +413,14 @@ struct DICOMAppModelTests {
             memberID: updatedMember.id,
             effectiveDate: updatedDate
         )
-        let initialSnapshot = AppSnapshot(
+        let initialSnapshot = TestLibrarySnapshot(
             generation: 1,
             members: [originalMember, updatedMember],
             records: [],
             drafts: [],
             dicomStudies: [originalStudy]
         )
-        let updatedSnapshot = AppSnapshot(
+        let updatedSnapshot = TestLibrarySnapshot(
             generation: 2,
             members: [originalMember, updatedMember],
             records: [],
@@ -432,7 +432,7 @@ struct DICOMAppModelTests {
         let dicomService = DICOMAppServiceSpy()
         await dicomService.setReviewContent(DICOMStudyReviewContent(
             viewerContent: viewerContent,
-            selectableMembers: [originalMember, updatedMember]
+            selectableMembers: [originalMember, updatedMember].map(LibraryMemberSummary.init)
         ))
         await dicomService.setSavedSnapshot(updatedSnapshot)
         let slices = GatedAppModelDICOMSliceService(session: session)
@@ -477,7 +477,7 @@ struct DICOMAppModelTests {
     func reviewCannotEscapeBeforeItsModelAllowsDismissal() async {
         let study = dicomSummary(state: .confirmed)
         let model = AppModel(
-            service: AppServiceSpy(snapshot: AppSnapshot(
+            service: AppServiceSpy(snapshot: TestLibrarySnapshot(
                 members: [],
                 records: [],
                 drafts: [],

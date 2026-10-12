@@ -13,11 +13,11 @@ struct LANRealSocketBackpressureTests {
     private static let maximumRSSDelta = UInt64(64 * 1_024 * 1_024)
     private static let maximumEventLoopP99Nanoseconds = UInt64(250_000_000)
 
-    @Test
-    func productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect()
+    @Test(arguments: [false, true])
+    func productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect(sqlite: Bool)
         async throws
     {
-        let fixture = try await LANInboxStoreTestFixture.make()
+        let fixture = try await LANReceiverBackendFixture.make(sqlite: sqlite)
         defer { fixture.destroy() }
 
         let channelUsage = RealChannelUsage()
@@ -26,7 +26,8 @@ struct LANRealSocketBackpressureTests {
         let receiver = LANReceiver(
             rootURL: fixture.rootURL,
             session: LANSession(),
-            storeObserver: { storeOperations.record($0) }
+            storeObserver: { storeOperations.record($0) },
+            store: fixture.injectedStore
         )
         let assetCatalog = try LANPhoneAssetCatalog.loadBundled()
         var slowDescriptors: [Int32] = []
@@ -321,7 +322,7 @@ struct LANRealSocketBackpressureTests {
             _ = Darwin.close(abruptDescriptor)
             try await realWaitUntilAsync(timeout: .seconds(3)) {
                 guard let snapshot = try? await fixture.store.loadSnapshot(),
-                      let summary = try? await fixture.store.storageSummary() else {
+                      let summary = try? await fixture.store.snapshotAndStorageSummary().storage else {
                     return false
                 }
                 return snapshot.items.count == 2
@@ -345,11 +346,11 @@ struct LANRealSocketBackpressureTests {
             let finalSnapshot = try await fixture.store.loadSnapshot()
             #expect(finalSnapshot.items.count == 2)
             #expect(finalSnapshot.blobs.count == 2)
-            let summary = try await fixture.store.storageSummary()
+            let summary = try await fixture.store.snapshotAndStorageSummary().storage
             #expect(summary.partialObjectCount == 0)
 
             print(
-                "LAN_REAL_SOCKET_CALIBRATION "
+                "LAN_REAL_SOCKET_CALIBRATION backend=\(sqlite ? "sqlite" : "json") "
                     + "fixture_a_bytes=\(Self.firstLargeFixtureByteCount) "
                     + "fixture_b_bytes=\(Self.secondLargeFixtureByteCount) "
                     + "abrupt_fixture_bytes=\(Self.abruptFixtureByteCount) "

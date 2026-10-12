@@ -7,8 +7,8 @@ actor DICOMAppServiceSpy: DICOMAppServicing {
     var importOutcome: DICOMAppImportOutcome?
     var importError: DICOMImportError?
     var reviewContent: DICOMStudyReviewContent?
-    var savedSnapshot: AppSnapshot = .empty
-    var deletedSnapshot: AppSnapshot = .empty
+    var savedSnapshot: TestLibrarySnapshot = .empty
+    var deletedSnapshot: TestLibrarySnapshot = .empty
     var cancelOutcome: DICOMAppImportOutcome?
     var cancelError: DICOMImportError?
     private(set) var importedURLs: [URL] = []
@@ -36,11 +36,11 @@ actor DICOMAppServiceSpy: DICOMAppServicing {
         reviewContent = content
     }
 
-    func setSavedSnapshot(_ snapshot: AppSnapshot) {
+    func setSavedSnapshot(_ snapshot: TestLibrarySnapshot) {
         savedSnapshot = snapshot
     }
 
-    func setDeletedSnapshot(_ snapshot: AppSnapshot) {
+    func setDeletedSnapshot(_ snapshot: TestLibrarySnapshot) {
         deletedSnapshot = snapshot
     }
 
@@ -66,12 +66,12 @@ actor DICOMAppServiceSpy: DICOMAppServicing {
 
     func saveDICOMStudy(_ command: SaveDICOMStudyCommand) async throws -> AppSnapshot {
         saveCommands.append(command)
-        return savedSnapshot
+        return savedSnapshot.header
     }
 
     func deleteDICOMStudy(id: DICOMStudy.ID) async throws -> AppSnapshot {
         deletedStudyIDs.append(id)
-        return deletedSnapshot
+        return deletedSnapshot.header
     }
 }
 
@@ -136,6 +136,6 @@ func dicomReviewContent(
             inertObjectCount: inertObjectCount,
             series: series
         ),
-        selectableMembers: selectableMembers
+        selectableMembers: selectableMembers.map(LibraryMemberSummary.init)
     )
 }

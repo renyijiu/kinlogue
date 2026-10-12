@@ -82,7 +82,9 @@ public struct VaultDICOMImportJournal: Sendable {
     @discardableResult
     func reconcile(
         vaultID: UUID,
-        retaining reachable: Set<VaultObjectReference>
+        retaining reachable: Set<VaultObjectReference>,
+        excluding activeOperations: Set<UUID> = [],
+        allowsPromotions: Bool = true
     ) throws -> DICOMImportReconciliationResult {
         let directory = layout.dicomImportJournalDirectoryPath
         let journalPaths = try files.listRegularFiles(relativeDirectory: directory)
@@ -94,9 +96,10 @@ public struct VaultDICOMImportJournal: Sendable {
             guard let operationID = operationID(fromJournalPath: path) else {
                 throw DICOMImportError.integrityFailure
             }
+            if activeOperations.contains(operationID) { continue }
             do {
                 let receipt = try read(operationID: operationID)
-                guard receipt.vaultID == vaultID else { throw DICOMImportError.integrityFailure }
+                guard receipt.vaultID == vaultID, allowsPromotions || receipt.promotedReferences.isEmpty else { throw DICOMImportError.integrityFailure }
                 for reference in receipt.promotedReferences {
                     if reachable.contains(reference) {
                         preserved += 1

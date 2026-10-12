@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import KinlogueCore
 import Testing
@@ -35,6 +36,8 @@ struct PlaintextLibraryBackupSourceTests {
 
             #expect(result.manifest.revisionPair == plan.revisionPair)
             #expect(result.manifest.entryCount == plan.entryCount)
+            #expect(result.manifest.maximumContainerByteCount == plan.maximumContainerByteCount)
+            #expect(output.source().byteCount <= plan.maximumContainerByteCount)
             #expect(result.maximumBufferedPlaintextByteCount
                 <= BackupFormatLimits.maximumFramePlaintextByteCount)
             #expect(await source.maximumSimultaneousOpenFileCount == 1)
@@ -53,6 +56,135 @@ struct PlaintextLibraryBackupSourceTests {
             #expect(restored.value(for: fixture.inboxDerivedArtifactPath)
                 == fixture.inboxDerivedArtifactBytes)
             #expect(restored.value(for: fixture.inboxPreprocessingPartialPath) == nil)
+        }
+    }
+
+    @Test(arguments: ["vault", "inbox", "derived"])
+    func streamingDigestRejectsDamagePredatingThePreparedFileToken(_ kind: String) async throws {
+        try await withLibraryBackupFixture { fixture in
+            let path = kind == "vault" ? fixture.vaultObjectPath
+                : kind == "inbox" ? fixture.inboxBlobPath : fixture.inboxDerivedArtifactPath
+            try damageLibraryBackupFileInPlace(fixture.root.appendingPathComponent(path))
+            let source = try PlaintextLibraryBackupSource(vault: fixture.vault, inboxStore: fixture.inbox)
+            let plan = try await source.prepare()
+            let output = SourceTestLockedBytes()
+            await #expect(throws: BackupContainerError.sourceIntegrityFailure) {
+                _ = try await EncryptedBackupContainerWriter().write(
+                    entries: await source.containerSources(for: plan),
+                    revisionPair: plan.revisionPair,
+                    sequence: 1,
+                    signer: fixture.signer,
+                    sink: .init(write: output.append, readBackSource: output.source)
+                )
+            }
+        }
+    }
+
+    @Test(arguments: ["library.json", "lan-inbox/inbox.json"])
+    func refusesEntryAfterSameInodeHeadDamage(_ path: String) async throws {
+        try await withLibraryBackupFixture { fixture in
+            let source = try PlaintextLibraryBackupSource(vault: fixture.vault, inboxStore: fixture.inbox)
+            let plan = try await source.prepare()
+            let entries = await source.containerSources(for: plan)
+            let entry = try #require(entries.first { $0.path == fixture.vaultObjectPath })
+            try damageLibraryBackupFileInPlace(fixture.root.appendingPathComponent(path))
+
+            await #expect(throws: (any Error).self) {
+                let opened = try await entry.open()
+                opened.close()
+            }
+        }
+    }
+
+    @Test(arguments: ["vault", "inbox", "derived"])
+    func finalValidationRejectsDamageAfterAnEntryWasRead(_ kind: String) async throws {
+        try await withLibraryBackupFixture { fixture in
+            let source = try PlaintextLibraryBackupSource(vault: fixture.vault, inboxStore: fixture.inbox)
+            let plan = try await source.prepare()
+            let path = kind == "vault" ? fixture.vaultObjectPath
+                : kind == "inbox" ? fixture.inboxBlobPath : fixture.inboxDerivedArtifactPath
+            let entries = await source.containerSources(for: plan)
+            let entry = try #require(entries.first { $0.path == path })
+            let opened = try await entry.open()
+            _ = try opened.read(offset: 0, maximumByteCount: Int(entry.plaintextByteCount))
+            opened.close()
+            try damageLibraryBackupFileInPlace(fixture.root.appendingPathComponent(path))
+
+            await #expect(throws: PlaintextLibraryBackupSourceError.sourceChanged) {
+                try await source.withValidatedCurrentPair(for: plan) {
+                    Issue.record("A damaged source must never reach publication")
+                }
+            }
+        }
+    }
+
+    @Test
+    func openedEntryRejectsSameInodeDamage() async throws {
+        try await withLibraryBackupFixture { fixture in
+            let source = try PlaintextLibraryBackupSource(vault: fixture.vault, inboxStore: fixture.inbox)
+            let plan = try await source.prepare()
+            let entries = await source.containerSources(for: plan)
+            let entry = try #require(entries.first { $0.path == fixture.vaultObjectPath })
+            let opened = try await entry.open()
+            defer { opened.close() }
+            try damageLibraryBackupFileInPlace(fixture.root.appendingPathComponent(entry.path))
+
+            #expect(throws: PlaintextLibraryBackupSourceError.sourceChanged) {
+                _ = try opened.read(offset: 0, maximumByteCount: Int(entry.plaintextByteCount))
+            }
+        }
+    }
+
+    @Test
+    func refusesAnEntryAfterInboxCommit() async throws {
+        try await withLibraryBackupFixture { fixture in
+            let source = try PlaintextLibraryBackupSource(vault: fixture.vault, inboxStore: fixture.inbox)
+            let plan = try await source.prepare()
+            _ = try await uploadLibraryBackupBlob(
+                Data("another-synthetic-blob".utf8), name: "another.bin", to: fixture.inbox
+            )
+            let entries = await source.containerSources(for: plan)
+            let entry = try #require(entries.first)
+            await #expect(throws: (any Error).self) {
+                let opened = try await entry.open()
+                opened.close()
+            }
+        }
+    }
+
+    @Test
+    func refusesReplacementFileWithIdenticalBytes() async throws {
+        try await withLibraryBackupFixture { fixture in
+            let source = try PlaintextLibraryBackupSource(vault: fixture.vault, inboxStore: fixture.inbox)
+            let plan = try await source.prepare()
+            let entries = await source.containerSources(for: plan)
+            let entry = try #require(entries.first { $0.path == fixture.vaultObjectPath })
+            let url = fixture.root.appendingPathComponent(entry.path)
+            try FileManager.default.moveItem(at: url, to: fixture.base.appendingPathComponent("old-object"))
+            try fixture.vaultObjectBytes.write(to: url)
+            #expect(chmod(url.path, 0o600) == 0)
+            await #expect(throws: PlaintextLibraryBackupSourceError.sourceChanged) {
+                let opened = try await entry.open()
+                opened.close()
+            }
+        }
+    }
+
+    @Test
+    func cancelledEntryOpenReleasesItsMutationLease() async throws {
+        try await withLibraryBackupFixture { fixture in
+            let source = try PlaintextLibraryBackupSource(vault: fixture.vault, inboxStore: fixture.inbox)
+            let plan = try await source.prepare()
+            let entries = await source.containerSources(for: plan)
+            let entry = try #require(entries.first)
+            let task = Task {
+                withUnsafeCurrentTask { $0?.cancel() }
+                let opened = try await entry.open()
+                opened.close()
+            }
+            await #expect(throws: CancellationError.self) { try await task.value }
+            let opened = try await entry.open()
+            opened.close()
         }
     }
 
@@ -265,4 +397,13 @@ private final class SourceTestLockedEntries: @unchecked Sendable {
     }
 
     func value(for path: String) -> Data? { lock.withLock { entries[path] } }
+}
+
+private func damageLibraryBackupFileInPlace(_ url: URL) throws {
+    let handle = try FileHandle(forUpdating: url)
+    defer { try? handle.close() }
+    let original = try #require(try handle.read(upToCount: 1)?.first)
+    try handle.seek(toOffset: 0)
+    try handle.write(contentsOf: Data([original ^ 0xff]))
+    try handle.synchronize()
 }

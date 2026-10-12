@@ -51,7 +51,7 @@ private enum PlaintextLibraryBackupPlanEntry: Sendable {
         path: String,
         byteCount: UInt64,
         digest: Data,
-        identity: BackupPublishedFileIdentity
+        identity: PlaintextVaultManifestIdentity
     )
 
     var kind: BackupManifestEntry.Kind {
@@ -85,11 +85,13 @@ public struct PlaintextLibraryBackupPlan: Sendable {
     public let revisionPair: BackupRevisionPair
     public let entryCount: Int
     public let totalPlaintextByteCount: UInt64
+    public let maximumContainerByteCount: UInt64
 
     fileprivate let root: VaultRootGeneration
     fileprivate let vaultSnapshot: PlaintextVaultBackupSnapshot
     fileprivate let inboxSnapshot: PlaintextLANInboxBackupSnapshot
     fileprivate let entries: [PlaintextLibraryBackupPlanEntry]
+    fileprivate let heads: [PlaintextLibraryBackupPlanEntry]
 }
 
 // SAFETY: lock protects both current and maximum descriptor counters and all
@@ -120,6 +122,7 @@ public actor PlaintextLibraryBackupSource {
     private let vault: PlaintextVault
     private var inboxStore: PlaintextLANInboxStore?
     private let rootURL: URL
+    private let rootBinding: VaultRootBinding
     private let mutationCoordinator: VaultMutationCoordinator
     private let metrics = SourceDescriptorMetrics()
 
@@ -132,6 +135,7 @@ public actor PlaintextLibraryBackupSource {
         self.vault = vault
         self.inboxStore = inboxStore
         rootURL = vaultRoot
+        rootBinding = try VaultRootBinding(rootURL: vaultRoot)
         mutationCoordinator = VaultMutationCoordinator.shared(for: vaultRoot)
     }
 
@@ -146,6 +150,7 @@ public actor PlaintextLibraryBackupSource {
         self.vault = vault
         inboxStore = nil
         rootURL = vaultRoot
+        rootBinding = try VaultRootBinding(rootURL: vaultRoot)
         mutationCoordinator = VaultMutationCoordinator.shared(for: vaultRoot)
     }
 
@@ -166,13 +171,18 @@ public actor PlaintextLibraryBackupSource {
 
             var entries: [PlaintextLibraryBackupPlanEntry] = []
             for file in vaultSnapshot.files + inboxSnapshot.files {
+                try Task.checkCancellation()
                 let identity = try Self.inspectFile(
                     relativePath: file.relativePath,
                     root: vaultSnapshot.root,
                     rootURL: rootURL
                 )
-                guard identity.byteCount == file.byteCount else {
+                guard UInt64(identity.byteCount) == file.byteCount else {
                     throw PlaintextLibraryBackupSourceError.integrityFailure
+                }
+                if file.kind == .vaultCatalog,
+                   identity != vaultSnapshot.manifestIdentity {
+                    throw PlaintextLibraryBackupSourceError.sourceChanged
                 }
                 entries.append(.file(
                     kind: file.kind,
@@ -183,35 +193,45 @@ public actor PlaintextLibraryBackupSource {
                 ))
             }
             entries.sort { $0.path < $1.path }
-            guard entries.count <= BackupFormatLimits.maximumEntryCount,
-                  Set(entries.map(\.path)).count == entries.count else {
-                throw PlaintextLibraryBackupSourceError.resourceLimit
+            let revisionPair = try BackupRevisionPair(
+                vault: vaultSnapshot.revision, lanInbox: inboxSnapshot.revision
+            )
+            var nextFrame: UInt64 = 0
+            let manifestEntries = try entries.map { entry in
+                let frames = try BackupManifestEntry.requiredFrameCount(for: entry.byteCount)
+                let manifestEntry = try BackupManifestEntry(
+                    kind: entry.kind,
+                    path: entry.path,
+                    plaintextByteCount: entry.byteCount,
+                    plaintextDigest: entry.digest,
+                    firstFrameIndex: nextFrame,
+                    frameCount: frames
+                )
+                let endFrame = nextFrame.addingReportingOverflow(UInt64(frames))
+                guard !endFrame.overflow else { throw BackupContractError.arithmeticOverflow }
+                nextFrame = endFrame.partialValue
+                return manifestEntry
             }
-            var total: UInt64 = 0
-            for entry in entries {
-                let next = total.addingReportingOverflow(entry.byteCount)
-                guard !next.overflow,
-                      next.partialValue <= BackupFormatLimits.maximumPlaintextByteCount else {
-                    throw PlaintextLibraryBackupSourceError.resourceLimit
-                }
-                total = next.partialValue
-            }
-            return PlaintextLibraryBackupPlan(
-                revisionPair: try BackupRevisionPair(
-                    vault: vaultSnapshot.revision,
-                    lanInbox: inboxSnapshot.revision
-                ),
-                entryCount: entries.count,
-                totalPlaintextByteCount: total,
+            let manifest = try BackupManifest(revisionPair: revisionPair, entries: manifestEntries)
+            let plan = PlaintextLibraryBackupPlan(
+                revisionPair: revisionPair,
+                entryCount: manifest.entryCount,
+                totalPlaintextByteCount: manifest.totalPlaintextByteCount,
+                maximumContainerByteCount: manifest.maximumContainerByteCount,
                 root: vaultSnapshot.root,
                 vaultSnapshot: vaultSnapshot,
                 inboxSnapshot: inboxSnapshot,
-                entries: entries
+                entries: entries,
+                heads: entries.filter { $0.kind == .vaultCatalog || $0.kind == .lanInboxManifest }
             )
+            try validateHeads(plan, using: lease)
+            return plan
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as PlaintextLibraryBackupSourceError {
             throw error
+        } catch BackupContractError.resourceLimit, BackupContractError.arithmeticOverflow {
+            throw PlaintextLibraryBackupSourceError.resourceLimit
         } catch VaultError.resourceLimitExceeded {
             throw PlaintextLibraryBackupSourceError.resourceLimit
         } catch VaultError.ioFailure(let code) {
@@ -249,8 +269,8 @@ public actor PlaintextLibraryBackupSource {
         }
     }
 
-    /// Retains the short source lease through a synchronous publication step.
-    /// No file payload is read while this lease is held.
+    /// Retains the source lease through final head and file-identity validation
+    /// and the synchronous publication step.
     func withValidatedCurrentPair<T: Sendable>(
         for plan: PlaintextLibraryBackupPlan,
         _ body: () throws -> T
@@ -273,13 +293,41 @@ public actor PlaintextLibraryBackupSource {
         _ plan: PlaintextLibraryBackupPlan,
         using lease: VaultMutationLease
     ) async throws {
+        try validateHeads(plan, using: lease)
+        try await vault.validateBackupSnapshot(plan.vaultSnapshot, using: lease)
+        let inboxStore = try resolvedInboxStore()
+        try await inboxStore.validateBackupSnapshot(plan.inboxSnapshot, using: lease)
+        for entry in plan.entries {
+            try Task.checkCancellation()
+            try validateFile(entry, root: plan.root)
+        }
+        try rootBinding.validateFilesystemIdentity(plan.root, using: lease)
+    }
+
+    private func validateHeads(
+        _ plan: PlaintextLibraryBackupPlan,
+        using lease: VaultMutationLease
+    ) throws {
+        try Task.checkCancellation()
         guard plan.root == plan.vaultSnapshot.root,
               plan.root == plan.inboxSnapshot.root else {
             throw PlaintextLibraryBackupSourceError.sourceChanged
         }
-        try await vault.validateBackupSnapshot(plan.vaultSnapshot, using: lease)
-        let inboxStore = try resolvedInboxStore()
-        try await inboxStore.validateBackupSnapshot(plan.inboxSnapshot, using: lease)
+        try rootBinding.validateFilesystemIdentity(plan.root, using: lease)
+        for head in plan.heads {
+            try validateFile(head, root: plan.root)
+        }
+    }
+
+    private func validateFile(
+        _ entry: PlaintextLibraryBackupPlanEntry,
+        root: VaultRootGeneration
+    ) throws {
+        guard case let .file(_, path, _, _, identity) = entry else { return }
+        let descriptor = try Self.openFile(
+            relativePath: path, root: root, rootURL: rootURL, expectedIdentity: identity
+        )
+        Darwin.close(descriptor)
     }
 
     private func resolvedInboxStore() throws -> PlaintextLANInboxStore {
@@ -295,7 +343,7 @@ public actor PlaintextLibraryBackupSource {
     ) async throws -> BackupContainerOpenedEntrySource {
         let lease = try await mutationCoordinator.acquire()
         do {
-            try await validate(plan, using: lease)
+            try validateHeads(plan, using: lease)
             switch entry {
             case let .inline(_, _, bytes):
                 lease.release()
@@ -316,7 +364,15 @@ public actor PlaintextLibraryBackupSource {
                 let metrics = metrics
                 return BackupContainerOpenedEntrySource(
                     read: { offset, count in
-                        try Self.read(descriptor: descriptor, offset: offset, count: count)
+                        try Task.checkCancellation()
+                        guard try Self.strictIdentity(descriptor) == expectedIdentity else {
+                            throw PlaintextLibraryBackupSourceError.sourceChanged
+                        }
+                        let bytes = try Self.read(descriptor: descriptor, offset: offset, count: count)
+                        guard try Self.strictIdentity(descriptor) == expectedIdentity else {
+                            throw PlaintextLibraryBackupSourceError.sourceChanged
+                        }
+                        return bytes
                     },
                     close: {
                         Darwin.close(descriptor)
@@ -334,7 +390,7 @@ public actor PlaintextLibraryBackupSource {
         relativePath: String,
         root: VaultRootGeneration,
         rootURL: URL
-    ) throws -> BackupPublishedFileIdentity {
+    ) throws -> PlaintextVaultManifestIdentity {
         let descriptor = try openFile(
             relativePath: relativePath,
             root: root,
@@ -349,7 +405,7 @@ public actor PlaintextLibraryBackupSource {
         relativePath: String,
         root: VaultRootGeneration,
         rootURL: URL,
-        expectedIdentity: BackupPublishedFileIdentity?
+        expectedIdentity: PlaintextVaultManifestIdentity?
     ) throws -> Int32 {
         let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
         guard !components.isEmpty,
@@ -388,7 +444,11 @@ public actor PlaintextLibraryBackupSource {
                 throw PlaintextLibraryBackupSourceError.ioFailure(errno)
             }
             do {
-                let actual = try strictIdentity(descriptor)
+                let actual = try strictIdentity(
+                    descriptor,
+                    requiresPrivatePermissions: relativePath == "library.json"
+                        || relativePath == "lan-inbox/inbox.json"
+                )
                 if let expectedIdentity, actual != expectedIdentity {
                     throw PlaintextLibraryBackupSourceError.sourceChanged
                 }
@@ -420,8 +480,9 @@ public actor PlaintextLibraryBackupSource {
     }
 
     private static func strictIdentity(
-        _ descriptor: Int32
-    ) throws -> BackupPublishedFileIdentity {
+        _ descriptor: Int32,
+        requiresPrivatePermissions: Bool = false
+    ) throws -> PlaintextVaultManifestIdentity {
         var metadata = stat()
         guard fstat(descriptor, &metadata) == 0 else {
             throw PlaintextLibraryBackupSourceError.ioFailure(errno)
@@ -429,14 +490,12 @@ public actor PlaintextLibraryBackupSource {
         guard (metadata.st_mode & S_IFMT) == S_IFREG,
               metadata.st_uid == geteuid(),
               metadata.st_nlink == 1,
+              !requiresPrivatePermissions
+                || metadata.st_mode & mode_t(0o7777) == mode_t(0o600),
               metadata.st_size >= 0 else {
             throw PlaintextLibraryBackupSourceError.integrityFailure
         }
-        return .init(
-            device: UInt64(metadata.st_dev),
-            inode: UInt64(metadata.st_ino),
-            byteCount: UInt64(metadata.st_size)
-        )
+        return PlaintextVaultManifestIdentity(metadata)
     }
 
     private static func read(descriptor: Int32, offset: UInt64, count: Int) throws -> Data {

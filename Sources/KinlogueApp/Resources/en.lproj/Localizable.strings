@@ -34,6 +34,8 @@
 	<string>Previous Series</string>
 	<key>上一张</key>
 	<string>Previous Slice</string>
+	<key>上一次资料库操作尚未核实完成。现有内容已保留；请退出并保留资料库及恢复记录，暂时无法继续恢复。</key>
+	<string>The previous library operation could not be verified. Existing contents have been preserved. Quit and keep the library and its recovery records; restoration is unavailable for now.</string>
 	<key>上一页</key>
 	<string>Previous page</string>
 	<key>上传中断</key>
@@ -158,6 +160,8 @@
 	<string>Add to Review Queue</string>
 	<key>加密目录备份</key>
 	<string>Encrypted Folder Backup</string>
+	<key>加载更多待确认项</key>
+	<string>Load more pending items</string>
 	<key>医学影像</key>
 	<string>Medical Imaging</string>
 	<key>医学影像切片画布</key>
@@ -304,16 +308,22 @@
 	<string>Notes are stored separately from source transcriptions and excluded from comparison.</string>
 	<key>复制地址</key>
 	<string>Copy Address</string>
+	<key>失败的导入</key>
+	<string>Failed imports</string>
 	<key>好</key>
 	<string>OK</string>
 	<key>如需继续，请准确输入：</key>
 	<string>To continue, enter this phrase exactly:</string>
+	<key>完成时间</key>
+	<string>Completed at</string>
 	<key>完整回输恢复码</key>
 	<string>Re-enter the complete recovery code</string>
 	<key>完整性校验失败</key>
 	<string>Integrity check failed</string>
 	<key>完整性校验失败，可重试</key>
 	<string>Integrity check failed; retry available</string>
+	<key>完整性检查未通过，资料库操作已停止</key>
+	<string>Integrity check failed; library operations have stopped</string>
 	<key>完整预览</key>
 	<string>Full Preview</string>
 	<key>完整预览，PDF 第 %lld 页</key>
@@ -380,6 +390,10 @@
 	<string>Organize originals from confirmed reports and medical images into one ZIP by family member and date.</string>
 	<key>尚无已验证的本地恢复点</key>
 	<string>No locally verified restore point yet</string>
+	<key>尚未巡检</key>
+	<string>Not inspected</string>
+	<key>尚未巡检，等待空闲时开始</key>
+	<string>Not inspected; waiting for idle time</string>
 	<key>尚未确认家庭成员与检查日期</key>
 	<string>Family member and study date not yet confirmed</string>
 	<key>尚未配置数据备份。</key>
@@ -388,6 +402,8 @@
 	<string>QR code for the local upload address; verification code not included</string>
 	<key>局域网接收已开启</key>
 	<string>Local network receiving is active</string>
+	<key>巡检未完成，将在空闲时继续</key>
+	<string>Inspection incomplete; it will continue when idle</string>
 	<key>左侧</key>
 	<string>Left</string>
 	<key>已作为 1 份报告加入待确认。</key>
@@ -410,6 +426,8 @@
 	<string>%lld%% complete</string>
 	<key>已显示第 %lld 张，共 %lld 张</key>
 	<string>Showing slice %1$lld of %2$lld</string>
+	<key>已检查项目</key>
+	<string>Items checked</string>
 	<key>已清空比较选择，当前 0/2</key>
 	<string>Comparison selection cleared; current selection: 0/2</string>
 	<key>已确认信息</key>
@@ -420,6 +438,8 @@
 	<string>Exited comparison selection mode</string>
 	<key>已选择第 %lld 条记录，当前 %@</key>
 	<string>Selected record %1$lld; current selection: %2$@</string>
+	<key>已隔离的损坏项目</key>
+	<string>Damaged items isolated</string>
 	<key>已验证的恢复点概要</key>
 	<string>Verified Restore Point Summary</string>
 	<key>并排查看历史原件</key>
@@ -634,6 +654,8 @@
 	<string>Unable to Delete Family Member</string>
 	<key>无法删除这条记录</key>
 	<string>Unable to Delete Record</string>
+	<key>无法加载更多待确认项，请重试。</key>
+	<string>More pending items could not be loaded. Try again.</string>
 	<key>无法开始接收。请检查防火墙、网络连接或稍后重试。</key>
 	<string>Unable to start receiving. Check the firewall and network connection, or try again later.</string>
 	<key>无法归档家庭成员</key>
@@ -650,6 +672,8 @@
 	<string>Unable to add the family member. Try again later.</string>
 	<key>无法证明哪个恢复点最新，已暂停写入和清理。</key>
 	<string>Kinlogue cannot prove which restore point is newest, so writing and cleanup are paused.</string>
+	<key>无法读取家庭成员</key>
+	<string>Couldn’t load the family member</string>
 	<key>无法读取所选恢复点，请确认文件已下载到本机后重试。</key>
 	<string>The selected restore point cannot be read. Make sure it is downloaded to this Mac and try again.</string>
 	<key>无法读取所选文件夹</key>
@@ -660,6 +684,8 @@
 	<string>Unable to read this Mac's local network addresses.</string>
 	<key>无法读取这项影像检查</key>
 	<string>This Imaging Study Could Not Be Read</string>
+	<key>无法载入记录</key>
+	<string>Couldn’t load records</string>
 	<key>日期未知</key>
 	<string>Unknown Date</string>
 	<key>时间线日期</key>
@@ -670,6 +696,8 @@
 	<string>This file type is not supported</string>
 	<key>暂停播放</key>
 	<string>Pause Playback</string>
+	<key>暂时无法打开资料库。请稍后重试，或退出后检查本机存储。</key>
+	<string>The library cannot be opened right now. Try again later, or quit and check local storage.</string>
 	<key>最多只能选择两条记录</key>
 	<string>You can select at most two records</string>
 	<key>最近本地验证</key>
@@ -702,8 +730,12 @@
 	<string>About Local Data Storage</string>
 	<key>本机资料库已删除</key>
 	<string>Local Library Deleted</string>
+	<key>本次巡检已完成</key>
+	<string>This inspection is complete</string>
 	<key>本次操作未继续。请重新启动或稍后重试，应用会恢复到完整状态。</key>
 	<string>The operation did not continue. Restart the app or try again later; it will recover to a complete state.</string>
+	<key>本次资料库操作已停止。请退出并重新打开续页，再检查资料库状态。</key>
+	<string>The library operation has stopped. Quit and reopen Kinlogue, then check the library status.</string>
 	<key>来源人工录入</key>
 	<string>Source: manual entry</string>
 	<key>来源位置不可用</key>
@@ -735,7 +767,7 @@
 	<key>检查内容</key>
 	<string>Study Contents</string>
 	<key>检查日期</key>
-	<string>Exam Date</string>
+	<string>Study Date</string>
 	<key>检查索引和不再共享的本机 DICOM 原件会被删除；最初选择的源文件夹不会被修改。</key>
 	<string>The study index and local DICOM originals that are no longer shared will be deleted. The originally selected source folder is not modified.</string>
 	<key>检查结果</key>
@@ -764,16 +796,22 @@
 	<string>Loading image slice</string>
 	<key>正在加载影像切片…</key>
 	<string>Loading image slice…</string>
+	<key>正在加载待确认队列…</key>
+	<string>Loading pending queue…</string>
 	<key>正在取消并清理暂存…</key>
 	<string>Cancelling and cleaning up staging…</string>
 	<key>正在取消并清理未完成的导出…</key>
 	<string>Cancelling and cleaning up the unfinished export…</string>
 	<key>正在复制原始文件…</key>
 	<string>Copying Originals…</string>
+	<key>正在巡检</key>
+	<string>Inspection in progress</string>
 	<key>正在归档</key>
 	<string>Filing</string>
 	<key>正在打开本机资料库…</key>
 	<string>Opening Local Library…</string>
+	<key>正在打开资料库…</key>
+	<string>Opening library…</string>
 	<key>正在接收</key>
 	<string>Receiving</string>
 	<key>正在更新本机资料库…</key>
@@ -800,6 +838,10 @@
 	<string>Loading Local Draft…</string>
 	<key>正在读取记录与本机原件…</key>
 	<string>Loading Record and Local Originals…</string>
+	<key>正在载入 %@</key>
+	<string>Loading %@</string>
+	<key>正在载入记录…</key>
+	<string>Loading records…</string>
 	<key>正在重新识别</key>
 	<string>Re-recognizing</string>
 	<key>正在验证压缩包…</key>
@@ -978,6 +1020,8 @@
 	<string>Record</string>
 	<key>记录及其不再共享的原件将无法在续页中查看；最初选择的源文件不会被删除。</key>
 	<string>The record and originals no longer shared by other records will no longer be visible in Kinlogue. The originally selected source file is not deleted.</string>
+	<key>记录暂时无法打开</key>
+	<string>This record can’t be opened right now</string>
 	<key>设置</key>
 	<string>Settings</string>
 	<key>识别失败，点按重试</key>
@@ -1030,14 +1074,28 @@
 	<string>Library</string>
 	<key>资料库删除结果尚未确认。请退出并重新打开续页后检查；原资料可能仍保留在磁盘上。</key>
 	<string>Library deletion could not be confirmed. Quit and reopen Kinlogue to check; the original data may remain on disk.</string>
+	<key>资料库完整性巡检</key>
+	<string>Library integrity inspection</string>
+	<key>资料库完整性检查未通过。当前操作已停止；你可以从数据备份恢复，或退出后检查资料库。</key>
+	<string>The library integrity check failed. Operations have stopped. Restore from a data backup, or quit and inspect the library.</string>
 	<key>资料库当前不可写入</key>
 	<string>The library is currently read-only</string>
 	<key>资料库替换已进入收敛阶段。请退出并重新打开续页；在重新启动前不要继续使用当前窗口。</key>
 	<string>Library replacement has entered recovery convergence. Quit and reopen Kinlogue; do not continue using this window before restarting.</string>
 	<key>资料库替换未完成，请重新启动续页以安全收敛。</key>
 	<string>Library replacement did not finish. Restart Kinlogue so it can converge safely.</string>
+	<key>资料库格式不受支持或已损坏。现有内容已保留；你可以从数据备份恢复，或退出后检查资料库。</key>
+	<string>The library format is unsupported or damaged. Existing contents have been preserved. Restore from a data backup, or quit and inspect the library.</string>
+	<key>资料库正由另一个续页进程使用。请关闭该进程后重试。</key>
+	<string>Another Kinlogue process is using this library. Close that process and try again.</string>
 	<key>跟随系统</key>
 	<string>System Default</string>
+	<key>载入下一页记录</key>
+	<string>Load the next page of records</string>
+	<key>载入更多 %@</key>
+	<string>Load more %@</string>
+	<key>载入更多记录</key>
+	<string>Load more records</string>
 	<key>输入你在首次设置时独立保存的完整恢复码。续页会继续使用原有备份身份，不会生成新的恢复码。</key>
 	<string>Enter the complete recovery code you saved independently during initial setup. Kinlogue will continue using the existing backup identity and will not generate a new recovery code.</string>
 	<key>还没有健康记录</key>
@@ -1118,6 +1176,8 @@
 	<string>Some originals are temporarily unavailable</string>
 	<key>部分原始文件已损坏或发生变化，导出未完成。</key>
 	<string>Some originals are damaged or changed, so the export did not finish.</string>
+	<key>部分资料无法读取</key>
+	<string>Some items couldn’t be read</string>
 	<key>采样日期</key>
 	<string>Collection Date</string>
 	<key>重新授权原备份目录…</key>
@@ -1126,6 +1186,10 @@
 	<string>Recognition failed. Current fields were kept.</string>
 	<key>重新识别并覆盖</key>
 	<string>Re-recognize and Replace</string>
+	<key>重新载入 %@</key>
+	<string>Reload %@</string>
+	<key>重新载入当前查询</key>
+	<string>Retry the current query</string>
 	<key>重新载入最新版本</key>
 	<string>Reload Latest Version</string>
 	<key>重新选择文件夹…</key>
@@ -1142,6 +1206,8 @@
 	<string>Retry Current Slice</string>
 	<key>重试未完成，可以稍后再试</key>
 	<string>Retry incomplete. Try again later.</string>
+	<key>重试载入</key>
+	<string>Retry loading</string>
 	<key>错误：%@</key>
 	<string>Error: %@</string>
 	<key>键盘调整</key>

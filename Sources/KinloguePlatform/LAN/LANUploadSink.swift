@@ -179,6 +179,7 @@ public actor LANUploadSink {
     private let descriptor: Int32
     private let declaredByteCount: Int?
     private let uploadPermit: LANInboxAdmissionPolicy.UploadPermit
+    private let descriptorDidClose: @Sendable () -> Void
     private let cleanup: Cleanup
     private let publish: Publish
     private let failureInjector: FailureInjector
@@ -220,6 +221,7 @@ public actor LANUploadSink {
         self.descriptor = descriptor
         self.declaredByteCount = declaredByteCount
         self.uploadPermit = uploadPermit
+        self.descriptorDidClose = {}
         self.cleanup = cleanup
         self.publish = publish
         self.failureInjector = .none
@@ -234,11 +236,13 @@ public actor LANUploadSink {
         cleanup: @escaping Cleanup,
         publish: @escaping Publish,
         failureInjector: FailureInjector,
-        maximumWriteByteCount: Int = .max
+        maximumWriteByteCount: Int = .max,
+        descriptorDidClose: @escaping @Sendable () -> Void = {}
     ) throws {
         guard maximumWriteByteCount > 0 else {
             _ = Darwin.close(descriptor)
             uploadPermit.release()
+            descriptorDidClose()
             throw LANInboxError.invalidState
         }
         do {
@@ -249,12 +253,14 @@ public actor LANUploadSink {
         } catch {
             _ = Darwin.close(descriptor)
             uploadPermit.release()
+            descriptorDidClose()
             throw error
         }
         self.attemptID = attemptID
         self.descriptor = descriptor
         self.declaredByteCount = declaredByteCount
         self.uploadPermit = uploadPermit
+        self.descriptorDidClose = descriptorDidClose
         self.cleanup = cleanup
         self.publish = publish
         self.failureInjector = failureInjector
@@ -266,9 +272,11 @@ public actor LANUploadSink {
         guard descriptorIsOpen else { return }
         let descriptor = descriptor
         let uploadPermit = uploadPermit
+        let descriptorDidClose = descriptorDidClose
         Self.ioThreadPool.submit { state in
             _ = state
             _ = Darwin.close(descriptor)
+            descriptorDidClose()
             uploadPermit.release()
         }
     }
@@ -701,6 +709,7 @@ public actor LANUploadSink {
         let descriptor = descriptor
         await Self.closeOnIOThread(descriptor)
         descriptorIsOpen = false
+        descriptorDidClose()
     }
 
     private func closeDescriptorIgnoringErrors() async {
@@ -708,6 +717,7 @@ public actor LANUploadSink {
         let descriptor = descriptor
         await Self.closeOnIOThread(descriptor)
         descriptorIsOpen = false
+        descriptorDidClose()
     }
 
     private static func closeOnIOThread(_ descriptor: Int32) async {

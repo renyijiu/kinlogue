@@ -123,7 +123,7 @@ struct AcceptanceRunOwnership: Sendable {
         try Self.removeIdleVaultLocks(
             names.intersection(lockNames).sorted().map {
                 runRoot.appendingPathComponent($0)
-            }
+            }, sqliteNames: SQLiteLibraryOwner.lockFilenames(rootURL: runRoot.appendingPathComponent("SourceVault"))
         )
 
         guard Darwin.unlink(receiptURL.path) == 0 else {
@@ -320,10 +320,10 @@ struct AcceptanceRunOwnership: Sendable {
         let sourceVault = runRoot.resolvingSymlinksInPath()
             .appendingPathComponent("SourceVault", isDirectory: true)
             .standardizedFileURL
-        return VaultMutationLockNaming.filenames(forRootURL: sourceVault)
+        return VaultMutationLockNaming.filenames(forRootURL: sourceVault).union(SQLiteLibraryOwner.lockFilenames(rootURL: sourceVault))
     }
 
-    private static func removeIdleVaultLocks(_ urls: [URL]) throws {
+    private static func removeIdleVaultLocks(_ urls: [URL], sqliteNames: Set<String>) throws {
         var descriptors: [(url: URL, descriptor: Int32)] = []
         defer {
             for entry in descriptors.reversed() {
@@ -343,6 +343,10 @@ struct AcceptanceRunOwnership: Sendable {
                   metadata.st_nlink == 1 else {
                 throw SyntheticAcceptanceError.unsafeCleanupTarget
             }
+            if sqliteNames.contains(url.lastPathComponent) {
+                guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { throw SyntheticAcceptanceError.unsafeCleanupTarget }
+                continue
+            }
             var request = Darwin.flock()
             request.l_type = Int16(F_WRLCK)
             request.l_whence = Int16(SEEK_SET)
@@ -353,6 +357,11 @@ struct AcceptanceRunOwnership: Sendable {
             }
         }
         for entry in descriptors {
+            var opened = stat(), current = stat()
+            guard fstat(entry.descriptor, &opened) == 0, lstat(entry.url.path, &current) == 0,
+                  opened.st_dev == current.st_dev, opened.st_ino == current.st_ino else {
+                throw SyntheticAcceptanceError.unsafeCleanupTarget
+            }
             guard Darwin.unlink(entry.url.path) == 0 else {
                 throw SyntheticAcceptanceError.unsafeCleanupTarget
             }

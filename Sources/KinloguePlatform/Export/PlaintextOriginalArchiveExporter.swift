@@ -72,10 +72,20 @@ enum PlaintextOriginalArchiveExporterFault: Equatable, Sendable {
 
 struct PlaintextOriginalArchiveSnapshot: Sendable {
     let plan: OriginalArchivePlan
-    let revision: VaultRevision
-    let manifestIdentity: PlaintextVaultManifestIdentity
+    let revision: VaultRevision?
+    let manifestIdentity: PlaintextVaultManifestIdentity?
     let metadataByAttachmentID: [Attachment.ID: PlaintextVaultObjectMetadata]
     let vaultRootURL: URL
+    let sqlitePins: SQLiteLogicalOriginalPins?
+    init(plan: OriginalArchivePlan, revision: VaultRevision, manifestIdentity: PlaintextVaultManifestIdentity,
+         metadataByAttachmentID: [Attachment.ID: PlaintextVaultObjectMetadata], vaultRootURL: URL) {
+        self.plan = plan; self.revision = revision; self.manifestIdentity = manifestIdentity
+        self.metadataByAttachmentID = metadataByAttachmentID; self.vaultRootURL = vaultRootURL; sqlitePins = nil
+    }
+    init(plan: OriginalArchivePlan, pins: SQLiteLogicalOriginalPins, rootURL: URL) {
+        self.plan = plan; sqlitePins = pins; vaultRootURL = rootURL
+        revision = nil; manifestIdentity = nil; metadataByAttachmentID = [:]
+    }
 }
 
 // SAFETY: `lock` serializes the only mutable state and makes descriptor close
@@ -86,18 +96,41 @@ final class PlaintextOriginalArchiveSource: @unchecked Sendable {
     let sha256Digest: Data
     private let lock = NSLock()
     private var isClosed = false
+    private let sqliteReader: SQLiteLogicalOriginalReader?
 
     init(descriptor: Int32, byteCount: Int, sha256Digest: Data) {
         self.descriptor = descriptor
+        sqliteReader = nil
         self.byteCount = byteCount
         self.sha256Digest = sha256Digest
     }
+
+    init(reader: SQLiteLogicalOriginalReader, byteCount: Int, sha256Digest: Data) {
+        descriptor = -1; sqliteReader = reader; self.byteCount = byteCount; self.sha256Digest = sha256Digest
+    }
+    func read(offset: Int, count: Int) throws -> Data {
+        try lock.withLock {
+            guard !isClosed else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
+            if let sqliteReader { return try sqliteReader.read(offset: UInt64(offset), maximumByteCount: count) }
+            var data = Data(count: count)
+            let actual = data.withUnsafeMutableBytes { buffer -> Int in
+                while true {
+                    let result = pread(descriptor, buffer.baseAddress, count, off_t(offset))
+                    if result < 0, errno == EINTR { continue }; return result
+                }
+            }
+            guard actual == count else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
+            return data
+        }
+    }
+
+    func reportDigestMismatch() { sqliteReader?.reportDigestMismatch() }
 
     func close() {
         lock.withLock {
             guard !isClosed else { return }
             isClosed = true
-            Darwin.close(descriptor)
+            if let sqliteReader { sqliteReader.close() } else { Darwin.close(descriptor) }
         }
     }
 
@@ -123,7 +156,8 @@ public actor PlaintextOriginalArchiveExporter {
     private static let bufferSize = 64 * 1_024
     private static let stableModificationDate = Date(timeIntervalSince1970: 315_532_800)
 
-    private let vault: PlaintextVault
+    private let vault: PlaintextVault?
+    private let sqliteStore: SQLiteLibraryStore?
     private let fileManager: FileManager
     private let destinationAccess: PlaintextOriginalArchiveDestinationAccess
     private let parentDirectorySync: @Sendable (URL) throws -> Void
@@ -131,6 +165,7 @@ public actor PlaintextOriginalArchiveExporter {
 
     public init(vault: PlaintextVault) {
         self.vault = vault
+        sqliteStore = nil
         fileManager = .default
         destinationAccess = .live
         parentDirectorySync = Self.syncParentDirectory
@@ -146,14 +181,23 @@ public actor PlaintextOriginalArchiveExporter {
         failureInjector: (@Sendable (PlaintextOriginalArchiveExporterFault) -> Bool)? = nil
     ) {
         self.vault = vault
+        sqliteStore = nil
         self.fileManager = fileManager
         self.destinationAccess = destinationAccess
         self.parentDirectorySync = parentDirectorySync
         self.failureInjector = failureInjector
     }
 
+    package init(store: SQLiteLibraryStore) {
+        vault = nil; sqliteStore = store; fileManager = .default; destinationAccess = .live
+        parentDirectorySync = Self.syncParentDirectory; failureInjector = nil
+    }
+
     public func prepare(undatedToken: String) async throws -> PlaintextOriginalArchivePreparation {
-        let snapshot = try await vault.prepareOriginalArchiveExport(undatedToken: undatedToken)
+        let snapshot: PlaintextOriginalArchiveSnapshot
+        if let sqliteStore { snapshot = try await SQLiteOriginalArchiveSource(store: sqliteStore).prepare(undatedToken: undatedToken) }
+        else if let vault { snapshot = try await vault.prepareOriginalArchiveExport(undatedToken: undatedToken) }
+        else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
         guard !snapshot.plan.entries.isEmpty else {
             throw PlaintextOriginalArchiveExportError.emptyArchive
         }
@@ -166,6 +210,7 @@ public actor PlaintextOriginalArchiveExporter {
         progress: @escaping ProgressHandler = { _ in }
     ) async throws -> PlaintextOriginalArchiveExportResult {
         let snapshot = preparation.snapshot
+        defer { snapshot.sqlitePins?.release() }
         try Task.checkCancellation()
         progress(Self.progress(.preparing, snapshot: snapshot))
         let destinationCandidate = try normalizedDestination(
@@ -212,7 +257,9 @@ public actor PlaintextOriginalArchiveExporter {
             ))
             try verify(workURL, against: snapshot.plan)
             try failIfRequested(.beforeFinalRevisionCheck)
-            try await vault.validateOriginalArchiveRevision(snapshot)
+            if let pins = snapshot.sqlitePins { try pins.validate() }
+            else if let vault { try await vault.validateOriginalArchiveRevision(snapshot) }
+            else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
             try Task.checkCancellation()
             try failIfRequested(.beforeCommit)
             progress(Self.progress(
@@ -284,10 +331,11 @@ private extension PlaintextOriginalArchiveExporter {
         var completedEntries = 0
         for entry in snapshot.plan.entries {
             try Task.checkCancellation()
-            let source = try await vault.openOriginalArchiveSource(
-                for: entry,
-                snapshot: snapshot
-            )
+            let source: PlaintextOriginalArchiveSource
+            if let pins = snapshot.sqlitePins {
+                source = PlaintextOriginalArchiveSource(reader: try pins.open(entry.attachmentID), byteCount: entry.byteCount, sha256Digest: entry.sha256Digest)
+            } else if let vault { source = try await vault.openOriginalArchiveSource(for: entry, snapshot: snapshot) }
+            else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
             defer { source.close() }
             try write(
                 entry,
@@ -341,25 +389,10 @@ private extension PlaintextOriginalArchiveExporter {
                   requestedSize <= entry.byteCount - expectedPosition else {
                 throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure
             }
-            var data = Data(count: requestedSize)
-            if failureInjector?(.shortSourceRead) == true {
-                throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure
-            }
-            let readCount = data.withUnsafeMutableBytes { buffer -> Int in
-                while true {
-                    let result = pread(
-                        source.descriptor,
-                        buffer.baseAddress,
-                        requestedSize,
-                        off_t(expectedPosition)
-                    )
-                    if result < 0, errno == EINTR { continue }
-                    return result
-                }
-            }
-            guard readCount == requestedSize else {
-                throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure
-            }
+            if failureInjector?(.shortSourceRead) == true { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
+            let data = try source.read(offset: expectedPosition, count: requestedSize)
+            let readCount = data.count
+            guard readCount == requestedSize else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
             hasher.update(data: data)
             expectedPosition += readCount
             completedBytes += readCount
@@ -371,8 +404,9 @@ private extension PlaintextOriginalArchiveExporter {
             ))
             return data
         }
-        guard expectedPosition == entry.byteCount,
-              Data(hasher.finalize()) == entry.sha256Digest else {
+        guard expectedPosition == entry.byteCount else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
+        guard Data(hasher.finalize()) == entry.sha256Digest else {
+            source.reportDigestMismatch()
             throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure
         }
     }

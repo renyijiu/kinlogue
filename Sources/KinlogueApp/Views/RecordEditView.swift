@@ -66,7 +66,7 @@ struct RecordEditState {
 struct RecordEditView: View {
     @Environment(\.dismiss) private var dismiss
     let record: HealthRecord
-    let members: [FamilyMember]
+    let members: [LibraryMemberSummary]
     let original: OriginalDocumentPayload?
     let isOriginalLoading: Bool
     let selectedOriginalSourceID: ReportSource.ID?
@@ -81,7 +81,7 @@ struct RecordEditView: View {
 
     init(
         record: HealthRecord,
-        members: [FamilyMember],
+        members: [LibraryMemberSummary],
         original: OriginalDocumentPayload?,
         isOriginalLoading: Bool,
         selectedOriginalSourceID: ReportSource.ID?,
@@ -195,7 +195,7 @@ struct RecordEditView: View {
         ScrollView {
             Form {
                 Picker(AppLocalization.string("家庭成员"), selection: $editor.memberID) {
-                    let labels = RecordQuery.selectionLabels(for: members)
+                    let labels = LibraryMemberSummary.labels( members)
                     ForEach(editableMemberChoices) { member in
                         Text(labels[member.id] ?? member.displayName).tag(member.id)
                     }
@@ -265,9 +265,8 @@ struct RecordEditView: View {
         .disabled(isSaving)
     }
 
-    private var editableMemberChoices: [FamilyMember] {
-        RecordQuery.selectableMembers(
-            from: members.filter { !$0.isArchived || $0.id == editor.record.memberID },
+    private var editableMemberChoices: [LibraryMemberSummary] {
+        LibraryMemberSummary.selectable( members.filter { !$0.isArchived || $0.id == editor.record.memberID },
             includeArchived: true
         )
     }

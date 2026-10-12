@@ -8,6 +8,31 @@ import Testing
 @Suite("Encrypted checkpoint restore", .serialized)
 struct EncryptedCheckpointRestoreTests {
     @Test
+    func sqliteReaderRejectsLegacyFormatBeforeStagingWithoutCallingItDamaged() async throws {
+        try await withRestoreFixture { fixture in
+            let destination = fixture.base.appendingPathComponent("SQLiteDestination")
+            try makePrivateDirectory(destination)
+            let root = destination.appendingPathComponent("Vault")
+            let owner = try SQLiteLibraryOwner(rootURL: root)
+            let store = try SQLiteLibraryStore(owner: owner)
+            defer { try? store.close() }
+            let member = try FamilyMember(displayName: "Synthetic preserved member")
+            try await SQLiteReportRepository(store: store).saveMember(member, replacing: nil)
+            let before = try restoreTreeSnapshot(at: root)
+            let names = try FileManager.default.contentsOfDirectory(atPath: destination.path).sorted()
+            let checkpointBytes = try Data(contentsOf: fixture.validCheckpointURL)
+            let verifier = try BackupRestoreVerifier(owner: owner)
+            await #expect(throws: BackupRestoreError.unsupportedFormat) {
+                _ = try await verifier.prepare(checkpointURL: fixture.validCheckpointURL, recoveryCode: fixture.recoveryCode)
+            }
+            #expect(try restoreTreeSnapshot(at: root) == before)
+            #expect(try FileManager.default.contentsOfDirectory(atPath: destination.path).sorted() == names)
+            #expect(try Data(contentsOf: fixture.validCheckpointURL) == checkpointBytes)
+            #expect(try await SQLiteReportRepository(store: store).member(member.id) == member)
+        }
+    }
+
+    @Test
     func cleanProfileRestoresWithoutBookmarkOrDeviceIdentityAndLeavesSourceUnchanged() async throws {
         try await withRestoreFixture { fixture in
             let before = try Data(contentsOf: fixture.checkpointURL)

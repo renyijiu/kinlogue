@@ -297,7 +297,7 @@ public actor LANReceiver {
         let token: UUID
         let sessionID: LANSessionID
         let presentation: LANPairingPresentation
-        let store: PlaintextLANInboxStore
+        let store: any LANUploadStoring
         let publicationGuard: LANInboxPublicationGuard
         let transport: LANServerTransport
         let networkMonitor: LANNetworkMonitor?
@@ -312,7 +312,7 @@ public actor LANReceiver {
             token: UUID,
             sessionID: LANSessionID,
             presentation: LANPairingPresentation,
-            store: PlaintextLANInboxStore,
+            store: any LANUploadStoring,
             publicationGuard: LANInboxPublicationGuard,
             transport: LANServerTransport,
             networkMonitor: LANNetworkMonitor?,
@@ -336,7 +336,8 @@ public actor LANReceiver {
         case stopping(UUID)
     }
 
-    private let rootURL: URL
+    private let rootURL: URL?
+    private let injectedStore: (any LANUploadStoring)?
     private let session: LANSession
     private let idleDuration: Duration
     private let storeObserver: StoreObserver
@@ -350,6 +351,7 @@ public actor LANReceiver {
 
     public init(rootURL: URL) {
         self.rootURL = rootURL
+        self.injectedStore = nil
         session = LANSession()
         idleDuration = .seconds(15 * 60)
         storeObserver = { _ in }
@@ -369,9 +371,11 @@ public actor LANReceiver {
         storeInitializationHook: @escaping StoreInitializationHook = {},
         preActivationHook: @escaping PreActivationHook = { _ in },
         publicationRevocationHook: @escaping PublicationRevocationHook = {},
-        fileUploadPublishedHook: @escaping FileUploadPublishedHook = {}
+        fileUploadPublishedHook: @escaping FileUploadPublishedHook = {},
+        store: (any LANUploadStoring)? = nil
     ) {
         self.rootURL = rootURL
+        self.injectedStore = store
         self.session = session
         self.idleDuration = idleDuration
         self.storeObserver = storeObserver
@@ -380,6 +384,15 @@ public actor LANReceiver {
         self.preActivationHook = preActivationHook
         self.publicationRevocationHook = publicationRevocationHook
         self.fileUploadPublishedHook = fileUploadPublishedHook
+    }
+
+    package init(store: any LANUploadStoring) {
+        rootURL = nil
+        injectedStore = store
+        session = LANSession()
+        idleDuration = .seconds(15 * 60)
+        storeObserver = { _ in }; postBindHook = { _, _ in }; storeInitializationHook = {}
+        preActivationHook = { _ in }; publicationRevocationHook = {}; fileUploadPublishedHook = {}
     }
 
     public func start(
@@ -464,17 +477,15 @@ public actor LANReceiver {
         phase = .starting(token)
 
         let pairing: LANPairingPresentation
-        let store: PlaintextLANInboxStore
+        let store: any LANUploadStoring
         let guardValue: LANInboxPublicationGuard
         do {
             pairing = try await session.startNewSession()
-            store = try PlaintextLANInboxStore(
-                rootURL: rootURL,
-                runtimeGeneration: UUID()
-            )
+            if let injectedStore { store = injectedStore }
+            else { guard let rootURL else { throw LANReceiverError.storageUnavailable }; store = try PlaintextLANInboxStore(rootURL: rootURL, runtimeGeneration: UUID()) }
             try await storeInitializationHook()
             storeObserver(.initialize)
-            _ = try await store.initialize()
+            try await store.prepare()
             guardValue = try await store.publicationGuard()
         } catch {
             await session.stop()

@@ -96,7 +96,9 @@ public struct BackupContainerReader: Sendable {
                 counter: 0
             )
             manifestBytes = try AES.GCM.open(
-                AES.GCM.SealedBox(combined: nonce.bytes + encryptedManifest + manifestTag),
+                AES.GCM.SealedBox(
+                    nonce: nonce.cryptoKitNonce, ciphertext: encryptedManifest, tag: manifestTag
+                ),
                 using: dek,
                 authenticating: BackupCrypto.manifestAAD(
                     descriptorDigest: descriptorDigest,
@@ -117,6 +119,7 @@ public struct BackupContainerReader: Sendable {
         try validateGraph(manifest: manifest, parsed: parsed)
 
         var frameCursor = 0
+        var frameOffset = parsed.framesOffset
         for entry in manifest.entries {
             try Task.checkCancellation()
             let writer: BackupContainerEntrySink.Writer
@@ -127,7 +130,10 @@ public struct BackupContainerReader: Sendable {
             var entryByteCount: UInt64 = 0
             for localIndex in 0..<Int(entry.frameCount) {
                 try Task.checkCancellation()
-                let layout = parsed.frames[frameCursor]
+                let layout = try BackupContainerFrameLayout.read(
+                    source: parsed.source, offset: frameOffset, expectedIndex: UInt64(frameCursor)
+                )
+                frameOffset = layout.endOffset
                 let remaining = entry.plaintextByteCount - entryByteCount
                 let expectedLength = Int(min(
                     UInt64(BackupFormatLimits.maximumFramePlaintextByteCount),
@@ -158,7 +164,9 @@ public struct BackupContainerReader: Sendable {
                         counter: counter
                     )
                     plaintext = try AES.GCM.open(
-                        AES.GCM.SealedBox(combined: nonce.bytes + ciphertext + tag),
+                        AES.GCM.SealedBox(
+                            nonce: nonce.cryptoKitNonce, ciphertext: ciphertext, tag: tag
+                        ),
                         using: dek,
                         authenticating: BackupCrypto.frameAAD(
                             prologue: parsed.prologue,
@@ -187,7 +195,7 @@ public struct BackupContainerReader: Sendable {
             catch is CancellationError { throw CancellationError() }
             catch { throw BackupContainerError.outputFailure }
         }
-        guard frameCursor == parsed.frames.count else { throw BackupContainerError.graphInvalid }
+        guard frameCursor == parsed.header.frameCount, frameOffset == parsed.bodyByteCount else { throw BackupContainerError.graphInvalid }
         return manifest
     }
 
@@ -197,7 +205,7 @@ public struct BackupContainerReader: Sendable {
     ) throws {
         guard manifest.formatVersion == parsed.header.version,
               manifest.suite == parsed.header.suite,
-              manifest.totalFrameCount == UInt64(parsed.frames.count),
+              manifest.totalFrameCount == UInt64(parsed.header.frameCount),
               manifest.entryCount <= BackupFormatLimits.maximumEntryCount,
               manifest.totalPlaintextByteCount <= BackupFormatLimits.maximumPlaintextByteCount else {
             throw BackupContainerError.graphInvalid
@@ -205,6 +213,10 @@ public struct BackupContainerReader: Sendable {
         for entry in manifest.entries {
             let validPath: Bool
             switch entry.kind {
+            case .logicalSegment:
+                validPath = manifest.isLogical && entry.path.hasPrefix("logical/")
+            case .original:
+                validPath = manifest.isLogical && entry.path.hasPrefix("originals/")
             case .vaultCatalog:
                 validPath = entry.path == "library.json"
             case .lanInboxManifest:
@@ -221,7 +233,7 @@ public struct BackupContainerReader: Sendable {
             guard validPath else { throw BackupContainerError.graphInvalid }
             let end = entry.firstFrameIndex.addingReportingOverflow(UInt64(entry.frameCount))
             guard !end.overflow,
-                  end.partialValue <= UInt64(parsed.frames.count) else {
+                  end.partialValue <= UInt64(parsed.header.frameCount) else {
                 throw BackupContainerError.graphInvalid
             }
         }

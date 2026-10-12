@@ -439,7 +439,7 @@ struct ImportReviewModelTests {
             state: .needsReview,
             documentObjectID: UUID()
         )
-        let content = ImportReviewContent(
+        let content = testReviewContent(
             draft: draft,
             document: ImportDraftDocument(
                 blocks: [block],
@@ -452,7 +452,7 @@ struct ImportReviewModelTests {
             )
         )
         let service = AppServiceSpy(
-            snapshot: AppSnapshot(
+            snapshot: TestLibrarySnapshot(
                 members: [member],
                 records: [],
                 drafts: [DraftSummary(draft: draft)]
@@ -490,7 +490,7 @@ struct ImportReviewModelTests {
             state: .needsReview,
             documentObjectID: UUID()
         )
-        let content = ImportReviewContent(
+        let content = testReviewContent(
             draft: draft,
             document: ImportDraftDocument(
                 blocks: [],
@@ -505,7 +505,7 @@ struct ImportReviewModelTests {
             )
         )
         let service = AppServiceSpy(
-            snapshot: AppSnapshot(
+            snapshot: TestLibrarySnapshot(
                 members: [member],
                 records: [],
                 drafts: [DraftSummary(draft: draft)]
@@ -540,7 +540,7 @@ private struct ReviewFixture {
     let attachment: KinlogueCore.Attachment
     let draft: ImportDraft
     let content: ImportReviewContent
-    let snapshot: AppSnapshot
+    let snapshot: TestLibrarySnapshot
 
     init(
         includeDate: Bool = false,
@@ -559,7 +559,7 @@ private struct ReviewFixture {
             documentObjectID: UUID(),
             memberID: memberID == .fixtureMember ? member.id : nil
         )
-        content = ImportReviewContent(
+        content = testReviewContent(
             draft: draft,
             document: ImportDraftDocument(
                 blocks: [],
@@ -579,7 +579,7 @@ private struct ReviewFixture {
                 contentTypeIdentifier: "public.png"
             )
         )
-        snapshot = AppSnapshot(members: [member], records: [], drafts: [DraftSummary(draft: draft)])
+        snapshot = TestLibrarySnapshot(members: [member], records: [], drafts: [DraftSummary(draft: draft)])
     }
 }
 

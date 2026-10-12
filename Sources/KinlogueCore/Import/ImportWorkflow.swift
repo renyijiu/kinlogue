@@ -69,11 +69,11 @@ public protocol ImportDraftStore: Sendable {
         draftID: ImportDraft.ID,
         expectedRevision: UInt64,
         record: HealthRecord
-    ) async throws -> VaultCatalog
+    ) async throws
     func discard(
         draftID: ImportDraft.ID,
         expectedRevision: UInt64
-    ) async throws -> VaultCatalog
+    ) async throws
 }
 
 public enum ImportWorkflowOutcome: Equatable, Sendable {
@@ -106,8 +106,11 @@ public actor ImportWorkflow {
         }
     }
 
-    public func retry(draftID: ImportDraft.ID) async throws -> ImportWorkflowOutcome {
-        try await process(draftID: draftID)
+    public func retry(
+        draftID: ImportDraft.ID,
+        attemptID: UUID = UUID()
+    ) async throws -> ImportWorkflowOutcome {
+        try await process(draftID: draftID, attemptID: attemptID)
     }
 
     public func resumeInterruptedImports() async throws -> [ImportWorkflowOutcome] {
@@ -125,8 +128,11 @@ public actor ImportWorkflow {
         return outcomes
     }
 
-    private func process(draftID: ImportDraft.ID) async throws -> ImportWorkflowOutcome {
-        let lease = try await store.beginProcessing(draftID: draftID, attemptID: UUID())
+    private func process(
+        draftID: ImportDraft.ID,
+        attemptID: UUID = UUID()
+    ) async throws -> ImportWorkflowOutcome {
+        let lease = try await store.beginProcessing(draftID: draftID, attemptID: attemptID)
         let blocks: [OCRBlock]
         do {
             let source = try await store.loadSource(draftID: draftID)

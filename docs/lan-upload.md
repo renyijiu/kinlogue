@@ -172,7 +172,7 @@ LAN inbox 位于 [storage.md](storage.md) 描述的 lan-inbox/ 明文子树。�
 
 普通焦点丢失、临时 sheet、系统唤醒或重新打开 App 不会自动创建或恢复接收会话。应用重启后必须由用户明确重新开始，手机旧 cookie/CSRF 不能恢复新会话。
 
-整库删除开始时，`LANInboxModel` 会先不可逆锁定本进程的 Vault lifecycle、推进 generation、停止轮询/预处理和窗口通知，并立即清空队列、选择、预览、接收凭据与错误状态。之后所有已经 admission 的初始化、刷新、地址解析、接收启停、归档、预处理、重试、删除和预览异步结果都必须同时匹配旧操作冻结的 generation 且 lifecycle 未锁定才可发布；迟到回调不能重新填充已删除资料、重启 receiver、刷新新界面或触发 catalog 回调。当前进程只有重启后才能重新打开普通 Vault 访问。
+整库删除开始时，`LANInboxModel` 会先不可逆锁定本进程的 Vault lifecycle、推进 generation、停止轮询/窗口通知并请求 App processing owner 取消预处理，并立即清空队列、选择、预览、接收凭据与错误状态。之后所有已经 admission 的初始化、刷新、地址解析、接收启停、归档、预处理、重试、删除和预览异步结果都必须同时匹配旧操作冻结的 generation 且 lifecycle 未锁定才可发布；迟到回调不能重新填充已删除资料、重启 receiver、刷新新界面或触发 catalog 回调。当前进程只有重启后才能重新打开普通 Vault 访问。
 
 对应 App model 回归使用可控 gate 覆盖地址解析迟到、receiver start 迟到、archive terminal 迟到和多项删除中途进入整库 lifecycle：迟到 start 会补做底层 stop，archive 不触发 catalog callback，多删除只允许已经进入的单项结束且不再启动下一项。
 
@@ -190,3 +190,11 @@ LAN inbox 位于 [storage.md](storage.md) 描述的 lan-inbox/ 明文子树。�
 6. 报告归档失败时保留选择和队列项；不要根据手机通用结果猜测 Vault 状态。
 
 当前自动化与真实设备门禁见 [acceptance/lan-upload-matrix.md](acceptance/lan-upload-matrix.md) 和 [acceptance/lan-upload-feasibility.md](acceptance/lan-upload-feasibility.md)。
+
+LAN 预处理现在由 composition 持有的 `AppProcessingCoordinator` 调度。替换 `LANInboxModel` 只更换观察者，不丢失进行中的任务、不重复同一 item 的处理；自动失败不会在刷新时无限重试。显式 retry 仍可重新处理，整库恢复/删除由共享 lifecycle 取消并等待 owner 退出。生产 durable inbox 目前仍为 JSON。
+
+## SQLite 开发路径
+
+[SQLite LAN 仓库](sqlite-storage.md#lan-事务与上传归属) 已通过真实 Receiver、App service、HTTP 回压和强退恢复测试；生产 composition 仍为 JSON。数据库路径登记上传文件归属，完成后保留同一 inode；OCR 写入独立表，归档以单事务转移原件引用、创建草稿并写回执。scope 撤销与最终提交串行，实际 descriptor 关闭后释放活动 ownership；停止临时接收不关闭共享库。
+
+新路径保留现有上传、识别和队列预算；所选 OCR 组合先累计 128 MiB 读取上限，LAN source 与报告 OCR 分别限制 32/16 MiB，超限不移除队列原件。最近 5,000 个完成归档命令可幂等重放；终态只绑定相关会话和内容，缺失 transport receipt 不阻止合法归档。SQL 屏幕改为每页最多 100 项，全队列数量和原件内容字节单独聚合；它不读取全部 OCR 或历史回执，也不声称已验证未读内容或精确归属共享数据库物理字节。预览严格查询所选项，初始化与删除不再生成丢弃的全量快照。App processing owner 独立遍历工作页，未显示的项也继续处理；完整扫描后才清理尝试记录。页外选择按每批最多 32 项核对，仍支持超过 32 项批量删除，归档保留原有上限。迟到页面在刷新、修改和整库撤销后不能覆盖当前状态。生产组装尚未切换；近上限 Platform 首批 100 项 p95 为 7.648 ms，实际 App 安装计时尚待完成，见 [规模证据](storage-refactor-measurement-2026-10-11.md#lan-首批-100-项分页复测)。

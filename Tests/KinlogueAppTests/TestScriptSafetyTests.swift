@@ -100,7 +100,7 @@ struct TestScriptSafetyTests {
             "KinloguePlatformTests.platformRule()",
             "KinloguePlatformTests.DICOMImportWorkflowIntegrationTests/isolatedDICOM()",
             "KinloguePlatformTests.LANRealSocketBackpressureTests/ordinarySocketRule()",
-            "KinloguePlatformTests.LANRealSocketBackpressureTests/productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect()",
+            "KinloguePlatformTests.LANRealSocketBackpressureTests/productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect(sqlite:)",
             "KinlogueAppTests.AppSuite/first()",
             "KinlogueAppTests.AppSuite/second()",
             "KinlogueAppTests.appRule()",

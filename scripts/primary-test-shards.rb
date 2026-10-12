@@ -66,7 +66,7 @@ acceptance_prefix = "KinlogueAppTests.AcceptanceScanScriptTests/"
 installed_lan = "KinlogueAppTests.SyntheticAcceptanceRunnerTests/" \
   "installedLANProbeUsesProductionHTTPAndPersistsAcrossProcessPhases()"
 real_socket = "KinloguePlatformTests.LANRealSocketBackpressureTests/" \
-  "productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect()"
+  "productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect(sqlite:)"
 case_alias = "KinloguePlatformTests." \
   "differentlyCasedVaultAliasesShareStableAndLegacyLockIdentity()"
 

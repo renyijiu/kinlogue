@@ -17,7 +17,14 @@ actor LiveOriginalExportService: OriginalExportServicing {
     private var cancelActiveOperation: (@Sendable () -> Bool)?
 
     init(vault: PlaintextVault, lifecycle: LibraryLifecycleCoordinator) {
-        let exporter = PlaintextOriginalArchiveExporter(vault: vault)
+        self.init(exporter: PlaintextOriginalArchiveExporter(vault: vault), lifecycle: lifecycle)
+    }
+
+    init(store: SQLiteLibraryStore, lifecycle: LibraryLifecycleCoordinator) {
+        self.init(exporter: PlaintextOriginalArchiveExporter(store: store), lifecycle: lifecycle)
+    }
+
+    private init(exporter: PlaintextOriginalArchiveExporter, lifecycle: LibraryLifecycleCoordinator) {
         self.lifecycle = lifecycle
         prepareOperation = { undatedToken in
             do {

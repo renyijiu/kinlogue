@@ -10,6 +10,9 @@ struct AppComposition {
     let backupModel: BackupModel
     let restoreModel: RestoreModel
     let startupCoordinator: AppStartupCoordinator
+    let processingCoordinator: AppProcessingCoordinator
+    var libraryObserver: AppLibraryObservationCoordinator? = nil
+    var integrityCoordinator: AppIntegrityCoordinator? = nil
 
     static func makeDefault() -> Self {
         do {
@@ -22,9 +25,10 @@ struct AppComposition {
     static func makeDefault(identity: AppRuntimeIdentity) -> Self {
         do {
             let services = try LiveAppServiceEnvironment.makeDefault(identity: identity)
+            guard let vault = services.vault else { return makeUnavailable() }
             let backup = try makeBackupRuntime(
                 identity: identity,
-                vault: services.vault,
+                vault: vault,
                 lifecycle: services.lifecycle
             )
             return makeComposition(services: services, backup: backup)
@@ -49,9 +53,26 @@ struct AppComposition {
         }
     }
 
+    static func makeOpened(identity: AppRuntimeIdentity, services: LiveAppServiceEnvironment,
+                           context: SQLiteStartupContext, database: SQLiteLibraryStore) -> Self {
+        let live = LiveBackupService(store: database, configurationStore: context.configuration,
+            requiresSelectedDirectoryScope: identity.mode == .production)
+        let restore = BackupRestoreService(verifier: context.verifier, transaction: context.transaction,
+            configurationStore: context.configuration, operationCoordinator: live.operationCoordinator,
+            lifecycle: context.lifecycle, database: database)
+        return makeComposition(services: services, backup: BackupRuntime(liveBackup: live,
+            backupModel: BackupModel(service: live), restoreService: LiveRestoreService(service: restore)), restoreReconciled: true, database: database)
+    }
+
+    static func makeSQLiteUnavailable(restoreService: (any BackupRestoreServicing)?) -> Self {
+        makeUnavailable(seedRestoreService: restoreService)
+    }
+
     private static func makeComposition(
         services: LiveAppServiceEnvironment,
-        backup: BackupRuntime
+        backup: BackupRuntime,
+        restoreReconciled: Bool = false,
+        database: SQLiteLibraryStore? = nil
     ) -> Self {
         let dicomViewerRegistry = DICOMViewerRegistry()
         let appModel = AppModel(
@@ -61,22 +82,59 @@ struct AppComposition {
             dicomSliceServiceFactory: services.dicomSliceServiceFactory,
             dicomViewerRegistry: dicomViewerRegistry,
             onDurableStateChanged: { [weak backupModel = backup.backupModel] in
-                Task { await backupModel?.handleAppEvent(.mutation) }
+                if services.commitChanges == nil { Task { await backupModel?.handleAppEvent(.mutation) } }
             }
         )
-        let lanInboxModel = LANInboxModel(
-            service: services.lanInboxService,
+        let processing = AppProcessingCoordinator(
+            lanService: services.lanInboxService,
+            lifecycle: services.lifecycle,
             onCatalogChanged: { [weak appModel] in
                 await appModel?.refresh()
             },
             onDurableStateChanged: { [weak backupModel = backup.backupModel] in
-                await backupModel?.handleAppEvent(.mutation)
+                if services.commitChanges == nil { await backupModel?.handleAppEvent(.mutation) }
             }
         )
+        let lanInboxModel = LANInboxModel(
+            service: services.lanInboxService,
+            processing: processing,
+            onCatalogChanged: { [weak appModel] in
+                await appModel?.refresh()
+            },
+            onDurableStateChanged: { [weak backupModel = backup.backupModel] in
+                if services.commitChanges == nil { await backupModel?.handleAppEvent(.mutation) }
+            }
+        )
+        let inspection = database.map { database in
+            AppIntegrityCoordinator(store: database, lifecycle: services.lifecycle, onCompleted: { [weak appModel, weak lanInboxModel] in
+                await appModel?.refresh(); await lanInboxModel?.refresh()
+            }, onUnsafe: { [weak appModel, weak lanInboxModel] in
+                lanInboxModel?.beginDestructiveVaultLifecycle()
+                async let revocation: Void = services.lifecycle.revoke()
+                await appModel?.beginDestructiveVaultLifecycle()
+                await revocation
+                appModel?.requireRestartAfterIntegrityFailure()
+            })
+        }
+        if let inspection {
+            appModel.onLibraryUnavailable = { [weak inspection] in await inspection?.requestUnsafeShutdown() }
+        }
+        let observer = services.commitChanges.map { subscribe in
+            AppLibraryObservationCoordinator(subscribe: subscribe, reconcile: { [weak appModel, weak lanInboxModel] in
+                guard let appModel, appModel.phase == .ready else { return nil }
+                await appModel.refresh()
+                await lanInboxModel?.refresh()
+                return appModel.currentLibraryRevision
+            }, onDurableChange: { [weak backupModel = backup.backupModel] in
+                await inspection?.libraryChanged()
+                await backupModel?.handleAppEvent(.mutation)
+            })
+        }
+        let observationRegistrationID = UUID()
         let restoreModel = makeRestoreModel(
             service: backup.restoreService,
             appModel: appModel,
-            lanInboxModel: lanInboxModel
+            lanInboxModel: lanInboxModel, libraryObserver: observer
         )
         let destroyService = BackupCoordinatedVaultDestroyService(
             operationCoordinator: backup.liveBackup.operationCoordinator,
@@ -85,18 +143,34 @@ struct AppComposition {
         )
         let startup = AppStartupCoordinator(
             reconcileRestore: { [weak restoreModel] in
-                await restoreModel?.reconcileBeforeStartingServices() ?? false
+                if restoreReconciled { return true }
+                return await restoreModel?.reconcileBeforeStartingServices() ?? false
             },
             startStorage: { [weak appModel, weak lanInboxModel] in
                 guard let appModel else { return false }
+                if let observer {
+                    do { try await services.lifecycle.register(id: observationRegistrationID) { await observer.stop() } }
+                    catch { return false }
+                }
+                observer?.install()
                 await appModel.start()
                 guard appModel.phase == .ready else { return false }
                 await lanInboxModel?.start()
+                await observer?.reconcile()
                 return true
+            },
+            startProcessing: {
+                await processing.startRecovery(using: services.dataService)
+                await inspection?.start()
             },
             startScheduler: { [weak backupModel = backup.backupModel] in
                 await backupModel?.refresh()
                 await backupModel?.handleAppEvent(.startup)
+            },
+            reconcileLibrary: {
+                await inspection?.pause()
+                await observer?.reconcile()
+                await inspection?.libraryChanged()
             }
         )
         return Self(
@@ -104,16 +178,17 @@ struct AppComposition {
             deletionModel: deletionModel(
                 destroyService: destroyService,
                 appModel: appModel,
-                lanInboxModel: lanInboxModel
+                lanInboxModel: lanInboxModel, libraryObserver: observer
             ),
             lanInboxModel: lanInboxModel,
             backupModel: backup.backupModel,
             restoreModel: restoreModel,
-            startupCoordinator: startup
+            startupCoordinator: startup,
+            processingCoordinator: processing, libraryObserver: observer, integrityCoordinator: inspection
         )
     }
 
-    private static func makeUnavailable(backup: BackupRuntime? = nil) -> Self {
+    private static func makeUnavailable(backup: BackupRuntime? = nil, seedRestoreService: (any BackupRestoreServicing)? = nil) -> Self {
         let unavailableAppService = UnavailableAppService()
         let dicomViewerRegistry = DICOMViewerRegistry()
         let appModel = AppModel(
@@ -123,9 +198,13 @@ struct AppComposition {
             dicomSliceServiceFactory: { UnavailableDICOMSliceService() },
             dicomViewerRegistry: dicomViewerRegistry
         )
-        let lanInboxModel = LANInboxModel(service: UnavailableLANInboxService())
+        let unavailableLANService = UnavailableLANInboxService()
+        let processing = AppProcessingCoordinator(lanService: unavailableLANService)
+        let lanInboxModel = LANInboxModel(
+            service: unavailableLANService, processing: processing
+        )
         let backupModel = backup?.backupModel ?? BackupModel(service: UnavailableBackupService())
-        let restoreService: any BackupRestoreServicing = backup?.restoreService
+        let restoreService: any BackupRestoreServicing = seedRestoreService ?? backup?.restoreService
             ?? UnavailableRestoreService()
         let restoreModel = makeRestoreModel(
             service: restoreService,
@@ -162,18 +241,21 @@ struct AppComposition {
             lanInboxModel: lanInboxModel,
             backupModel: backupModel,
             restoreModel: restoreModel,
-            startupCoordinator: startup
+            startupCoordinator: startup,
+            processingCoordinator: processing
         )
     }
 
     private static func deletionModel(
         destroyService: any VaultDestroyServicing,
         appModel: AppModel,
-        lanInboxModel: LANInboxModel
+        lanInboxModel: LANInboxModel,
+        libraryObserver: AppLibraryObservationCoordinator? = nil
     ) -> VaultDeletionModel {
         VaultDeletionModel(
             destroyService: destroyService,
             onDeletionBegan: { [weak appModel, weak lanInboxModel] in
+                await libraryObserver?.stop()
                 lanInboxModel?.beginDestructiveVaultLifecycle()
                 await appModel?.beginDestructiveVaultLifecycle()
             },
@@ -188,12 +270,14 @@ struct AppComposition {
         service: any BackupRestoreServicing,
         appModel: AppModel,
         lanInboxModel: LANInboxModel,
-        securityScope: any RestoreFileSecurityScope = SystemRestoreFileSecurityScope()
+        securityScope: any RestoreFileSecurityScope = SystemRestoreFileSecurityScope(),
+        libraryObserver: AppLibraryObservationCoordinator? = nil
     ) -> RestoreModel {
         RestoreModel(
             service: service,
             securityScope: securityScope,
             onReplacementBegan: { [weak appModel, weak lanInboxModel] in
+                await libraryObserver?.stop()
                 lanInboxModel?.beginDestructiveVaultLifecycle()
                 await appModel?.beginDestructiveVaultLifecycle()
             },

@@ -73,6 +73,8 @@ DICOM import 在第一份 staged bytes 出现前先原子写入 opaque ownership
 
 本页只拥有 DICOM 的 Vault 图、提交和恢复不变量；导入流程、XPC、slice service、Viewer 与支持边界见 [`dicom.md`](dicom.md)。
 
+[VaultImportDraftStore](../Sources/KinloguePlatform/Import/VaultImportDraftStore.swift) 的 begin/complete/fail processing 转换先固定原 draft 和一次生成的 OCR bytes，再通过 `PlaintextVault.commit(updating:)` 在同一 mutation lease 内读取当前目录、核对 draft 未变并提交。无关成员/报告编辑被保留；变化的 revision/attempt 或已删除 draft 被拒绝。OCR 提取与编码在 lease 外完成，既有显式 generation 提交及文件原子发布协议不变。
+
 ## 读取、损坏与兼容边界
 
 `PlaintextVault.inspect()` 可能返回：
@@ -84,7 +86,7 @@ DICOM import 在第一份 staged bytes 出现前先原子写入 opaque ownership
 - `unsupportedVersion`：格式版本不支持；
 - `ready(revision)`：全部必需验证通过。
 
-App 启动使用 `loadValidatedCatalog()` 在一次解析中同时完成 `inspect()` 等价的全对象校验并取得 catalog；只有 `absent` 才初始化空 Vault。自动恢复直接从这份已验证 catalog 选择可恢复草稿，恢复完成后再读取一次最新 catalog 交给 UI，避免把验证结果丢弃后重复扫描相同对象，同时仍保证恢复前完整性门禁和恢复后的新鲜快照。
+App 启动使用 `loadValidatedCatalog()` 在一次解析中同时完成 `inspect()` 等价的全对象校验并取得 catalog；只有 `absent` 才初始化空 Vault。从这份已验证 catalog 选择可恢复草稿后，先读取当前 catalog 并发布 Ready，再由 App 级 owner 在后台恢复 OCR、逐项刷新快照。原件完整性校验仍阻塞 Ready；OCR 不再阻塞，不能把这次任务归属调整记为启动哈希成本已经消除。
 
 未知非空目录、部分初始化收据、符号链接替换、缺失对象、长度变化、digest 不匹配和 malformed manifest 都必须 fail closed，不能返回部分 catalog。
 
@@ -167,3 +169,7 @@ inbox manifest 同样校验 generation、vault ID、item/receipt/terminal 引用
 - checkpoint 使用独立密码学认证；活动 Vault 的 SHA-256 语义和明文姿态没有改变。未来若加入活动 Vault 加密或云同步，仍必须提供显式迁移、密钥生命周期和失败恢复协议，不能把当前 SHA-256 重新命名成认证。
 
 完整格式、自动化、保留和恢复顺序见 [`backup-and-restore.md`](backup-and-restore.md)。
+
+## SQLite 开发边界
+
+本分支新增的 [SQLite 内核](sqlite-storage.md) 尚未被 App composition 选择。以上 JSON 布局、启动原件校验和整个 catalog 提交仍是当前生产行为；报告/OCR 窄查询、LAN 上传/预处理/单事务归档和规范化 DICOM 导入/查询/Viewer 已有真实数据库回归；App 按需查询、逻辑备份/严格恢复、原件导出与统一候选启动均已接通可注入的 SQLite 服务，通过统一切换门禁后才替换上述生产路径。

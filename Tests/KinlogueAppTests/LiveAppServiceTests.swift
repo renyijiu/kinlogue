@@ -64,14 +64,14 @@ struct LiveAppServiceTests {
 
         #expect(snapshot.generation == 1)
         #expect(snapshot.members.isEmpty)
-        #expect(snapshot.records.isEmpty)
-        #expect(snapshot.drafts.isEmpty)
+        #expect(snapshot.reportCount == 0)
+        #expect(snapshot.draftCount == 0)
         let inbox = try await environment.lanInboxService.initialize()
         let catalog = try await PlaintextVault(
             rootURL: identity.sourceVault.rootURL
         ).loadCatalog()
-        #expect(inbox.snapshot.vaultID == catalog.vaultID)
-        #expect(inbox.snapshot.items.isEmpty)
+        #expect(inbox.page.revision.libraryID == catalog.vaultID)
+        #expect(inbox.page.items.isEmpty)
         let manifestURL = identity.sourceVault.rootURL.appendingPathComponent("library.json")
         let manifest = try Data(contentsOf: manifestURL)
         #expect(manifest.range(of: Data("KLGPLAINTEXT1".utf8)) != nil)
@@ -143,6 +143,252 @@ struct LiveAppServiceTests {
         #expect(settled == later)
         #expect(settled.importDrafts.count == 1)
         #expect(settled.importDrafts.first?.state == .processing)
+    }
+
+    @Test(arguments: [false, true])
+    @MainActor
+    func recoveredOCRPublishesItsTerminalStateAfterTheLibraryIsReady(fails: Bool) async throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let vault = try PlaintextVault(rootURL: parent.appendingPathComponent("Vault"))
+        let initial = try await vault.initialize()
+        let member = try FamilyMember(displayName: "Synthetic member")
+        let original = try ImportedFileValidator().validate(data: reportLifecyclePNG(red: 0))
+        let attachment = try Attachment(
+            contentTypeIdentifier: original.contentTypeIdentifier,
+            byteCount: original.data.count,
+            sha256Digest: original.sha256Digest
+        )
+        let record = try HealthRecord(
+            memberID: member.id, attachmentID: attachment.id, importState: .confirmed
+        )
+        _ = try await vault.commit(VaultCommitRequest(
+            expectedGeneration: initial.generation,
+            catalog: VaultCatalog(
+                vaultID: initial.vaultID, generation: initial.generation + 1,
+                members: [member], records: [record], attachments: [attachment]
+            ),
+            writes: [VaultObjectWrite(
+                reference: VaultObjectReference(id: attachment.id, kind: .attachment),
+                plaintext: original.data
+            )]
+        ))
+        let commitGate = AsyncOperationGate()
+        let store = VaultImportDraftStore(vault: vault, processingWillCommit: { draft in
+            if draft.state == .needsReview || draft.state == .failed { await commitGate.wait() }
+        })
+        guard case .created(let draftID) = try await store.stage(
+            ImportedFileValidator().validate(data: reportLifecyclePNG())
+        ) else { Issue.record("Expected a synthetic draft"); return }
+        var followingDraftID: ImportDraft.ID?
+        if fails {
+            guard case .created(let id) = try await store.stage(
+                ImportedFileValidator().validate(data: reportLifecyclePNG(red: 0.5))
+            ) else { Issue.record("Expected a second synthetic draft"); return }
+            followingDraftID = id
+        }
+        let extractor = ReportLifecycleTextExtractor(fails: fails)
+        let lifecycle = LibraryLifecycleCoordinator()
+        let service = LiveAppService(
+            vault: vault, draftStore: store,
+            workflow: ImportWorkflow(store: store, textExtractor: extractor),
+            lifecycle: lifecycle
+        )
+        let model = AppModel(service: service)
+        let completion = AsyncOperationGate()
+        let followingCompletion = AsyncOperationGate()
+        let completed = ReportLifecycleCompletionProbe()
+        let processing = AppProcessingCoordinator(
+            lanService: UnavailableLANInboxService(), lifecycle: lifecycle,
+            onCatalogChanged: {
+                await model.refresh()
+                await completed.markCompleted()
+                if await completed.count == 1 { await completion.wait() }
+                else { await followingCompletion.wait() }
+            }
+        )
+
+        await model.start()
+        #expect(model.phase == .ready)
+        #expect(model.members == [LibraryMemberSummary(member)])
+        #expect(await extractor.callCount == 0)
+        await processing.startRecovery(using: service)
+        await extractor.waitUntilEntered()
+        await processing.startRecovery(using: service)
+        await model.refresh()
+        #expect(model.phase == .ready)
+        #expect(model.members == [LibraryMemberSummary(member)])
+        #expect(await extractor.callCount == 1)
+        model.selectedMemberID = member.id
+        await model.waitForCurrentPage()
+        #expect(model.timelineSections.flatMap(\.records) == [LibraryReportSummary(record: record)])
+        await model.selectRecord(record.id)
+        #expect(model.originalDocument?.data == original.data)
+
+        await extractor.resume()
+        #expect(await commitGate.waitUntilStarted())
+        #expect(await model.createMember(displayName: "Concurrent synthetic member", disambiguationLabel: nil))
+        #expect(model.phase == .ready)
+        #expect(model.members.count == 2)
+        await commitGate.open()
+        #expect(await completion.waitUntilStarted())
+        if fails {
+            #expect(model.backgroundDrafts.first?.id == draftID)
+            #expect(model.backgroundDrafts.first?.state == .failed)
+        } else {
+            #expect(model.reviewQueue.first?.id == draftID)
+            #expect(model.backgroundDrafts.isEmpty)
+        }
+        #expect(await extractor.callCount == 1)
+        await completion.open()
+        if let followingDraftID {
+            #expect(await followingCompletion.waitUntilStarted())
+            #expect(model.reviewQueue.map(\.id) == [followingDraftID])
+            #expect(model.backgroundDrafts.first?.state == .failed)
+            #expect(await extractor.callCount == 2)
+            await followingCompletion.open()
+        }
+        await lifecycle.revoke()
+    }
+
+    @Test(arguments: [ImportState.processing, .needsReview], [false, true])
+    @MainActor
+    func recoveryPersistenceFailureOffersExplicitRetryWithoutRestart(
+        failingState: ImportState,
+        superseded: Bool
+    ) async throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let vault = try PlaintextVault(rootURL: parent.appendingPathComponent("Vault"))
+        _ = try await vault.initialize()
+        let fault = RecoveryCommitFailureInjector(state: failingState)
+        let retryGate = AsyncOperationGate()
+        let store = VaultImportDraftStore(vault: vault, processingWillCommit: { draft in
+            if await fault.isRetry(draft) { await retryGate.wait() }
+            try await fault.beforeCommit(draft)
+        })
+        guard case .created(let draftID) = try await store.stage(
+            ImportedFileValidator().validate(data: reportLifecyclePNG())
+        ) else { Issue.record("Expected a synthetic draft"); return }
+        guard case .created(let followingID) = try await store.stage(
+            ImportedFileValidator().validate(data: reportLifecyclePNG(red: 0.5))
+        ) else { Issue.record("Expected a second synthetic draft"); return }
+        let extractor = LiveAppServiceTextExtractorStub(blocks: [])
+        let service = LiveAppService(
+            vault: vault, draftStore: store,
+            workflow: ImportWorkflow(store: store, textExtractor: extractor)
+        )
+        let model = AppModel(service: service)
+        let completion = AsyncOperationGate()
+        let followingCompletion = AsyncOperationGate()
+        let completed = ReportLifecycleCompletionProbe()
+        let processing = AppProcessingCoordinator(
+            lanService: UnavailableLANInboxService(),
+            onCatalogChanged: {
+                await model.refresh()
+                await completed.markCompleted()
+                if await completed.count == 1 { await completion.wait() }
+                else { await followingCompletion.wait() }
+            }
+        )
+        await model.start()
+        await processing.startRecovery(using: service)
+        #expect(await completion.waitUntilStarted())
+        #expect(model.phase == .ready)
+        #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.canRetryRecovery == true)
+        #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.state == (failingState == .processing ? .staging : .processing))
+        model.requestDiscardDraft(draftID)
+        #expect(model.pendingDiscardDraftID == nil)
+        await completion.open()
+        #expect(await followingCompletion.waitUntilStarted())
+        #expect(model.reviewQueue.map(\.id) == [followingID])
+        await followingCompletion.open()
+        await processing.startRecovery(using: service)
+        await service.resumeInterruptedImports(onDraftCompleted: {})
+        await model.refresh()
+        #expect(await fault.failureCount == 1)
+        #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.canRetryRecovery == true)
+        #expect(await extractor.files.count == (failingState == .processing ? 1 : 2))
+
+        if superseded {
+            _ = try await VaultImportDraftStore(vault: vault).beginProcessing(
+                draftID: draftID, attemptID: UUID()
+            )
+            await model.refresh()
+            #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.state == .processing)
+            #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.canRetryRecovery == false)
+            await processing.cancelAndDrain()
+            return
+        }
+        let retry = Task { await model.retryDraft(draftID) }
+        #expect(await retryGate.waitUntilStarted())
+        await model.refresh()
+        #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.canRetryRecovery == false)
+        #expect(await extractor.files.count == (failingState == .processing ? 1 : 2))
+        await retryGate.open()
+        await retry.value
+        #expect(await fault.failureCount == 2)
+        #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.canRetryRecovery == true)
+
+        await model.retryDraft(draftID)
+        #expect(model.phase == .ready)
+        #expect(Set(model.reviewQueue.map(\.id)) == [followingID, draftID])
+        #expect(model.reviewQueue.allSatisfy { !$0.canRetryRecovery })
+        #expect(model.backgroundDrafts.isEmpty)
+        await processing.cancelAndDrain()
+    }
+
+    @Test(arguments: [false, true])
+    @MainActor
+    func revocationDrainsStartupRecoveryAndRejectsItsLateCallback(atCommitBoundary: Bool) async throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let vault = try PlaintextVault(rootURL: parent.appendingPathComponent("Vault"))
+        _ = try await vault.initialize()
+        let commitGate = AsyncOperationGate()
+        let store = VaultImportDraftStore(vault: vault, processingWillCommit: { draft in
+            if draft.state == .needsReview { await commitGate.wait() }
+        })
+        _ = try await store.stage(ImportedFileValidator().validate(data: reportLifecyclePNG()))
+        let extractor = ReportLifecycleTextExtractor()
+        let lifecycle = LibraryLifecycleCoordinator()
+        let service = LiveAppService(
+            vault: vault, draftStore: store,
+            workflow: ImportWorkflow(store: store, textExtractor: extractor),
+            lifecycle: lifecycle
+        )
+        let model = AppModel(service: service)
+        let callback = ReportLifecycleCompletionProbe()
+        let processing = AppProcessingCoordinator(
+            lanService: UnavailableLANInboxService(), lifecycle: lifecycle,
+            onCatalogChanged: { await callback.markCompleted() }
+        )
+        await model.start()
+        await processing.startRecovery(using: service)
+        await extractor.waitUntilEntered()
+        if atCommitBoundary {
+            await extractor.resume()
+            #expect(await commitGate.waitUntilStarted())
+        }
+        await model.beginDestructiveVaultLifecycle()
+        let drained = ReportLifecycleCompletionProbe()
+        let revocation = Task {
+            await lifecycle.revoke()
+            await drained.markCompleted()
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(!(await drained.isCompleted))
+        if atCommitBoundary { await commitGate.open() }
+        else { await extractor.resume() }
+        await revocation.value
+        #expect(await extractor.observedCancellation == !atCommitBoundary)
+        #expect(!(await callback.isCompleted))
+        #expect(model.reviewQueue.isEmpty)
+        #expect(model.backgroundDrafts.isEmpty)
+        #expect(try await vault.loadCatalog().importDrafts.first?.state == .processing)
     }
 
     @Test
@@ -474,17 +720,15 @@ struct LiveAppServiceTests {
 
         let snapshot = try await fixture.service.bootstrap()
 
-        #expect(snapshot == AppSnapshot(
-            generation: catalog.generation,
-            members: catalog.members,
-            records: catalog.records,
-            drafts: catalog.importDrafts.map(DraftSummary.init)
-        ))
+        #expect(snapshot.generation == catalog.generation)
+        #expect(snapshot.members == catalog.members.map(LibraryMemberSummary.init))
+        #expect(snapshot.reportCount == catalog.records.filter { $0.importState == .confirmed }.count)
+        #expect(snapshot.draftCount == catalog.importDrafts.count)
         let vaultCalls = await fixture.vault.callCounts
         #expect(vaultCalls.initialize == 1)
         #expect(vaultCalls.loadCatalog == 1)
         #expect(vaultCalls.commit == 0)
-        #expect(await fixture.draftStore.resumableCallCount == 0)
+        #expect(await fixture.draftStore.resumableCallCount == 1)
     }
 
     @Test
@@ -506,27 +750,27 @@ struct LiveAppServiceTests {
         #expect(vaultCalls.loadValidatedCatalog == 1)
         #expect(vaultCalls.loadCatalog == 1)
         #expect(vaultCalls.commit == 0)
-        #expect(await fixture.draftStore.resumableCallCount == 0)
+        #expect(await fixture.draftStore.resumableCallCount == 1)
     }
 
     @Test
-    func bootstrapUsesTheValidatedCatalogInsteadOfEnumeratingDraftsAgain() async throws {
+    func bootstrapEnumeratesRecoveryIDsWithoutStartingProcessing() async throws {
         let catalog = try syntheticCatalog()
         let fixture = try LiveAppServiceFixture(
             state: try readyState(for: catalog),
             initializedCatalog: catalog,
             catalogReads: [.success(catalog)],
-            resumableError: .recoveryRead,
             requiresBootstrap: true
         )
 
         _ = try await fixture.service.bootstrap()
 
-        #expect(await fixture.draftStore.resumableCallCount == 0)
+        #expect(await fixture.draftStore.resumableCallCount == 1)
+        #expect(await fixture.draftStore.beginProcessingCallCount == 0)
     }
 
     @Test
-    func bootstrapPropagatesRecoveryProcessingFailureAndRetriesOnNextCall() async throws {
+    func bootstrapReadinessDoesNotDependOnRecoveryProcessing() async throws {
         let transaction = try SyntheticDraftTransaction()
         let resumableDraft = ImportDraft(attachmentID: transaction.attachment.id)
         let catalog = try VaultCatalog(
@@ -539,22 +783,23 @@ struct LiveAppServiceTests {
         let fixture = try LiveAppServiceFixture(
             state: try readyState(for: catalog),
             initializedCatalog: catalog,
+            catalogReads: [.success(catalog), .success(catalog), .success(catalog)],
             beginProcessingError: .recoveryProcessing,
             requiresBootstrap: true
         )
 
-        for _ in 0..<2 {
-            await #expect(throws: LiveAppServiceFixtureError.recoveryProcessing) {
-                try await fixture.service.bootstrap()
-            }
-        }
-
-        #expect(await fixture.draftStore.resumableCallCount == 0)
-        #expect(await fixture.draftStore.beginProcessingCallCount == 2)
+        _ = try await fixture.service.bootstrap()
+        _ = try await fixture.service.bootstrap()
+        #expect(await fixture.draftStore.beginProcessingCallCount == 0)
+        await fixture.service.resumeInterruptedImports(onDraftCompleted: {})
+        await fixture.service.resumeInterruptedImports(onDraftCompleted: {})
+        #expect(await fixture.draftStore.resumableCallCount == 1)
+        #expect(await fixture.draftStore.beginProcessingCallCount == 1)
+        #expect(try await fixture.service.draftPage(states: [.staging], cursor: nil).items.first?.canRetryRecovery == true)
     }
 
     @Test
-    func confirmDraftReturnsTheStoreCommittedSnapshotWithoutASecondCatalogRead() async throws {
+    func confirmDraftLoadsTheSnapshotAfterTheStoreCommits() async throws {
         let transaction = try SyntheticDraftTransaction()
         let fixture = try LiveAppServiceFixture(
             state: try readyState(for: transaction.beforeCommit),
@@ -580,15 +825,15 @@ struct LiveAppServiceTests {
 
         let snapshot = try await fixture.service.confirmDraft(command)
 
-        #expect(snapshot.records.map(\.id) == [transaction.committedRecord.id])
-        #expect(snapshot.drafts.isEmpty)
+        #expect(try await fixture.service.reportPage(query: "", memberID: nil, cursor: nil).items.map(\.id) == [transaction.committedRecord.id])
+        #expect(snapshot.draftCount == 0)
         #expect(await fixture.draftStore.confirmCallCount == 1)
         #expect(
             await fixture.draftStore.lastConfirmedExpectedRevision
                 == command.expectedRevision
         )
         let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.loadCatalog == 1)
+        #expect(vaultCalls.loadCatalog == 4)
         #expect(vaultCalls.commit == 0)
     }
 
@@ -999,7 +1244,7 @@ struct LiveAppServiceTests {
         #expect(review.original.data == Data([1, 2, 3, 4]))
         #expect(await fixture.draftStore.loadReviewSnapshotCallCount == 1)
         #expect(await fixture.draftStore.loadDocumentCallCount == 0)
-        #expect(await fixture.vault.callCounts.loadCatalog == 0)
+        #expect(await fixture.vault.callCounts.loadCatalog == 1)
     }
 
     @Test
@@ -1246,7 +1491,7 @@ struct LiveAppServiceTests {
     }
 
     @Test
-    func discardDraftReturnsTheStoreCommittedSnapshotWithoutLoadingTheCatalog() async throws {
+    func discardDraftLoadsTheSnapshotAfterTheStoreCommits() async throws {
         let transaction = try SyntheticDraftTransaction()
         let fixture = try LiveAppServiceFixture(
             state: try readyState(for: transaction.beforeCommit),
@@ -1260,13 +1505,13 @@ struct LiveAppServiceTests {
         )
         let snapshot = try await fixture.service.discardDraft(command)
 
-        #expect(snapshot.records.map(\.id) == [transaction.committedRecord.id])
-        #expect(snapshot.drafts.isEmpty)
+        #expect(try await fixture.service.reportPage(query: "", memberID: nil, cursor: nil).items.map(\.id) == [transaction.committedRecord.id])
+        #expect(snapshot.draftCount == 0)
         #expect(await fixture.draftStore.discardCallCount == 1)
         #expect(await fixture.draftStore.lastDiscardedDraftID == command.draftID)
         #expect(await fixture.draftStore.lastDiscardedExpectedRevision == command.expectedRevision)
         let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.loadCatalog == 0)
+        #expect(vaultCalls.loadCatalog == 2)
         #expect(vaultCalls.commit == 0)
     }
 
@@ -1279,11 +1524,11 @@ struct LiveAppServiceTests {
             catalogReads: [.success(projection.catalog)]
         )
 
-        let snapshot = try await fixture.service.refresh()
+        _ = try await fixture.service.refresh()
 
-        #expect(snapshot.records.map(\.id) == [projection.confirmed.id])
-        #expect(!snapshot.records.contains { $0.id == projection.needsReview.id })
-        #expect(await fixture.vault.callCounts.loadCatalog == 1)
+        #expect(try await fixture.service.reportPage(query: "", memberID: nil, cursor: nil).items.map(\.id) == [projection.confirmed.id])
+        #expect(try await !fixture.service.reportPage(query: "", memberID: nil, cursor: nil).items.contains { $0.id == projection.needsReview.id })
+        #expect(await fixture.vault.callCounts.loadCatalog == 3)
     }
 
     @Test
@@ -1313,7 +1558,7 @@ struct LiveAppServiceTests {
         )
         let manualDate = Date(timeIntervalSince1970: 1_784_332_800)
 
-        let snapshot = try await fixture.service.updateRecord(UpdateRecordCommand(
+        _ = try await fixture.service.updateRecord(UpdateRecordCommand(
             recordID: record.id,
             expectedRevision: record.revision,
             memberID: member.id,
@@ -1328,7 +1573,7 @@ struct LiveAppServiceTests {
             userNote: ""
         ))
 
-        let updated = try #require(snapshot.records.first)
+        let updated = try #require(try await fixture.service.loadRecords(ids: [record.id]).records.first)
         #expect(updated.timelineDateCandidate?.source.entryMethod == .manual)
         #expect(updated.reportedResults?.entryMethod == .manual)
         #expect(updated.reportedResults?.transcription == "Manual result")
@@ -1480,7 +1725,8 @@ struct LiveAppServiceTests {
         )
 
         let firstSnapshot = try await first.updateRecord(firstCommand)
-        #expect(firstSnapshot.records.first?.revision == record.revision + 1)
+        #expect(firstSnapshot.reportCount == 1)
+        #expect(try await first.loadRecords(ids: [record.id]).records.first?.revision == record.revision + 1)
         await #expect(throws: AppServiceError.recordChanged) {
             try await stale.updateRecord(staleCommand)
         }
@@ -1502,7 +1748,7 @@ struct LiveAppServiceTests {
         )
 
         await #expect(throws: AppServiceError.recordUnavailable) {
-            try await fixture.service.loadOriginal(
+            try await fixture.service.loadTestOriginal(
                 recordID: projection.needsReview.id,
                 sourceID: projection.needsReview.sources.first.id
             )
@@ -1556,11 +1802,11 @@ struct LiveAppServiceTests {
             ]
         )
 
-        let first = try await fixture.service.loadOriginal(
+        let first = try await fixture.service.loadTestOriginal(
             recordID: record.id,
             sourceID: firstSource.id
         )
-        let second = try await fixture.service.loadOriginal(
+        let second = try await fixture.service.loadTestOriginal(
             recordID: record.id,
             sourceID: secondSource.id
         )
@@ -1596,10 +1842,10 @@ struct LiveAppServiceTests {
             transaction.confirmCommand
         )
 
-        #expect(snapshot.records == [transaction.committedRecord])
-        #expect(snapshot.drafts.isEmpty)
+        #expect(try await fixture.service.loadRecords(ids: [transaction.committedRecord.id]).records == [transaction.committedRecord])
+        #expect(snapshot.draftCount == 0)
         #expect(await fixture.draftStore.confirmCallCount == 1)
-        #expect(await fixture.vault.callCounts.loadCatalog == 2)
+        #expect(await fixture.vault.callCounts.loadCatalog == 5)
     }
 
     @Test
@@ -1636,7 +1882,7 @@ struct LiveAppServiceTests {
         }
 
         #expect(await fixture.draftStore.confirmCallCount == 1)
-        #expect(await fixture.vault.callCounts.loadCatalog == 2)
+        #expect(await fixture.vault.callCounts.loadCatalog == 3)
     }
 
     @Test
@@ -1654,10 +1900,10 @@ struct LiveAppServiceTests {
             expectedRevision: transaction.draft.revision
         ))
 
-        #expect(snapshot.records.isEmpty)
-        #expect(snapshot.drafts.isEmpty)
+        #expect(snapshot.reportCount == 0)
+        #expect(snapshot.draftCount == 0)
         #expect(await fixture.draftStore.discardCallCount == 1)
-        #expect(await fixture.vault.callCounts.loadCatalog == 1)
+        #expect(await fixture.vault.callCounts.loadCatalog == 2)
     }
 
     @Test
@@ -1699,10 +1945,10 @@ struct LiveAppServiceTests {
         let applied = try #require(await fixture.vault.lastCommitCatalog)
         #expect(snapshot.generation == 2)
         #expect(snapshot.members.count == 1)
-        #expect(snapshot.members == applied.members)
+        #expect(snapshot.members == applied.members.map(LibraryMemberSummary.init))
         #expect(snapshot.members.first?.displayName == "Synthetic new member")
         let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.loadCatalog == 2)
+        #expect(vaultCalls.loadCatalog == 3)
         #expect(vaultCalls.commit == 1)
     }
 
@@ -1718,13 +1964,13 @@ struct LiveAppServiceTests {
 
         let snapshot = try await fixture.service.deleteRecord(id: projection.record.id)
 
-        #expect(snapshot.records.isEmpty)
-        #expect(snapshot.drafts.map(\.id) == [projection.draft.id])
+        #expect(snapshot.reportCount == 0)
+        #expect(try await fixture.service.draftPage(states: [.staging], cursor: nil).items.map(\.id) == [projection.draft.id])
         let applied = try #require(await fixture.vault.lastCommitCatalog)
         #expect(applied.records.isEmpty)
         #expect(applied.attachments == [projection.draftAttachment])
         let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.loadCatalog == 2)
+        #expect(vaultCalls.loadCatalog == 5)
         #expect(vaultCalls.commit == 1)
     }
 
@@ -1767,9 +2013,9 @@ struct LiveAppServiceTests {
         let snapshot = try await fixture.service.deleteMember(id: projection.member.id)
 
         #expect(snapshot.members.isEmpty)
-        #expect(snapshot.records.isEmpty)
+        #expect(snapshot.reportCount == 0)
         let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.loadCatalog == 2)
+        #expect(vaultCalls.loadCatalog == 3)
         #expect(vaultCalls.commit == 1)
     }
 }
@@ -1854,6 +2100,7 @@ private struct LiveAppServiceFixture {
             bootstrapCalls: bootstrapCalls
         )
         let draftStore = LiveAppServiceDraftStoreStub(
+            vault: vault,
             document: draftDocument,
             reviewCatalog: catalog,
             originalData: readObjectData,
@@ -1863,7 +2110,7 @@ private struct LiveAppServiceFixture {
             confirmError: confirmError,
             discardError: discardError,
             resumableError: resumableError,
-            resumableDraftIDs: resumableDraftIDs,
+            resumableDraftIDs: resumableDraftIDs.isEmpty ? catalog.importDrafts.filter(\.isResumableAfterInterruption).map(\.id) : resumableDraftIDs,
             beginProcessingError: beginProcessingError
         )
         self.vault = vault
@@ -1995,12 +2242,12 @@ private actor LiveAppServiceVaultStub: VaultStore {
         loadCatalogCallCount += 1
         if !catalogReads.isEmpty {
             switch catalogReads.removeFirst() {
-            case .success(let catalog): return catalog
+            case .success(let catalog): appliedCatalog = catalog; return catalog
             case .failure(let error): throw error
             }
         }
         if let appliedCatalog { return appliedCatalog }
-        throw LiveAppServiceFixtureError.unexpectedCall
+        return initializedCatalog
     }
 
     func readObject(_ reference: VaultObjectReference) async throws -> Data {
@@ -2033,13 +2280,17 @@ private actor LiveAppServiceVaultStub: VaultStore {
             appliedCatalog = request.catalog
             throw LiveAppServiceFixtureError.commitResponseLost
         }
+        appliedCatalog = request.catalog
         return request.catalog
     }
+
+    func applyDraftCommit(_ catalog: VaultCatalog) { appliedCatalog = catalog }
 
     func destroy() async throws {}
 }
 
 private actor LiveAppServiceDraftStoreStub: ImportDraftStore {
+    private let vault: LiveAppServiceVaultStub?
     private let document: ImportDraftDocument?
     private let reviewSnapshot: ImportDraftReviewSnapshot?
     private let confirmCatalog: VaultCatalog?
@@ -2065,6 +2316,7 @@ private actor LiveAppServiceDraftStoreStub: ImportDraftStore {
     private(set) var lastSavedReviewExpectedRevision: UInt64?
 
     init(
+        vault: LiveAppServiceVaultStub? = nil,
         document: ImportDraftDocument? = nil,
         reviewCatalog: VaultCatalog? = nil,
         originalData: Data? = nil,
@@ -2077,6 +2329,7 @@ private actor LiveAppServiceDraftStoreStub: ImportDraftStore {
         resumableDraftIDs: [ImportDraft.ID] = [],
         beginProcessingError: LiveAppServiceFixtureError? = nil
     ) {
+        self.vault = vault
         self.document = document
         if let document,
            let reviewCatalog,
@@ -2173,25 +2426,25 @@ private actor LiveAppServiceDraftStoreStub: ImportDraftStore {
         draftID: ImportDraft.ID,
         expectedRevision: UInt64,
         record: HealthRecord
-    ) async throws -> VaultCatalog {
+    ) async throws {
         confirmCallCount += 1
         lastConfirmedExpectedRevision = expectedRevision
         lastConfirmedRecord = record
         if let confirmError { throw confirmError }
         guard let confirmCatalog else { throw LiveAppServiceFixtureError.unexpectedCall }
-        return confirmCatalog
+        await vault?.applyDraftCommit(confirmCatalog)
     }
 
     func discard(
         draftID: ImportDraft.ID,
         expectedRevision: UInt64
-    ) async throws -> VaultCatalog {
+    ) async throws {
         discardCallCount += 1
         lastDiscardedDraftID = draftID
         lastDiscardedExpectedRevision = expectedRevision
         if let discardError { throw discardError }
         guard let discardCatalog else { throw LiveAppServiceFixtureError.unexpectedCall }
-        return discardCatalog
+        await vault?.applyDraftCommit(discardCatalog)
     }
 }
 
@@ -2210,12 +2463,37 @@ private actor LiveAppServiceTextExtractorStub: TextExtractionService {
     }
 }
 
+private actor RecoveryCommitFailureInjector {
+    let state: ImportState
+    private(set) var failureCount = 0
+    private var failedDraftID: ImportDraft.ID?
+
+    init(state: ImportState) { self.state = state }
+
+    func isRetry(_ draft: ImportDraft) -> Bool {
+        failureCount == 1 && draft.id == failedDraftID && draft.state == .processing
+    }
+
+    func beforeCommit(_ draft: ImportDraft) throws {
+        guard draft.state == state, failureCount < 2,
+              failedDraftID == nil || draft.id == failedDraftID else { return }
+        failedDraftID = draft.id
+        failureCount += 1
+        throw VaultError.ioFailure(5)
+    }
+}
+
 private actor ReportLifecycleTextExtractor: TextExtractionService {
     private let gate = AsyncOperationGate()
+    private let fails: Bool
     private(set) var observedCancellation = false
+    private(set) var callCount = 0
+
+    init(fails: Bool = false) { self.fails = fails }
 
     func extractText(from file: ValidatedImportedFile) async throws -> [OCRBlock] {
         _ = file
+        callCount += 1
         await gate.wait()
         do {
             try Task.checkCancellation()
@@ -2223,6 +2501,7 @@ private actor ReportLifecycleTextExtractor: TextExtractionService {
             observedCancellation = true
             throw error
         }
+        if fails && callCount == 1 { throw LiveAppServiceFixtureError.recoveryProcessing }
         return []
     }
 
@@ -2240,13 +2519,15 @@ private actor ReportLifecycleTextExtractor: TextExtractionService {
 
 private actor ReportLifecycleCompletionProbe {
     private(set) var isCompleted = false
+    private(set) var count = 0
 
     func markCompleted() {
         isCompleted = true
+        count += 1
     }
 }
 
-private func reportLifecyclePNG() throws -> Data {
+private func reportLifecyclePNG(red: CGFloat = 1) throws -> Data {
     let context = try #require(CGContext(
         data: nil,
         width: 8,
@@ -2256,7 +2537,7 @@ private func reportLifecyclePNG() throws -> Data {
         space: CGColorSpaceCreateDeviceRGB(),
         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
     ))
-    context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+    context.setFillColor(CGColor(red: red, green: 1, blue: 1, alpha: 1))
     context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
     let image = try #require(context.makeImage())
     let data = NSMutableData()

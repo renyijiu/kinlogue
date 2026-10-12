@@ -52,6 +52,23 @@ func exactReportFingerprintIsOrderIndependentButPreservesMultiplicityAndLength()
     #expect(try ReportFingerprint(sources: [a]) != ReportFingerprint(sources: [
         .init(sha256Digest: digestA, byteCount: 11),
     ]))
+
+    let first = try Attachment(
+        contentTypeIdentifier: "public.png", byteCount: a.byteCount, sha256Digest: a.sha256Digest
+    )
+    let second = try Attachment(
+        contentTypeIdentifier: "public.png", byteCount: b.byteCount, sha256Digest: b.sha256Digest
+    )
+    let sources = try ReportSources([
+        ReportSource(attachmentID: first.id, pageCount: 1),
+        ReportSource(attachmentID: second.id, pageCount: 1),
+        ReportSource(attachmentID: first.id, pageCount: 1),
+    ])
+    #expect(try ReportFingerprint(sources: sources, attachments: [second, first])
+        == ReportFingerprint(sources: [a, a, b]))
+    #expect(throws: DomainValidationError.invalidCatalogReference) {
+        _ = try ReportFingerprint(sources: sources, attachments: [first])
+    }
 }
 
 @Test
@@ -101,6 +118,25 @@ func persistedProvenanceRequiresSourceIdentityAndProjectsFromCurrentOrder() thro
     #expect(try block.projected(for: forward).pageNumber == 2)
     #expect(try block.projected(for: reversed).pageNumber == 1)
     #expect(try block.projected(for: forward).filePageNumber == 1)
+    let projected = try block.projected(for: forward)
+    #expect(try projected.attributedAndValidated(for: forward) == projected)
+    #expect(throws: DomainValidationError.invalidCatalogReference) {
+        _ = try block.attributedAndValidated(for: ReportSources([first]))
+    }
+    let wrongAttachment = try ReportSource(id: second.id, attachmentID: UUID(), pageCount: 2)
+    #expect(throws: DomainValidationError.invalidCatalogReference) {
+        _ = try block.attributedAndValidated(for: ReportSources([wrongAttachment]))
+    }
+    let raw = try OCRBlock(pageNumber: 2, text: "Synthetic", boundingBox: bounds,
+        confidence: nil, method: .vision, engineVersion: "synthetic")
+    let attributed = try raw.attributedAndValidated(for: ReportSources([second]))
+    #expect(attributed.id == raw.id)
+    #expect(attributed.sourceID == second.id)
+    #expect(attributed.attachmentID == second.attachmentID)
+    #expect(attributed.filePageNumber == 2)
+    #expect(throws: DomainValidationError.invalidCatalogReference) {
+        _ = try raw.attributedAndValidated(for: ReportSources([first]))
+    }
     let reference = try SourceReference(
         sourceID: second.id,
         attachmentID: second.attachmentID,

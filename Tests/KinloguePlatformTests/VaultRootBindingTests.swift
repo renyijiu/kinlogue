@@ -336,6 +336,60 @@ func vaultRootBindingDeletionReconciliationNeverRecreatesTheRoot() async throws 
     #expect(!FileManager.default.fileExists(atPath: transaction.quarantineURL.path))
 }
 
+@Test
+func filesystemRootValidationRequiresAnActiveMatchingLease() async throws {
+    let first = try vaultRootBindingFixture()
+    let second = try vaultRootBindingFixture()
+    defer {
+        try? FileManager.default.removeItem(at: first.parent)
+        try? FileManager.default.removeItem(at: second.parent)
+    }
+    _ = try await PlaintextVault(rootURL: first.root).initialize()
+    _ = try await PlaintextVault(rootURL: second.root).initialize()
+    let binding = try VaultRootBinding(rootURL: first.root)
+    let generation = try binding.probe()
+    let wrongLease = try await VaultMutationCoordinator.shared(for: second.root).acquire()
+    #expect(throws: VaultError.mutationConflict) {
+        try binding.validateFilesystemIdentity(generation, using: wrongLease)
+    }
+    wrongLease.release()
+
+    let lease = try await VaultMutationCoordinator.shared(for: first.root).acquire()
+    try binding.validateFilesystemIdentity(generation, using: lease)
+    lease.release()
+    #expect(throws: VaultError.mutationConflict) {
+        try binding.validateFilesystemIdentity(generation, using: lease)
+    }
+}
+
+@Test(arguments: ["parent", "root"])
+func filesystemRootValidationRejectsDirectoryReplacement(_ replaced: String) async throws {
+    let fixture = try vaultRootBindingFixture()
+    let displaced = fixture.parent.appendingPathExtension("displaced")
+    defer {
+        try? FileManager.default.removeItem(at: fixture.parent)
+        try? FileManager.default.removeItem(at: displaced)
+    }
+    _ = try await PlaintextVault(rootURL: fixture.root).initialize()
+    let binding = try VaultRootBinding(rootURL: fixture.root)
+    let generation = try binding.probe()
+    let lease = try await VaultMutationCoordinator.shared(for: fixture.root).acquire()
+    defer { lease.release() }
+    let target = replaced == "parent" ? fixture.parent : fixture.root
+    try FileManager.default.moveItem(at: target, to: displaced)
+    try FileManager.default.createDirectory(
+        at: target, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700]
+    )
+    if replaced == "parent" {
+        try FileManager.default.moveItem(
+            at: displaced.appendingPathComponent("Vault"), to: fixture.root
+        )
+    }
+    #expect(throws: VaultError.invalidPath) {
+        try binding.validateFilesystemIdentity(generation, using: lease)
+    }
+}
+
 private func vaultRootBindingFixture() throws -> (parent: URL, root: URL) {
     let parent = FileManager.default.temporaryDirectory.appendingPathComponent(
         "kinlogue-root-binding-\(UUID().uuidString)",

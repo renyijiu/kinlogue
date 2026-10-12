@@ -8,14 +8,17 @@ struct LANInboxView: View {
     }
 
     @ObservedObject var model: LANInboxModel
-    let members: [FamilyMember]
+    let members: [LibraryMemberSummary]
     let onOpenDuplicate: (LANReportDuplicateDestination) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            if model.items.isEmpty {
+            if model.isLoading && model.items.isEmpty {
+                ProgressView(AppLocalization.string("正在加载待确认队列…"))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.items.isEmpty && !model.hasMore && model.storage?.itemCount == 0 {
                 ContentUnavailableView {
                     Label(AppLocalization.string("没有待确认项"), systemImage: "tray")
                 } description: {
@@ -57,6 +60,12 @@ struct LANInboxView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .background(KinlogueTheme.surface)
+                if model.hasMore {
+                    Button(AppLocalization.string("加载更多待确认项")) { Task { await model.loadMore() } }
+                        .disabled(model.isLoadingMore)
+                        .padding(8)
+                    if model.isLoadingMore { ProgressView() }
+                }
                 archiveActions
             }
         }
@@ -107,7 +116,9 @@ struct LANInboxView: View {
                     Text(AppLocalization.string("待确认队列"))
                         .font(.title2.bold())
                     if let storage = model.storage {
-                        Text(AppLocalization.string("\(model.items.count) 个唯一原件 · 实际占用 \(ByteCountFormatter.string(fromByteCount: Int64(storage.totalPhysicalByteCount), countStyle: .file))"))
+                        Text(model.usesContentByteTotals
+                            ? AppLocalization.string("\(storage.itemCount) 个唯一原件 · 原件内容 \(ByteCountFormatter.string(fromByteCount: Int64(storage.sourceByteCount), countStyle: .file))")
+                            : AppLocalization.string("\(storage.itemCount) 个唯一原件 · 实际占用 \(ByteCountFormatter.string(fromByteCount: Int64(storage.totalPhysicalByteCount), countStyle: .file))"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -137,10 +148,20 @@ struct LANInboxView: View {
                 )
             }
             if let notice = model.archiveNotice { archiveNotice(notice) }
+            if model.hasDamagedItems {
+                Label(AppLocalization.string("部分资料无法读取"), systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+            }
             if let error = model.userErrorMessage {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.red)
+                if model.canRetryQueueLoad {
+                    Button(AppLocalization.string("重试载入")) {
+                        Task { await model.retryQueueLoad() }
+                    }
+                    .disabled(model.isLoading || model.isLoadingMore)
+                }
             }
         }
         .padding(16)
@@ -237,8 +258,8 @@ struct LANInboxView: View {
     }
 
     private var memberPickerOptions: [MemberPickerOption] {
-        let labels = RecordQuery.selectionLabels(for: members)
-        return RecordQuery.selectableMembers(from: members).map { member in
+        let labels = LibraryMemberSummary.labels( members)
+        return LibraryMemberSummary.selectable( members).map { member in
             MemberPickerOption(
                 id: member.id,
                 label: labels[member.id] ?? member.displayName
@@ -247,7 +268,7 @@ struct LANInboxView: View {
     }
 
     private var activeMemberIDs: Set<FamilyMember.ID> {
-        Set(RecordQuery.selectableMembers(from: members).map(\.id))
+        Set(LibraryMemberSummary.selectable( members).map(\.id))
     }
 
     private func clearArchivedMemberSelection(activeIDs: Set<FamilyMember.ID>) {

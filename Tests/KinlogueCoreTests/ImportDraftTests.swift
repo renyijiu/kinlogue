@@ -188,12 +188,77 @@ func duplicateDetectorUsesTheCompleteMultisetAndStableClassTieBreaks() throws {
         drafts: []
     ) == .record(lowerID))
 
+    let lowerDraft = ImportDraft(
+        id: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
+        sources: lower.sources,
+        state: .needsReview,
+        documentObjectID: UUID()
+    )
+    let higherDraft = ImportDraft(
+        id: UUID(uuidString: "10000000-0000-0000-0000-000000000002")!,
+        sources: higher.sources,
+        state: .needsReview,
+        documentObjectID: UUID()
+    )
+    let dangling = try HealthRecord(
+        memberID: member.id,
+        attachmentID: UUID(),
+        importState: .confirmed
+    )
+    let unconfirmed = try HealthRecord(
+        memberID: member.id,
+        sources: lower.sources,
+        importState: .needsReview
+    )
+    #expect(DuplicateDetector.find(
+        fingerprint: fingerprint,
+        attachments: [second, first],
+        records: [dangling, higher, lower],
+        drafts: [higherDraft, lowerDraft]
+    ) == .record(lowerID))
+    #expect(DuplicateDetector.find(
+        fingerprint: fingerprint,
+        attachments: [second, first],
+        records: [dangling, unconfirmed],
+        drafts: [higherDraft, lowerDraft]
+    ) == .draft(lowerDraft.id))
+    #expect(DuplicateDetector.find(
+        fingerprint: fingerprint,
+        attachments: [first, second, first],
+        records: [higher, lower],
+        drafts: [higherDraft, lowerDraft]
+    ) == nil)
+    #expect(DuplicateDetector.find(
+        fingerprint: fingerprint,
+        attachments: [first],
+        records: [higher, lower],
+        drafts: [higherDraft, lowerDraft]
+    ) == nil)
+
     let repeated = try ReportSources([sourceA, try ReportSource(
         attachmentID: first.id,
         displayName: "a-copy.png",
         pageCount: 1
     ), sourceB])
-    #expect(try ReportFingerprint(sources: repeated, attachments: [first, second]) != fingerprint)
+    let repeatedFingerprint = try ReportFingerprint(sources: repeated, attachments: [first, second])
+    #expect(repeatedFingerprint != fingerprint)
+    #expect(DuplicateDetector.find(
+        fingerprint: repeatedFingerprint,
+        attachments: [first, second],
+        records: [higher, lower],
+        drafts: [higherDraft, lowerDraft]
+    ) == nil)
+    let repeatedDraft = ImportDraft(
+        sources: try ReportSources(Array(repeated.elements.reversed())),
+        state: .needsReview,
+        documentObjectID: UUID()
+    )
+    #expect(DuplicateDetector.find(
+        fingerprint: repeatedFingerprint,
+        attachments: [first, second],
+        records: [higher, lower],
+        drafts: [higherDraft, repeatedDraft, lowerDraft]
+    ) == .draft(repeatedDraft.id))
 }
 
 @Test

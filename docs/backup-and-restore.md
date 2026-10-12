@@ -52,6 +52,13 @@
 
 ## 格式与安全边界
 
+当前写入容量版本为 `1.1`（minimum reader `1`），继续读取 `1.0` 的旧恢复点；旧身份、恢复根派生和设备签名契约保持兼容。新版最多 30,002 条目（20,000 Vault objects + 5,000 inbox blobs + 5,000 derived + 两份 manifest）、2²⁴ 个 payload frames、每 frame 256 KiB、32 MiB canonical manifest。名义明文预算 4 TiB；逐条向上取整和空条目也占 frame，实际容量由两个预算共同限制。超过预算在写入前返回 resource limit；这不是扩大 LAN 准入，也不代表无限大小的资料库均能备份。
+
+空间预检使用实际 plaintext、36 bytes/frame、实际 manifest 与至多 4 KiB 固定记录开销，并保留 256 MiB 空间余量。reader 逐帧扫描而不保存全部 frame 的位置数组。旧 reader 明确拒绝新版，不能用旧 App 恢复新恢复点。
+
+备份 source 在准备和最终发布时完整验证 Vault/inbox；逐条流读取只校验根/父目录身份、两个 durable head token 和当前文件 token，不再每条解码整份目录。token 包含 device/inode/长度/纳秒 mtime/ctime，读取前后检查且保留 SHA-256；最终线性复核还会发现条目已经读完后的文件改动。这里没有全局缓存，也没有降低恢复时完整图/原件校验。
+
+
 - 一个恢复点覆盖 exact `VaultRevision` 与 exact durable LAN inbox revision，以及两者的完整 committed reachable graph；不包含 LAN partial、进程内任务、未提交 staging 或 App 偏好。
 - 每次使用新的 DEK；CryptoKit HPKE `Curve25519/SHA-256/ChaChaPoly` 封装 DEK，payload 使用 AES-256-GCM、最多 256 KiB 的认证 frame。manifest 加密，footer 由 recovery-root 授权的设备 Ed25519 身份签名。
 - repository 只接受固定 opaque 叶名、regular file、单硬链接和有界大小；读取、发布与删除均基于 no-follow descriptor 和 identity 复核。正式叶排他发布，不覆盖同名文件。
@@ -68,3 +75,10 @@ Core/Platform/App 自动化覆盖 canonical 格式、pending enrollment 重启�
 activation 的安装探针按生产事务契约逐 phase 固定终态，不再把任意旧根或新根都视为成功：existing root 在 intent、writer reset、old-root move 后必须恢复精确旧根，后续三 phase 必须保留新根；absent root 在 intent、writer reset 后必须保持无根，后续三 phase 必须保留新根，且每项都要求 transaction/preflight receipt、staging 与 rollback 全部不存在。另一个 production integration case 在 preparation 已通过后定长破坏 staging 中的 committed Vault object；`BackupRestoreTransaction.activate` 的 activation 后 strict validation 必须返回 `graphInvalid`，并立即恢复逐文件相同的旧根或原本的无根状态，同时清空上述事务工件。
 
 当前 Mac 已人工完成真实 Powerbox 目录设置和多次“立即备份”，并在 Finder 中核对专用 repository 内存在多个完整 `.kinloguebackup` 文件；该证据只覆盖本机已安装开发候选，不代替正式分发门禁。尚未执行的人工/分发门禁包括：手动恢复、真实阿里云盘/百度网盘客户端传播、外置盘/NAS、macOS 26/27 独立机器、Developer ID/notarization，以及键盘/VoiceOver 恢复流程。准确状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
+
+
+## SQLite 开发路径
+
+生产 composition 当前仍使用上文 JSON source。本分支已实现 [SQLite logical-v1](sqlite-storage.md#逻辑恢复点与原件导出)：恢复点保存 schema 解耦的领域记录和原件，完整保留 OCR 复核、LAN 历史回执及 DICOM 图。短暂持锁生成的应用自有数据库副本只是内部捕获工件，不进入恢复点。后续合法编辑不使已捕获版本失效；外部容器继续使用既有流式加密、回读、排他发布和 witness。
+
+SQLite 恢复在本应用创建的新库中重建并严格验证逻辑记录和原件，整库事务共享单实例 owner；新 reader 明确拒绝旧 JSON checkpoint，不自动迁移或改写。真实 service、冻结 wire 夹具和 19 个 root/capture 故障场景已通过本机定向回归。独立探针已完成近上限、约 9.76 GiB 原件与 20,001 个原件的真实加密发布及严格恢复；三档分别用时 35.393/86.389/15.710 秒和 173.388/293.429/160.168 秒。每档只运行一次完整闭环，不声称 p95。实际条目下界、内存、FD、admission 与验证边界见 [实测记录](storage-refactor-measurement-2026-10-11.md#sqlite-完整规模闭环)；App/系统及 macOS 26 验证仍待完成。

@@ -18,7 +18,7 @@ struct RestoreModelTests {
             attachmentID: UUID(),
             importState: .confirmed
         )
-        let snapshot = AppSnapshot(members: [member], records: [record], drafts: [])
+        let snapshot = TestLibrarySnapshot(members: [member], records: [record], drafts: [])
         let dataService: any AppDataServicing = unavailable
             ? UnavailableAppService()
             : AppServiceSpy(snapshot: snapshot, originals: [record.id: OriginalDocumentPayload(

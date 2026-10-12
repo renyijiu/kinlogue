@@ -10,10 +10,20 @@ public enum VaultImportDraftStoreError: Error, Equatable, Sendable {
 }
 
 public actor VaultImportDraftStore: ImportDraftStore {
-    private let vault: any VaultStore
+    private let vault: PlaintextVault
+    private let processingWillCommit: (@Sendable (ImportDraft) async throws -> Void)?
 
-    public init(vault: any VaultStore) {
+    public init(vault: PlaintextVault) {
         self.vault = vault
+        processingWillCommit = nil
+    }
+
+    init(
+        vault: PlaintextVault,
+        processingWillCommit: @escaping @Sendable (ImportDraft) async throws -> Void
+    ) {
+        self.vault = vault
+        self.processingWillCommit = processingWillCommit
     }
 
     public func stage(_ file: ValidatedImportedFile) async throws -> ImportStageOutcome {
@@ -48,7 +58,7 @@ public actor VaultImportDraftStore: ImportDraftStore {
         attachments.append(attachment)
         var drafts = catalog.importDrafts
         drafts.append(draft)
-        let next = try nextCatalog(catalog, attachments: attachments, drafts: drafts)
+        let next = try Self.nextCatalog(catalog, attachments: attachments, drafts: drafts)
         _ = try await vault.commit(try VaultCommitRequest(
             expectedGeneration: catalog.generation,
             catalog: next,
@@ -64,21 +74,12 @@ public actor VaultImportDraftStore: ImportDraftStore {
         draftID: ImportDraft.ID,
         attemptID: UUID
     ) async throws -> ImportProcessingLease {
-        let catalog = try await vault.loadCatalog()
-        guard let index = catalog.importDrafts.firstIndex(where: { $0.id == draftID }) else {
-            throw VaultImportDraftStoreError.draftNotFound
+        let draft = try await commitProcessingTransition(draftID: draftID) { original in
+            (try original.startingProcessing(attemptID: attemptID), [])
         }
-        var drafts = catalog.importDrafts
-        drafts[index] = try drafts[index].startingProcessing(attemptID: attemptID)
-        let next = try nextCatalog(catalog, drafts: drafts)
-        _ = try await vault.commit(try VaultCommitRequest(
-            expectedGeneration: catalog.generation,
-            catalog: next,
-            writes: []
-        ))
         return ImportProcessingLease(
             draftID: draftID,
-            revision: drafts[index].revision,
+            revision: draft.revision,
             attemptID: attemptID
         )
     }
@@ -122,49 +123,61 @@ public actor VaultImportDraftStore: ImportDraftStore {
         lease: ImportProcessingLease,
         document: ImportDraftDocument
     ) async throws {
-        let catalog = try await vault.loadCatalog()
-        guard let index = catalog.importDrafts.firstIndex(where: { $0.id == lease.draftID }) else {
-            throw VaultImportDraftStoreError.draftNotFound
-        }
-        let documentObjectID = UUID()
-        var drafts = catalog.importDrafts
-        drafts[index] = try drafts[index].completingProcessing(
-            expectedRevision: lease.revision,
-            attemptID: lease.attemptID,
-            documentObjectID: documentObjectID
-        )
-        let persistedDocument = try document.attributedAndValidated(for: drafts[index].sources)
-        let next = try nextCatalog(catalog, drafts: drafts)
-        _ = try await vault.commit(try VaultCommitRequest(
-            expectedGeneration: catalog.generation,
-            catalog: next,
-            writes: [VaultObjectWrite(
+        _ = try await commitProcessingTransition(draftID: lease.draftID) { original in
+            let documentObjectID = UUID()
+            let draft = try original.completingProcessing(
+                expectedRevision: lease.revision,
+                attemptID: lease.attemptID,
+                documentObjectID: documentObjectID
+            )
+            let persistedDocument = try document.attributedAndValidated(for: draft.sources)
+            return (draft, [VaultObjectWrite(
                 reference: VaultObjectReference(id: documentObjectID, kind: .ocr),
-                plaintext: try encode(persistedDocument)
-            )]
-        ))
+                plaintext: try CanonicalVaultJSON.encode(persistedDocument)
+            )])
+        }
     }
 
     public func failProcessing(
         lease: ImportProcessingLease,
         failureCode: ImportFailureCode
     ) async throws {
+        _ = try await commitProcessingTransition(draftID: lease.draftID) { original in
+            (try original.failingProcessing(
+                expectedRevision: lease.revision,
+                attemptID: lease.attemptID,
+                failureCode: failureCode
+            ), [])
+        }
+    }
+
+    private func commitProcessingTransition(
+        draftID: ImportDraft.ID,
+        transform: @Sendable (ImportDraft) throws -> (ImportDraft, [VaultObjectWrite])
+    ) async throws -> ImportDraft {
+        try Task.checkCancellation()
         let catalog = try await vault.loadCatalog()
-        guard let index = catalog.importDrafts.firstIndex(where: { $0.id == lease.draftID }) else {
+        guard let original = catalog.importDrafts.first(where: { $0.id == draftID }) else {
             throw VaultImportDraftStoreError.draftNotFound
         }
-        var drafts = catalog.importDrafts
-        drafts[index] = try drafts[index].failingProcessing(
-            expectedRevision: lease.revision,
-            attemptID: lease.attemptID,
-            failureCode: failureCode
-        )
-        let next = try nextCatalog(catalog, drafts: drafts)
-        _ = try await vault.commit(try VaultCommitRequest(
-            expectedGeneration: catalog.generation,
-            catalog: next,
-            writes: []
-        ))
+        let (draft, writes) = try transform(original)
+        try await processingWillCommit?(draft)
+        _ = try await vault.commit(updating: { current in
+            guard let index = current.importDrafts.firstIndex(where: { $0.id == draftID }) else {
+                throw VaultImportDraftStoreError.draftNotFound
+            }
+            guard current.importDrafts[index] == original else {
+                throw ImportDraftError.staleAttempt
+            }
+            var drafts = current.importDrafts
+            drafts[index] = draft
+            return try VaultCommitRequest(
+                expectedGeneration: current.generation,
+                catalog: Self.nextCatalog(current, drafts: drafts),
+                writes: writes
+            )
+        })
+        return draft
     }
 
     public func resumableDraftIDs() async throws -> [ImportDraft.ID] {
@@ -259,7 +272,7 @@ public actor VaultImportDraftStore: ImportDraftStore {
             memberID: memberID,
             documentObjectID: savedDocumentObjectID
         )
-        let next = try nextCatalog(catalog, drafts: drafts)
+        let next = try Self.nextCatalog(catalog, drafts: drafts)
         let reference = VaultObjectReference(id: savedDocumentObjectID, kind: .ocr)
         let documentData = try encode(try document.attributedAndValidated(for: drafts[index].sources))
         let request = try VaultCommitRequest(
@@ -287,7 +300,7 @@ public actor VaultImportDraftStore: ImportDraftStore {
         draftID: ImportDraft.ID,
         expectedRevision: UInt64,
         record: HealthRecord
-    ) async throws -> VaultCatalog {
+    ) async throws {
         let catalog = try await vault.loadCatalog()
         guard let draft = catalog.importDrafts.first(where: { $0.id == draftID }) else {
             throw VaultImportDraftStoreError.draftNotFound
@@ -308,8 +321,8 @@ public actor VaultImportDraftStore: ImportDraftStore {
         var records = catalog.records
         records.append(record)
         let drafts = catalog.importDrafts.filter { $0.id != draftID }
-        let next = try nextCatalog(catalog, records: records, drafts: drafts)
-        return try await vault.commit(try VaultCommitRequest(
+        let next = try Self.nextCatalog(catalog, records: records, drafts: drafts)
+        _ = try await vault.commit(try VaultCommitRequest(
             expectedGeneration: catalog.generation,
             catalog: next,
             writes: []
@@ -319,7 +332,7 @@ public actor VaultImportDraftStore: ImportDraftStore {
     public func discard(
         draftID: ImportDraft.ID,
         expectedRevision: UInt64
-    ) async throws -> VaultCatalog {
+    ) async throws {
         let catalog = try await vault.loadCatalog()
         guard let draft = catalog.importDrafts.first(where: { $0.id == draftID }) else {
             throw VaultImportDraftStoreError.draftNotFound
@@ -336,15 +349,15 @@ public actor VaultImportDraftStore: ImportDraftStore {
         let attachments = catalog.attachments.filter {
             retainedAttachmentIDs.contains($0.id)
         }
-        let next = try nextCatalog(catalog, attachments: attachments, drafts: drafts)
-        return try await vault.commit(try VaultCommitRequest(
+        let next = try Self.nextCatalog(catalog, attachments: attachments, drafts: drafts)
+        _ = try await vault.commit(try VaultCommitRequest(
             expectedGeneration: catalog.generation,
             catalog: next,
             writes: []
         ))
     }
 
-    private func nextCatalog(
+    private nonisolated static func nextCatalog(
         _ catalog: VaultCatalog,
         records: [HealthRecord]? = nil,
         attachments: [Attachment]? = nil,

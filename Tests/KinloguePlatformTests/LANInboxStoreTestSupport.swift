@@ -44,3 +44,23 @@ struct LANInboxStoreTestFixture {
         try? FileManager.default.removeItem(at: parentURL)
     }
 }
+
+struct LANReceiverBackendFixture {
+    let rootURL: URL
+    let store: any LANPendingItemStoring
+    let kernel: SQLiteLibraryStore?
+    var injectedStore: (any LANUploadStoring)? { kernel == nil ? nil : store }
+    static func make(sqlite: Bool) async throws -> Self {
+        if !sqlite {
+            let value = try await LANInboxStoreTestFixture.make()
+            return Self(rootURL: value.rootURL, store: value.store, kernel: nil)
+        }
+        let root = try sqliteTestRoot()
+        let kernel = try SQLiteLibraryStore(rootURL: root)
+        return Self(rootURL: root, store: try SQLiteLANInboxStore(store: kernel), kernel: kernel)
+    }
+    func destroy() {
+        try? kernel?.close()
+        try? FileManager.default.removeItem(at: rootURL.deletingLastPathComponent())
+    }
+}

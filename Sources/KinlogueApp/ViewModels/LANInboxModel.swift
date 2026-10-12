@@ -33,6 +33,7 @@ struct LANInboxDeleteCommand: Equatable, Sendable {
 
 private enum LANInboxUserError {
     case cannotOpenQueue
+    case cannotLoadMore
     case cannotRefreshQueue
     case noNetworkAddress
     case cannotReadNetworkAddress
@@ -48,6 +49,8 @@ private enum LANInboxUserError {
         switch self {
         case .cannotOpenQueue:
             AppLocalization.string("无法打开手机上传待确认队列，请稍后重试。")
+        case .cannotLoadMore:
+            AppLocalization.string("无法加载更多待确认项，请重试。")
         case .cannotRefreshQueue:
             AppLocalization.string("待确认队列暂时无法刷新。")
         case .noNetworkAddress:
@@ -78,14 +81,15 @@ final class LANInboxModel: ObservableObject {
     typealias DurableStateChangeHook = @Sendable () async -> Void
 
     private let service: any LANInboxServicing
+    private let processing: AppProcessingCoordinator
     private let onCatalogChanged: CatalogChangeHook
     private let onDurableStateChanged: DurableStateChangeHook
     private let lifecycleMonitor: LANSessionLifecycleMonitor
     private var lifecycleAdapter: LANSessionLifecycleNotificationAdapter?
     private var primaryWindowID: ObjectIdentifier?
     private var pollTask: Task<Void, Never>?
-    private var preprocessingTask: Task<Void, Never>?
-    private var automaticPreprocessingFailures: Set<LANInboxItem.ID> = []
+    private var retainedItems: [UUID: LANInboxItem] = [:]
+    private var queueRequestGeneration: UInt64 = 0
     private var selectedRevisions: [LANInboxItem.ID: UInt64] = [:]
     private var previewRequestGeneration: UInt64 = 0
     private var previewItemRevision: UInt64?
@@ -94,8 +98,12 @@ final class LANInboxModel: ObservableObject {
     private var vaultLifecycleIsLocked = false
     private var observedChangeGeneration: UInt64?
 
+    @Published private(set) var hasDamagedItems = false
     @Published private(set) var isLoading = false
-    @Published private(set) var snapshot: LANInboxSnapshot?
+    @Published private(set) var page: LANInboxPage?
+    @Published private(set) var loadedItems: [LANInboxItem] = []
+    @Published private(set) var isLoadingMore = false
+    @Published private(set) var usesContentByteTotals = false
     @Published private(set) var storage: LANInboxStorageSummary?
     @Published private(set) var receiverPhase: LANInboxReceiverPhase = .inactive
     @Published private(set) var receiverDetails: LANReceiverDetails?
@@ -108,39 +116,51 @@ final class LANInboxModel: ObservableObject {
     @Published private(set) var archiveOrder: [LANInboxItem.ID] = []
     @Published var selectedMemberID: FamilyMember.ID?
     @Published var canonicalReportDate = Date()
-    @Published private(set) var busyItemIDs: Set<LANInboxItem.ID> = []
+    @Published private var mutationItemIDs: Set<LANInboxItem.ID> = []
+    @Published private var processingItemIDs: Set<LANInboxItem.ID> = []
+
+    var busyItemIDs: Set<LANInboxItem.ID> { mutationItemIDs.union(processingItemIDs) }
     @Published var archiveNotice: LANInboxArchiveNotice?
     @Published var previewPresentation: LANInboxPreviewPresentation?
     @Published private(set) var pendingDeleteCommand: LANInboxDeleteCommand?
 
     init(
         service: any LANInboxServicing,
+        processing: AppProcessingCoordinator? = nil,
         onCatalogChanged: @escaping CatalogChangeHook = {},
         onDurableStateChanged: @escaping DurableStateChangeHook = {}
     ) {
         self.service = service
+        self.processing = processing ?? AppProcessingCoordinator(lanService: service)
         self.onCatalogChanged = onCatalogChanged
         self.onDurableStateChanged = onDurableStateChanged
         lifecycleMonitor = LANSessionLifecycleMonitor(
             stopReceiving: { await service.stopReceiving() },
             invalidateCredential: {}
         )
+        self.processing.onLANProcessingChanged = { [weak self] refresh in
+            guard let self, !vaultLifecycleIsLocked else { return }
+            processingItemIDs = self.processing.busyItemIDs
+            if !self.processing.failedItemIDs.isEmpty { userError = .preprocessingFailed }
+            if refresh { await self.refresh() }
+        }
     }
 
     deinit {
         pollTask?.cancel()
-        preprocessingTask?.cancel()
     }
 
+    var hasMore: Bool { page?.nextCursor != nil }
+
     var items: [LANInboxItem] {
-        snapshot?.items ?? []
+        loadedItems
     }
 
     var selectedItem: LANInboxItem? {
         guard selectedItemIDs.count == 1, let id = selectedItemIDs.first else {
             return nil
         }
-        return items.first { $0.id == id }
+        return retainedItems[id] ?? items.first { $0.id == id }
     }
 
     var userErrorMessage: String? {
@@ -148,7 +168,7 @@ final class LANInboxModel: ObservableObject {
     }
 
     var orderedSelectedItems: [LANInboxItem] {
-        let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        let byID = knownItems
         return archiveOrder.compactMap { byID[$0] }
     }
 
@@ -170,6 +190,7 @@ final class LANInboxModel: ObservableObject {
         guard let lifecycleGeneration = currentVaultLifecycleGeneration(),
               !hasStarted else { return }
         hasStarted = true
+        let request = beginQueueRequest()
         isLoading = true
         defer {
             if acceptsVaultLifecycleResult(lifecycleGeneration) {
@@ -181,12 +202,14 @@ final class LANInboxModel: ObservableObject {
             guard acceptsVaultLifecycleResult(lifecycleGeneration) else { return }
             let screen = try await service.initialize()
             guard acceptsVaultLifecycleResult(lifecycleGeneration) else { return }
-            apply(screen)
+            guard request == queueRequestGeneration else { return }
+            apply(screen, retaining: [])
             observedChangeGeneration = changeGeneration
             startPolling()
             schedulePreprocessing()
         } catch {
             guard acceptsVaultLifecycleResult(lifecycleGeneration) else { return }
+            guard request == queueRequestGeneration else { return }
             hasStarted = false
             userError = .cannotOpenQueue
         }
@@ -196,13 +219,25 @@ final class LANInboxModel: ObservableObject {
 
     private func refresh(allowAutomaticPreprocessing: Bool) async {
         guard let lifecycleGeneration = currentVaultLifecycleGeneration() else { return }
+        let request = beginQueueRequest()
         do {
             let changeGeneration = await service.changeGeneration()
             let previousChangeGeneration = observedChangeGeneration
             guard acceptsVaultLifecycleResult(lifecycleGeneration) else { return }
             let screen = try await service.refresh()
             guard acceptsVaultLifecycleResult(lifecycleGeneration) else { return }
-            apply(screen)
+            let selection = Array(selectedItemIDs)
+            var retained: [LANInboxItem] = []
+            for offset in stride(from: 0, to: selection.count, by: LANArchiveIntent.maximumSourceCount) {
+                let batch = Array(selection[offset..<min(offset + LANArchiveIntent.maximumSourceCount, selection.count)])
+                retained += (try? await service.loadItems(ids: batch)) ?? []
+                guard acceptsVaultLifecycleResult(lifecycleGeneration), request == queueRequestGeneration else { return }
+            }
+            if let previewID = previewPresentation?.id, !selection.contains(previewID) {
+                retained += (try? await service.loadItems(ids: [previewID])) ?? []
+            }
+            guard acceptsVaultLifecycleResult(lifecycleGeneration), request == queueRequestGeneration else { return }
+            apply(screen, retaining: retained)
             observedChangeGeneration = changeGeneration
             if let previousChangeGeneration,
                changeGeneration > previousChangeGeneration {
@@ -212,8 +247,54 @@ final class LANInboxModel: ObservableObject {
             if allowAutomaticPreprocessing { schedulePreprocessing() }
         } catch {
             guard acceptsVaultLifecycleResult(lifecycleGeneration) else { return }
+            guard request == queueRequestGeneration else { return }
             userError = .cannotRefreshQueue
         }
+    }
+
+    var canRetryQueueLoad: Bool {
+        switch userError {
+        case .cannotOpenQueue?, .cannotLoadMore?, .cannotRefreshQueue?: true
+        default: false
+        }
+    }
+
+    func retryQueueLoad() async {
+        switch userError {
+        case .cannotOpenQueue?: await start()
+        case .cannotLoadMore?: await loadMore()
+        case .cannotRefreshQueue?: await refresh()
+        default: break
+        }
+    }
+
+    func loadMore() async {
+        guard let lifecycleGeneration = currentVaultLifecycleGeneration(), let cursor = page?.nextCursor,
+              !isLoadingMore else { return }
+        let request = beginQueueRequest()
+        isLoadingMore = true
+        defer { if request == queueRequestGeneration { isLoadingMore = false } }
+        do {
+            let screen = try await service.loadPage(cursor: cursor)
+            guard acceptsVaultLifecycleResult(lifecycleGeneration), request == queueRequestGeneration else { return }
+            apply(screen, retaining: Array(retainedItems.values), appending: true)
+        } catch LibraryReportError.staleCursor {
+            guard acceptsVaultLifecycleResult(lifecycleGeneration), request == queueRequestGeneration else { return }
+            await refresh()
+        } catch {
+            guard acceptsVaultLifecycleResult(lifecycleGeneration), request == queueRequestGeneration else { return }
+            userError = .cannotLoadMore
+        }
+    }
+
+    private var knownItems: [UUID: LANInboxItem] {
+        retainedItems.merging(Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })) { _, visible in visible }
+    }
+
+    private func beginQueueRequest() -> UInt64 {
+        queueRequestGeneration &+= 1
+        isLoadingMore = false
+        return queueRequestGeneration
     }
 
     func prepareReceiving() async {
@@ -329,15 +410,18 @@ final class LANInboxModel: ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         observedChangeGeneration = nil
-        preprocessingTask?.cancel()
-        preprocessingTask = nil
+        processing.beginDestructiveVaultLifecycle()
         lifecycleAdapter?.stop()
         lifecycleAdapter = nil
         primaryWindowID = nil
-        automaticPreprocessingFailures.removeAll()
         selectedRevisions.removeAll()
-        busyItemIDs.removeAll()
-        snapshot = nil
+        mutationItemIDs.removeAll()
+        processingItemIDs.removeAll()
+        page = nil
+        loadedItems = []
+        retainedItems = [:]
+        _ = beginQueueRequest()
+        hasDamagedItems = false
         storage = nil
         availableAddresses = []
         selectedAddress = nil
@@ -355,7 +439,7 @@ final class LANInboxModel: ObservableObject {
 
     func reconcileSelectionOrder() {
         guard !vaultLifecycleIsLocked else { return }
-        let currentByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        let currentByID = knownItems
         let validSelected = selectedItemIDs.filter { id in
             guard let item = currentByID[id], item.isReviewable else { return false }
             if let frozenRevision = selectedRevisions[id] {
@@ -366,7 +450,7 @@ final class LANInboxModel: ObservableObject {
         }
         selectedItemIDs = Set(validSelected)
         archiveOrder.removeAll { !selectedItemIDs.contains($0) }
-        for item in items where selectedItemIDs.contains(item.id)
+        for item in currentByID.values.sorted(by: { ($0.sequence, $0.id.uuidString) < ($1.sequence, $1.id.uuidString) }) where selectedItemIDs.contains(item.id)
             && !archiveOrder.contains(item.id) {
             archiveOrder.append(item.id)
         }
@@ -392,15 +476,19 @@ final class LANInboxModel: ObservableObject {
                 from: canonicalReportDate
               ) else { return }
         let orderedIDs = archiveOrder
-        busyItemIDs.formUnion(orderedIDs)
+        let expectedRevisions = orderedSelectedItems.map(\.revision)
+        _ = beginQueueRequest()
+        invalidatePreview()
+        mutationItemIDs.formUnion(orderedIDs)
         defer {
             if acceptsVaultLifecycleResult(lifecycleGeneration) {
-                busyItemIDs.subtract(orderedIDs)
+                mutationItemIDs.subtract(orderedIDs)
             }
         }
         do {
             let result = try await service.archive(
                 itemIDs: orderedIDs,
+                expectedRevisions: expectedRevisions,
                 memberID: selectedMemberID,
                 canonicalReportDate: reportDate
             )
@@ -432,32 +520,23 @@ final class LANInboxModel: ObservableObject {
 
     func retry(itemID: LANInboxItem.ID) async {
         guard let lifecycleGeneration = currentVaultLifecycleGeneration(),
-              let item = items.first(where: { $0.id == itemID }) else { return }
+              let item = knownItems[itemID] else { return }
         switch item.state {
         case .stored, .failed, .unsupported:
             break
         case .preprocessing, .reviewable, .integrityFailed:
             return
         }
-        let succeeded = await performItemMutation(
-            itemID: itemID,
-            refreshAfter: false,
-            lifecycleGeneration: lifecycleGeneration
-        ) {
-            try await service.preprocess(itemID: itemID)
-        }
+        guard !busyItemIDs.contains(itemID) else { return }
+        let succeeded = await processing.preprocess(itemID: itemID)
         guard acceptsVaultLifecycleResult(lifecycleGeneration) else { return }
-        if succeeded {
-            automaticPreprocessingFailures.remove(itemID)
-        } else {
-            automaticPreprocessingFailures.insert(itemID)
-        }
+        if !succeeded { userError = .staleItem }
         await refresh(allowAutomaticPreprocessing: succeeded)
     }
 
     func requestDelete(_ ids: Set<LANInboxItem.ID>) {
         guard !vaultLifecycleIsLocked else { return }
-        let targets = items.compactMap { item -> LANInboxDeleteTarget? in
+        let targets = knownItems.values.sorted { ($0.sequence, $0.id.uuidString) < ($1.sequence, $1.id.uuidString) }.compactMap { item -> LANInboxDeleteTarget? in
             guard ids.contains(item.id), !busyItemIDs.contains(item.id) else { return nil }
             return LANInboxDeleteTarget(
                 itemID: item.id,
@@ -496,7 +575,7 @@ final class LANInboxModel: ObservableObject {
 
     func openPreview(itemID: LANInboxItem.ID) async {
         guard let lifecycleGeneration = currentVaultLifecycleGeneration(),
-              let item = items.first(where: { $0.id == itemID }), item.isReviewable else {
+              let item = knownItems[itemID], item.isReviewable else {
             return
         }
         let expectedRevision = item.revision
@@ -523,12 +602,12 @@ final class LANInboxModel: ObservableObject {
         payload: OriginalDocumentPayload
     ) {
         guard !vaultLifecycleIsLocked else { return }
-        guard items.first(where: { $0.id == itemID })?.isReviewable == true else {
+        guard knownItems[itemID]?.isReviewable == true else {
             userError = .cannotOpenOriginal
             return
         }
         let generation = beginPreviewRequest()
-        guard let item = items.first(where: { $0.id == itemID }),
+        guard let item = knownItems[itemID],
               isCurrentPreviewRequest(
                 generation,
                 itemID: itemID,
@@ -545,7 +624,7 @@ final class LANInboxModel: ObservableObject {
 
     func loadPreviewPayload(itemID: LANInboxItem.ID) async throws -> OriginalDocumentPayload {
         guard let lifecycleGeneration = currentVaultLifecycleGeneration(),
-              items.first(where: { $0.id == itemID })?.isReviewable == true else {
+              knownItems[itemID]?.isReviewable == true else {
             throw LANInboxError.invalidState
         }
         let preview = try await service.loadPreview(itemID: itemID)
@@ -566,10 +645,13 @@ final class LANInboxModel: ObservableObject {
         operation: () async throws -> Void
     ) async -> Bool {
         guard acceptsVaultLifecycleResult(lifecycleGeneration),
-              busyItemIDs.insert(itemID).inserted else { return false }
+              !busyItemIDs.contains(itemID) else { return false }
+        _ = beginQueueRequest()
+        if previewPresentation?.id == itemID { invalidatePreview() }
+        mutationItemIDs.insert(itemID)
         defer {
             if acceptsVaultLifecycleResult(lifecycleGeneration) {
-                busyItemIDs.remove(itemID)
+                mutationItemIDs.remove(itemID)
             }
         }
         do {
@@ -585,26 +667,34 @@ final class LANInboxModel: ObservableObject {
         return true
     }
 
-    private func apply(_ screen: LANInboxScreenSnapshot) {
+    private func apply(_ screen: LANInboxScreenSnapshot, retaining: [LANInboxItem], appending: Bool = false) {
         guard !vaultLifecycleIsLocked else { return }
-        if let snapshot, screen.snapshot.generation < snapshot.generation { return }
-        if snapshot != screen.snapshot {
-            snapshot = screen.snapshot
-            let currentIDs = Set(screen.snapshot.items.map(\.id))
-            selectedItemIDs.formIntersection(currentIDs)
-            automaticPreprocessingFailures.formIntersection(currentIDs)
-            reconcileSelectionOrder()
+        let incoming = screen.page
+        if let page {
+            guard page.revision.libraryID == incoming.revision.libraryID,
+                  page.revision.openEpoch == incoming.revision.openEpoch,
+                  incoming.revision.generation >= page.revision.generation else { return }
+            if appending && page.revision != incoming.revision { return }
         }
-        if let presentation = previewPresentation,
-           let previewItemRevision,
-           !screen.snapshot.items.contains(where: {
-               $0.id == presentation.id
-                   && $0.revision == previewItemRevision
-                   && $0.isReviewable
-           }) {
-            invalidatePreview()
+        switch userError {
+        case .cannotOpenQueue?, .cannotRefreshQueue?, .cannotLoadMore?: userError = nil
+        default: break
         }
-        if storage != screen.storage { storage = screen.storage }
+        page = incoming
+        if appending {
+            let existing = Set(loadedItems.map(\.id))
+            loadedItems += incoming.items.filter { !existing.contains($0.id) }
+        } else { loadedItems = incoming.items }
+        retainedItems = Dictionary(uniqueKeysWithValues: retaining.map { ($0.id, $0) })
+        hasDamagedItems = (appending && hasDamagedItems) || !incoming.damagedItemIDs.isEmpty || !screen.damagedUploadIDs.isEmpty || !screen.damagedReceiptIDs.isEmpty || !screen.damagedTerminalIDs.isEmpty
+        selectedItemIDs.formIntersection(Set(knownItems.keys))
+        reconcileSelectionOrder()
+        if let presentation = previewPresentation, let previewItemRevision {
+            let item = knownItems[presentation.id]
+            if item?.revision != previewItemRevision || item?.isReviewable != true { invalidatePreview() }
+        }
+        storage = screen.storage
+        usesContentByteTotals = screen.usesContentByteTotals
     }
 
     private func beginPreviewRequest() -> UInt64 {
@@ -626,45 +716,14 @@ final class LANInboxModel: ObservableObject {
         expectedRevision: UInt64
     ) -> Bool {
         generation == previewRequestGeneration
-            && items.contains(where: {
-                $0.id == itemID
-                    && $0.revision == expectedRevision
-                    && $0.isReviewable
-            })
+            && knownItems[itemID]?.revision == expectedRevision
+            && knownItems[itemID]?.isReviewable == true
     }
 
     private func schedulePreprocessing() {
-        guard let lifecycleGeneration = currentVaultLifecycleGeneration(),
-              preprocessingTask == nil else { return }
-        preprocessingTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            var attemptedItemIDs: Set<LANInboxItem.ID> = []
-            while !Task.isCancelled,
-                  acceptsVaultLifecycleResult(lifecycleGeneration) {
-                guard let item = items.first(where: {
-                    guard case .stored = $0.state else { return false }
-                    return !attemptedItemIDs.contains($0.id)
-                        && !automaticPreprocessingFailures.contains($0.id)
-                }) else { break }
-                let itemID = item.id
-                attemptedItemIDs.insert(itemID)
-                busyItemIDs.insert(itemID)
-                do {
-                    try await service.preprocess(itemID: itemID)
-                    guard acceptsVaultLifecycleResult(lifecycleGeneration) else { return }
-                    automaticPreprocessingFailures.remove(itemID)
-                } catch {
-                    guard acceptsVaultLifecycleResult(lifecycleGeneration) else { return }
-                    automaticPreprocessingFailures.insert(itemID)
-                    userError = .preprocessingFailed
-                }
-                busyItemIDs.remove(itemID)
-                await refresh(allowAutomaticPreprocessing: false)
-            }
-            if acceptsVaultLifecycleResult(lifecycleGeneration) {
-                preprocessingTask = nil
-            }
-        }
+        guard !vaultLifecycleIsLocked else { return }
+        processingItemIDs = processing.busyItemIDs
+        processing.schedulePreprocessing()
     }
 
     private func startPolling() {

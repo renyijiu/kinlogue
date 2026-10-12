@@ -79,6 +79,38 @@ struct SyntheticAcceptanceRunnerTests {
     }
 
     @Test
+    func sqliteCandidateEntryRequiresTheExistingAcceptanceIdentity() {
+        let arguments = ["Kinlogue", AppRuntimeIdentity.syntheticSmokeArgument, "--acceptance-phase=sqlite-candidate"]
+        let accepted = AcceptanceSmokeEntry.resolve(bundleInfo: [
+            "CFBundleIdentifier": "com.kinlogue.mac.acceptance.\(runID)",
+            AppRuntimeIdentity.acceptanceEnabledInfoKey: true,
+            AppRuntimeIdentity.acceptanceRunIDInfoKey: runID
+        ], arguments: arguments, trustedApplicationSupportDirectory: supportDirectory)
+        #expect(accepted.request?.phase.rawValue == "sqlite-candidate")
+        #expect(AcceptanceSmokeEntry.resolve(bundleInfo: ["CFBundleIdentifier": AppRuntimeIdentity.productionBundleIdentifier],
+            arguments: arguments, trustedApplicationSupportDirectory: supportDirectory) == .reject)
+    }
+
+    @Test
+    @MainActor
+    func sqliteCandidateProbeUsesRealServicesAndReleasesItsExactOwnership() async throws {
+        let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("kinlogue-candidate-probe-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: base) }
+        let identity = try AppRuntimeIdentity.resolve(bundleInfo: [
+            "CFBundleIdentifier": "com.kinlogue.mac.acceptance.\(runID)",
+            AppRuntimeIdentity.acceptanceEnabledInfoKey: true,
+            AppRuntimeIdentity.acceptanceRunIDInfoKey: runID
+        ], arguments: ["Kinlogue", AppRuntimeIdentity.syntheticSmokeArgument, AcceptanceSmokePhase.sqliteCandidate.argument],
+            trustedApplicationSupportDirectory: base)
+        _ = try AcceptanceRunOwnership.claim(applicationSupportURL: base, runID: runID)
+        let result = try await SQLiteCandidateAcceptanceProbe.run(request: AcceptanceSmokeRequest(identity: identity, phase: .sqliteCandidate))
+        #expect(result.reportCount == 1 && result.originalBytesBeforeReady == 0 && result.exportedOriginalCount == 1)
+        #expect(!FileManager.default.fileExists(atPath: identity.sourceVault.rootURL.deletingLastPathComponent().path))
+        try result.emit()
+    }
+
+    @Test
     func installedLANEvidenceCannotEncodeAFailedRequiredField() throws {
         let hash = String(repeating: "a", count: 64)
         let valid = try InstalledLANAcceptanceEvent(

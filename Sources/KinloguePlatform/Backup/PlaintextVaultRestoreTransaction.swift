@@ -64,6 +64,7 @@ private struct BackupRestoreTransactionReceipt: Codable {
     let inboxGeneration: UInt64
     let inboxCommitID: UUID
     let inboxManifestDigest: Data
+    let logicalDigest: Data?
 }
 
 private struct BackupRestoreEpochRecord: Codable {
@@ -91,6 +92,7 @@ public final class BackupRestoreTransaction: @unchecked Sendable {
     private let epochName: String
     private let failureInjector: FailureInjector?
     private let mutationCoordinator: VaultMutationCoordinator
+    private var owner: SQLiteLibraryOwner?
 
     public convenience init(activeRootURL: URL) throws {
         try self.init(activeRootURL: activeRootURL, failureInjector: nil)
@@ -122,10 +124,18 @@ public final class BackupRestoreTransaction: @unchecked Sendable {
         mutationCoordinator = VaultMutationCoordinator.shared(for: root)
     }
 
+    package convenience init(owner: SQLiteLibraryOwner, failureInjector: FailureInjector? = nil) throws {
+        try self.init(activeRootURL: owner.rootURL, failureInjector: failureInjector)
+        try owner.validate(); self.owner = owner
+    }
+
     public func activate(
         prepared: BackupPreparedRestore,
         resetWriter: @escaping WriterReset
     ) async throws -> BackupRestoreActivationResult {
+        try owner?.validate()
+        try owner?.requireClosedDatabase()
+        guard (owner != nil) == (prepared.summary.logicalDigest != nil) else { throw BackupRestoreError.graphInvalid }
         guard prepared.activeRootName == activeRootName,
               prepared.stagingURL.deletingLastPathComponent() == stableParentURL,
               prepared.preflightReceiptURL.deletingLastPathComponent() == stableParentURL else {
@@ -133,6 +143,7 @@ public final class BackupRestoreTransaction: @unchecked Sendable {
         }
         let lease = try await mutationCoordinator.acquire()
         defer { lease.release() }
+        try owner?.validate()
         let parentDescriptor = try BackupRestoreFilesystem.openStrictDirectory(stableParentURL)
         defer { Darwin.close(parentDescriptor) }
         guard try !namedNodeExists(transactionReceiptName, at: parentDescriptor),
@@ -155,7 +166,7 @@ public final class BackupRestoreTransaction: @unchecked Sendable {
         let epoch = try advanceEpoch(parentDescriptor: parentDescriptor)
         var receipt = BackupRestoreTransactionReceipt(
             magic: BackupRestoreTransactionReceipt.magic,
-            version: 1,
+            version: owner == nil ? 1 : 2,
             operationID: prepared.operationID,
             epoch: epoch,
             scenario: currentIdentity == nil ? .absentRoot : .existingRoot,
@@ -172,7 +183,8 @@ public final class BackupRestoreTransaction: @unchecked Sendable {
             vaultManifestDigest: prepared.summary.revisionPair.vault.manifestDigest,
             inboxGeneration: prepared.summary.revisionPair.lanInbox.generation,
             inboxCommitID: prepared.summary.revisionPair.lanInbox.commitID,
-            inboxManifestDigest: prepared.summary.revisionPair.lanInbox.manifestDigest
+            inboxManifestDigest: prepared.summary.revisionPair.lanInbox.manifestDigest,
+            logicalDigest: prepared.summary.logicalDigest
         )
         try writeInitialReceipt(receipt, parentDescriptor: parentDescriptor)
         try failIfRequested(.afterIntent)
@@ -221,8 +233,11 @@ public final class BackupRestoreTransaction: @unchecked Sendable {
     }
 
     public func reconcile() async throws -> BackupRestoreReconciliationOutcome {
+        try owner?.validate()
+        try owner?.requireClosedDatabase()
         let lease = try await mutationCoordinator.acquire()
         defer { lease.release() }
+        try owner?.validate()
         let parentDescriptor = try BackupRestoreFilesystem.openStrictDirectory(stableParentURL)
         defer { Darwin.close(parentDescriptor) }
         guard try namedNodeExists(transactionReceiptName, at: parentDescriptor) else {
@@ -326,6 +341,20 @@ public final class BackupRestoreTransaction: @unchecked Sendable {
             parentDescriptor: parent
         ) == receipt.stagingIdentity else {
             throw BackupRestoreError.activationConflict
+        }
+        if let owner {
+            try owner.validate()
+            let store = try SQLiteLibraryStore(owner: owner, mode: .strictExisting)
+            defer { try? store.close() }
+            let validation = try SQLiteLogicalBackupSource(store: store).validateStrict()
+            let pair = try SQLiteLogicalBackupSource.revision(validation.header)
+            guard validation.digest == receipt.logicalDigest,
+                  pair.vault.generation == receipt.vaultGeneration, pair.vault.commitID == receipt.vaultCommitID,
+                  pair.vault.manifestDigest == receipt.vaultManifestDigest,
+                  pair.lanInbox.generation == receipt.inboxGeneration, pair.lanInbox.commitID == receipt.inboxCommitID,
+                  pair.lanInbox.manifestDigest == receipt.inboxManifestDigest else { throw BackupRestoreError.graphInvalid }
+            try owner.validate()
+            return
         }
         let vault = try PlaintextVault(rootURL: activeRootURL)
         let inbox = try PlaintextLANInboxStore(rootURL: activeRootURL)
@@ -500,7 +529,8 @@ public final class BackupRestoreTransaction: @unchecked Sendable {
 
     private func validateReceiptShape(_ receipt: BackupRestoreTransactionReceipt) throws {
         guard receipt.magic == BackupRestoreTransactionReceipt.magic,
-              receipt.version == 1,
+              receipt.version == (owner == nil ? 1 : 2),
+              (owner == nil ? receipt.logicalDigest == nil : receipt.logicalDigest?.count == 32),
               receipt.epoch > 0,
               receipt.activeRootNameDigest == ContentDigest.sha256(Data(activeRootName.utf8)),
               receipt.checkpointID.count == 16,

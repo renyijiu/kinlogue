@@ -9,6 +9,49 @@ import Testing
 @MainActor
 struct LiveDICOMAppServiceIntegrationTests {
     @Test
+    func sqliteViewerSurvivesUnrelatedReportCommitAndRevokesForItsStudyAndClosedLibrary() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let source = fixture.base.appendingPathComponent("GeneratedSource")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
+        try GeneratedDICOMFixture.explicitVRLittleEndianMR().write(to: source.appendingPathComponent("synthetic.dcm"))
+        let workflow = try DICOMImportWorkflow(repository: fixture.studies, decoder: GeneratedAppDICOMDecoder())
+        let service = LiveAppService(reports: fixture.reports, studies: fixture.studies, draftStore: fixture.reports,
+            workflow: ImportWorkflow(store: fixture.reports, textExtractor: GeneratedAppTextExtractor()),
+            dicomRuntime: DICOMAppRuntime(workflow: workflow, securityScope: .notRequiredForTesting))
+        _ = try await service.bootstrap()
+        let imported = try await service.importDICOMDirectory(at: source)
+        let model = AppModel(service: service, dicomService: service,
+            dicomSliceServiceFactory: { DICOMSliceService(repository: fixture.studies, decoder: GeneratedAppDICOMDecoder()) })
+        await model.start()
+        let viewer = model.makeDICOMStudyViewerModel(studyID: imported.studyID)
+        viewer.activateWindow(onDismiss: {})
+        await viewer.load()
+        #expect(viewer.phase == .ready && viewer.image != nil)
+        let member = try FamilyMember(displayName: "Synthetic viewer member")
+        try await fixture.reports.saveMember(member, replacing: nil)
+        _ = try await fixture.confirmed(member: member, seed: "unrelated report")
+        await model.refresh()
+        #expect(viewer.phase == .ready && viewer.image != nil)
+        _ = try await service.saveDICOMStudy(SaveDICOMStudyCommand(studyID: imported.studyID,
+            expectedRevision: 0, memberID: member.id, effectiveDate: Date(timeIntervalSince1970: 100)))
+        await model.refresh()
+        #expect(viewer.phase == .closed && viewer.image == nil)
+        let reopened = model.makeDICOMStudyViewerModel(studyID: imported.studyID)
+        reopened.activateWindow(onDismiss: {})
+        await reopened.load()
+        #expect(reopened.phase == .ready)
+        try fixture.store.close()
+        await reopened.selectSeries(try #require(reopened.selectedSeriesID))
+        for _ in 0..<200 {
+            if model.phase == .locked, reopened.phase == .closed { break }
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        #expect(model.phase == .locked)
+        #expect(reopened.phase == .closed && reopened.image == nil)
+    }
+
+    @Test
     func cancellationAfterManifestCommitWaitsForProjectionAndReportsSuccess() async throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent(
             "kinlogue-app-dicom-cancel-after-commit-\(UUID().uuidString)",
@@ -114,7 +157,8 @@ struct LiveDICOMAppServiceIntegrationTests {
             displayName: "Synthetic imaging integration member",
             disambiguationLabel: nil
         )
-        let member = try #require(memberSnapshot.members.first)
+        let memberID = try #require(memberSnapshot.members.first?.id)
+        let member = try await service.loadMember(id: memberID)
 
         let imported = try await service.importDICOMDirectory(at: source)
 
@@ -123,8 +167,8 @@ struct LiveDICOMAppServiceIntegrationTests {
         #expect(imported.viewableInstanceCount == 1)
         #expect(imported.inertObjectCount == 0)
         let pending = try await service.refresh()
-        #expect(pending.records.isEmpty)
-        #expect(pending.drafts.isEmpty)
+        #expect(pending.reportCount == 0)
+        #expect(pending.draftCount == 0)
         #expect(pending.dicomStudies.map(\.state) == [.needsReview])
 
         let review = try await service.loadDICOMStudyReview(studyID: imported.studyID)
@@ -138,13 +182,14 @@ struct LiveDICOMAppServiceIntegrationTests {
 
         let confirmation = SaveDICOMStudyCommand(
             studyID: imported.studyID,
+            expectedRevision: review.study.contentRevision,
             memberID: member.id,
             effectiveDate: Date(timeIntervalSince1970: 1_785_566_400)
         )
         let confirmed = try await service.saveDICOMStudy(confirmation)
         #expect(confirmed.dicomStudies.map(\.state) == [.confirmed])
-        #expect(confirmed.records.isEmpty)
-        #expect(confirmed.drafts.isEmpty)
+        #expect(confirmed.reportCount == 0)
+        #expect(confirmed.draftCount == 0)
         let repeatedConfirmation = try await service.saveDICOMStudy(confirmation)
         #expect(repeatedConfirmation.generation == confirmed.generation)
 
@@ -152,8 +197,8 @@ struct LiveDICOMAppServiceIntegrationTests {
             id: member.id,
             displayName: "Synthetic renamed imaging member"
         )
-        let afterOrdinaryMemberEdit = try await service.updateMember(renamedMember)
-        #expect(afterOrdinaryMemberEdit.members == [renamedMember])
+        let afterOrdinaryMemberEdit = try await service.updateMember(renamedMember, replacing: member)
+        #expect(afterOrdinaryMemberEdit.members == [LibraryMemberSummary(renamedMember)])
         #expect(afterOrdinaryMemberEdit.dicomStudies.map(\.id) == [imported.studyID])
 
         let reportBytes = Data("synthetic-report-after-dicom-confirmation".utf8)
@@ -172,10 +217,11 @@ struct LiveDICOMAppServiceIntegrationTests {
         let reportDraft = try #require(
             try await vault.loadCatalog().importDrafts.first { $0.id == reportDraftID }
         )
-        let afterReportDiscard = try await draftStore.discard(
+        try await draftStore.discard(
             draftID: reportDraftID,
             expectedRevision: reportDraft.revision
         )
+        let afterReportDiscard = try await vault.loadCatalog()
         #expect(afterReportDiscard.dicomStudies.map(\.id) == [imported.studyID])
         #expect(try await service.loadDICOMStudyViewer(studyID: imported.studyID).study.id == imported.studyID)
 
@@ -191,8 +237,8 @@ struct LiveDICOMAppServiceIntegrationTests {
         #expect(afterStudyDeletion.dicomStudies.isEmpty)
         let afterMemberDeletion = try await service.deleteMember(id: member.id)
         #expect(afterMemberDeletion.members.isEmpty)
-        #expect(afterMemberDeletion.records.isEmpty)
-        #expect(afterMemberDeletion.drafts.isEmpty)
+        #expect(afterMemberDeletion.reportCount == 0)
+        #expect(afterMemberDeletion.draftCount == 0)
 
         await lifecycle.revoke()
         await #expect(throws: LibraryLifecycleCoordinatorError.revoked) {
@@ -204,6 +250,7 @@ struct LiveDICOMAppServiceIntegrationTests {
         await #expect(throws: LibraryLifecycleCoordinatorError.revoked) {
             try await service.saveDICOMStudy(SaveDICOMStudyCommand(
                 studyID: imported.studyID,
+                expectedRevision: review.study.contentRevision,
                 memberID: member.id,
                 effectiveDate: Date(timeIntervalSince1970: 1_785_566_400)
             ))
@@ -348,7 +395,8 @@ private actor DICOMOutcomeProjectionVault: VaultStore {
     func readSnapshot(
         selecting references: @Sendable (VaultCatalog) throws -> [VaultObjectReference]
     ) async throws -> VaultReadSnapshot {
-        try await underlying.readSnapshot(selecting: references)
+        _ = try await loadCatalog()
+        return try await underlying.readSnapshot(selecting: references)
     }
 
     func commit(_ request: VaultCommitRequest) async throws -> VaultCatalog {
@@ -419,7 +467,8 @@ private actor CatalogLoadGatedVault: VaultStore {
     func readSnapshot(
         selecting references: @Sendable (VaultCatalog) throws -> [VaultObjectReference]
     ) async throws -> VaultReadSnapshot {
-        try await underlying.readSnapshot(selecting: references)
+        _ = try await loadCatalog()
+        return try await underlying.readSnapshot(selecting: references)
     }
 
     func commit(_ request: VaultCommitRequest) async throws -> VaultCatalog {

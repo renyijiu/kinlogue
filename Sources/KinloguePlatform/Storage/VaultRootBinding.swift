@@ -72,6 +72,24 @@ struct VaultRootBinding: Sendable {
         }
     }
 
+    /// Validates only directory identity; a snapshot caller must also check its
+    /// exact manifest identity before reusing a previously validated catalog.
+    func validateFilesystemIdentity(
+        _ expected: VaultRootGeneration,
+        using lease: VaultMutationLease
+    ) throws {
+        try mutationCoordinator.withValidatedLease(lease) {
+            try validateCurrentPath(
+                parentIdentity: DirectoryIdentity(
+                    device: expected.parentDevice, inode: expected.parentInode
+                ),
+                rootIdentity: DirectoryIdentity(
+                    device: expected.rootDevice, inode: expected.rootInode
+                )
+            )
+        }
+    }
+
     /// Re-probes instead of trusting a cached path or descriptor identity.
     /// Any missing, replaced or damaged generation is a non-match.
     func matches(_ expected: VaultRootGeneration) -> Bool {

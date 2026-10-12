@@ -7,16 +7,17 @@ enum LANReportArchiveCoordinatorFault: Equatable, Sendable {
     case beforeTerminalCleanup
 }
 
-/// Turns one ordered Mac selection into at most one review draft. The inbox
-/// intent survives cross-store work, and selected items leave the queue only
-/// after the Vault has a durable new or pre-existing destination.
+/// Turns one ordered Mac selection into at most one review draft. SQLite moves
+/// its references in one transaction; the temporary JSON backend retains its
+/// durable intent until cross-store publication has a verified destination.
 public actor LANReportArchiveCoordinator {
     public typealias IDGenerator = @Sendable () -> UUID
 
-    private let inbox: PlaintextLANInboxStore
-    private let vault: PlaintextVault
+    private let sqliteInbox: SQLiteLANInboxStore?
+    private let inbox: PlaintextLANInboxStore?
+    private let vault: PlaintextVault?
     private let preprocessor: LANItemPreprocessor
-    private let stager: VaultReportSelectionStaging
+    private let stager: VaultReportSelectionStaging?
     private let makeID: IDGenerator
     private let failureInjector: (@Sendable (LANReportArchiveCoordinatorFault) -> Bool)?
 
@@ -45,6 +46,7 @@ public actor LANReportArchiveCoordinator {
         makeID: @escaping IDGenerator = { UUID() },
         failureInjector: (@Sendable (LANReportArchiveCoordinatorFault) -> Bool)?
     ) throws {
+        self.sqliteInbox = nil
         self.inbox = inbox
         self.vault = vault
         self.preprocessor = preprocessor
@@ -53,12 +55,28 @@ public actor LANReportArchiveCoordinator {
         self.failureInjector = failureInjector
     }
 
+    package init(inbox: SQLiteLANInboxStore, preprocessor: LANItemPreprocessor) {
+        sqliteInbox = inbox
+        self.inbox = nil; vault = nil; stager = nil
+        self.preprocessor = preprocessor; makeID = { UUID() }; failureInjector = nil
+    }
+
     public func archive(
         itemIDs: [LANInboxItem.ID],
+        expectedRevisions: [UInt64]? = nil,
         memberID: FamilyMember.ID,
         canonicalReportDate: Date,
         activeSessionID: UUID? = nil
     ) async throws -> LANReportArchiveResult {
+        if let sqliteInbox {
+            if let result = try await sqliteInbox.completedArchive(itemIDs: itemIDs, memberID: memberID, canonicalReportDate: canonicalReportDate) { return result }
+            if expectedRevisions == nil { _ = try await preprocessor.preprocess(itemIDs: itemIDs) }
+            let prepared = try await preprocessor.preparedSelection(itemIDs: itemIDs,
+                canonicalReportDate: CanonicalVaultJSON.persistenceStableDate(canonicalReportDate))
+            if let expectedRevisions, prepared.items.map(\.revision) != expectedRevisions { throw LANInboxError.staleRevision }
+            return try await sqliteInbox.archive(prepared, memberID: memberID, canonicalReportDate: canonicalReportDate, activeSessionID: activeSessionID)
+        }
+        guard let inbox, let vault, let stager else { throw LANInboxError.vaultUnavailable }
         guard !itemIDs.isEmpty,
               itemIDs.count <= LANArchiveIntent.maximumSourceCount,
               Set(itemIDs).count == itemIDs.count,
@@ -68,11 +86,12 @@ public actor LANReportArchiveCoordinator {
         let persistenceStableDate = CanonicalVaultJSON.persistenceStableDate(
             canonicalReportDate
         )
-        _ = try await preprocessor.preprocess(itemIDs: itemIDs)
+        if expectedRevisions == nil { _ = try await preprocessor.preprocess(itemIDs: itemIDs) }
         let prepared = try await preprocessor.preparedSelection(
             itemIDs: itemIDs,
             canonicalReportDate: persistenceStableDate
         )
+        if let expectedRevisions, prepared.items.map(\.revision) != expectedRevisions { throw LANInboxError.staleRevision }
         var snapshot = try await inbox.loadSnapshot()
         var intent = try existingOrNewIntent(
             snapshot: snapshot,
@@ -166,6 +185,7 @@ public actor LANReportArchiveCoordinator {
     }
 
     public func reconcileTerminalStaging(in snapshot: LANInboxSnapshot) async {
+        guard let inbox, let stager else { return }
         var completed: [LANArchiveTerminal] = []
         for terminal in snapshot.archiveTerminals {
             do {
@@ -182,6 +202,7 @@ public actor LANReportArchiveCoordinator {
         _ terminal: LANArchiveTerminal,
         staged: VaultStagedReportSelection? = nil
     ) async {
+        guard let inbox, let stager else { return }
         guard failureInjector?(.beforeTerminalCleanup) != true else { return }
         do {
             if let staged {
@@ -312,6 +333,7 @@ public actor LANReportArchiveCoordinator {
         intent: LANArchiveIntent,
         activeSessionID: UUID?
     ) async throws -> LANArchiveTerminal {
+        guard let inbox, let vault else { throw LANInboxError.vaultUnavailable }
         let (catalog, revision) = try await vault.loadCatalogHead()
         if let draft = catalog.importDrafts.first(where: { $0.id == intent.draftID }),
            draft.state == .needsReview,
