@@ -64,9 +64,8 @@ func (a *area) wrappedHeight(e *node, ed *editor, cw float32) float32 {
 				if ed.compose != "" && p == ed.buf.para(ed.caret) {
 					at := runeOffset(part.Text, ed.caret-ed.buf.start(p))
 					part.Text = part.Text[:at] + ed.compose + part.Text[at:]
-				} else {
-					part.Spans, _ = ed.rangeSpans(ed.buf.start(p), ed.buf.end(p))
 				}
+				part.Spans, _ = ed.rangeSpans(ed.buf.start(p), ed.buf.end(p))
 				height += textSystem().Shape(part).Height
 			}
 			a.wrapped, a.wrappedParams, a.wrappedVersion = height, params, ed.buf.version
@@ -76,10 +75,8 @@ func (a *area) wrappedHeight(e *node, ed *editor, cw float32) float32 {
 	}
 	params.Text = ed.displayText()
 	params.KeepSpaces, params.MaxLines = true, 0
-	if ed.compose == "" {
-		// Bold runs take more room, so the text may wrap sooner.
-		params.Spans, _ = ed.rangeSpans(0, ed.buf.n)
-	}
+	// Bold runs take more room, so the text may wrap sooner.
+	params.Spans, _ = ed.rangeSpans(0, ed.buf.n)
 	if params != a.wrappedParams {
 		a.wrappedParams = params
 		a.wrapped = textSystem().Layout(params).Height
@@ -160,10 +157,7 @@ func (a *area) paraLayout(ed *editor, p int) *text.Layout {
 	if ed.compose != "" && p == b.para(ed.caret) {
 		compose = ed.compose
 	}
-	spans := ""
-	if compose == "" {
-		spans, _ = ed.rangeSpans(b.start(p), b.end(p))
-	}
+	spans, _ := ed.rangeSpans(b.start(p), b.end(p))
 	if pr.layout != nil && pr.compose == compose && pr.spans == spans {
 		return pr.layout
 	}
@@ -400,6 +394,8 @@ func (a *area) paint(e *node, p *Painter, ox, oy float32) {
 		l := a.paraLayout(ed, i)
 		y := oy + float32(a.hs.top(i)-a.scroll)
 		start, end := b.start(i), b.end(i)
+		_, sp := ed.rangeSpans(start, end)
+		p.textBackgrounds(l, ox, y, ts, sp)
 		if focused {
 			for _, selected := range ed.selectedRanges() {
 				sa, sz := selected.Start, selected.End
@@ -412,11 +408,7 @@ func (a *area) paint(e *node, p *Painter, ox, oy float32) {
 				}
 			}
 		}
-		var sp *spanPaint
-		if pr := &b.paras[i]; pr.compose == "" {
-			_, sp = ed.rangeSpans(start, end)
-		}
-		p.textLayout(l, ox, y, ts.color, ts, sp)
+		p.textForeground(l, ox, y, ts.color, ts, sp)
 		if ed.compose != "" && b.para(ed.caret) == i {
 			c := ed.caret - start
 			for _, r := range l.Selection(c, c+utf8.RuneCountInString(ed.compose)) {
@@ -430,7 +422,7 @@ func (a *area) paint(e *node, p *Painter, ox, oy float32) {
 		const blink = 530 * time.Millisecond
 		if (phase/blink)%2 == 0 {
 			x, y, h := a.caretAt(ed, ed.caret, ed.composeCaret)
-			p.s.Ops = append(p.s.Ops, scene.Op{Kind: scene.OpFill, Rect: p.snap(Rect{ox + x, oy + float32(y-a.scroll), 0, h}), Color: t.Accent.scene(), Wide: p.wide(t.Accent, Color{}, Color{}), Opacity: p.opacity})
+			p.add(scene.Op{Kind: scene.OpFill, Rect: p.snap(Rect{ox + x, oy + float32(y-a.scroll), 0, h}), Color: t.Accent.scene(), Wide: p.wide(t.Accent, Color{}, Color{}), Opacity: p.opacity})
 			op := &p.s.Ops[len(p.s.Ops)-1]
 			op.Rect.W = max(round(p.scale), 1)
 		}

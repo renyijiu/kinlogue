@@ -27,6 +27,10 @@ func (s *testSurface) StartDataDrag(r platform.DragRequest) {
 }
 func (s *testSurface) CancelDataDrag()                  {}
 func (s *testSurface) SetDropFormats([]transfer.Format) {}
+func (s *testSurface) NewWebView(*platform.WindowOptions, platform.WindowHandler) (platform.WebView, error) {
+	return nil, platform.ErrUnsupported
+}
+func (s *testSurface) PlaceWebViews([]platform.WebViewPlacement) {}
 
 // testGPU is a GPU renderer whose device goes away when fail is set.
 type testGPU struct {
@@ -190,5 +194,25 @@ func TestEveryFrameOnTheGPU(t *testing.T) {
 	frame()
 	if g.frames != 3 || s.pixels != 0 || h.path != "drawn on the GPU" {
 		t.Errorf("%d frames on the GPU, %d drawn in memory, the last %q", g.frames, s.pixels, h.path)
+	}
+}
+
+func TestTransformedFramesStayOnGPU(t *testing.T) {
+	g := &testGPU{}
+	h, s, frame := gpuHost(t, func() (gpuRenderer, error) { return g, nil })
+	active := true
+	h.rt = newRuntime(func(c *context) {
+		coreBox(c).Size(30, 20).Translate(10, 10).Rotate(8).Background(RGB(50, 80, 200))
+		if active {
+			c.AnimationFrame()
+		}
+	}, h)
+	frame()
+	frame()
+	active = false
+	h.lastFrame = time.Now().Add(-time.Second)
+	frame()
+	if g.frames != 3 || s.pixels != 0 || h.soft.Image.Pix != nil {
+		t.Fatal("active or resting transforms switched to CPU rendering")
 	}
 }

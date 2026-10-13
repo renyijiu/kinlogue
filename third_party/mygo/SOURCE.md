@@ -1,15 +1,17 @@
 # mygo local source
 
-This directory is the Go runtime/UI subset of [egoist/mygo v0.3.7](https://github.com/egoist/mygo/tree/v0.3.7), pinned to commit `d7f292d6d972eb0718d4012d23527df009e6b349` (2026-10-09). It retains the root Go files, `go.mod`, `go.sum`, `LICENSE`, `internal/`, `transfer/`, and `ui/`, including their platform implementations, embedded resources, and tests. Upstream CLI, examples, plugins, website, and JavaScript packages are not included. The upstream MIT license is in [LICENSE](LICENSE).
+This directory is the Go runtime/UI subset of [egoist/mygo v0.4.8](https://github.com/egoist/mygo/tree/v0.4.8), pinned to commit `c0e1068027faf8b14777c9cb925c937ef34ac2bb` (2026-10-12 UTC). It retains the root Go files, `go.mod`, `go.sum`, `LICENSE`, `internal/`, `transfer/`, `audio/`, and `ui/`, including their platform implementations, embedded resources, and tests. Upstream CLI, examples, plugins, website, and JavaScript packages are not included. The upstream MIT license is in [LICENSE](LICENSE).
 
-The original module checksum is `h1:hT6jjSBRqtvl3b0zReFGdGjGaNfz1IqvhnrK+Vrje94=`; its `go.mod` checksum is `h1:1sRzZ6jEhKE7iuEQXjyoXDgxyxQ1uTgMHDcDKZvoDIU=`. These identify the upstream module, not this modified directory. Kinlogue still requires `github.com/egoist/mygo v0.3.7` and applies exactly one local `replace` in the root `go.mod`. Build and package checks must retain that distinction rather than describe the binary as using unmodified upstream code.
+The original module checksum is `h1:NpzFFiv8L4uXhkriknAehoucN//gtCtnGgr/DzQxZIw=`; its `go.mod` checksum is `h1:+B7ZTBwVfa/nL/6+o6Vm8xBFYwJoFCg4VJbY9k6T0E8=`. These identify the upstream module, not this modified directory. Kinlogue still requires `github.com/egoist/mygo v0.4.8` and applies exactly one local `replace` in the root `go.mod`. Build and package checks must retain that distinction rather than describe the binary as using unmodified upstream code.
 
 ## Local patch
 
-Every file except the two below is byte-identical to upstream v0.3.7. The patch lets the app word calendars in its own language; upstream draws them in English only. It changes only:
+The only behavioral patch lets the app word calendars in its own language; upstream draws them in English only. It changes these two files:
 
 - `ui/date.go`: add `CalendarText` and `SetCalendarText`. The month title, weekday headings, day names for accessibility and the previous/next month button names come from it; the default is the upstream English wording, so an app that never calls `SetCalendarText` sees no change.
 - `ui/datetime_test.go`: add a regression test for app-provided wording, partial wording and restoring the default.
+
+`internal/gpu/metal/metal.go` has only a four-field whitespace alignment from `gofmt`, required by the repository formatting gate. All other retained files are byte-identical to upstream v0.4.8.
 
 No private macOS API, replacement widget, additional dependency, or runtime bypass was introduced. Platform bridges are unchanged.
 

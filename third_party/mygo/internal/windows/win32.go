@@ -370,6 +370,7 @@ const (
 	tpmReturnCmd   = 0x0100
 	mncClose       = 1
 
+	monitorDefaultToNull    = 0
 	monitorDefaultToNearest = 2
 	monitorDefaultToPrimary = 1
 	monitorInfoPrimary      = 1
@@ -384,6 +385,9 @@ const (
 	vkLWin    = 0x5B
 	vkRWin    = 0x5C
 
+	vkProcessKey = 0xE5
+	vkPacket     = 0xE7
+
 	cfUnicodeText = 13
 	cfDIB         = 8
 	cfDIBV5       = 17
@@ -391,8 +395,11 @@ const (
 
 	idcArrow = 32512
 
-	dwmwaUseImmersiveDarkMode = 20
-	dwmwaSystemBackdropType   = 38
+	dwmwaUseImmersiveDarkMode   = 20
+	dwmwaWindowCornerPreference = 33
+	dwmwaSystemBackdropType     = 38
+
+	dwmwcpRound = 2 // DWM_WINDOW_CORNER_PREFERENCE
 
 	lwaAlpha = 0x2
 	ulwAlpha = 0x2

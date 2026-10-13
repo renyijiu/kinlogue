@@ -40,7 +40,9 @@ type Application struct {
 	menu      *Menu
 	menuSet   bool
 	paths     map[PathName]string
-	finished  sync.Once
+	// stateStore is the WindowStateStore, or nil for the file.
+	stateStore WindowStateStore
+	finished   sync.Once
 
 	// quitting is only touched on the main thread.
 	quitting    bool
@@ -76,8 +78,9 @@ var App = &Application{readyCh: make(chan struct{}), Dock: &Dock{}}
 // immediately.
 //
 // When the MYGO_GENERATE environment variable is set (see `mygo generate`),
-// Run writes the TypeScript client for the bound services to that path and
-// returns without starting the event loop.
+// Run writes the TypeScript client for the bound services to that path, or
+// nothing when the app binds none, and returns without starting the event
+// loop.
 func (a *Application) Run() error {
 	if out := os.Getenv("MYGO_GENERATE"); out != "" {
 		return WriteTypeScript(out)

@@ -74,9 +74,8 @@ func main() {}
 }
 
 // mygoPin is the upstream version the preview links through its local
-// replacement; legacyMygoPin is the one preview bundles built before the
-// upgrade still carry.
-const mygoPin, legacyMygoPin = "v0.3.7", "v0.2.15"
+// replacement. Older pins are accepted only for preserving previous bundles.
+const mygoPin = "v0.4.8"
 
 func addLocalMygo(t *testing.T, root, goPath, replacement string) {
 	t.Helper()
@@ -137,12 +136,14 @@ func assembleFixture(t *testing.T, root, goPath, permission string) string {
 func TestBuildPreservesLegacyAppAndUsesSelectedToolchain(t *testing.T) {
 	// The earlier bundle was built against the mygo version pinned before,
 	// first from upstream and later through the local replacement.
-	for name, replaced := range map[string]bool{"upstream": false, "local replacement": true} {
-		t.Run(name, func(t *testing.T) { buildPreservesLegacyApp(t, replaced) })
+	for _, version := range []string{"v0.2.15", "v0.3.7"} {
+		for name, replaced := range map[string]bool{"upstream": false, "local replacement": true} {
+			t.Run(version+"/"+name, func(t *testing.T) { buildPreservesLegacyApp(t, version, replaced) })
+		}
 	}
 }
 
-func buildPreservesLegacyApp(t *testing.T, replaced bool) {
+func buildPreservesLegacyApp(t *testing.T, legacyMygoPin string, replaced bool) {
 	root, goPath := goFixture(t)
 	run(t, root, goPath, "mod", "edit", "-require=github.com/egoist/mygo@"+legacyMygoPin)
 	run(t, root, goPath, "mod", "download", "github.com/egoist/mygo@"+legacyMygoPin)
@@ -214,6 +215,15 @@ func TestCurrentVerifierRequiresBackupCrypto(t *testing.T) {
 	addLocalMygo(t, root, goPath, "third_party/mygo")
 	assembleFixture(t, root, goPath, "read-write")
 	rejected(t, root, "verify-go-preview.sh", "backup crypto pin is incorrect")
+}
+
+func TestCurrentVerifierRejectsPreviousMygo(t *testing.T) {
+	root, goPath := goFixture(t)
+	run(t, root, goPath, "mod", "edit", "-require=github.com/egoist/mygo@v0.3.7")
+	addLocalMygo(t, root, goPath, "third_party/mygo")
+	put(t, filepath.Join(root, "cmd", "kinlogue", "backup.go"), []byte("package main\nimport _ \"filippo.io/age\"\n"), 0600)
+	assembleFixture(t, root, goPath, "read-write")
+	rejected(t, root, "verify-go-preview.sh", "direct dependency pin is incorrect")
 }
 
 func TestBuilderRejectsAdditionalReplacementBeforePublishing(t *testing.T) {

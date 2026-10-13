@@ -60,3 +60,5 @@ kind: pattern-reference | product-decision | external-spec
 - [`2026-08-07-dicom-viewer-ui-contract.md`](2026-08-07-dicom-viewer-ui-contract.md)：Viewer model、canvas、交互和无障碍。
 - [`2026-08-09-dicom-canvas-lifetime-correction.md`](2026-08-09-dicom-canvas-lifetime-correction.md)：像素快照生命周期修正。
 - [`2026-08-09-dicom-viewer-window-presentation.md`](2026-08-09-dicom-viewer-window-presentation.md)：独立窗口呈现和撤销边界。
+
+- [mygo v0.4.8 升级来源追加](mygo-0.4.8-upgrade-2026-10-13.md)：锁定版本、模块摘要、保留日历补丁和打包版本边界。

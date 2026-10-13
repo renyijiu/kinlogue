@@ -7,7 +7,7 @@ replace github.com/egoist/mygo => ./third_party/mygo
 require (
 	filippo.io/age v1.3.2
 	github.com/ebitengine/purego v0.11.1
-	github.com/egoist/mygo v0.3.7
+	github.com/egoist/mygo v0.4.8
 	golang.org/x/sys v0.48.0
 	modernc.org/sqlite v1.60.1
 )

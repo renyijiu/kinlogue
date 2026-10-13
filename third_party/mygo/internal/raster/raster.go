@@ -51,7 +51,9 @@ func (m *Image) RGBA() []byte {
 
 type clip struct {
 	shape
-	round bool
+	transform, inverse scene.Affine
+	valid              bool
+	round              bool
 	// spans is where in spanBuf the clip, with continuous corners, keeps
 	// the spans clipSolid found for the rows of the area, lo and hi a row
 	// (noSpan until found), or -1.
@@ -76,6 +78,7 @@ type renderer struct {
 
 // Render draws s into dst, which must be s.Width×s.Height.
 func Render(dst *Image, s *scene.Scene) {
+	drawCanvases(s)
 	var r Renderer
 	r.d.draw(dst, s, image.Rect(0, 0, dst.W, dst.H), r.opBounds(s, nil))
 }
@@ -123,7 +126,8 @@ func (d *drawer) draw(dst *Image, s *scene.Scene, area image.Rectangle, bounds [
 		d.drawOps(dst, s, area, bounds, from, i, px, b)
 		b = nil
 		if fx.Effect.Backdrop {
-			d.bd.read(dst, scene.BackdropOf(op.Rect, fx.Blur, dst.W, dst.H))
+			d.bd.read(dst, scene.BackdropOf(op.Transform.Bounds(op.Rect), fx.Blur, dst.W, dst.H))
+			d.bd.img.Transform = op.Transform
 			b = &d.bd.img
 		}
 		next.Begin(fx, op.Rect, scene.FitRadii(op.Rect, op.Radii))
@@ -204,21 +208,55 @@ func (r *renderer) render(dst *Image, s *scene.Scene, area image.Rectangle, boun
 		}
 		switch op.Kind {
 		case scene.OpFill:
-			r.fill(op)
+			if op.Transform.Set {
+				r.transformed(op, nil, nil)
+			} else {
+				r.fill(op)
+			}
 		case scene.OpShadow:
-			r.shadow(op)
+			if op.Transform.Set {
+				r.transformed(op, nil, nil)
+			} else if op.Inset {
+				r.insetShadow(op)
+			} else {
+				r.shadow(op)
+			}
 		case scene.OpGlyphs:
-			r.glyphs(op)
+			transformed := op.Transform.Set
+			for _, g := range s.Glyphs[op.Start:op.End] {
+				transformed = transformed || g.Transform.Set
+			}
+			if transformed {
+				r.transformedGlyphs(op)
+			} else {
+				r.glyphs(op)
+			}
 		case scene.OpImage:
-			r.image(op)
+			if op.Transform.Set {
+				r.transformed(op, nil, nil)
+			} else {
+				r.image(op)
+			}
+		case scene.OpHole:
+			if op.Transform.Set {
+				r.transformed(op, nil, nil)
+			} else {
+				r.hole(op)
+			}
 		case scene.OpEffect:
 			if i == from && px != nil {
-				r.effect(op, px, b)
+				if op.Transform.Set {
+					r.transformed(op, px, b)
+				} else {
+					r.effect(op, px, b)
+				}
 			}
 		case scene.OpPushClip:
 			radii := scene.Corners(op.Rect, op.Radii, op.Continuous)
 			c := clip{shape: newShape(op.Rect, radii), round: hasRadii(radii), spans: -1}
-			if c.continuous {
+			c.transform = op.Transform
+			c.inverse, c.valid = op.Transform.Inverse()
+			if c.continuous && !c.transform.Set {
 				// Continuous corners take long to find the spans of, which
 				// every operation within the clip needs.
 				c.spans = len(r.spanBuf)
@@ -258,10 +296,15 @@ func (r *renderer) clear(c scene.Color) {
 func (r *renderer) updateBounds() {
 	r.x0, r.y0, r.x1, r.y1 = r.area.Min.X, r.area.Min.Y, r.area.Max.X, r.area.Max.Y
 	for _, c := range r.clips {
-		r.x0 = max(r.x0, int(math.Floor(float64(c.r.X))))
-		r.y0 = max(r.y0, int(math.Floor(float64(c.r.Y))))
-		r.x1 = min(r.x1, int(math.Ceil(float64(c.r.X+c.r.W))))
-		r.y1 = min(r.y1, int(math.Ceil(float64(c.r.Y+c.r.H))))
+		b := c.transform.Bounds(c.r)
+		if !c.valid {
+			r.x1, r.y1 = r.x0, r.y0
+			return
+		}
+		r.x0 = max(r.x0, int(math.Floor(float64(b.X))))
+		r.y0 = max(r.y0, int(math.Floor(float64(b.Y))))
+		r.x1 = min(r.x1, int(math.Ceil(float64(b.X+b.W))))
+		r.y1 = min(r.y1, int(math.Ceil(float64(b.Y+b.H))))
 	}
 }
 
@@ -281,7 +324,12 @@ func (r *renderer) clipCoverage(x, y int) float32 {
 	for i := range r.clips {
 		c := &r.clips[i]
 		px, py := float32(x)+0.5, float32(y)+0.5
-		if c.round {
+		if c.transform.Set {
+			if !c.valid {
+				return 0
+			}
+			cov *= transformedCoverage(&c.shape, c.transform, c.inverse, px, py)
+		} else if c.round {
 			cov *= coverage(&c.shape, px, py)
 		} else {
 			// Partial pixels at fractional clip edges.
@@ -300,6 +348,9 @@ func (r *renderer) clipSolid(y int) (lo, hi int) {
 	lo, hi = r.x0, r.x1
 	for i := range r.clips {
 		c := &r.clips[i]
+		if c.transform.Set {
+			return lo, lo
+		}
 		var l, h int
 		if k := c.spans + 2*(y-r.area.Min.Y); c.spans >= 0 && y >= r.area.Min.Y && y < r.area.Max.Y {
 			if r.spanBuf[k] == noSpan {
@@ -788,6 +839,59 @@ func (r *renderer) fill(op *scene.Op) {
 	}
 }
 
+// hole makes a rounded rectangle transparent within the clips: each pixel
+// keeps what its coverage leaves of it, as renderers blend with a
+// destination factor of one minus the coverage and none of the source.
+func (r *renderer) hole(op *scene.Op) {
+	if op.Rect.Empty() {
+		return
+	}
+	opacity := op.Opacity
+	if opacity == 0 {
+		opacity = 1
+	}
+	shape := newShape(op.Rect, scene.Corners(op.Rect, op.Radii, op.Continuous))
+	x0, y0, x1, y1 := r.pixelBounds(op.Rect)
+	for y := y0; y < y1; y++ {
+		row := r.dst.Pix[y*r.dst.Stride:]
+		py := float32(y) + 0.5
+		cl, ch := r.clipSolid(y)
+		ol, oh := solidSpan(&shape, float32(y), float32(y+1))
+		sl, sh := max(ol, cl, x0), min(oh, ch, x1)
+		if sl < sh && opacity >= 1 {
+			clear(row[4*sl : 4*sh])
+		} else if sl < sh {
+			for x := sl; x < sh; x++ {
+				erase(row[4*x:4*x+4], opacity)
+			}
+		}
+		for x := x0; x < x1; x++ {
+			if x >= sl && x < sh {
+				x = sh - 1 // past the run, which is done
+				continue
+			}
+			cov := r.clipCoverage(x, y)
+			if cov == 0 {
+				continue
+			}
+			if x < ol || x >= oh {
+				cov *= coverage(&shape, float32(x)+0.5, py)
+			}
+			if cov > 0 {
+				erase(row[4*x:4*x+4], cov*opacity)
+			}
+		}
+	}
+}
+
+// erase takes the coverage cov of a premultiplied pixel away.
+func erase(p []byte, cov float32) {
+	inv := 1 - cov
+	for i := range p[:4] {
+		p[i] = to8(float32(p[i]) / 255 * inv)
+	}
+}
+
 // shadow draws a Gaussian-blurred rounded rectangle, integrating the blur
 // along y numerically and along x exactly (Evan Wallace's method), outside
 // the box casting it, if any.
@@ -945,6 +1049,119 @@ func (r *renderer) shadow(op *scene.Op) {
 	}
 }
 
+// insetShadow draws an inner shadow: inside the box Cast, what the hole
+// Rect, blurred as shadow blurs a box, leaves uncovered.
+func (r *renderer) insetShadow(op *scene.Op) {
+	x0, y0, x1, y1 := r.pixelBounds(op.Cast)
+	if x0 >= x1 || y0 >= y1 {
+		return
+	}
+	opacity := op.Opacity
+	if opacity == 0 {
+		opacity = 1
+	}
+	c := op.Color.Premul(opacity)
+	box := newShape(op.Cast, scene.Corners(op.Cast, op.CastRadii, op.Continuous))
+	radii := scene.Corners(op.Rect, op.Radii, op.Continuous)
+	hole := newShape(op.Rect, radii)
+	empty := op.Rect.Empty()
+	sigma := op.Blur / 2
+	if sigma < 0.5 || empty {
+		for y := y0; y < y1; y++ {
+			row := r.dst.Pix[y*r.dst.Stride:]
+			// Nothing shows where the hole covers the row's pixels
+			// entirely, as it does most of a large box.
+			var sl, sh int
+			if !empty {
+				sl, sh = solidSpan(&hole, float32(y), float32(y+1))
+			}
+			for x := x0; x < x1; x++ {
+				if x >= sl && x < sh {
+					x = sh - 1
+					continue
+				}
+				px, py := float32(x)+0.5, float32(y)+0.5
+				v := coverage(&box, px, py)
+				if !empty {
+					v *= 1 - coverage(&hole, px, py)
+				}
+				if v > 0 {
+					blend(row[4*x:4*x+4], c, v*r.clipCoverage(x, y))
+				}
+			}
+		}
+		return
+	}
+	// The hole blurred as shadow blurs a box, four samples along y and
+	// exactly along x.
+	corner := max(abs(radii[0]), abs(radii[1]), abs(radii[2]), abs(radii[3]))
+	continuous := op.Continuous && corner > 0
+	var cc contCorner
+	if continuous {
+		cc = newContCorner(corner, corner, corner, op.Rect.W, op.Rect.H)
+	}
+	ext := 3 * sigma
+	cx, cy := op.Rect.X+op.Rect.W/2, op.Rect.Y+op.Rect.H/2
+	hx, hy := op.Rect.W/2, op.Rect.H/2
+	k := float32(math.Sqrt(0.5)) / sigma
+	far := 2.6 / k // where erf passes 0.9997
+	for y := y0; y < y1; y++ {
+		py := float32(y) + 0.5 - cy
+		low, high := py-hy, py+hy
+		start := min(max(-ext, low), high)
+		end := min(max(ext, low), high)
+		step := (end - start) / 4
+		var weight, half [4]float32
+		var sum float32
+		narrowest := hx
+		yy := start + step*0.5
+		for i := range 4 {
+			weight[i] = gaussian(yy, sigma) * step
+			sum += weight[i]
+			half[i] = hx
+			if v := hy - abs(py-yy); continuous {
+				if v < cc.e {
+					at, _ := cc.inset(v)
+					half[i] = hx - at
+					narrowest = min(narrowest, half[i])
+				}
+			} else if delta := min(hy-corner-abs(py-yy), 0); delta < 0 {
+				half[i] = hx - corner + float32(math.Sqrt(float64(max(0, corner*corner-delta*delta))))
+				narrowest = min(narrowest, half[i])
+			}
+			yy += step
+		}
+		row := r.dst.Pix[y*r.dst.Stride:]
+		cl, ch := r.clipSolid(y)
+		// In the middle of the row, far from the hole's edges, the hole
+		// covers sum of each pixel, and nothing shows where that is all.
+		ml, mh := x1, x1
+		if 1-sum <= 0.002 {
+			ml = max(int(math.Ceil(float64(cx-narrowest+far-0.5))), x0)
+			mh = min(int(math.Floor(float64(cx+narrowest-far-0.5)))+1, x1)
+		}
+		for x := x0; x < x1; x++ {
+			if x >= ml && x < mh {
+				x = mh - 1
+				continue
+			}
+			px := float32(x) + 0.5
+			var covered float32
+			for i := range 4 {
+				covered += weight[i] * 0.5 * (erf((px-cx+half[i])*k) - erf((px-cx-half[i])*k))
+			}
+			v := (1 - covered) * coverage(&box, px, float32(y)+0.5)
+			if v <= 0.002 {
+				continue
+			}
+			if x < cl || x >= ch {
+				v *= r.clipCoverage(x, y)
+			}
+			blend(row[4*x:4*x+4], c, v)
+		}
+	}
+}
+
 func gaussian(x, sigma float32) float32 {
 	return float32(math.Exp(float64(-(x*x)/(2*sigma*sigma)))) / (float32(math.Sqrt(2*math.Pi)) * sigma)
 }
@@ -1091,7 +1308,7 @@ func mixMask(src, dst byte, coverage uint32) byte {
 
 func (r *renderer) image(op *scene.Op) {
 	img := op.Image
-	if img == nil || img.W == 0 || img.H == 0 || op.Rect.Empty() || op.Src.Empty() {
+	if img == nil || img.W == 0 || img.H == 0 || op.Rect.Empty() || unflipped(op.Src).Empty() {
 		return
 	}
 	opacity := op.Opacity
@@ -1120,15 +1337,58 @@ func (r *renderer) image(op *scene.Op) {
 			if cov <= 0 {
 				continue
 			}
-			c := sample(img, op.Src.X+(px-op.Rect.X)*sx, op.Src.Y+(py-op.Rect.Y)*sy, op.Src)
-			if op.Grayscale {
-				l := 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2]
-				c[0], c[1], c[2] = l, l, l
-			}
+			c := sampleOp(op, op.Src.X+(px-op.Rect.X)*sx, op.Src.Y+(py-op.Rect.Y)*sy, abs32(sx), abs32(sy))
 			blend(row[4*x:4*x+4], c, cov)
 		}
 	}
 }
+
+// sampleOp reads op's image at (u, v), where a pixel spans du by dv of
+// its pixels, as op samples, grays and tints it.
+func sampleOp(op *scene.Op, u, v, du, dv float32) [4]float32 {
+	if op.Pixelated {
+		u, v = pixelated(u, du), pixelated(v, dv)
+	}
+	c := sample(op.Image, u, v, unflipped(op.Src))
+	if op.Grayscale {
+		l := 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2]
+		c[0], c[1], c[2] = l, l, l
+	}
+	if t := op.Color; t != (scene.Color{}) {
+		a := float32(t.A) / 255
+		c[0] *= float32(t.R) / 255 * a
+		c[1] *= float32(t.G) / 255 * a
+		c[2] *= float32(t.B) / 255 * a
+		c[3] *= a
+	}
+	return c
+}
+
+// unflipped returns the rectangle a source rectangle covers, which has a
+// negative width or height along an axis it flips.
+func unflipped(r scene.Rect) scene.Rect {
+	if r.W < 0 {
+		r.X, r.W = r.X+r.W, -r.W
+	}
+	if r.H < 0 {
+		r.Y, r.H = r.Y+r.H, -r.H
+	}
+	return r
+}
+
+// pixelated moves t, a coordinate in an image's pixels, so that sampling
+// it bilinearly draws each pixel as a square of its color, blended with
+// the next only across the pixel of the frame, d of the image's pixels
+// wide, that their edge crosses, as the GPU renderers do (Ebitengine's
+// FilterPixelated).
+func pixelated(t, d float32) float32 {
+	c := t - 0.5
+	i := float32(math.Floor(float64(c)))
+	f := (c-i-0.5)/min(max(d, 1e-5), 1) + 0.5
+	return i + min(max(f, 0), 1) + 0.5
+}
+
+func abs32(v float32) float32 { return float32(math.Abs(float64(v))) }
 
 // sample reads a premultiplied pixel at (u, v) with bilinear filtering,
 // clamped to src.

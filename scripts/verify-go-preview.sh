@@ -102,11 +102,11 @@ fi
     && "$BUILD_INFO" == *$'\n\tbuild\tCGO_ENABLED=0\n'* \
     && "$BUILD_INFO" == *$'\n\tbuild\t-trimpath=true\n'* \
     && "$BUILD_INFO" == *$'\n\tbuild\t-tags=mygo_noinspector\n'* ]] || fail "Go build settings differ from the preview contract"
-MYGO_PIN=$'github.com/egoist/mygo\tv0.3.7'
+MYGO_PIN=$'github.com/egoist/mygo\tv0.4.8'
 # A preserved earlier bundle may still link the mygo version pinned before.
 if [[ "$PREVIOUS" -eq 1 ]] && print -r -- "$BUILD_INFO" \
-    | /usr/bin/awk -F '\t' '$2 == "dep" && $3 == "github.com/egoist/mygo" && $4 == "v0.2.15" { found = 1 } END { exit !found }'; then
-  MYGO_PIN=$'github.com/egoist/mygo\tv0.2.15'
+    | /usr/bin/awk -F '\t' '$2 == "dep" && $3 == "github.com/egoist/mygo" && ($4 == "v0.2.15" || $4 == "v0.3.7") { found = 1 } END { exit !found }'; then
+  MYGO_PIN="$(print -r -- "$BUILD_INFO" | /usr/bin/awk -F '\t' '$2 == "dep" && $3 == "github.com/egoist/mygo" { print $3 "\t" $4 }')"
 fi
 for pin in "$MYGO_PIN" $'github.com/ebitengine/purego\tv0.11.1' $'modernc.org/sqlite\tv1.60.1'; do
   print -r -- "$BUILD_INFO" | /usr/bin/awk -F '\t' -v pin="$pin" '$2 == "dep" && $3 "\t" $4 == pin { found = 1 } END { exit !found }' \

@@ -93,6 +93,23 @@ func TestEscapeClosesTheOverlayOnTop(t *testing.T) {
 	}
 }
 
+// TestUnhandledEscape tells the window of the Escapes nothing handled,
+// which close a flyout, and of no other.
+func TestUnhandledEscape(t *testing.T) {
+	d := &dialogView{size: "Small"}
+	tt := coreNewTester(d.view, 500, 400)
+	tt.Key(0, KeyEscape)
+	if tt.h.escapes != 1 {
+		t.Fatalf("an Escape nothing handled reached the window %d times", tt.h.escapes)
+	}
+	tt.Click("Open")
+	tt.Key(0, KeyEscape) // closes the dialog
+	tt.Key(Shift, KeyEscape)
+	if d.open || tt.h.escapes != 1 {
+		t.Errorf("the dialog open %v, Escapes for the window %d", d.open, tt.h.escapes)
+	}
+}
+
 func TestOverlayGivesTheFocusBack(t *testing.T) {
 	d := &dialogView{size: "Small"}
 	tt := coreNewTester(d.view, 500, 400)
@@ -105,6 +122,31 @@ func TestOverlayGivesTheFocusBack(t *testing.T) {
 	tt.Click("OK")
 	if d.open || !tt.Focused("Open") {
 		t.Errorf("closed by OK: the focus is not back on Open")
+	}
+}
+
+func TestPopoverRestoresFocusWithToastViewport(t *testing.T) {
+	open := false
+	tt := coreNewTester(func(c *context) {
+		anchor := coreButton(c, "Open")
+		if anchor.Clicked() {
+			open = true
+		}
+		corePopover(c, anchor, &open, func() {
+			coreButton(c, "Inside")
+		})
+		// The viewport comes after the popover, as it does when the
+		// engine builds the theme's toasts after the view.
+		coreToastViewportBase(c, func(*node, []Toast) {})
+	}, 400, 300)
+	tt.Click("Open")
+	tt.Key(0, KeyTab)
+	if !tt.Focused("Inside") {
+		t.Fatal("Tab did not move focus into the popover")
+	}
+	tt.Key(0, KeyEscape)
+	if open || !tt.Focused("Open") {
+		t.Errorf("closing the popover did not restore focus to its anchor (open %v)", open)
 	}
 }
 

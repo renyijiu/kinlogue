@@ -238,7 +238,7 @@ func (rt *engine) accessTree() *platform.AccessTree {
 	default:
 		rt.accessElement(t, root, -1, false, &focused)
 	}
-	if rt.windowFocused && rt.focused != 0 {
+	if rt.windowFocus() && rt.focused != 0 {
 		focus := rt.focused
 		// A list choosing rows with the arrows has the focus for them:
 		// assistive technology follows the row chosen, as the arrows move
@@ -295,7 +295,7 @@ func (rt *engine) accessElement(t *platform.AccessTree, e *node, parent int, scr
 	if role, ok := e.accessRole(); ok {
 		n := platform.AccessNode{
 			ID: e.id, Parent: parent, Role: role, Label: e.label,
-			Bounds: platform.RectF{X: float64(e.x), Y: float64(e.y), W: float64(e.w), H: float64(e.h)},
+			Bounds: accessBounds(e),
 		}
 		if scrolled {
 			n.Actions |= platform.ActionScrollIntoView
@@ -311,6 +311,17 @@ func (rt *engine) accessElement(t *platform.AccessTree, e *node, parent int, scr
 			return
 		}
 	}
+	if e.webView != nil {
+		// Its page first, as it paints, in a node of its own that the
+		// platform's elements of the page are inside.
+		if v := rt.host.platformWebView(e.webView); v != nil {
+			b := e.contentBox()
+			t.Nodes = append(t.Nodes, platform.AccessNode{
+				ID: e.id ^ pageNodeID, Parent: parent, Role: platform.RoleGroup, WebView: v,
+				Bounds: platform.RectF{X: float64(b.X), Y: float64(b.Y), W: float64(b.W), H: float64(b.H)},
+			})
+		}
+	}
 	// Children in flow first, absolute ones above them, as they paint.
 	scrolled = scrolled || e.scrolls()
 	for ch := e.first; ch != nil; ch = ch.next {
@@ -324,6 +335,9 @@ func (rt *engine) accessElement(t *platform.AccessTree, e *node, parent int, scr
 		}
 	}
 }
+
+// pageNodeID tells the node of a web view's page from its element's.
+const pageNodeID = 0x9e3779b97f4a7c15
 
 // accessDetails fills in the name, value, states and actions of a node.
 func (rt *engine) accessDetails(e *node, n *platform.AccessNode) {
@@ -444,6 +458,9 @@ func (rt *engine) accessDetails(e *node, n *platform.AccessNode) {
 			n.Value = ed.buf.string()
 			n.SelStart, n.SelEnd = ed.selection()
 		}
+	}
+	if e.accFill != nil {
+		e.accFill(n)
 	}
 }
 

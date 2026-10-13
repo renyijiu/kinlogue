@@ -1,3 +1,5 @@
+//go:build !js
+
 // Package e2e drives the real native backend. It needs a desktop session,
 // so it only runs with MYGO_E2E=1:
 //
@@ -422,7 +424,12 @@ func TestEarlyWindow(t *testing.T) {
 // which may take longer than that on a slow runner.
 func waitFor(t testing.TB, w *mygo.Window, expr string) {
 	t.Helper()
-	p := w.Page()
+	waitForPage(t, w.Page(), expr)
+}
+
+// waitForPage is waitFor for a page, as a web view's.
+func waitForPage(t testing.TB, p *mygo.Page, expr string) {
+	t.Helper()
 	check := "!!(" + expr + ")"
 	start := time.Now()
 	first, cancel := context.WithTimeout(t.Context(), time.Minute)
@@ -553,6 +560,33 @@ func TestChannels(t *testing.T) {
 	}
 }
 
+// TestReloadLoadHTML checks that reloading a page LoadHTML loaded, by the
+// app or the page, loads the HTML again, where the web view would load its
+// URL: a blank page, or what its base URL serves.
+func TestReloadLoadHTML(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Hidden: true})
+	reloads := []struct {
+		name   string
+		reload func()
+	}{
+		{"Reload", w.Page().Reload},
+		{"location.reload()", func() { w.Page().Eval("setTimeout(() => location.reload())") }},
+	}
+	for _, base := range []string{"", "app://localhost/"} {
+		w.Page().LoadHTML(fmt.Sprintf("<p id=html data-base=%q>html</p>", base), base)
+		shown := fmt.Sprintf("document.getElementById('html')?.dataset.base === %q", base)
+		for _, r := range reloads {
+			t.Logf("base URL %q, %s", base, r.name)
+			waitFor(t, w, shown)
+			if _, err := w.Page().Eval("window.before = true"); err != nil {
+				t.Fatal(err)
+			}
+			r.reload()
+			waitFor(t, w, "!window.before && "+shown)
+		}
+	}
+}
+
 func TestEvalForms(t *testing.T) {
 	w := newWindow(t, mygo.WindowOptions{Hidden: true})
 	w.Page().LoadHTML("<p>eval</p>", "")
@@ -678,8 +712,9 @@ func TestFullScreenToolbar(t *testing.T) {
 	}
 }
 
-// AppKit lays the title bar out again when the title or the appearance
-// changes, which must not move the traffic lights back.
+// AppKit lays the title bar out again when the title or the appearance,
+// the application's or the window's own, changes, which must not move the
+// traffic lights back.
 func TestTrafficLightPosition(t *testing.T) {
 	w := newWindow(t, mygo.WindowOptions{Width: 400, Height: 240, TitleBarStyle: mygo.TitleBarHidden,
 		TrafficLightPosition: &mygo.Point{X: 18, Y: 19}})
@@ -704,6 +739,8 @@ func TestTrafficLightPosition(t *testing.T) {
 		mygo.Theme.SetSource(mygo.ThemeDark)
 	}
 	placed("after the appearance changed")
+	setWindowAppearance(w, !mygo.Theme.IsDark())
+	placed("after the window took an appearance of its own")
 }
 
 // GTK gives frameless windows no resize borders, so the outer pixels of
@@ -755,6 +792,44 @@ func TestFramelessResizeEdges(t *testing.T) {
 	waitFor(t, w, "window.pressed === 1")
 }
 
+// A window without a caption that is maximized, minimized and restored
+// fills the work area of its display again, on every display. Windows sizes
+// its client area while it is still the minimized window, parked off
+// screen, whose nearest display is the primary one: on another display,
+// which CI lacks, the client area came back on the primary one, outside the
+// window, which showed nothing.
+func TestRestoreMaximizedCaptionless(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("MyGo fits the client area of maximized windows without a caption on Windows only")
+	}
+	for i, d := range mygo.Screen.Displays() {
+		w := newWindow(t, mygo.WindowOptions{TitleBarStyle: mygo.TitleBarHidden, Content: ui.View(func(c *ui.Context) {
+			ui.Text(c, "Maximized")
+		})})
+		w.SetBounds(mygo.Rectangle{X: d.WorkArea.X + 40, Y: d.WorkArea.Y + 40, Width: 600, Height: 400})
+		w.Maximize()
+		eventually(t, fmt.Sprintf("a window maximized on display %d", i), func() bool {
+			b := w.ContentBounds()
+			return w.IsMaximized() && b.X >= d.Bounds.X && b.Y >= d.Bounds.Y &&
+				b.X+b.Width <= d.Bounds.X+d.Bounds.Width && b.Y+b.Height <= d.Bounds.Y+d.Bounds.Height
+		})
+		want := w.ContentBounds()
+		w.Minimize()
+		eventually(t, "a minimized window", w.IsMinimized)
+		w.Restore()
+		eventually(t, "the maximized window back", func() bool { return !w.IsMinimized() && w.IsMaximized() })
+		var b mygo.Rectangle
+		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if b = w.ContentBounds(); b == want {
+				break
+			}
+		}
+		if b != want {
+			t.Errorf("display %d (primary %v): the client area came back at %+v, want %+v", i, d.Primary, b, want)
+		}
+	}
+}
+
 func TestDockedDevTools(t *testing.T) {
 	w := newWindow(t, mygo.WindowOptions{Title: "DevTools", Width: 800, Height: 600, Page: mygo.PageOptions{DevTools: mygo.DevToolsEnabled}})
 	w.Page().LoadHTML("<p>inspect me</p>", "")
@@ -782,8 +857,8 @@ func TestWindowGeometryAndState(t *testing.T) {
 	}
 	cw, ch := w.ContentSize()
 	widthOK := cw == 420
-	if runtime.GOOS == "windows" {
-		widthOK = cw > 380 && cw <= 420 // the bounds include the resize borders
+	if runtime.GOOS != "darwin" {
+		widthOK = cw > 380 && cw <= 420 // the bounds include the borders
 	}
 	if !widthOK || ch > 320 || (runtime.GOOS != "linux" && ch == 320) {
 		t.Errorf("content size = %dx%d, expected the title bar to be excluded", cw, ch)
@@ -812,6 +887,45 @@ func TestWindowGeometryAndState(t *testing.T) {
 	if z := w.Page().ZoomFactor(); z != 1.5 {
 		t.Errorf("zoom = %v", z)
 	}
+}
+
+// ContentBounds is where the page is on the screen: inside Bounds, below
+// the title bar and borders of a window manager's frame and below a menu
+// bar. SetContentBounds puts the page there.
+func TestContentBounds(t *testing.T) {
+	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{{Label: "App", Submenu: []*mygo.MenuItem{{Label: "Item"}}}}))
+	defer mygo.App.SetMenu(nil)
+	w := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300, X: 120, Y: 140})
+	w.Page().LoadHTML(`<body style="margin:0;height:100vh" onmousedown="window.at=[event.clientX,event.clientY]"></body>`, "")
+	waitFor(t, w, "document.readyState === 'complete'")
+	check := func(what string) {
+		t.Helper()
+		b, c := w.Bounds(), w.ContentBounds()
+		if c.X < b.X || c.Y < b.Y || c.X+c.Width > b.X+b.Width || c.Y+c.Height > b.Y+b.Height {
+			t.Fatalf("%s: content %+v not inside the window %+v", what, c, b)
+		}
+		page := func() [2]int {
+			got, _ := mygo.EvalAs[[2]int](w.Page(), "[innerWidth, innerHeight]")
+			return got
+		}
+		eventually(t, what+": the page as large as the content", func() bool { return page() == [2]int{c.Width, c.Height} })
+		// A press at the content's top-left corner lands there in the page.
+		if !movePointer(c.X+3, c.Y+2) {
+			return
+		}
+		pressButton(true)
+		pressButton(false)
+		waitFor(t, w, "window.at")
+		if at, _ := mygo.EvalAs[[2]int](w.Page(), "window.at"); at != [2]int{3, 2} {
+			t.Errorf("%s: a press at the content's (3, 2), content %+v in the window %+v, reached the page at %v", what, c, b, at)
+		}
+		w.Page().Eval("window.at = undefined")
+	}
+	check("a new window")
+	want := mygo.Rectangle{X: 200, Y: 180, Width: 360, Height: 240}
+	w.SetContentBounds(want)
+	eventually(t, "the content where it was put", func() bool { return w.ContentBounds() == want })
+	check("after SetContentBounds")
 }
 
 // A window the user cannot resize still takes the sizes the app gives it,
@@ -2378,6 +2492,17 @@ func TestContentWindowFileDrop(t *testing.T) {
 	if e := events.Load(); e == nil || !slices.Equal(e.Paths, []string{"/tmp/c.txt"}) || e.X != 300 || e.Y != 250 {
 		t.Errorf("OnFileDrop got %+v", e)
 	}
+	// Finder drags file reference URLs (file:///.file/id=…), which reach
+	// the app as paths.
+	file := filepath.Join(t.TempDir(), "a b.txt")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, _ = filepath.EvalSymlinks(file)
+	if _, dropped, _ := dropFiles(w, 50, 50, []string{file}); !dropped {
+		t.Fatal("the drop zone did not take a file that exists")
+	}
+	eventually(t, "the path of the file in the zone", func() bool { return slices.Equal(got(), []string{file}) })
 }
 
 // accessNode is an element as assistive technology reads it.
@@ -2923,6 +3048,58 @@ func TestReorderByDragging(t *testing.T) {
 		t.Skip("pointer automation not available on this platform")
 	}
 	eventually(t, "the new order", func() bool { return order.Load() == "acdbe" })
+}
+
+// TestDraggableByDragging throws an element with the events of a real
+// mouse: it comes to rest where Snap chooses, shows there, and takes
+// clicks there.
+func TestDraggableByDragging(t *testing.T) {
+	var frames, clicks atomic.Int32
+	var rest atomic.Value
+	var moving atomic.Bool
+	rest.Store(ui.Point{})
+	var off ui.Point
+	view := func(c *ui.Context) {
+		frames.Add(1)
+		card := ui.Box(c).Absolute().Left(20).Top(20).Size(60, 40).Background(ui.RGB(255, 0, 0))
+		card.Draggable(&off, ui.DraggableOptions{
+			Axis:   ui.Horizontal,
+			Bounds: &ui.Rect{W: 200},
+			Snap:   ui.Nearest(ui.Point{}, ui.Point{X: 200}),
+		})
+		if card.Clicked() {
+			clicks.Add(1)
+		}
+		rest.Store(off)
+		moving.Store(card.Transitioning())
+	}
+	w := newWindow(t, mygo.WindowOptions{Title: "Draggable", Width: 400, Height: 200, Content: ui.View(view)})
+	eventually(t, "a frame", func() bool { return frames.Load() > 0 })
+	if !drag(w, [][2]float64{{50, 40}, {60, 40}, {100, 40}, {150, 40}, {180, 40}}) {
+		t.Skip("pointer automation not available on this platform")
+	}
+	eventually(t, "the card to rest at 200", func() bool { return rest.Load() == ui.Point{X: 200} && !moving.Load() })
+	if n := clicks.Load(); n != 0 {
+		t.Fatalf("the drag clicked %d times", n)
+	}
+	data, err := w.CapturePage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, s := img.Bounds(), deviceScale(w)
+	red := func(x, y float64) bool {
+		c := color.RGBAModel.Convert(img.At(b.Min.X+int(x*s), b.Min.Y+int(y*s))).(color.RGBA)
+		return c.R > 200 && c.G < 60
+	}
+	if !red(250, 40) || red(50, 40) {
+		t.Fatalf("at rest, the card is not at 220 to 280: red at 250 %v, at 50 %v", red(250, 40), red(50, 40))
+	}
+	click(w, 250, 40)
+	eventually(t, "a click where the card rests", func() bool { return clicks.Load() == 1 })
 }
 
 // TestRouterSideButtons goes back and forward in a router with the side
