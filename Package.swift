@@ -111,11 +111,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "KinlogueStorageProcessFixture",
-            dependencies: ["KinlogueCore", "KinlogueDICOMIPC", "KinloguePlatform"],
-            linkerSettings: [
-                .linkedFramework("AppKit"),
-                .linkedFramework("CryptoKit"),
-            ]
+            dependencies: ["KinlogueCore", "KinlogueDICOMIPC", "KinloguePlatform"]
         ),
         .executableTarget(
             name: "KinlogueExportWriterProbe",

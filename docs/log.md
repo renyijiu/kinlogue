@@ -1629,3 +1629,11 @@
 - **测试计数**：`@Test` 声明 1214 个，主清单 1166 tests / 96 suites。
 - **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，全部源码和测试改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1166 tests / 96 suites，隔离运行的验收扫描、storage process、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只追加了本条日志。传入实际清单摘要的 `scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
 - **未执行**：卷重新编号仍然只通过改写记录里的设备号模拟，没有在重启或系统更新前后实测；备份目录位于外接卷或网盘同步目录时的表现没有实测；改动之前的界面表现是读代码得出的，没有在界面上复现；修复后的设置页也没有在界面上看过。owner 锁文件的命名和安装验收运行的归属收据仍含设备号，没有改动。其余与前几条相同：`run-acceptance.sh`、`run-backup-capability-probe.sh`、托管平台上的 CI、macOS 26、真实手机和人工门禁都没有执行。
+
+## [2026-10-13] probe/cleanup | 备份可行性探针只保留整根激活
+
+- **起因**：早先评审时登记的后续任务，用户决定保留激活这一组、删除其余，这次要求继续处理。[`BackupCapabilityProbe`](../Sources/KinlogueStorageProcessFixture/BackupCapabilityProbe.swift) 写于生产备份代码出现之前，用自带的合成格式（魔数以 `KLG-U0-` 开头）证明设备身份存储、公钥写入与种子恢复的分离、repository 发布与容量、security-scoped bookmark、分块大小和 20,000 对象 / 2 GiB 数据集在沙盒里可行。这些性质现在各有生产实现和测试；只有整根激活这一组调用的是生产的恢复校验器和恢复事务。
+- **删除**：身份、密钥、repository 发布、所选目录发布、bookmark、命名数据集和分块这七组操作及其结果类型、参数和辅助函数，探针由 4313 行减为 874 行；[探针测试](../Tests/KinlogueStorageProcessTests/BackupCapabilityActivationProbeTests.swift)里对应的 14 项（保留 4 项激活测试）；[安装脚本](../scripts/run-backup-capability-probe.sh)里对应的段落、`--interactive-bookmark` 参数、升级安装的第二个包和报告字段，脚本由 1162 行减为 496 行；entitlement 里的 bookmark 和用户选择文件两项；fixture target 不再需要的 AppKit 与 CryptoKit 链接设置。
+- **保留并调整**：被另一个进程占用时拒绝激活、十一个故障点各自收敛到确定的根、截断收据失败关闭，这三类用例和它们的断言没有变。脚本的报告只剩环境、签名、已安装工件的摘要和一个 `activation` 状态，schema 版本记为 3；原先“机制通过”和“证明通过”两个状态里后者从未被置为通过，合并为一个。安装后的 entitlement 和签名信息改为直接从已安装的包取得（原先取自升级后的包）。[源码检查测试](../Tests/KinlogueAppTests/BackupCapabilityProbeSourceSafetyTests.swift)重写为只断言仍然存在的内容：探针只有 App Sandbox 一项 entitlement、不触及 Keychain 和用户目录、调用生产事务且不自带激活算法、脚本包含全部用例并且每种失败都会拉低那个状态。
+- **历史证据**：[`backup-and-restore.md`](backup-and-restore.md) 里“20,000 对象、2 GiB 流式备份”那句保留为历史，并注明产生它的工具已删除。
+- **未执行**：改写后的安装脚本只做了 `zsh -n` 语法检查，没有运行；它需要登录会话里已签名并安装的沙盒包。

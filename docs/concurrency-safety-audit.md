@@ -4,7 +4,7 @@ This audit covers production declarations under `Sources/`. It records why the
 remaining compiler escape hatches are safe, what invariant must remain true,
 and how repository automation detects unreviewed additions.
 
-<!-- concurrency-inventory: unchecked=67 files=36 dicom=10 core=0 unsafe=2 -->
+<!-- concurrency-inventory: unchecked=66 files=36 dicom=10 core=0 unsafe=2 -->
 
 ## Current inventory
 
@@ -13,7 +13,7 @@ and how repository automation detects unreviewed additions.
 | `KinlogueCore` | 0 unchecked declarations | Domain values and state machines remain checked `Sendable`. |
 | `KinloguePlatform/DICOM` | 10 `@unchecked Sendable` declarations | Lock-protected pixel/reply/budget state, actor-backed runtime services, and one scanner-owned descriptor lease with structured concurrent read-only use. |
 | LAN and storage platform code | 28 `@unchecked Sendable` declarations | Private locks/serial queues, actor confinement, SwiftNIO event-loop confinement, or immutable task-local error transport. |
-| Original export orchestration and capability probes | 10 `@unchecked Sendable` declarations | Lock-protected cancellation/progress and probe metrics; one exporter-owned descriptor whose close lifetime is structured and idempotent. |
+| Original export orchestration and capability probes | 9 `@unchecked Sendable` declarations | Lock-protected cancellation/progress and probe metrics; one exporter-owned descriptor whose close lifetime is structured and idempotent. |
 | Encrypted backup and restore | 18 `@unchecked Sendable` declarations | Immutable service authority, actor/cross-process serialization, lock-protected configuration/history/metrics and publication leases, and structured descriptor lifetimes. |
 | App backup destination authority | 1 `@unchecked Sendable` declaration | Immutable authority context with synchronized access. |
 | DICOM XPC Helper | 2 `nonisolated(unsafe)` properties | One private lock protects both process-lifecycle collections. |
