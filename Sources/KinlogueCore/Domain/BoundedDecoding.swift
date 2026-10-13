@@ -39,14 +39,6 @@ extension KeyedDecodingContainer {
         return try container.decodeBoundedArray(type, maximumCount: maximumCount)
     }
 
-    func decodeBoundedArrayIfPresent<Element: Decodable>(
-        _ type: Element.Type,
-        forKey key: Key,
-        maximumCount: Int
-    ) throws -> [Element]? {
-        guard contains(key), try !decodeNil(forKey: key) else { return nil }
-        return try decodeBoundedArray(type, forKey: key, maximumCount: maximumCount)
-    }
 }
 
 extension UnkeyedDecodingContainer {

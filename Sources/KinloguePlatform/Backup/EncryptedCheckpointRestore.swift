@@ -184,14 +184,15 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
             firstPass = try reader.read(
                 source: source.byteSource,
                 recoverySeed: recoverySeed,
-                sink: .init { _ in { _ in } }
+                sink: .init { _ in { _ in } },
+                // A file-tree checkpoint cannot be restored; say so before decrypting all of it.
+                acceptManifest: { guard $0.isLogical else { throw BackupRestoreError.unsupportedFormat } }
             )
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             throw Self.map(error)
         }
-        guard firstPass.manifest.isLogical else { throw BackupRestoreError.unsupportedFormat }
         let capacity = try availableCapacity()
         let logicalBytes = firstPass.manifest.entries.filter { $0.kind == .logicalSegment }.reduce(UInt64(0)) { $0 + $1.plaintextByteCount }
         // First reserve streamed originals, the input logical spool and the later

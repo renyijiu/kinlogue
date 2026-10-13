@@ -39,6 +39,38 @@ func encryptedContainerRoundTripsBoundaries(_ payloadByteCount: Int) async throw
 }
 
 @Test
+func readerStopsBeforeDecryptingAnyEntryWhenTheCallerRefusesTheManifest() async throws {
+    let fixture = try ContainerFixture(payloadByteCount: 700_000)
+    let output = LockedBytes()
+    _ = try await fixture.writer.write(
+        entries: fixture.sources,
+        revisionPair: fixture.revisionPair,
+        sequence: 9,
+        signer: fixture.signer,
+        sink: .init(write: { output.append($0) }, readBackSource: output.source)
+    )
+
+    struct Refused: Error {}
+    let untouched = LockedEntryLifecycle()
+    #expect(throws: Refused.self) {
+        _ = try BackupContainerReader().read(
+            source: output.source(),
+            recoverySeed: fixture.recoverySeed,
+            sink: untouched.sink,
+            acceptManifest: { manifest in
+                // The manifest handed over is the authenticated one for this checkpoint.
+                #expect(manifest.revisionPair == fixture.revisionPair)
+                #expect(manifest.entries.count == fixture.sources.count)
+                throw Refused()
+            }
+        )
+    }
+
+    #expect(untouched.maximumActiveEntryCount == 0)
+    #expect(untouched.finishedPaths.isEmpty)
+}
+
+@Test
 func encryptedContainerFinishesEachEntryBeforeOpeningTheNext() async throws {
     let fixture = try ContainerFixture(payloadByteCount: 700_000)
     let output = LockedBytes()

@@ -18,7 +18,7 @@ private final class SQLiteLANScopes: @unchecked Sendable {
     }
 }
 
-package final class SQLiteLANInboxStore: LANPendingItemStoring, Sendable {
+package final class SQLiteLANInboxStore: LANUploadStoring, Sendable {
     let store: SQLiteLibraryStore
     let epoch: UUID
     package let admissionPolicy: LANInboxAdmissionPolicy
@@ -64,17 +64,6 @@ package final class SQLiteLANInboxStore: LANPendingItemStoring, Sendable {
                 }
                 if changed { try SQLiteLibraryState.advance(in: db) }
             }
-        }
-    }
-
-    @concurrent
-    package func inspect() async -> LANInboxAccessState {
-        await LibraryStorageExecutor.run {
-            do {
-                let value = try store.read(epoch: epoch, SQLiteLibraryState.read)
-                return .ready(try LANInboxRevision(generation: UInt64(value.generation) + 1, commitID: value.commitID, manifestDigest: value.contentHash))
-            } catch SQLiteLibraryError.unsupportedFormat { return .unsupportedVersion }
-            catch { return .damaged }
         }
     }
 

@@ -14,7 +14,17 @@ struct TestScriptSafetyTests {
         #expect(!script.contains("--parallel"))
         #expect(!script.contains("--num-workers"))
         #expect(!script.contains("KINLOGUE_TEST_WORKERS"))
-        #expect(script.components(separatedBy: "--no-parallel").count == 9)
+        // Every command that runs tests is serial and bounded by a deadline, however many there are.
+        let testCommands = Self.logicalCommands(in: script).filter {
+            $0.contains("swift test \"${SWIFT_TEST_ARGUMENTS[@]}\"")
+        }
+        #expect(testCommands.count >= 6)
+        for command in testCommands {
+            #expect(command.contains("scripts/run-with-deadline.sh"), Comment(rawValue: command))
+            if !command.contains("list > \"$PRIMARY_TEST_LIST\"") {
+                #expect(command.contains("--no-parallel"), Comment(rawValue: command))
+            }
+        }
         #expect(!script.contains("SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH"))
         #expect(script.contains("--filter KinlogueCoreTests"))
         #expect(script.contains("primary-test-shards.rb"))
@@ -58,7 +68,6 @@ struct TestScriptSafetyTests {
         #expect(script.contains(
             "KINLOGUE_TEST_SUMMARY_MAX_SECONDS=\"$SHARD_SUPERVISOR_TIMEOUT_SECONDS\""
         ))
-        #expect(script.components(separatedBy: "scripts/run-with-deadline.sh").count == 10)
     }
 
     @Test
@@ -838,6 +847,21 @@ struct TestScriptSafetyTests {
             process.terminationStatus,
             String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         )
+    }
+
+    /// Shell lines joined across trailing backslashes, so one entry is one command.
+    private static func logicalCommands(in script: String) -> [String] {
+        var commands: [String] = []
+        var current = ""
+        for line in script.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasSuffix("\\") {
+                current += line.dropLast() + " "
+            } else {
+                commands.append(current + line)
+                current = ""
+            }
+        }
+        return commands
     }
 
     private var scriptURL: URL {

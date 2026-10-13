@@ -204,22 +204,85 @@ func aCancelledAttemptLeavesTheDraftInProcessingForTheNextLaunch() async throws 
     let bytes = Data("SYNTHETIC-CANCELLED-ATTEMPT".utf8)
     let file = try ValidatedImportedFile(data: bytes, kind: .image, contentTypeIdentifier: "public.png",
                                          sha256Digest: ContentDigest.sha256(bytes))
-    guard case .created(let draftID) = try await repository.stage(file) else {
-        Issue.record("Expected a new draft")
-        return
-    }
-    let lease = try await repository.beginProcessing(draftID: draftID, attemptID: UUID())
+    let extractor = SuspendedWorkflowExtractor()
+    let workflow = ImportWorkflow(store: repository, textExtractor: extractor)
 
-    // Recording the failure of a cancelled attempt would turn an interrupted import into one the
-    // user has to retry by hand; the draft has to stay resumable instead.
-    let cancelled = Task {
-        withUnsafeCurrentTask { $0?.cancel() }
-        try await repository.failProcessing(lease: lease, failureCode: .cancelled)
-    }
-    await #expect(throws: CancellationError.self) { try await cancelled.value }
+    let attempt = Task { try await workflow.importFile(file) }
+    while !(await extractor.hasStarted) { try await Task.sleep(for: .milliseconds(2)) }
+    attempt.cancel()
 
+    // Recording a failure here would turn an interrupted import into one the user has to retry
+    // by hand; the draft has to stay resumable instead.
+    await #expect(throws: CancellationError.self) { _ = try await attempt.value }
+    let draftID = try #require(try await repository.resumableDraftIDs().first)
     #expect(try await repository.draft(draftID).state == .processing)
     #expect(try await repository.resumableDraftIDs() == [draftID])
+}
+
+@Test
+func anExtractorThatGivesUpWhileItsTaskStillRunsIsRecordedAsACancelledFailure() async throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let kernel = try SQLiteLibraryStore(rootURL: root)
+    defer { try? kernel.close() }
+    let repository = SQLiteReportRepository(store: kernel)
+    let bytes = Data("SYNTHETIC-EXTRACTOR-GAVE-UP".utf8)
+    let file = try ValidatedImportedFile(data: bytes, kind: .image, contentTypeIdentifier: "public.png",
+                                         sha256Digest: ContentDigest.sha256(bytes))
+    let workflow = ImportWorkflow(store: repository, textExtractor: AbandoningWorkflowExtractor())
+
+    guard case let .failed(draftID, code) = try await workflow.importFile(file) else {
+        Issue.record("Expected a recorded failure")
+        return
+    }
+
+    #expect(code == .cancelled)
+    let draft = try await repository.draft(draftID)
+    #expect(draft.state == .failed)
+    #expect(draft.failureCode == .cancelled)
+    #expect(try await repository.resumableDraftIDs().isEmpty)
+}
+
+@Test
+func draftsAreListedAndResumedInTheOrderTheyWereImported() async throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let kernel = try SQLiteLibraryStore(rootURL: root)
+    defer { try? kernel.close() }
+    let repository = SQLiteReportRepository(store: kernel)
+
+    var staged: [UUID] = []
+    for ordinal in 0..<24 {
+        let bytes = Data("SYNTHETIC-ORDERED-IMPORT-\(ordinal)".utf8)
+        let file = try ValidatedImportedFile(data: bytes, kind: .image, contentTypeIdentifier: "public.png",
+                                             sha256Digest: ContentDigest.sha256(bytes))
+        guard case .created(let id) = try await repository.stage(file) else {
+            Issue.record("Expected a new draft")
+            return
+        }
+        staged.append(id)
+    }
+
+    #expect(try await repository.resumableDraftIDs() == staged)
+    #expect(try await repository.draftPage(states: [.staging], limit: 100, cursor: nil).items.map(\.id) == staged)
+}
+
+/// Stays in extraction until its task is cancelled.
+private actor SuspendedWorkflowExtractor: TextExtractionService {
+    private(set) var hasStarted = false
+
+    func extractText(from file: ValidatedImportedFile) async throws -> [OCRBlock] {
+        hasStarted = true
+        try await Task.sleep(for: .seconds(30))
+        return []
+    }
+}
+
+/// Reports cancellation without its task having been cancelled.
+private struct AbandoningWorkflowExtractor: TextExtractionService {
+    func extractText(from file: ValidatedImportedFile) async throws -> [OCRBlock] {
+        throw CancellationError()
+    }
 }
 
 private actor SyntheticWorkflowExtractor: TextExtractionService {

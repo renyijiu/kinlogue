@@ -187,10 +187,6 @@ public struct DICOMStudy: Codable, Identifiable, Hashable, Sendable {
         )
     }
 
-    public func reassigning(memberID: FamilyMember.ID, effectiveDate: Date) throws -> Self {
-        try confirmed(memberID: memberID, effectiveDate: effectiveDate)
-    }
-
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         try decoder.rejectUnknownKeys([

@@ -10,10 +10,14 @@ public struct BackupContainerReadResult: Sendable {
 public struct BackupContainerReader: Sendable {
     public init() {}
 
+    /// `acceptManifest` sees the authenticated manifest before any entry is decrypted. An error it
+    /// throws ends the read and reaches the caller unchanged, so a caller that cannot use this
+    /// kind of checkpoint does not pay for decrypting all of it first.
     public func read(
         source: BackupContainerByteSource,
         recoverySeed: Data,
-        sink: BackupContainerEntrySink
+        sink: BackupContainerEntrySink,
+        acceptManifest: (BackupManifest) throws -> Void = { _ in }
     ) throws -> BackupContainerReadResult {
         try Task.checkCancellation()
         let parsed = try BackupContainerParser.parse(source: source)
@@ -63,7 +67,8 @@ public struct BackupContainerReader: Sendable {
         let manifest = try Self.decrypt(
             parsed: parsed,
             dek: SymmetricKey(data: dekBytes),
-            sink: sink
+            sink: sink,
+            acceptManifest: acceptManifest
         )
         return BackupContainerReadResult(
             publicVerification: publicVerification,
@@ -74,7 +79,8 @@ public struct BackupContainerReader: Sendable {
     static func decrypt(
         parsed: ParsedBackupContainer,
         dek: SymmetricKey,
-        sink: BackupContainerEntrySink
+        sink: BackupContainerEntrySink,
+        acceptManifest: (BackupManifest) throws -> Void = { _ in }
     ) throws -> BackupManifest {
         let descriptorDigest = BackupCrypto.digest(parsed.descriptor.canonicalBytes)
         let authorizationDigest = BackupCrypto.digest(parsed.authorization.canonicalBytes)
@@ -117,6 +123,7 @@ public struct BackupContainerReader: Sendable {
             try BackupManifest.decodeCanonical(manifestBytes)
         }
         try validateGraph(manifest: manifest, parsed: parsed)
+        try acceptManifest(manifest)
 
         var frameCursor = 0
         var frameOffset = parsed.framesOffset

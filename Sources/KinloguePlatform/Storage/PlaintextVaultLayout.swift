@@ -37,19 +37,6 @@ public struct PlaintextVaultLayout: Sendable {
         "\(dicomImportJournalDirectoryPath)/\(operationID.uuidString.lowercased()).json"
     }
 
-    static func isAtomicTemporaryFilename(_ name: String) -> Bool {
-        let prefix = ".kinlogue-"
-        let suffix = ".tmp"
-        guard name.hasPrefix(prefix),
-              name.hasSuffix(suffix),
-              name.count == prefix.count + 36 + suffix.count else {
-            return false
-        }
-        return UUID(
-            uuidString: String(name.dropFirst(prefix.count).dropLast(suffix.count))
-        ) != nil
-    }
-
     public func objectPath(_ reference: VaultObjectReference) -> String {
         let fileExtension = reference.kind == .ocr ? "json" : "data"
         return "objects/\(reference.kind.storageComponent)/"

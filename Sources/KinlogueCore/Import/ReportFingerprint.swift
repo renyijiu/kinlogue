@@ -129,14 +129,4 @@ extension KeyedDecodingContainer {
         )
     }
 
-    func decodeReportFingerprintIfPresent(
-        forKey key: Key,
-        maximumSourceCount: Int
-    ) throws -> ReportFingerprint? {
-        guard contains(key), try !decodeNil(forKey: key) else { return nil }
-        return try decodeReportFingerprint(
-            forKey: key,
-            maximumSourceCount: maximumSourceCount
-        )
-    }
 }

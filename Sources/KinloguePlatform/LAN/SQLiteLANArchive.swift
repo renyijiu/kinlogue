@@ -60,7 +60,7 @@ extension SQLiteLANInboxStore {
                         reportSourceID: document.source.id, attachmentID: document.source.attachmentID)
                 }
                 return try LANArchiveIntent(vaultID: SQLiteLibraryState.read(from: db).libraryID, orderedSources: sources,
-                    memberID: memberID, canonicalReportDate: command.date, draftID: UUID(), documentObjectID: UUID())
+                    memberID: memberID, canonicalReportDate: command.date, draftID: LibraryOrderedIDGenerator.shared.next(), documentObjectID: UUID())
             }
             let fingerprint = ContentDigest.sha256(try CanonicalVaultJSON.encode(intent.fingerprint))
             let duplicate = try store.read(epoch: epoch) { db -> SQLiteLANVerifiedDestination? in

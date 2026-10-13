@@ -129,8 +129,7 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
         }
         let attemptID = UUID()
         let task = Task<AppSnapshot, Error> { [self] in
-            do { _ = try await reports.initializeLibrary() }
-            catch is VaultError { throw AppServiceError.vaultUnavailable }
+            _ = try await reports.initializeLibrary()
             recoveryDraftIDs = try await draftStore.resumableDraftIDs()
             try Task.checkCancellation()
             return AppSnapshot(header: try await reports.header())
@@ -1020,15 +1019,6 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
         }
         return try await lifecycle.withActiveOperation {
             try await operation(runtime)
-        }
-    }
-
-    private func startupIsReady() async -> Bool {
-        do {
-            try await requireStartup()
-            return true
-        } catch {
-            return false
         }
     }
 

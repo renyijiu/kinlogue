@@ -13,11 +13,11 @@ public struct LANInboxPreviewPayload: Equatable, Sendable {
 
 /// Item-oriented use cases shared by the Mac surface and launch recovery.
 public actor LANPendingQueueWorkflow {
-    private let inbox: any LANPendingItemStoring
+    private let inbox: SQLiteLANInboxStore
     private let preprocessor: LANItemPreprocessor
     private let archiveCoordinator: LANReportArchiveCoordinator
 
-    package init(inbox: any LANPendingItemStoring, preprocessor: LANItemPreprocessor, archiveCoordinator: LANReportArchiveCoordinator) {
+    package init(inbox: SQLiteLANInboxStore, preprocessor: LANItemPreprocessor, archiveCoordinator: LANReportArchiveCoordinator) {
         self.inbox = inbox; self.preprocessor = preprocessor; self.archiveCoordinator = archiveCoordinator
     }
 

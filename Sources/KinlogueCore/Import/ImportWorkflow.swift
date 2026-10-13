@@ -138,12 +138,14 @@ public actor ImportWorkflow {
             let source = try await store.loadSource(draftID: draftID)
             blocks = try await textExtractor.extractText(from: source)
             try Task.checkCancellation()
-        } catch is CancellationError {
-            try await store.failProcessing(lease: lease, failureCode: .cancelled)
-            return .failed(draftID, .cancelled)
         } catch {
-            try await store.failProcessing(lease: lease, failureCode: .textExtractionFailed)
-            return .failed(draftID, .textExtractionFailed)
+            // An attempt whose task was cancelled is interrupted, not failed. Nothing is recorded:
+            // the draft stays in processing and the next launch resumes it. An extractor that gives
+            // up on its own, with the task still running, is recorded as a cancelled failure.
+            try Task.checkCancellation()
+            let code: ImportFailureCode = error is CancellationError ? .cancelled : .textExtractionFailed
+            try await store.failProcessing(lease: lease, failureCode: code)
+            return .failed(draftID, code)
         }
         let document = ImportDraftDocument(
             blocks: blocks,

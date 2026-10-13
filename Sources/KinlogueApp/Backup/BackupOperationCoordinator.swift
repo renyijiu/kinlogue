@@ -217,19 +217,6 @@ actor BackupOperationCoordinator: BackupAutomaticRunning {
     }
 }
 
-/// Concrete U4 bridge for an already-resolved, security-scoped local
-/// repository. U7 owns opening/closing the bookmark scope around this adapter.
-struct LocalDirectoryCheckpointCreator: BackupCheckpointCreating {
-    let publisher: BackupCheckpointPublisher
-
-    func createCheckpoint(
-        configuration: BackupLocalConfiguration
-    ) async throws -> BackupCheckpointCreation {
-        let result = try await publisher.publishNext(configuration: configuration)
-        return .init(revisionPair: result.revisionPair)
-    }
-}
-
 struct LocalDirectoryRetentionAdapter: BackupRetentionExecuting {
     let executor: BackupRetentionExecutor
 

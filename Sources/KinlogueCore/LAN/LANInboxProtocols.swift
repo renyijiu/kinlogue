@@ -22,16 +22,3 @@ public enum LANInboxError: Error, Equatable, Sendable {
     case receiptConflict
     case storageFailure
 }
-
-public enum LANInboxAccessState: Equatable, Sendable {
-    case absent
-    case operationInProgress
-    case damaged
-    case unsupportedVersion
-    case ready(LANInboxRevision)
-}
-
-public protocol LANInboxRepository: Sendable {
-    func inspect() async -> LANInboxAccessState
-    func loadSnapshot() async throws -> LANInboxSnapshot
-}

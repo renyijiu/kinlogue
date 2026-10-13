@@ -1,8 +1,8 @@
 import Foundation
 import KinlogueCore
 
+/// What a receiver needs from the inbox while it accepts uploads.
 package protocol LANUploadStoring: Sendable {
-    func initialize() async throws -> LANInboxSnapshot
     func prepare() async throws
     func publicationGuard() async throws -> LANInboxPublicationGuard
     func revokePublications(guardedBy guardValue: LANInboxPublicationGuard) async throws
@@ -15,38 +15,9 @@ package protocol LANUploadStoring: Sendable {
     func endItemSession(sessionID: UUID) async throws
 }
 
-package protocol LANPendingItemStoring: LANInboxRepository, LANUploadStoring {
-    func queueScreen(cursor: LANInboxPageCursor?) async throws -> LANInboxQueueScreen
-    func itemPage(cursor: LANInboxPageCursor?, processing: Bool) async throws -> LANInboxPage
-    func removeItem(itemID: UUID, expectedRevision: UInt64, activeSessionID: UUID?) async throws
-    func loadItems(ids: [UUID]) async throws -> [LANInboxItem]
-    func snapshotAndStorageSummary() async throws -> LANInboxSnapshotAndStorageSummary
-    func deleteItem(itemID: UUID, expectedRevision: UInt64, activeSessionID: UUID?,
-                    admissionGenerationCutoff: UInt64?) async throws -> LANInboxSnapshot
-    func withVerifiedItemSourceContent<T: Sendable>(itemID: UUID, _ body: @escaping @Sendable (Int32) throws -> T) async throws -> T
-    func markItemPreprocessingIssue(itemID: UUID, expectedRevision: UInt64, issue: LANInboxFileIssue) async throws -> LANInboxItem
-    func reportAttachmentID(for item: LANInboxItem) async throws -> UUID
-    func loadPreprocessedDocument(itemID: UUID, expectedRevision: UInt64) async throws -> LANPreprocessedSourceDocument
-    func savePreprocessedDocument(itemID: UUID, expectedRevision: UInt64, document: LANPreprocessedSourceDocument) async throws -> LANInboxItem
-}
-
-extension LANUploadStoring {
-    package func prepare() async throws { _ = try await initialize() }
-}
-extension LANPendingItemStoring {
-    package func removeItem(itemID: UUID, expectedRevision: UInt64, activeSessionID: UUID?) async throws {
-        _ = try await deleteItem(itemID: itemID, expectedRevision: expectedRevision, activeSessionID: activeSessionID, admissionGenerationCutoff: nil)
-    }
-}
-
 public enum LANItemUploadStartOutcome: Sendable {
     case sink(LANUploadSink)
     case terminal(LANInboxTransportReceipt)
-}
-
-public enum LANArchivePreparationOutcome: Equatable, Sendable {
-    case active(LANArchiveIntent)
-    case completed(LANArchiveTerminal)
 }
 
 public struct LANInboxSnapshotAndStorageSummary: Sendable {

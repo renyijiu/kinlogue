@@ -134,7 +134,7 @@ Vision 常把“查”识别成异体字“査”，使“检査所见”一类�
 
 `ImportDraft` 的 processing 使用 `revision + attemptID` lease：旧任务完成、失败或取消后，不能覆盖一个新 attempt。资料库打开并发布 Ready 后，App-owned `AppProcessingCoordinator` 在后台只自动恢复 `.staging` 和中断的 `.processing`，每个终态自动刷新 App snapshot；durable `.failed` 只有用户显式 retry 才回到 processing，并允许显式 discard。若开始或完成处理的持久化失败，App 保留绑定原 draft/attempt 的内存失败标记，在 durable `.staging` / `.processing` 上提供现有重试入口，不伪造持久状态、不自动循环、不放宽 discard。新 attempt、成功终态或删除使旧失败标记失效；取消和 lifecycle 撤销不添加重试标记。待确认页的手动 OCR 只接受当前 `needsReview` revision，并通过 `saveReview` 原子发布新的 OCR document；过期页面不能覆盖较新的保存结果。
 
-存储侧先持久化原件并登记草稿，OCR 文档和草稿的新 revision 在同一个数据库事务里保存。重启读取会保留结构完整的 `.needsReview` / `.failed` 供用户处理，只把 `.staging` / `.processing` 交给自动恢复，不返回 dangling source reference。自动恢复按草稿 ID 的顺序进行，不保证与导入的先后一致。被取消的处理不会记成失败：草稿留在 `.processing`，由下一次启动继续；处理期间草稿已被别处改动时，重新识别以“复核内容已过期”的错误结束，而不是一般性失败。
+存储侧先持久化原件并登记草稿，OCR 文档和草稿的新 revision 在同一个数据库事务里保存。重启读取会保留结构完整的 `.needsReview` / `.failed` 供用户处理，只把 `.staging` / `.processing` 交给自动恢复，不返回 dangling source reference。草稿 ID 按创建时刻递增，待确认列表和自动恢复都按导入的先后排列。处理所在的任务被取消时不记成失败：草稿留在 `.processing`，由下一次启动继续，这条规则在 [`ImportWorkflow`](../Sources/KinlogueCore/Import/ImportWorkflow.swift) 里；识别服务自己放弃而任务仍在运行时，记为“已取消”的失败，需要手动重试；处理期间草稿已被别处改动时，重新识别以“复核内容已过期”的错误结束，而不是一般性失败。
 
 App 层把 Finder 报告导入、失败草稿重试和“重新识别并覆盖”三条可持久化路径纳入共享 `LibraryLifecycleCoordinator`。整库恢复或删除撤销 lifecycle 时，注册 hook 会取消这些 admitted OCR/import task 并等待它们结束；已经取消但仍处于 `.processing` 的 draft 由下一次正常启动按既有 lease 恢复，迟到 task 不能在 whole-root 切换后发布旧 generation。只读的复核快照、原件加载和查询不进入该 fence。
 

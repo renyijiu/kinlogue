@@ -29,27 +29,6 @@ public enum BackupLocalCheckpointState: String, CaseIterable, Hashable, Sendable
     case overdue
 }
 
-public enum BackupOperationKind: String, CaseIterable, Hashable, Sendable {
-    case manualBackup
-    case automaticBackup
-    case recoveryCodeVerification
-    case restore
-    case retention
-}
-
-public enum BackupOperationPhase: String, CaseIterable, Hashable, Sendable {
-    case idle
-    case preflighting
-    case readingSource
-    case writingEncryptedCheckpoint
-    case verifyingWork
-    case committingPublication
-    case verifyingFinal
-    case completed
-    case cancelled
-    case failed
-}
-
 /// Stable error codes for state restoration and localization. These values never
 /// carry a path, key, digest, recovery code, or health-record content.
 public enum BackupSemanticError: String, CaseIterable, Error, Hashable, Sendable {

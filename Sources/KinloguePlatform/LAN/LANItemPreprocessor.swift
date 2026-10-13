@@ -140,14 +140,14 @@ private actor LANItemPreprocessingGate {
 public actor LANItemPreprocessor {
     public typealias IDGenerator = @Sendable () -> UUID
 
-    private let inbox: any LANPendingItemStoring
+    private let inbox: SQLiteLANInboxStore
     private let validator: ImportedFileValidator
     private let textExtractor: any TextExtractionService
     private let candidateExtractor: ReportCandidateExtractor
     private let makeID: IDGenerator
 
     package init(
-        inbox: any LANPendingItemStoring,
+        inbox: SQLiteLANInboxStore,
         validator: ImportedFileValidator = ImportedFileValidator(),
         textExtractor: any TextExtractionService = OnDeviceTextExtractionService(),
         candidateExtractor: ReportCandidateExtractor = ReportCandidateExtractor(),
@@ -342,13 +342,6 @@ public actor LANItemPreprocessor {
         try Task.checkCancellation()
         return try await inbox.savePreprocessedDocument(itemID: itemID, expectedRevision: item.revision,
             document: CanonicalVaultJSON.decode(LANPreprocessedSourceDocument.self, from: encoded))
-    }
-
-    private func currentItem(itemID: LANInboxItem.ID) async throws -> LANInboxItem {
-        guard let item = try await inbox.loadItems(ids: [itemID]).first else {
-            throw LANItemPreprocessorError.itemNotFound
-        }
-        return item
     }
 
     nonisolated static func attachmentID(

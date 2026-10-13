@@ -241,31 +241,6 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
         items.first { $0.contentIdentity == contentIdentity }
     }
 
-    public func transportReceipt(
-        transport: LANInboxTransportIdentity
-    ) -> LANInboxTransportReceipt? {
-        transportReceipts.first { $0.transport == transport }
-    }
-
-    public func contentTerminal(
-        sessionID: UUID,
-        contentIdentity: LANInboxContentIdentity,
-        admissionGeneration: UInt64
-    ) -> LANInboxContentTerminal? {
-        contentTerminals.first {
-            $0.contentIdentity == contentIdentity
-                && $0.applies(sessionID: sessionID, admissionGeneration: admissionGeneration)
-        }
-    }
-
-    public func archiveIntent(id: LANArchiveIntent.ID) -> LANArchiveIntent? {
-        archiveIntents.first { $0.id == id }
-    }
-
-    public func archiveTerminal(intentID: LANArchiveIntent.ID) -> LANArchiveTerminal? {
-        archiveTerminals.first { $0.intent.id == intentID }
-    }
-
     public func storageSummary(
         pendingUploadCount: Int = 0,
         pendingByteCount: Int = 0,

@@ -62,7 +62,7 @@ actor LiveLANInboxService: LANInboxServicing {
     }
 
     private struct Runtime {
-        let inbox: any LANPendingItemStoring
+        let inbox: SQLiteLANInboxStore
         let workflow: LANPendingQueueWorkflow
         let publicationGuard: LANInboxPublicationGuard
     }

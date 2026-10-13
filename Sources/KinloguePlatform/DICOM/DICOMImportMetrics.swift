@@ -63,12 +63,6 @@ public actor DICOMImportMetricsRecorder {
         updateDescriptorMaximums()
     }
 
-    func recordSourceDescriptorsOpened(_ count: Int) {
-        precondition(count >= 0)
-        liveSourceDescriptors += count
-        updateDescriptorMaximums()
-    }
-
     func recordSourceDescriptorClosed() {
         precondition(liveSourceDescriptors > 0)
         liveSourceDescriptors -= 1
@@ -125,26 +119,12 @@ public actor DICOMImportMetricsRecorder {
         recordManagedFullRead(digest: digest, byteCount: byteCount)
     }
 
-    func recordAttachmentPromotion(digest: Data, byteCount: Int) {
-        recordManagedFullRead(digest: digest, byteCount: byteCount)
-        let key = DICOMContentIdentity(digest: digest, byteCount: byteCount)
-        writesByObject[key, default: 0] += 1
-        promotedBytes += byteCount
-        addedDiskBytes += byteCount
-        maximumAddedDiskBytes = max(maximumAddedDiskBytes, addedDiskBytes)
-    }
-
     func recordAttachmentAdoption(byteCount: Int) {
         promotedBytes += byteCount
     }
 
     func recordPublicationValidation(digest: Data, byteCount: Int) {
         recordManagedFullRead(digest: digest, byteCount: byteCount)
-    }
-
-    func recordIndexPromotion(byteCount: Int) {
-        addedDiskBytes += byteCount
-        maximumAddedDiskBytes = max(maximumAddedDiskBytes, addedDiskBytes)
     }
 
     public init() {}

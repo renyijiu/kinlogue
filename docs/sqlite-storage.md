@@ -60,6 +60,8 @@ pin 固定 descriptor 和文件身份，不在快照捕获时读取全部原件�
 
 成员及来源读取先检查 SQL 字节长度和数量，再逐行验证；长度使用 BLOB 字节口径，包含 NUL。搜索和严格备份逐项处理成员。完整成员辅助读取仍受 128 MiB 单次预算约束，不限制资料库成员总字节数；App header、成员选择和复核只读有独立摘要的 160-scalar 成员投影，编辑按 ID 读取完整成员。真实测试覆盖 135 MiB 成员库的按 ID 读取、搜索和逻辑备份，以及精确 16 MiB 成员的恢复闭环。
 
+新草稿的 ID 由 [LibraryOrderedIDGenerator](../Sources/KinloguePlatform/Storage/LibraryOrderedID.swift) 分配：前 48 位是创建时刻的毫秒数，其后 12 位在同一毫秒内递增，其余随机（UUID 第 7 版的布局）。草稿没有单独的排序列，待确认列表、导入状态和启动时的自动恢复都按 `draft_id` 翻页，所以存下来的 ID 字节顺序就是导入的先后；系统时钟在运行期间回拨也不打乱顺序，跨启动则跟随时钟。本机导入和 LAN 归档创建的草稿都用它。这个 ID 因此带有创建时间；它留在资料库和加密恢复点里，不进入导出的 ZIP，也不发送给手机页面。此前用随机 ID 创建的草稿保持原来的相对位置，不会被重排。
+
 报告 staging 或发布失败时，即使尚未返回 original ID，也按本次 operation 精确回收。丢失响应先核对 live 原件、草稿和完整来源身份；草稿已进入 processing 等后续合法状态仍返回已创建。草稿缺失或来源已更换不误报成功，未知 inode 保留并报错。
 
 [查询契约](../Sources/KinlogueCore/Domain/LibraryReportQuery.swift) 每页最多 100 个摘要，每页都携带同次读取的 `LibraryRevision`，游标另绑定 query/member。摘要 title/reportType/organization/conclusion 分别最多 160/128/128/512 个 Unicode scalar；完整转录保留在详情和独立搜索表。普通列表不读取详情、OCR 或完整搜索文本；搜索复用 `RecordQuery` 的 Foundation 本地化子串规则，保持字段边界、中文短词、成员名及 confirmed-only 语义，不包含用户 notes 或原始 OCR。搜索扫描可取消，不中断随后无关查询。
@@ -88,7 +90,7 @@ header、列表、搜索、成员编辑、复核、详情、原件和比较都�
 
 ## LAN 事务与上传归属
 
-[SQLiteLANInboxStore](../Sources/KinloguePlatform/LAN/SQLiteLANInboxStore.swift) 通过窄协议注入 Receiver、Mac 队列、预处理及归档，共用一个 SQLite owner 和 admission policy。各接收 scope 独立撤销；创建/撤销 scope 与最终提交共用 admission，并在调用方执行器外等待。停止 Receiver 排空自己的 sink，保留 Mac 队列和数据库 owner。
+[SQLiteLANInboxStore](../Sources/KinloguePlatform/LAN/SQLiteLANInboxStore.swift) 由 Receiver 经窄协议 `LANUploadStoring` 使用，Mac 队列、预处理及归档直接持有这个类型，共用一个 SQLite owner 和 admission policy。各接收 scope 独立撤销；创建/撤销 scope 与最终提交共用 admission，并在调用方执行器外等待。停止 Receiver 排空自己的 sink，保留 Mac 队列和数据库 owner。
 
 [上传生命周期](../Sources/KinloguePlatform/Storage/SQLiteLANUpload.swift) 在接收字节前登记 `inbox_uploads` 的 operation、scope、transport、attempt 和实际 inode；未知内容不伪造摘要。完成后在 admission 外验证长度/摘要，同 inode rename，事务同时发布原件、队列和回执。响应丢失先核对 durable receipt；取消和恢复只清理归属可证明的文件。实际 descriptor 关闭后才释放活动登记；partial 记账不推进业务 revision。LAN revision 为 SQL generation + 1，初始化不人为制造提交。
 

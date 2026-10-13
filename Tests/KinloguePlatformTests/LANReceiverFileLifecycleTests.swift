@@ -318,7 +318,6 @@ private struct GatedUploadStore: LANUploadStoring {
     let base: SQLiteLANInboxStore
     let gate: AdmissionGate
 
-    func initialize() async throws -> LANInboxSnapshot { try await base.initialize() }
     func prepare() async throws { try await base.prepare() }
     func publicationGuard() async throws -> LANInboxPublicationGuard { try await base.publicationGuard() }
     func revokePublications(guardedBy guardValue: LANInboxPublicationGuard) async throws {

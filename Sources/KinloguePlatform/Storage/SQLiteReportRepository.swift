@@ -205,7 +205,8 @@ package actor SQLiteReportRepository: ImportDraftStore {
         do {
             let id = try store.stageOriginal(bytes: file.data, sha256: file.sha256Digest,
                                              contentType: file.contentTypeIdentifier, operationID: operation)
-            let draft = ImportDraft(sources: try ReportSources([ReportSource(attachmentID: id, pageCount: file.pageCount)]))
+            let draft = ImportDraft(id: LibraryOrderedIDGenerator.shared.next(),
+                                    sources: try ReportSources([ReportSource(attachmentID: id, pageCount: file.pageCount)]))
             proposed = draft
             try store.publishOriginal(id, operationID: operation) { db in
                 try Self.checkNewDraftCapacity(originalIDs: [id], db)
@@ -279,9 +280,6 @@ package actor SQLiteReportRepository: ImportDraftStore {
     @concurrent
     package nonisolated func failProcessing(lease: ImportProcessingLease, failureCode: ImportFailureCode) async throws {
         try await LibraryStorageExecutor.run {
-            // A cancelled attempt records nothing: the draft stays in processing and is resumed
-            // on the next launch instead of being left as a failure the user has to retry.
-            try Task.checkCancellation()
             try store.write { db in
                 let next = try usableDraft(lease.draftID, db).failingProcessing(
                     expectedRevision: lease.revision, attemptID: lease.attemptID, failureCode: failureCode)
