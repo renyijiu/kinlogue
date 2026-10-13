@@ -65,7 +65,7 @@ Kinlogue 借鉴 LLM Wiki 的“原始资料 → 编译后的 Wiki → schema”�
 | `Tests/` | 按 target 镜像的单元、集成、并发、脚本安全和安装验收测试 | 任何行为改动先找到现有覆盖，再补最小缺口。 |
 | `scripts/` | 构建、隐私扫描、安装验收、回滚归档和包安全门禁 | 不把一次本机通过写成跨系统或正式分发通过。 |
 
-正式运行时从 [`AppRuntimeIdentity`](Sources/KinlogueApp/App/AppRuntimeIdentity.swift) 取得可信的 Application Support 路径，由 [`AppComposition`](Sources/KinlogueApp/App/AppComposition.swift) 组装 `PlaintextVault`、本机 OCR、导入 workflow 和 LAN inbox service。不要在 View 中直接创建存储、网络或 OCR 实例。
+正式运行时从 [`AppRuntimeIdentity`](Sources/KinlogueApp/App/AppRuntimeIdentity.swift) 取得可信的 Application Support 路径，由 [`LibraryLaunchCoordinator`](Sources/KinlogueApp/App/LibraryLaunchCoordinator.swift) 取得单实例 owner 并打开 SQLite 资料库，再由 [`AppComposition`](Sources/KinlogueApp/App/AppComposition.swift) 组装本机 OCR、导入 workflow 和 LAN inbox service。不要在 View 中直接创建存储、网络或 OCR 实例。
 
 ## 5. 修改工作流
 

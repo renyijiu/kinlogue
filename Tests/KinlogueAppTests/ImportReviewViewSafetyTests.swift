@@ -287,7 +287,7 @@ struct AppShellPresentationSafetyTests {
         #expect(entry.contains("SQLiteAppLaunchView(startup: startup"))
         #expect(entry.contains("startup.composition?.appModel"))
         #expect(!entry.contains("AppComposition"))
-        #expect(!entry.contains("PlaintextVault"))
+        #expect(!entry.contains("SQLiteLibraryStore"))
         // The JSON composition exists only for an explicit identity, never the user's own library.
         #expect(!composition.contains("static func makeDefault() -> Self"))
         #expect(!composition.contains("AppRuntimeIdentity.current()"))

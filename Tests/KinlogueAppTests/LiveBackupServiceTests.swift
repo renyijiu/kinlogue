@@ -7,20 +7,21 @@ import Testing
 @Test
 @MainActor
 func reauthorizingTheOriginalFolderPreservesWriterAndRejectsOtherDirectories() async throws {
-    let base = FileManager.default.temporaryDirectory
+    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
         .appendingPathComponent("KinlogueReauthorization-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: base) }
     let selected = base.appendingPathComponent("selected", isDirectory: true)
     let other = base.appendingPathComponent("other", isDirectory: true)
     let vaultURL = base.appendingPathComponent("support/Vault", isDirectory: true)
-    for url in [selected, other, vaultURL] {
+    for url in [selected, other, vaultURL.deletingLastPathComponent()] {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
     let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
     let store = BackupLocalConfigurationStore(rootURL: base.appendingPathComponent("support/BackupIdentity"))
-    let service = try LiveBackupService(
-        activeVaultURL: vaultURL, configurationStore: store,
-        vault: PlaintextVault(rootURL: vaultURL),
+    let library = try SQLiteLibraryStore(rootURL: vaultURL)
+    defer { try? library.close() }
+    let service = LiveBackupService(
+        store: library, configurationStore: store,
         requiresSelectedDirectoryScope: true,
         destinationAuthority: BackupDestinationAuthority(bookmarks: bookmarks),
         selectedDirectoryScope: bookmarks
@@ -64,27 +65,23 @@ func reauthorizingTheOriginalFolderPreservesWriterAndRejectsOtherDirectories() a
 }
 
 @Test
-func loadingBackupStatusNeverPreparesOrEnumeratesTheLibrarySource() async throws {
-    let base = FileManager.default.temporaryDirectory
+func loadingBackupStatusNeverReadsTheLibrarySource() async throws {
+    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
         .appendingPathComponent("KinlogueLiveBackupStatusCost-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: base) }
     let selected = base.appendingPathComponent("selected", isDirectory: true)
     let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
     try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: vaultURL, withIntermediateDirectories: true)
-    let vault = try PlaintextVault(rootURL: vaultURL)
-    let inbox = try PlaintextLANInboxStore(rootURL: vaultURL)
-    _ = try await vault.initialize()
-    _ = try await inbox.initialize()
+    try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let library = try SQLiteLibraryStore(rootURL: vaultURL)
+    defer { try? library.close() }
 
     let store = BackupLocalConfigurationStore(
         rootURL: base.appendingPathComponent("support/Kinlogue/BackupIdentity", isDirectory: true)
     )
-    let service = try LiveBackupService(
-        activeVaultURL: vaultURL,
+    let service = LiveBackupService(
+        store: library,
         configurationStore: store,
-        vault: vault,
-        inboxStore: inbox,
         requiresSelectedDirectoryScope: false,
         destinationAuthority: BackupDestinationAuthority(
             bookmarks: LiveBackupMutableBookmarks(resolvedURL: selected)
@@ -96,24 +93,24 @@ func loadingBackupStatusNeverPreparesOrEnumeratesTheLibrarySource() async throws
     let status = try await service.loadStatus()
 
     #expect(status.estimate == nil)
-    #expect(await service.sourcePreparationCountForTesting() == 0)
+    #expect(await service.sourceRevisionReadCountForTesting() == 0)
     _ = try await service.setAutomaticBackupEnabled(true)
-    #expect(await service.sourcePreparationCountForTesting() == 1)
+    #expect(await service.sourceRevisionReadCountForTesting() == 1)
     _ = try await service.setAutomaticBackupEnabled(false)
-    #expect(await service.sourcePreparationCountForTesting() == 1)
+    #expect(await service.sourceRevisionReadCountForTesting() == 1)
     // Exercise the actual writer witness and retention clock together.
     #expect(try await service.backUpNow() == .complete)
 }
 
 @Test
 func liveStatusPersistsAStaleBookmarkSoTheRefreshedGrantSurvivesRelaunch() async throws {
-    let base = FileManager.default.temporaryDirectory
+    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
         .appendingPathComponent("KinlogueLiveBackup-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: base) }
     let selected = base.appendingPathComponent("selected", isDirectory: true)
     let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
     try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: vaultURL, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
 
     let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
     let authority = BackupDestinationAuthority(bookmarks: bookmarks)
@@ -122,11 +119,11 @@ func liveStatusPersistsAStaleBookmarkSoTheRefreshedGrantSurvivesRelaunch() async
         isDirectory: true
     )
     let store = BackupLocalConfigurationStore(rootURL: storeRoot)
-    let service = try LiveBackupService(
-        activeVaultURL: vaultURL,
+    let library = try SQLiteLibraryStore(rootURL: vaultURL)
+    defer { try? library.close() }
+    let service = LiveBackupService(
+        store: library,
         configurationStore: store,
-        vault: PlaintextVault(rootURL: vaultURL),
-        inboxStore: PlaintextLANInboxStore(rootURL: vaultURL),
         requiresSelectedDirectoryScope: false,
         destinationAuthority: authority
     )
@@ -147,13 +144,13 @@ func liveStatusPersistsAStaleBookmarkSoTheRefreshedGrantSurvivesRelaunch() async
 
 @Test
 func showingBackupRepositoryOpensTheExactHiddenRepositoryWithBalancedScope() async throws {
-    let base = FileManager.default.temporaryDirectory
+    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
         .appendingPathComponent("KinlogueLiveBackupReveal-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: base) }
     let selected = base.appendingPathComponent("selected", isDirectory: true)
     let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
     try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: vaultURL, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
 
     let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
     let opener = LiveBackupRepositoryOpener()
@@ -161,11 +158,11 @@ func showingBackupRepositoryOpensTheExactHiddenRepositoryWithBalancedScope() asy
     let store = BackupLocalConfigurationStore(
         rootURL: base.appendingPathComponent("support/Kinlogue/BackupIdentity", isDirectory: true)
     )
-    let service = try LiveBackupService(
-        activeVaultURL: vaultURL,
+    let library = try SQLiteLibraryStore(rootURL: vaultURL)
+    defer { try? library.close() }
+    let service = LiveBackupService(
+        store: library,
         configurationStore: store,
-        vault: PlaintextVault(rootURL: vaultURL),
-        inboxStore: PlaintextLANInboxStore(rootURL: vaultURL),
         requiresSelectedDirectoryScope: false,
         destinationAuthority: authority,
         repositoryOpener: opener
@@ -188,13 +185,13 @@ func showingBackupRepositoryOpensTheExactHiddenRepositoryWithBalancedScope() asy
 
 @Test
 func failedRepositoryRevealReportsOfflineAndBalancesScope() async throws {
-    let base = FileManager.default.temporaryDirectory
+    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
         .appendingPathComponent("KinlogueLiveBackupRevealFailure-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: base) }
     let selected = base.appendingPathComponent("selected", isDirectory: true)
     let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
     try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: vaultURL, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
 
     let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
     let opener = LiveBackupRepositoryOpener(result: false)
@@ -202,11 +199,11 @@ func failedRepositoryRevealReportsOfflineAndBalancesScope() async throws {
     let store = BackupLocalConfigurationStore(
         rootURL: base.appendingPathComponent("support/Kinlogue/BackupIdentity", isDirectory: true)
     )
-    let service = try LiveBackupService(
-        activeVaultURL: vaultURL,
+    let library = try SQLiteLibraryStore(rootURL: vaultURL)
+    defer { try? library.close() }
+    let service = LiveBackupService(
+        store: library,
         configurationStore: store,
-        vault: PlaintextVault(rootURL: vaultURL),
-        inboxStore: PlaintextLANInboxStore(rootURL: vaultURL),
         requiresSelectedDirectoryScope: false,
         destinationAuthority: authority,
         repositoryOpener: opener
@@ -223,30 +220,26 @@ func failedRepositoryRevealReportsOfflineAndBalancesScope() async throws {
 
 @Test
 func automaticBackupPersistsRetryWhenDestinationIsOfflineBeforeSchedulerEntry() async throws {
-    let base = FileManager.default.temporaryDirectory
+    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
         .appendingPathComponent("KinlogueLiveBackupOfflineRetry-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: base) }
     let selected = base.appendingPathComponent("selected", isDirectory: true)
     let parked = base.appendingPathComponent("selected-offline", isDirectory: true)
     let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
     try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: vaultURL, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
 
-    let vault = try PlaintextVault(rootURL: vaultURL)
-    let inbox = try PlaintextLANInboxStore(rootURL: vaultURL)
-    _ = try await vault.initialize()
-    _ = try await inbox.initialize()
+    let library = try SQLiteLibraryStore(rootURL: vaultURL)
+    defer { try? library.close() }
     let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
     let start = Date(timeIntervalSince1970: 100_000)
     let clock = LiveBackupTestClock(start)
     let store = BackupLocalConfigurationStore(
         rootURL: base.appendingPathComponent("support/Kinlogue/BackupIdentity", isDirectory: true)
     )
-    let service = try LiveBackupService(
-        activeVaultURL: vaultURL,
+    let service = LiveBackupService(
+        store: library,
         configurationStore: store,
-        vault: vault,
-        inboxStore: inbox,
         requiresSelectedDirectoryScope: false,
         destinationAuthority: BackupDestinationAuthority(bookmarks: bookmarks),
         clock: { clock.now() }
@@ -270,11 +263,9 @@ func automaticBackupPersistsRetryWhenDestinationIsOfflineBeforeSchedulerEntry() 
     #expect(bookmarks.startCount == bookmarks.stopCount)
 
     clock.set(start.addingTimeInterval(60))
-    let relaunched = try LiveBackupService(
-        activeVaultURL: vaultURL,
+    let relaunched = LiveBackupService(
+        store: library,
         configurationStore: BackupLocalConfigurationStore(rootURL: store.rootURL),
-        vault: vault,
-        inboxStore: inbox,
         requiresSelectedDirectoryScope: false,
         destinationAuthority: BackupDestinationAuthority(bookmarks: bookmarks),
         clock: { clock.now() }
@@ -295,13 +286,13 @@ func automaticBackupPersistsRetryWhenDestinationIsOfflineBeforeSchedulerEntry() 
 @Test
 @MainActor
 func relaunchedModelResumesPersistedPendingEnrollmentWithTheOriginalRecoveryCode() async throws {
-    let base = FileManager.default.temporaryDirectory
+    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
         .appendingPathComponent("KinlogueLiveBackupPending-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: base) }
     let selected = base.appendingPathComponent("selected", isDirectory: true)
     let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
     try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: vaultURL, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
 
     let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
     let authority = BackupDestinationAuthority(bookmarks: bookmarks)
@@ -332,11 +323,11 @@ func relaunchedModelResumesPersistedPendingEnrollmentWithTheOriginalRecoveryCode
     }
     #expect(pending.phase == .pending)
 
-    let relaunchedService = try LiveBackupService(
-        activeVaultURL: vaultURL,
+    let library = try SQLiteLibraryStore(rootURL: vaultURL)
+    defer { try? library.close() }
+    let relaunchedService = LiveBackupService(
+        store: library,
         configurationStore: BackupLocalConfigurationStore(rootURL: storeRoot),
-        vault: PlaintextVault(rootURL: vaultURL),
-        inboxStore: PlaintextLANInboxStore(rootURL: vaultURL),
         requiresSelectedDirectoryScope: false,
         destinationAuthority: authority
     )

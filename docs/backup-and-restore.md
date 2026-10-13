@@ -52,14 +52,14 @@
 
 ## 格式与安全边界
 
-当前写入容量版本为 `1.1`（minimum reader `1`），继续读取 `1.0` 的旧恢复点；旧身份、恢复根派生和设备签名契约保持兼容。新版最多 30,002 条目（20,000 Vault objects + 5,000 inbox blobs + 5,000 derived + 两份 manifest）、2²⁴ 个 payload frames、每 frame 256 KiB、32 MiB canonical manifest。名义明文预算 4 TiB；逐条向上取整和空条目也占 frame，实际容量由两个预算共同限制。超过预算在写入前返回 resource limit；这不是扩大 LAN 准入，也不代表无限大小的资料库均能备份。
+当前写入容量版本为 `1.1`（minimum reader `1`）；旧身份、恢复根派生和设备签名契约保持兼容。容器层仍能解析并验证 `1.0` 和早先按文件树组织的恢复点，但恢复只接受逻辑格式：文件树格式的恢复点在通过解密验证之后、写入任何暂存之前以“格式不受支持”被拒绝，不会被报成损坏，输入文件和当前资料库都保持不变。容器最多 30,002 条目（逻辑记录段，加上每个原件一项）、2²⁴ 个 payload frames、每 frame 256 KiB、32 MiB canonical manifest。名义明文预算 4 TiB；逐条向上取整和空条目也占 frame，实际容量由两个预算共同限制。超过预算在写入前返回 resource limit；这不是扩大 LAN 准入，也不代表无限大小的资料库均能备份。
 
 空间预检使用实际 plaintext、36 bytes/frame、实际 manifest 与至多 4 KiB 固定记录开销，并保留 256 MiB 空间余量。reader 逐帧扫描而不保存全部 frame 的位置数组。旧 reader 明确拒绝新版，不能用旧 App 恢复新恢复点。
 
-备份 source 在准备和最终发布时完整验证 Vault/inbox；逐条流读取只校验根/父目录身份、两个 durable head token 和当前文件 token，不再每条解码整份目录。token 包含 device/inode/长度/纳秒 mtime/ctime，读取前后检查且保留 SHA-256；最终线性复核还会发现条目已经读完后的文件改动。这里没有全局缓存，也没有降低恢复时完整图/原件校验。
+备份 source 在一次 admission 内固定 revision、pin 住可达原件并取得数据库的内部副本，随后在副本上逐项严格验证并输出逻辑记录，期间不阻塞普通读写。原件在流读取时核对 device/inode/长度/纳秒 mtime/ctime 组成的身份 token 并保留 SHA-256，发布前再整体核对一次 pin。这里没有全局缓存，也没有降低恢复时的完整图和原件校验。
 
 
-- 一个恢复点覆盖 exact `VaultRevision` 与 exact durable LAN inbox revision，以及两者的完整 committed reachable graph；不包含 LAN partial、进程内任务、未提交 staging 或 App 偏好。
+- 一个恢复点覆盖资料库的一个确切提交，以及它的完整已提交可达图：成员、报告及其 OCR 复核、草稿、LAN 队列与历史回执、DICOM 图和原件；不包含进行中的 LAN 上传、进程内任务、未提交的 staging 或 App 偏好。
 - 每次使用新的 DEK；CryptoKit HPKE `Curve25519/SHA-256/ChaChaPoly` 封装 DEK，payload 使用 AES-256-GCM、最多 256 KiB 的认证 frame。manifest 加密，footer 由 recovery-root 授权的设备 Ed25519 身份签名。
 - repository 只接受固定 opaque 叶名、regular file、单硬链接和有界大小；读取、发布与删除均基于 no-follow descriptor 和 identity 复核。正式叶排他发布，不覆盖同名文件。
 - publication mutex 是 app-private configuration root 的固定目录 inode；同步 repository 中遗留或外部创建的 `.kinlogue-publication.lock` 只作为兼容保留项忽略，不能参与互斥或替换真实 lease。保留清理与发布采用相同 lease 和 `repository → app-private configuration` 锁顺序，避免 scan/delete 与 publish 交错。
@@ -70,15 +70,15 @@
 
 ## 当前验证边界
 
-Core/Platform/App 自动化覆盖 canonical 格式、pending enrollment 重启恢复与显式放弃、错误恢复码、篡改/截断、资源上限、目录替换、稳定 writer 配置变化、真实双进程线性 publication、保留策略、私有 staging、whole-root 回滚、设置模型和降级恢复。LAN 图证据通过真实 store upload 与 `LANDerivedArtifactSink` 同时形成 reviewable derived artifact 和 durable `.preprocessing`：权威 source plan/container 包含前者的真实字节、排除 transient partial；生产 `BackupRestoreVerifier`/transaction 恢复后 strict validator 接受完整图，派生叶被逐字节篡改时拒绝，正常启动又把没有 partial 的 preprocessing 收敛为可重试 `.failed(.storageFailure)`，不会伪装成 reviewable。跨进程恢复探针不再维护第二套 activation 状态机：seed 只生成合成 checkpoint，execute 与 relaunch reconcile 直接调用生产 `BackupRestoreVerifier` 和 `BackupRestoreTransaction`。当前 Mac 的真实子进程矩阵会在 existing root 的 intent、writer reset、old-root move、new-root activation、validation、commit 六个 durable phase，以及 absent root 适用的五个 phase 触发 `SIGKILL`；新进程必须收敛到精确旧根、空根或新根，并由真实 Vault 与 durable LAN inbox strict validator 证明 receipt、staging 与 rollback 已清理。隔离的 ad-hoc probe 还完成了 20,000 对象、2 GiB 合成数据的流式备份和完整读取。
+Core/Platform/App 自动化覆盖 canonical 格式、pending enrollment 重启恢复与显式放弃、错误恢复码、篡改/截断、资源上限、目录替换、稳定 writer 配置变化、真实双进程线性 publication、保留策略、私有 staging、whole-root 回滚、设置模型和降级恢复。[逻辑备份测试](../Tests/KinloguePlatformTests/SQLiteLogicalBackupTests.swift)用真实的仓库和 LAN 上传建立资料库，恢复后逐项核对成员、报告及其 OCR、LAN 预处理结果、DICOM 图和原件导出；冻结时仍在处理中的草稿和 LAN 项以可重试的失败状态进入恢复点，进行中的上传不进入。[恢复测试](../Tests/KinloguePlatformTests/EncryptedCheckpointRestoreTests.swift)覆盖错误恢复码、文件树格式的拒绝、已有资料库的整根替换、旧根移走之后中断的回滚、截断的事务收据失败关闭，以及只清理有收据的废弃预检。跨进程恢复探针不再维护第二套 activation 状态机：seed 只生成合成 checkpoint，execute 与 relaunch reconcile 直接调用生产 `BackupRestoreVerifier` 和 `BackupRestoreTransaction`。当前 Mac 的真实子进程矩阵会在 existing root 的 intent、writer reset、old-root move、new-root activation、validation、commit 六个 durable phase，以及 absent root 适用的五个 phase 触发 `SIGKILL`；新进程必须收敛到精确旧根、空根或新根，由对资料库的严格打开和逻辑校验确认内容，并证明 receipt、staging 与 rollback 已清理。另一个进程持有资料库时，恢复在准备任何暂存之前被拒绝；它放手之后同一次恢复成功。隔离的 ad-hoc probe 还完成了 20,000 对象、2 GiB 合成数据的流式备份和完整读取。
 
-activation 的安装探针按生产事务契约逐 phase 固定终态，不再把任意旧根或新根都视为成功：existing root 在 intent、writer reset、old-root move 后必须恢复精确旧根，后续三 phase 必须保留新根；absent root 在 intent、writer reset 后必须保持无根，后续三 phase 必须保留新根，且每项都要求 transaction/preflight receipt、staging 与 rollback 全部不存在。另一个 production integration case 在 preparation 已通过后定长破坏 staging 中的 committed Vault object；`BackupRestoreTransaction.activate` 的 activation 后 strict validation 必须返回 `graphInvalid`，并立即恢复逐文件相同的旧根或原本的无根状态，同时清空上述事务工件。
+activation 的安装探针按生产事务契约逐 phase 固定终态，不再把任意旧根或新根都视为成功：existing root 在 intent、writer reset、old-root move 后必须恢复精确旧根，后续三 phase 必须保留新根；absent root 在 intent、writer reset 后必须保持无根，后续三 phase 必须保留新根，且每项都要求 transaction/preflight receipt、staging 与 rollback 全部不存在。[真实进程测试](../Tests/KinlogueStorageProcessTests/SQLiteLogicalRestoreProcessTests.swift)另有两个场景在新根激活之后破坏其中一个原件：下一个进程的 reconcile 必须发现校验失败，恢复逐文件相同的旧根或原本的无根状态，并清空上述事务工件。
 
 当前 Mac 已人工完成真实 Powerbox 目录设置和多次“立即备份”，并在 Finder 中核对专用 repository 内存在多个完整 `.kinloguebackup` 文件；该证据只覆盖本机已安装开发候选，不代替正式分发门禁。尚未执行的人工/分发门禁包括：手动恢复、真实阿里云盘/百度网盘客户端传播、外置盘/NAS、macOS 26/27 独立机器、Developer ID/notarization，以及键盘/VoiceOver 恢复流程。准确状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
 
 
-## SQLite 开发路径
+## 逻辑恢复点
 
-界面入口的备份与恢复现在使用 [SQLite logical-v1](sqlite-storage.md#逻辑恢复点与原件导出)，上文的 JSON source 只剩测试在用：恢复点保存 schema 解耦的领域记录和原件，完整保留 OCR 复核、LAN 历史回执及 DICOM 图。短暂持锁生成的应用自有数据库副本只是内部捕获工件，不进入恢复点。后续合法编辑不使已捕获版本失效；外部容器继续使用既有流式加密、回读、排他发布和 witness。
+备份与恢复使用 [logical-v1](sqlite-storage.md#逻辑恢复点与原件导出)：恢复点保存 schema 解耦的领域记录和原件，完整保留 OCR 复核、LAN 历史回执及 DICOM 图。短暂持锁生成的应用自有数据库副本只是内部捕获工件，不进入恢复点。后续合法编辑不使已捕获版本失效；外部容器继续使用既有流式加密、回读、排他发布和 witness。
 
-SQLite 恢复在本应用创建的新库中重建并严格验证逻辑记录和原件，整库事务共享单实例 owner；新 reader 明确拒绝旧 JSON checkpoint，不自动迁移或改写。真实 service、冻结 wire 夹具和 19 个 root/capture 故障场景已通过本机定向回归。独立探针已完成近上限、约 9.76 GiB 原件与 20,001 个原件的真实加密发布及严格恢复；三档分别用时 35.393/86.389/15.710 秒和 173.388/293.429/160.168 秒。每档只运行一次完整闭环，不声称 p95。实际条目下界、内存、FD、admission 与验证边界见 [实测记录](storage-refactor-measurement-2026-10-11.md#sqlite-完整规模闭环)；App/系统及 macOS 26 验证仍待完成。
+恢复在本应用创建的新库中重建并严格验证逻辑记录和原件，整库事务由资料库的单实例 owner 持有；文件树格式的旧恢复点被明确拒绝，不自动迁移或改写。真实 service、冻结 wire 夹具和 19 个 root/capture 故障场景已通过本机定向回归。独立探针已完成近上限、约 9.76 GiB 原件与 20,001 个原件的真实加密发布及严格恢复；三档分别用时 35.393/86.389/15.710 秒和 173.388/293.429/160.168 秒。每档只运行一次完整闭环，不声称 p95。实际条目下界、内存、FD、admission 与验证边界见 [实测记录](storage-refactor-measurement-2026-10-11.md#sqlite-完整规模闭环)；App/系统及 macOS 26 验证仍待完成。

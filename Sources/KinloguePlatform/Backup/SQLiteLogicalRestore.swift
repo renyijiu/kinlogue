@@ -3,12 +3,12 @@ import Foundation
 import GRDB
 import KinlogueCore
 
-struct SQLiteLogicalValidation: Sendable {
+package struct SQLiteLogicalValidation: Sendable {
     let header: BackupLogicalHeaderV1
-    let digest: Data
-    let memberCount: Int
-    let recordCount: Int
-    let inboxItemCount: Int
+    package let digest: Data
+    package let memberCount: Int
+    package let recordCount: Int
+    package let inboxItemCount: Int
 }
 
 /// Only called for an empty App-created database in receipt-owned staging, never an input database.

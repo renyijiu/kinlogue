@@ -112,7 +112,7 @@ package final class SQLiteDICOMRepository: Sendable, DICOMImportStoring {
                     try journal.begin(operationID: operationID, vaultID: state.libraryID)
                     let ownership = try staging.prepare(operationID: operationID)
                     try journal.bindStagingOwnership(ownership, operationID: operationID)
-                    return .sqlite(SQLiteDICOMImportSession(operationID: operationID, libraryID: state.libraryID, epoch: epoch, ownership: ownership))
+                    return SQLiteDICOMImportSession(operationID: operationID, libraryID: state.libraryID, epoch: epoch, ownership: ownership)
                 } catch {
                     store.activeDICOMImports.remove(operationID)
                     try recoverImportsLocked(libraryID: state.libraryID)
@@ -143,7 +143,7 @@ package final class SQLiteDICOMRepository: Sendable, DICOMImportStoring {
         try await LibraryStorageExecutor.run {
             let session = try require(session)
             if let existing = try await verifiedDuplicate(proposal.study.fingerprint) {
-                try await abortImport(.sqlite(session))
+                try await abortImport(session)
                 return .duplicateExisting(existing)
             }
             guard proposal.study.state == .needsReview, proposal.study.contentRevision == 0,
@@ -180,7 +180,7 @@ package final class SQLiteDICOMRepository: Sendable, DICOMImportStoring {
             for object in proposal.objects {
                 await metrics?.recordPublicationValidation(digest: object.attachment.sha256Digest, byteCount: object.attachment.byteCount)
             }
-            try await abortImport(.sqlite(session))
+            try await abortImport(session)
             return .accepted(proposal.study.id)
         }
     }
@@ -226,8 +226,8 @@ package final class SQLiteDICOMRepository: Sendable, DICOMImportStoring {
     }
 
     private func require(_ session: DICOMImportSession) throws -> SQLiteDICOMImportSession {
-        guard case let .sqlite(value) = session, value.epoch == epoch else { throw DICOMImportError.publicationConflict }
-        return value
+        guard session.epoch == epoch else { throw DICOMImportError.publicationConflict }
+        return session
     }
     private func recoverImports() throws {
         try store.admission.withLock {

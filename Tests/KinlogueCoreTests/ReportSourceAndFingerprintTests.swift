@@ -197,41 +197,6 @@ func fingerprintRejectsDuplicateAttachmentMetadataIdentifiers() throws {
 }
 
 @Test
-func catalogRejectsConflictingPageCountsForTheSameAttachmentAcrossOwners() throws {
-    let member = try FamilyMember(displayName: "Synthetic")
-    let attachment = try Attachment(
-        contentTypeIdentifier: "public.png",
-        byteCount: 1,
-        sha256Digest: Data(repeating: 0x33, count: 32)
-    )
-    let record = try HealthRecord(
-        memberID: member.id,
-        sources: ReportSources([try ReportSource(
-            attachmentID: attachment.id,
-            pageCount: 1
-        )]),
-        importState: .confirmed
-    )
-    let draft = ImportDraft(
-        sources: try ReportSources([try ReportSource(
-            attachmentID: attachment.id,
-            pageCount: 2
-        )])
-    )
-
-    #expect(throws: DomainValidationError.invalidReportSourcePageCount) {
-        _ = try VaultCatalog(
-            vaultID: UUID(),
-            generation: 1,
-            members: [member],
-            records: [record],
-            attachments: [attachment],
-            importDrafts: [draft]
-        )
-    }
-}
-
-@Test
 func orderedSourceAndFingerprintDecodingRejectsInvalidWireValues() throws {
     let sourceID = UUID().uuidString
     let attachmentID = UUID().uuidString

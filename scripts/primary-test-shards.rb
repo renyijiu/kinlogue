@@ -3,9 +3,6 @@
 
 SINGLE_TEST_BATCH_SIZE = 16
 CONTAINERS_PER_SHARD = 2
-DEDICATED_FRESH_RUNNER_CONTAINERS = [
-  "KinloguePlatformTests.LANDerivedArtifactSinkTests",
-].freeze
 
 def fail_closed(message)
   warn("Primary test shard planning failed: #{message}")
@@ -61,16 +58,14 @@ required_prefixes.each do |prefix|
   fail_closed("required test target is missing") unless specifiers.any? { |value| value.start_with?(prefix) }
 end
 
-dicom_prefix = "KinloguePlatformTests.DICOMImportWorkflowIntegrationTests/"
 acceptance_prefix = "KinlogueAppTests.AcceptanceScanScriptTests/"
 installed_lan = "KinlogueAppTests.SyntheticAcceptanceRunnerTests/" \
   "installedLANProbeUsesProductionHTTPAndPersistsAcrossProcessPhases()"
 real_socket = "KinloguePlatformTests.LANRealSocketBackpressureTests/" \
-  "productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect(sqlite:)"
+  "productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect()"
 case_alias = "KinloguePlatformTests." \
-  "differentlyCasedVaultAliasesShareStableAndLegacyLockIdentity()"
+  "differentlyCasedLibraryAliasesContendForOneOwner()"
 
-fail_closed("isolated DICOM suite is missing") unless specifiers.any? { |value| value.start_with?(dicom_prefix) }
 fail_closed("isolated acceptance suite is missing") unless specifiers.any? { |value| value.start_with?(acceptance_prefix) }
 fail_closed("isolated installed LAN test is missing") unless specifiers.include?(installed_lan)
 fail_closed("isolated real socket test is missing") unless specifiers.include?(real_socket)
@@ -78,7 +73,6 @@ fail_closed("conditional case-alias test is missing") unless specifiers.include?
 
 isolated = lambda do |specifier|
   specifier.start_with?("KinlogueStorageProcessTests.") ||
-    specifier.start_with?(dicom_prefix) ||
     specifier.start_with?(acceptance_prefix) ||
     specifier == installed_lan ||
     specifier == real_socket ||
@@ -98,13 +92,9 @@ end.to_h { |group| [group, true] }
 shards = []
 multi_groups = []
 single_groups = []
-dedicated_groups = []
 groups.keys.sort.each do |group|
   values = groups.fetch(group)
-  if DEDICATED_FRESH_RUNNER_CONTAINERS.include?(group)
-    fail_closed("a dedicated container overlaps an isolated gate") if isolated_group_keys.key?(group)
-    dedicated_groups << [group, values]
-  elsif isolated_group_keys.key?(group)
+  if isolated_group_keys.key?(group)
     values.sort.each do |specifier|
       single_groups << [group, runtime_identifier.call(specifier), true]
     end
@@ -115,9 +105,6 @@ groups.keys.sort.each do |group|
     single_groups << [group, runtime_identifier.call(specifier), !specifier.include?("/")]
   end
 end
-unless dedicated_groups.map(&:first).sort == DEDICATED_FRESH_RUNNER_CONTAINERS.sort
-  fail_closed("a dedicated fresh-runner container is missing")
-end
 
 # Xcode 27 runs targets in separate processes. Keep each shard within one
 # target so its exact expected summary still comes from one test runner.
@@ -125,12 +112,8 @@ multi_groups.group_by { |group, *_| group.split(".", 2).first }.each_value do |t
   target_groups.each_slice(CONTAINERS_PER_SHARD) do |batch|
     alternatives = batch.map { |group, _| "#{Regexp.escape(group)}/" }
     values = batch.flat_map(&:last)
-    shards << ["^(?:#{alternatives.join('|')})", values, false]
+    shards << ["^(?:#{alternatives.join('|')})", values]
   end
-end
-
-dedicated_groups.each do |group, values|
-  shards << ["^(?:#{Regexp.escape(group)}/)", values, true]
 end
 
 single_groups.group_by { |group, *_| group.split(".", 2).first }.each_value do |target_groups|
@@ -142,12 +125,12 @@ single_groups.group_by { |group, *_| group.split(".", 2).first }.each_value do |
         "#{Regexp.escape(group)}/"
       end
     end
-    shards << ["^(?:#{alternatives.join('|')})", batch.map { |_, specifier, _| specifier }, false]
+    shards << ["^(?:#{alternatives.join('|')})", batch.map { |_, specifier, _| specifier }]
   end
 end
 shards.sort_by!(&:first)
 
-compiled = shards.map { |pattern, _, _| Regexp.new(pattern) }
+compiled = shards.map { |pattern, _| Regexp.new(pattern) }
 primary.each do |specifier|
   identifier = runtime_identifier.call(specifier)
   unless compiled.count { |pattern| pattern.match?(identifier) } == 1
@@ -163,12 +146,11 @@ end
 
 if inventory_summary
   core_specifiers = specifiers.select { |specifier| specifier.start_with?("KinlogueCoreTests.") }
-  primary_shards = shards.reject { |_, _, dedicated| dedicated }
-  test_count = core_specifiers.length + primary_shards.sum { |_, values, _| values.length }
+  test_count = core_specifiers.length + shards.sum { |_, values| values.length }
   suite_count = core_specifiers.map do |specifier|
     specifier.split("/", 2).first if specifier.include?("/")
   end.compact.uniq.length
-  suite_count += primary_shards.sum do |_, values, _|
+  suite_count += shards.sum do |_, values|
     values.map do |specifier|
       specifier.split("/", 2).first if specifier.include?("/")
     end.compact.uniq.length
@@ -178,18 +160,11 @@ if inventory_summary
   exit(0)
 end
 
-selected_shards = if partition_count == 1
-                    shards.reject { |_, _, dedicated| dedicated }
-                  elsif partition_index == partition_count - 1
-                    shards.select { |_, _, dedicated| dedicated }
-                  else
-                    shards.reject { |_, _, dedicated| dedicated }
-                      .each_with_index
-                      .select { |_, index| index % (partition_count - 1) == partition_index }
-                      .map(&:first)
-                  end
+selected_shards = shards.each_with_index
+                        .select { |_, index| index % partition_count == partition_index }
+                        .map(&:first)
 
-selected_shards.each do |pattern, values, _|
+selected_shards.each do |pattern, values|
   suite_count = values.map do |specifier|
     specifier.split("/", 2).first if specifier.include?("/")
   end.compact.uniq.length

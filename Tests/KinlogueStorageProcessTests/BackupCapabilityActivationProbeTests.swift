@@ -730,12 +730,12 @@ struct BackupCapabilityActivationProbeTests {
     }
 
     @Test
-    func activationWaitsForRealWriterAndRejectsItsPostSwapCommit() async throws {
+    func activationIsRefusedWhileAnotherProcessOwnsTheLibraryAndSucceedsOnceItLetsGo() async throws {
         try await withCapabilityDirectory { directory in
             let caseID = "real-writer"
             try runProbe(
                 [
-                    "activation-seed-writer", "--scenario", "existing",
+                    "activation-seed", "--scenario", "existing",
                     "--case-id", caseID,
                 ],
                 workingDirectory: directory
@@ -743,59 +743,53 @@ struct BackupCapabilityActivationProbeTests {
             let current = directory
                 .appendingPathComponent("activation-\(caseID)", isDirectory: true)
                 .appendingPathComponent("Vault", isDirectory: true)
+            let execute = [
+                "activation-execute", "--scenario", "existing",
+                "--case-id", caseID, "--fault", "none",
+            ]
 
             try await withStorageProcessFixture(processCount: 1) { processes in
-                let writer = processes[0]
-                try writer.send(.init(operation: "loadCatalog", rootURL: current))
-                #expect(try await writer.nextResponse().event == "catalogLoaded")
-                try writer.send(.init(operation: "holdCatalogCommit", variant: 1))
-                #expect(try await writer.nextResponse().event == "leaseHeld")
+                let owner = processes[0]
+                try owner.send(.init(operation: "openSQLite", rootURL: current))
+                #expect(try await owner.nextResponse().event == "sqliteOpened")
 
-                let activation = try startProbe(
-                    [
-                        "activation-execute", "--scenario", "existing",
-                        "--case-id", caseID, "--fault", "none",
-                    ],
-                    workingDirectory: directory
-                )
-                try await Task.sleep(for: .milliseconds(250))
-                #expect(activation.isRunning)
-                #expect(FileManager.default.fileExists(
-                    atPath: current.appendingPathComponent("library.json").path
-                ))
+                // A library has one owner. A restore from another process is turned away
+                // before it prepares anything.
+                let refused = try runProbeExpectingFailure(execute, workingDirectory: directory)
+                #expect(try decode(ProbeFailure.self, from: refused).code == "libraryOccupied")
 
-                try writer.send(.init(operation: "release"))
-                #expect(try await writer.nextResponse().event == "catalogCommitted")
-                let activated = try activation.finish(timeout: .seconds(10))
-                #expect(activated.terminationReason == .exit)
-                #expect(activated.terminationStatus == 0, "\(activated.standardOutput)")
-
-                let before = try FileManager.default.contentsOfDirectory(atPath: current.path)
-                #expect(Set(before).isSuperset(of: ["library.json", "objects", "lan-inbox"]))
-                #expect(!before.contains("root-state.json"))
-                try writer.send(.init(operation: "commitLoadedCatalog", variant: 2))
-                let rejected = try await writer.nextResponse()
-                #expect(rejected.event == "operationFailed")
-                #expect(rejected.code == "rootReplaced")
-                #expect(try FileManager.default.contentsOfDirectory(atPath: current.path) == before)
-
-                let output = try runProbe(
+                try owner.send(.init(operation: "closeSQLite"))
+                #expect(try await owner.nextResponse().event == "sqliteClosed")
+                let untouched = try decode(ActivationVerification.self, from: try runProbe(
                     ["activation-verify", "--case-id", caseID],
                     workingDirectory: directory
-                )
-                let verified = try decode(ActivationVerification.self, from: output)
+                ))
+                #expect(untouched.rootState == "old")
+                #expect(!untouched.receiptPresent)
+                #expect(!untouched.stagingPresent)
+                #expect(!untouched.rollbackPresent)
+
+                try runProbe(execute, workingDirectory: directory)
+                let verified = try decode(ActivationVerification.self, from: try runProbe(
+                    ["activation-verify", "--case-id", caseID],
+                    workingDirectory: directory
+                ))
                 #expect(verified.rootState == "new")
                 #expect(!verified.mixedState)
                 #expect(!verified.receiptPresent)
                 #expect(!verified.stagingPresent)
                 #expect(!verified.rollbackPresent)
                 #expect(verified.semanticValidated)
-                #expect(verified.vaultGeneration > 1)
-                #expect(verified.inboxGeneration > 1)
-                #expect(verified.vaultObjectCount == 1)
+                #expect(verified.libraryGeneration > 1)
+                #expect(verified.memberCount == 1)
                 #expect(verified.inboxItemCount == 1)
-                #expect(verified.inboxBlobCount == 1)
                 #expect(verified.inboxTerminalCount == 1)
+
+                // The process that owned the replaced library opens the restored one like any other.
+                try owner.send(.init(operation: "openSQLite", rootURL: current))
+                #expect(try await owner.nextResponse().event == "sqliteOpened")
+                try owner.send(.init(operation: "closeSQLite"))
+                #expect(try await owner.nextResponse().event == "sqliteClosed")
             }
         }
     }
@@ -1184,11 +1178,9 @@ private struct ActivationVerification: Decodable {
     let stagingPresent: Bool
     let rollbackPresent: Bool
     let semanticValidated: Bool
-    let vaultGeneration: UInt64
-    let inboxGeneration: UInt64
-    let vaultObjectCount: Int
+    let libraryGeneration: UInt64
+    let memberCount: Int
     let inboxItemCount: Int
-    let inboxBlobCount: Int
     let inboxTerminalCount: Int
 }
 

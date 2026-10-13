@@ -78,15 +78,16 @@ struct BackupCapabilityProbeSourceSafetyTests {
             "Sources/KinlogueStorageProcessFixture/BackupCapabilityProbe.swift"
         )
         let transactionSource = try contents(
-            "Sources/KinloguePlatform/Backup/PlaintextVaultRestoreTransaction.swift"
+            "Sources/KinloguePlatform/Backup/BackupRestoreTransaction.swift"
         )
         let compositionSource = try contents("Sources/KinlogueApp/App/AppComposition.swift")
+        let startupSource = try contents("Sources/KinlogueApp/App/SQLiteAppStartup.swift")
 
         for required in [
             "BackupRestoreTransaction", ".activate(prepared:", ".reconcile()",
             "BackupRestoreVerifier",
-            "activationSeedWriter", "createCommittedRoot",
-            "PlaintextLANInboxStore", "snapshotAndStorageSummary",
+            "createCommittedRoot", "SQLiteLibraryOwner",
+            "SQLiteLANInboxStore", "validateStrict",
             "strictValidateCommittedRoot", "@_spi(Testing) import KinloguePlatform",
             "64 * 1_024", "256 * 1_024", "1_024 * 1_024",
             "2 * 1_024 * 1_024 * 1_024",
@@ -110,8 +111,12 @@ struct BackupCapabilityProbeSourceSafetyTests {
         #expect(transactionSource.contains(
             "@_spi(Testing) public enum BackupRestoreTransactionFault"
         ))
-        #expect(transactionSource.contains("@_spi(Testing) public init("))
+        #expect(transactionSource.contains(
+            "package init(owner: SQLiteLibraryOwner, failureInjector: FailureInjector? = nil)"
+        ))
+        #expect(startupSource.contains("BackupRestoreTransaction(owner: owner)"))
         #expect(!compositionSource.contains("failureInjector"))
+        #expect(!startupSource.contains("failureInjector"))
         #expect(!source.contains("AppComposition"))
         #expect(!source.contains("root-state.json"))
         for forbidden in [
@@ -138,7 +143,7 @@ struct BackupCapabilityProbeSourceSafetyTests {
             "sourceTreeDirty", "identityPermissionFailure", "macOS26",
             "macOS27",
             "EXPECTED_GOLDEN_VECTOR_SHA256",
-            "real_writer_activation_case", "holdCatalogCommit", "rootReplaced",
+            "occupied_library_activation_case", "openSQLite", "libraryOccupied",
             "after-intent", "after-writer-reset", "after-old-root-move",
             "after-new-root-activation", "after-validation", "after-commit",
             "semanticValidated", "expected_root_state",

@@ -102,28 +102,6 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
     ] = [:]
 #endif
 
-    init(
-        vault: any VaultStore,
-        draftStore: any ImportDraftStore,
-        workflow: ImportWorkflow,
-        textExtractor: any TextExtractionService = OnDeviceTextExtractionService(),
-        validator: ImportedFileValidator = ImportedFileValidator(),
-        startupCompleted: Bool = false,
-        lifecycle: LibraryLifecycleCoordinator? = nil,
-        dicomRuntime: DICOMAppRuntime? = nil
-    ) {
-        let adapter = LegacyLibraryQueryAdapter(vault: vault, drafts: draftStore)
-        self.reports = adapter
-        self.studies = adapter
-        self.draftStore = draftStore
-        self.workflow = workflow
-        self.textExtractor = textExtractor
-        self.validator = validator
-        self.startupCompleted = startupCompleted
-        self.lifecycle = lifecycle
-        self.dicomRuntime = dicomRuntime
-    }
-
     init(reports: any LibraryReportStoring, studies: any LibraryDICOMStoring,
          draftStore: any ImportDraftStore, workflow: ImportWorkflow,
          textExtractor: any TextExtractionService = OnDeviceTextExtractionService(),
@@ -374,7 +352,7 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
                 switch error {
                 case is CancellationError, LibraryLifecycleCoordinatorError.revoked,
                      ImportDraftError.staleAttempt, ImportDraftError.invalidState,
-                     VaultImportDraftStoreError.draftNotFound:
+                     LibraryReportError.draftNotFound:
                     recoveryAttempts.removeValue(forKey: draft.id)
                 default:
                     if Task.isCancelled || reportLifecycleRevoked {
@@ -396,17 +374,7 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
     }
 
     private func performLoadReview(draftID: ImportDraft.ID) async throws -> ImportReviewContent {
-        let snapshot: LibraryReviewSnapshot
-        do {
-            snapshot = try await reports.reviewContent(draftID: draftID)
-        } catch let error as VaultImportDraftStoreError {
-            switch error {
-            case .draftNotFound, .attachmentNotFound:
-                throw AppServiceError.draftUnavailable
-            case .documentNotFound, .invalidDraftDocument:
-                throw error
-            }
-        }
+        let snapshot = try await reports.reviewContent(draftID: draftID)
         let source = snapshot.draft.sources.first
         return ImportReviewContent(
             revision: snapshot.revision,
@@ -449,8 +417,10 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
             detectedDateCandidate: command.detectedDateCandidate
         )
         let recognized: ImportDraftDocument
+        // Either store reports a draft that changed while its originals were being read.
         do { recognized = try await recognizeDocument(for: draft) }
         catch LibraryReportError.staleRevision { throw AppServiceError.invalidReview }
+        catch ImportDraftError.staleAttempt { throw AppServiceError.invalidReview }
         try Task.checkCancellation()
         let persistedDateSelection = dateSelectionAfterRecognition(
             currentDateSelection,

@@ -17,31 +17,27 @@ RUN_INBOX=false
 # takes well over an hour. The default stops at half; pass 4990 to go further.
 INBOX_CHECKPOINTS="0,100,1000,2500"
 
-# Report tiers are named by their approximate Vault object count: one
-# single-page report is one original plus one OCR document. The two largest
-# report tiers stop 20 objects short of the 20,000-object limit so that the
-# measured mutations still fit. `photos` uses a 1 MiB original, and the DICOM
-# tiers store opaque synthetic bytes behind a real study index.
+# Report tiers are named by the number of stored objects they stand for: one
+# single-page report is one original plus one OCR document. `photos` uses a
+# 1 MiB original instead of 64 KiB. `capacity-20000` is a self-contained run
+# that stages 20,000 unique originals and then backs the library up and
+# restores it.
 typeset -A TIER_ARGUMENTS=(
   reports-100 "--reports 50"
   reports-1000 "--reports 500"
   reports-5000 "--reports 2500"
   reports-20000 "--reports 9990"
   photos-20000 "--reports 9990 --attachment-bytes 1048576"
-  capacity-20000 "--reports 10000 --attachment-bytes 1048576"
-  large-originals "--reports 500 --large-attachments 8"
-  dicom-study "--reports 500 --dicom-studies 1 --dicom-objects-per-study 2000 --dicom-object-bytes 983040"
-  dicom-limit "--reports 4990 --dicom-studies 5 --dicom-objects-per-study 2000 --dicom-object-bytes 131072"
+  capacity-20000 "--reports 20000"
 )
 TIER_ORDER=(
   reports-100 reports-1000 reports-5000 reports-20000
-  photos-20000 capacity-20000 large-originals dicom-study dicom-limit
+  photos-20000 capacity-20000
 )
-# With --inbox, these tiers also measure publication against a large Vault catalog.
+# With --inbox, these tiers also measure uploads into a large library.
 INBOX_COUPLING_TIERS=(reports-20000)
-# Byte-capacity tiers omit the catalog-bound query and mutation repetitions.
-# capacity-20000 additionally exceeds the old entry cap with durable inbox data.
-BYTE_ONLY_TIERS=(photos-20000 capacity-20000)
+# Byte-capacity tiers omit the query and mutation repetitions.
+BYTE_ONLY_TIERS=(photos-20000)
 
 fail() {
   print -u2 -- "Storage scale probe failed: $1"
@@ -177,19 +173,20 @@ print -r -- "KLS_STORAGE_SCALE environment model=$(/usr/sbin/sysctl -n hw.model)
 
 for tier in "${SELECTED_TIERS[@]}"; do
   make_work_directory
-  if probe "tier=$tier phase=generate" generate ${=TIER_ARGUMENTS[$tier]}; then
+  if [[ "$tier" == capacity-20000 ]]; then
+    probe "tier=$tier phase=capacity" logical-capacity ${=TIER_ARGUMENTS[$tier]} || true
+  elif probe "tier=$tier phase=generate" logical-generate ${=TIER_ARGUMENTS[$tier]}; then
     for run in {1..$STARTUP_RUNS}; do
-      probe "tier=$tier phase=startup run=$run" startup
+      probe "tier=$tier phase=startup run=$run" logical-startup ${=TIER_ARGUMENTS[$tier]}
     done
     if (( ! ${BYTE_ONLY_TIERS[(Ie)$tier]} )); then
-      probe "tier=$tier phase=operations" operations
+      probe "tier=$tier phase=queries" logical-queries
+      probe "tier=$tier phase=operations" logical-operations
     fi
-    if [[ "$tier" == capacity-20000 ]]; then
-      probe "tier=$tier phase=capacity-inbox" capacity-inbox
-    fi
-    probe "tier=$tier phase=backup" backup
+    probe "tier=$tier phase=capture" logical-capture
+    probe "tier=$tier phase=backup" logical-backup
     if [[ "$RUN_INBOX" == true ]] && (( ${INBOX_COUPLING_TIERS[(Ie)$tier]} )); then
-      probe "tier=$tier phase=inbox" inbox --inbox-checkpoints 0,100
+      probe "tier=$tier phase=inbox" logical-inbox --inbox-checkpoints 0,100
     fi
   fi
   remove_work_directory || fail "could not remove the owned work directory"
@@ -197,6 +194,6 @@ done
 
 if [[ "$RUN_INBOX" == true ]]; then
   make_work_directory
-  probe "tier=empty-vault phase=inbox" inbox --inbox-checkpoints "$INBOX_CHECKPOINTS" || true
+  probe "tier=empty-library phase=inbox" logical-inbox --inbox-checkpoints "$INBOX_CHECKPOINTS" || true
   remove_work_directory || fail "could not remove the owned work directory"
 fi

@@ -13,21 +13,18 @@ struct LANRealSocketBackpressureTests {
     private static let maximumRSSDelta = UInt64(64 * 1_024 * 1_024)
     private static let maximumEventLoopP99Nanoseconds = UInt64(250_000_000)
 
-    @Test(arguments: [false, true])
-    func productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect(sqlite: Bool)
-        async throws
-    {
-        let fixture = try await LANReceiverBackendFixture.make(sqlite: sqlite)
+    @Test
+    func productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect() async throws {
+        let fixture = try await LANInboxStoreTestFixture.make()
         defer { fixture.destroy() }
 
         let channelUsage = RealChannelUsage()
         let eventLoopCapture = RealEventLoopCapture()
         let storeOperations = RealReceiverOperationCapture()
         let receiver = LANReceiver(
-            rootURL: fixture.rootURL,
+            store: fixture.store,
             session: LANSession(),
-            storeObserver: { storeOperations.record($0) },
-            store: fixture.injectedStore
+            storeObserver: { storeOperations.record($0) }
         )
         let assetCatalog = try LANPhoneAssetCatalog.loadBundled()
         var slowDescriptors: [Int32] = []
@@ -350,7 +347,7 @@ struct LANRealSocketBackpressureTests {
             #expect(summary.partialObjectCount == 0)
 
             print(
-                "LAN_REAL_SOCKET_CALIBRATION backend=\(sqlite ? "sqlite" : "json") "
+                "LAN_REAL_SOCKET_CALIBRATION backend=sqlite "
                     + "fixture_a_bytes=\(Self.firstLargeFixtureByteCount) "
                     + "fixture_b_bytes=\(Self.secondLargeFixtureByteCount) "
                     + "abrupt_fixture_bytes=\(Self.abruptFixtureByteCount) "

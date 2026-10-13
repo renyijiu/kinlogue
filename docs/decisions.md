@@ -8,8 +8,8 @@
 | --- | --- | --- |
 | 本机优先、单一操作员 | 一台 Mac 为多位家人管理报告；不引入账号、云同步或协作服务。 | [`2026-08-01-002`](plans/2026-08-01-002-feat-kinlogue-plaintext-mvp-plan.md)、README |
 | 明文 MVP | 原件、成员、OCR、搜索字段在 App Sandbox 本地明文保存；不使用 Keychain/应用层加密。 | [`2026-08-01-002`](plans/2026-08-01-002-feat-kinlogue-plaintext-mvp-plan.md)、[`PRIVACY.md`](../PRIVACY.md) |
-| digest 只做损坏检测与精确去重 | SHA-256 参与本机精确去重和完整性检查，但不是认证、保密、防篡改或防回滚。 | `PlaintextVault`、隐私说明 |
-| manifest 单一提交点 | 先写 immutable objects，再原子发布 `library.json`/`inbox.json`；恢复只接受完整 generation。 | `PlaintextVault`、`PlaintextLANInboxStore` |
+| digest 只做损坏检测与精确去重 | SHA-256 参与本机精确去重和完整性检查，但不是认证、保密、防篡改或防回滚。 | `SQLiteLibraryStore`、隐私说明 |
+| 数据库事务是单一提交点 | 原件先以 staged 状态写入并同步，领域引用和 live 状态在同一个数据库事务里发布；中断后只可能看到完整的旧提交或完整的新提交。 | `SQLiteLibraryStore`、[`sqlite-storage.md`](sqlite-storage.md) |
 | 人工确认 OCR | OCR/候选抽取保留来源和原文；用户确认前不能进 timeline/search/comparison，不能生成诊断。 | `HealthRecord`、`SourceField`、`ImportState` |
 | 临时配对 LAN | 用户明确 start；一次性 code + session cookie + CSRF；普通 HTTP，只针对可信任私人 LAN。 | [`lan-upload.md`](lan-upload.md)、LAN plan R1–R4/R18–R21 |
 | 单一待确认队列 | 手机只追加独立文件且不排序；Mac 按完整内容合并原件，用户在单一队列中单选/多选后决定报告页序、成员和日期。 | LAN plan U16–U20、`LANInboxItem`、`LANReportArchiveCoordinator` |
@@ -20,7 +20,7 @@
 | DICOM exact 包的进程隔离 | DICOM-Swift 1.5.0 只链接进单独签名、无网络 entitlement、无 Vault-root 权限的 XPC Helper；主 App/Core/Platform 不 import/link `DicomCore`，只通过有界 Foundation IPC contract 交换一个只读 descriptor 与最小 DTO。 | [`2026-08-06-001`](plans/2026-08-06-001-feat-dicom-mri-viewer-plan.md) KTD1–KTD2、[`release 边界探针`](sources/2026-08-07-dicom-swift-1.3.3-release-boundary.md)、[1.5.0 依赖核对](sources/dicom-swift-1.5.0-dependency-review-2026-09-16.md) |
 | DICOM 是受限辅助能力 | DICOM 只帮助保存检查原件和查看明确支持的二维灰度 MR；不扩张为诊断、测量、PACS 或通用影像工作站。 | [`dicom.md`](dicom.md)、[`project-overview.md`](project-overview.md) |
 | 已确认影像只经时间线进入 | 已确认检查与报告共用成员时间线和右栏详情，侧边栏不设“医学影像”导航项；“只看影像”由时间线类型筛选承担。数据层隔离不变：影像仍不进入 OCR、搜索或比较。 | 用户 2026-10-11 决策、[`dicom.md`](dicom.md)、[`design-system.md`](design-system.md) |
-| 首发前 current-only | 项目未公开发布，只支持 catalog v3 与 ordering policy v2；开发期 v1/v2 reader/migrator、policy v1 和 predecessor/rollback 路径已删除。除恢复先前由用户明确发起、且已写入有效 durable deletion receipt 的整库删除外，旧开发 Vault、未知版本、未知非空目录和损坏布局继续非破坏性 fail closed；App 不自动迁移、覆盖或删除其字节，用户可在仓库外导出后手工重置。 | 用户 2026-08-12 决策、[`storage.md`](storage.md)、[`dicom.md`](dicom.md) |
+| 首发前 current-only | 项目未公开发布，只支持当前的 SQLite schema 与 ordering policy v2；开发期的 JSON 清单存储、v1/v2 reader/migrator、policy v1 和 predecessor/rollback 路径已删除。除恢复先前由用户明确发起、且已写入有效 durable deletion receipt 的整库删除外，旧开发 Vault、未知版本、未知非空目录和损坏布局继续非破坏性 fail closed；App 不自动迁移、覆盖或删除其字节，用户可在仓库外导出后手工重置。 | 用户 2026-08-12 决策、[`storage.md`](storage.md)、[`dicom.md`](dicom.md) |
 
 ## [2026-09-16] 最低系统调整为 macOS 26
 
@@ -51,9 +51,25 @@
 
 **验证门禁**：历史隐私门禁的回归测试、当前树隐私门禁和文档门禁见 [`log.md`](log.md)。图标在 macOS 26/27 的 Dock、Finder 中的实际显示，以及深色或着色外观，尚未人工核对。
 
+## [2026-10-13] 资料库只保留 SQLite，删除 JSON 清单存储
+
+**问题**：界面入口和安装验收改用 SQLite 资料库之后，JSON 清单存储（`PlaintextVault`、独立的 LAN inbox 清单、跨进程写锁、JSON 备份来源和临时查询适配器）只剩测试和跨进程 fixture 在用。两套实现并存，每个共享类型都要同时支持两种后端，一批测试验证的是界面永远走不到的代码。
+
+**选择**（[SQLite 与架构重构计划](plans/2026-10-10-2322-refactor-sqlite-architecture-plan.md) 的收尾单元；用户 2026-10-12 同意按评审建议执行）：删除 JSON 实现以及只为它存在的类型和测试，共享类型收敛为只支持 SQLite。删除之前先把仍有意义的测试移植到 SQLite 资料库上；第二 owner、强退恢复、整根替换和备份仓库并发发布的测试保留并改用 SQLite 资料库。
+
+**未选择的替代方案**：保留 JSON 实现作为测试参照——它已不是界面的行为，对它的断言不能证明产品正确；提供 JSON 到 SQLite 的自动迁移——项目尚未公开发布，继续沿用“首发前 current-only”。
+
+**影响的代码/文档**：Core、Platform、App、跨进程 fixture 和各层测试；[`storage.md`](storage.md)、[`sqlite-storage.md`](sqlite-storage.md)、[`architecture.md`](architecture.md) 及各专题页。测试脚本去掉了只为被删类型存在的专用 XCTest 通道和隔离的 DICOM 门禁，CI 的测试分区由三个减为两个，见 [`testing-and-release.md`](testing-and-release.md)。
+
+**迁移/回滚要求**：没有迁移。早先的 JSON 资料库目录和文件树格式的恢复点会被识别并拒绝，字节保持不变；需要旧实现的人从 Git 历史取回。回滚即还原这次改动。
+
+**验证门禁**：自动化结果和未执行的门禁见 [`log.md`](log.md) 与 [当前验收账本](acceptance/current-release.md)；`run-acceptance.sh`、macOS 26 和人工门禁没有执行。
+
 ## 已被 supersede 的早期决策
 
 [`2026-08-01-001-feat-kinlogue-macos-vault-plan.md`](plans/2026-08-01-001-feat-kinlogue-macos-vault-plan.md) 早期计划曾以“加密 Vault、Keychain、加密 backup/restore”为 MVP 方向；它已被明文 MVP 计划的 `supersedes` 字段覆盖。它仍然保留 threat model、早期 target 规划和未来安全升级的背景，但不能作为当前代码或隐私文案的事实来源。
+
+“manifest 单一提交点”（先写 immutable objects，再原子发布 `library.json` / `inbox.json`）是 JSON 清单存储时期的规则，已由上面 2026-10-13 的决策取代；提交点现在是数据库事务。
 
 因此当前 Agent 不应：
 

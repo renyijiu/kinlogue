@@ -42,9 +42,6 @@ enum BackupCapabilityProbe {
             case .activationSeed:
                 try await activationSeed(configuration: configuration)
                 try emit(SimpleResult(category: "activation", status: "passed"))
-            case .activationSeedWriter:
-                try await activationSeedWriter(configuration: configuration)
-                try emit(SimpleResult(category: "activation", status: "passed"))
             case .activationExecute:
                 try await activationExecute(configuration: configuration)
                 try emit(SimpleResult(category: "activation", status: "passed"))
@@ -85,7 +82,6 @@ private extension BackupCapabilityProbe {
         case bookmarkCreate = "bookmark-create"
         case bookmarkResolve = "bookmark-resolve"
         case activationSeed = "activation-seed"
-        case activationSeedWriter = "activation-seed-writer"
         case activationExecute = "activation-execute"
         case activationReconcile = "activation-reconcile"
         case activationVerify = "activation-verify"
@@ -280,6 +276,7 @@ private extension BackupCapabilityProbe {
         case scopeUnavailable
         case receiptInvalid
         case activationInvalid
+        case libraryOccupied
         case ioFailure(Int32)
         case resourceLimit
         case datasetInvalid
@@ -304,6 +301,7 @@ private extension BackupCapabilityProbe {
             case .scopeUnavailable: "scopeUnavailable"
             case .receiptInvalid: "receiptInvalid"
             case .activationInvalid: "activationInvalid"
+            case .libraryOccupied: "libraryOccupied"
             case .ioFailure: "ioFailure"
             case .resourceLimit: "resourceLimit"
             case .datasetInvalid: "datasetInvalid"
@@ -1803,21 +1801,13 @@ private extension BackupCapabilityProbe {
         let inode: UInt64
     }
 
-    struct RootSemanticIdentity: Codable, Equatable {
+    struct RootSemanticIdentity: Equatable {
         let state: RootState
-        let vaultID: UUID
-        let vaultGeneration: UInt64
-        let vaultCommitID: UUID
-        let vaultCatalogDigest: Data
-        let vaultObjectCount: Int
-        let vaultObjectDigest: Data
-        let inboxGeneration: UInt64
-        let inboxCommitID: UUID
-        let inboxManifestDigest: Data
+        let generation: UInt64
+        let logicalDigest: Data
+        let memberCount: Int
         let inboxItemCount: Int
-        let inboxBlobCount: Int
         let inboxTerminalCount: Int
-        let rootTreeDigest: Data
     }
 
     struct ActivationVerification: Encodable {
@@ -1829,11 +1819,9 @@ private extension BackupCapabilityProbe {
         let stagingPresent: Bool
         let rollbackPresent: Bool
         let semanticValidated: Bool
-        let vaultGeneration: UInt64
-        let inboxGeneration: UInt64
-        let vaultObjectCount: Int
+        let libraryGeneration: UInt64
+        let memberCount: Int
         let inboxItemCount: Int
-        let inboxBlobCount: Int
         let inboxTerminalCount: Int
     }
 
@@ -1907,10 +1895,10 @@ private extension BackupCapabilityProbe {
             _ = try await createCommittedRoot(at: workspace.current, state: .old)
         }
         _ = try await createCommittedRoot(at: workspace.source, state: .new)
-        let vault = try PlaintextVault(rootURL: workspace.source)
-        let inbox = try PlaintextLANInboxStore(rootURL: workspace.source)
-        let source = try PlaintextLibraryBackupSource(vault: vault, inboxStore: inbox)
-        let plan = try await source.prepare()
+        let store = try SQLiteLibraryStore(rootURL: workspace.source)
+        defer { try? store.close() }
+        let snapshot = try await SQLiteLogicalBackupSource(store: store).prepare()
+        defer { snapshot.release() }
         let enrollment = try BackupKeyHierarchy.makeEnrollment()
         let signer = try BackupDeviceSigner(
             descriptor: enrollment.descriptor,
@@ -1919,8 +1907,8 @@ private extension BackupCapabilityProbe {
         )
         let bytes = ActivationCheckpointBytes()
         _ = try await EncryptedBackupContainerWriter().write(
-            entries: await source.containerSources(for: plan),
-            revisionPair: plan.revisionPair,
+            entries: snapshot.sources(),
+            revisionPair: snapshot.revisionPair,
             sequence: 1,
             signer: signer,
             sink: BackupContainerWriteSink(
@@ -1931,13 +1919,6 @@ private extension BackupCapabilityProbe {
         try writeExclusivePrivateFile(bytes.data, to: workspace.checkpoint)
         try writeExclusivePrivateFile(Data(enrollment.recoveryCode.utf8), to: workspace.recoveryCode)
         try syncParentDirectory(workspace.parent)
-    }
-
-    static func activationSeedWriter(configuration: Configuration) async throws {
-        guard configuration.scenario == .existing else {
-            throw ProbeError.invalidArguments
-        }
-        try await activationSeed(configuration: configuration)
     }
 
     static func activationExecute(configuration: Configuration) async throws {
@@ -1955,17 +1936,15 @@ private extension BackupCapabilityProbe {
             maximumByteCount: 256
         ), as: UTF8.self)
         do {
-            let verifier = try BackupRestoreVerifier(
-                stableParentURL: workspace.parent,
-                activeRootURL: workspace.current
-            )
+            let owner = try SQLiteLibraryOwner(rootURL: workspace.current)
+            let verifier = try BackupRestoreVerifier(owner: owner)
             let prepared = try await verifier.prepare(
                 checkpointURL: workspace.checkpoint,
                 recoveryCode: recoveryCode
             )
             let productionFault = fault.productionFault
             let transaction = try BackupRestoreTransaction(
-                activeRootURL: workspace.current,
+                owner: owner,
                 failureInjector: { actual in
                     guard actual == productionFault else { return false }
                     _ = Darwin.kill(getpid(), SIGKILL)
@@ -1986,11 +1965,9 @@ private extension BackupCapabilityProbe {
     static func activationReconcile(configuration: Configuration) async throws {
         let workspace = try ActivationWorkspace(configuration: configuration)
         do {
-            _ = try await BackupRestoreTransaction(activeRootURL: workspace.current).reconcile()
-            try BackupRestoreVerifier(
-                stableParentURL: workspace.parent,
-                activeRootURL: workspace.current
-            ).reconcileAbandonedPreflights()
+            let owner = try SQLiteLibraryOwner(rootURL: workspace.current)
+            _ = try await BackupRestoreTransaction(owner: owner).reconcile()
+            try BackupRestoreVerifier(owner: owner).reconcileAbandonedPreflights()
         } catch {
             throw mapRestoreError(error)
         }
@@ -2022,11 +1999,9 @@ private extension BackupCapabilityProbe {
             stagingPresent: staging,
             rollbackPresent: rollback,
             semanticValidated: true,
-            vaultGeneration: semantic?.vaultGeneration ?? 0,
-            inboxGeneration: semantic?.inboxGeneration ?? 0,
-            vaultObjectCount: semantic?.vaultObjectCount ?? 0,
+            libraryGeneration: semantic?.generation ?? 0,
+            memberCount: semantic?.memberCount ?? 0,
             inboxItemCount: semantic?.inboxItemCount ?? 0,
-            inboxBlobCount: semantic?.inboxBlobCount ?? 0,
             inboxTerminalCount: semantic?.inboxTerminalCount ?? 0
         )
     }
@@ -2051,6 +2026,7 @@ private extension BackupCapabilityProbe {
     }
 
     static func mapRestoreError(_ error: Error) -> ProbeError {
+        if error as? SQLiteLibraryError == .occupied { return .libraryOccupied }
         guard let restore = error as? BackupRestoreError else {
             return error as? ProbeError ?? .activationInvalid
         }
@@ -2061,77 +2037,51 @@ private extension BackupCapabilityProbe {
         }
     }
 
+    /// Builds one of the two seeded libraries: a member named for the state, one retained LAN
+    /// item, and one LAN item that was uploaded and then deleted.
     static func createCommittedRoot(
         at root: URL,
         state: RootState
     ) async throws -> RootSemanticIdentity {
-        let vault = try PlaintextVault(rootURL: root)
-        let initial = try await vault.initialize()
-        let vaultBytes = try activationVaultBytes(state)
-        let attachment = try Attachment(
-            contentTypeIdentifier: "public.data",
-            byteCount: vaultBytes.count,
-            sha256Digest: ContentDigest.sha256(vaultBytes)
-        )
-        let next = try VaultCatalog(
-            vaultID: initial.vaultID,
-            generation: try VaultGeneration.successor(of: initial.generation),
-            attachments: [attachment]
-        )
-        var committedCatalog = try await vault.commit(try VaultCommitRequest(
-            expectedGeneration: initial.generation,
-            catalog: next,
-            writes: [VaultObjectWrite(
-                reference: VaultObjectReference(id: attachment.id, kind: .attachment),
-                plaintext: vaultBytes
-            )]
-        ))
-        if state == .new {
-            committedCatalog = try await vault.commit(try VaultCommitRequest(
-                expectedGeneration: committedCatalog.generation,
-                catalog: VaultCatalog(
-                    vaultID: committedCatalog.vaultID,
-                    generation: try VaultGeneration.successor(
-                        of: committedCatalog.generation
-                    ),
-                    members: [try FamilyMember(displayName: "Synthetic restored root")],
-                    attachments: committedCatalog.attachments
-                ),
-                writes: []
-            ))
+        let store = try SQLiteLibraryStore(rootURL: root)
+        do {
+            try await SQLiteReportRepository(store: store).saveMember(
+                FamilyMember(displayName: try activationMemberName(state)),
+                replacing: nil
+            )
+            let inbox = try SQLiteLANInboxStore(store: store)
+            try await uploadActivationInboxBytes(
+                try activationInboxBytes(state),
+                name: "synthetic-retained.bin",
+                sessionID: UUID(),
+                store: inbox
+            )
+            let terminalSessionID = UUID()
+            let terminalBytes = try activationTerminalBytes(state)
+            try await uploadActivationInboxBytes(
+                terminalBytes,
+                name: "synthetic-terminal.bin",
+                sessionID: terminalSessionID,
+                store: inbox
+            )
+            let beforeDelete = try await inbox.loadSnapshot()
+            let terminalIdentity = try LANInboxContentIdentity(
+                sha256Digest: ContentDigest.sha256(terminalBytes),
+                byteCount: terminalBytes.count
+            )
+            guard let terminalItem = beforeDelete.item(contentIdentity: terminalIdentity) else {
+                throw ProbeError.activationInvalid
+            }
+            _ = try await inbox.deleteItem(
+                itemID: terminalItem.id,
+                expectedRevision: terminalItem.revision,
+                activeSessionID: terminalSessionID
+            )
+            try store.close()
+        } catch {
+            try? store.close()
+            throw error
         }
-
-        let inbox = try PlaintextLANInboxStore(rootURL: root)
-        _ = try await inbox.initialize()
-        let retainedSessionID = UUID()
-        try await uploadActivationInboxBytes(
-            try activationInboxBytes(state),
-            name: "synthetic-retained.bin",
-            sessionID: retainedSessionID,
-            store: inbox
-        )
-        let terminalSessionID = UUID()
-        let terminalBytes = try activationTerminalBytes(state)
-        try await uploadActivationInboxBytes(
-            terminalBytes,
-            name: "synthetic-terminal.bin",
-            sessionID: terminalSessionID,
-            store: inbox
-        )
-        let beforeDelete = try await inbox.loadSnapshot()
-        let terminalIdentity = try LANInboxContentIdentity(
-            sha256Digest: ContentDigest.sha256(terminalBytes),
-            byteCount: terminalBytes.count
-        )
-        guard let terminalItem = beforeDelete.item(contentIdentity: terminalIdentity) else {
-            throw ProbeError.activationInvalid
-        }
-        _ = try await inbox.deleteItem(
-            itemID: terminalItem.id,
-            expectedRevision: terminalItem.revision,
-            activeSessionID: terminalSessionID,
-            admissionGenerationCutoff: beforeDelete.generation
-        )
         let semantic = try await strictValidateCommittedRoot(at: root)
         guard semantic.state == state else { throw ProbeError.activationInvalid }
         return semantic
@@ -2141,7 +2091,7 @@ private extension BackupCapabilityProbe {
         _ bytes: Data,
         name: String,
         sessionID: UUID,
-        store: PlaintextLANInboxStore
+        store: SQLiteLANInboxStore
     ) async throws {
         let admission = try await store.itemAdmissionGeneration()
         let transport = LANInboxTransportIdentity(
@@ -2166,97 +2116,60 @@ private extension BackupCapabilityProbe {
         _ = try await sink.finish()
     }
 
-    static func strictValidateCommittedRoot(
-        at root: URL,
-        expected: RootSemanticIdentity? = nil
-    ) async throws -> RootSemanticIdentity {
+    /// Opens the root the way a restore does, validates every logical record and original, and
+    /// checks that it holds exactly one of the two seeded libraries.
+    static func strictValidateCommittedRoot(at root: URL) async throws -> RootSemanticIdentity {
         try validateOwnedDirectory(root)
-        let beforeTreeDigest = try capabilityTreeDigest(root)
+        let store = try SQLiteLibraryStore(owner: SQLiteLibraryOwner(rootURL: root), mode: .strictExisting)
+        defer { try? store.close() }
+        let source = SQLiteLogicalBackupSource(store: store)
+        let validation = try source.validateStrict()
+        let members = try await SQLiteReportRepository(store: store).members()
+        guard members.count == 1 else { throw ProbeError.activationInvalid }
+        let state = try activationState(memberName: members[0].displayName)
 
-        let vault = try PlaintextVault(rootURL: root)
-        let (catalog, revision) = try await vault.loadCatalogHead()
-        let readSnapshot = try await vault.readSnapshot { catalog in
-            catalog.reachableObjectReferences
-        }
-        guard readSnapshot.catalog == catalog,
-              catalog.reachableObjectReferences.count == 1,
-              readSnapshot.objects.count == 1,
-              let reference = catalog.reachableObjectReferences.first,
-              let vaultBytes = readSnapshot.objects[reference] else {
-            throw ProbeError.activationInvalid
-        }
-        let state = try activationState(vaultBytes: vaultBytes)
-
-        let inboxStore = try PlaintextLANInboxStore(rootURL: root)
-        let projection = try await inboxStore.snapshotAndStorageSummary()
-        let inbox = projection.snapshot
-        guard inbox.vaultID == catalog.vaultID,
-              inbox.items.count == 1,
-              inbox.blobs.count == 1,
+        let inboxStore = try SQLiteLANInboxStore(store: store)
+        let inbox = try await inboxStore.loadSnapshot()
+        guard inbox.items.count == 1,
               inbox.contentTerminals.count == 1,
               inbox.archiveIntents.isEmpty,
               inbox.archiveTerminals.isEmpty,
               let item = inbox.items.first,
-              let blob = inbox.blobs.first,
-              item.blobID == blob.id,
-              case .stored = item.state,
               let terminal = inbox.contentTerminals.first,
               case .deleted = terminal.kind else {
             throw ProbeError.activationInvalid
         }
-        let blobURL = root
-            .appendingPathComponent("lan-inbox", isDirectory: true)
-            .appendingPathComponent("blobs", isDirectory: true)
-            .appendingPathComponent(
-                "\(blob.id.uuidString.lowercased()).blob",
-                isDirectory: false
-            )
-        let blobBytes = try readPrivateFile(blobURL, maximumByteCount: 1 * 1_024 * 1_024)
         let expectedInboxBytes = try activationInboxBytes(state)
         let expectedTerminalBytes = try activationTerminalBytes(state)
-        guard blobBytes.count == blob.byteCount,
-              ContentDigest.sha256(blobBytes) == blob.sha256Digest,
-              blobBytes == expectedInboxBytes,
+        let readLimit = expectedInboxBytes.count + 1
+        let storedBytes = try await inboxStore.withVerifiedItemSourceContent(itemID: item.id) { descriptor in
+            var buffer = [UInt8](repeating: 0, count: readLimit)
+            let count = pread(descriptor, &buffer, readLimit, 0)
+            guard count >= 0 else { throw ProbeError.ioFailure(errno) }
+            return Data(buffer.prefix(count))
+        }
+        guard storedBytes == expectedInboxBytes,
               terminal.contentIdentity.sha256Digest
                 == ContentDigest.sha256(expectedTerminalBytes),
-              terminal.contentIdentity.byteCount == expectedTerminalBytes.count else {
+              terminal.contentIdentity.byteCount == expectedTerminalBytes.count,
+              validation.memberCount == 1,
+              validation.inboxItemCount == 1 else {
             throw ProbeError.activationInvalid
         }
-        let inboxManifest = try readPrivateFile(
-            root.appendingPathComponent("lan-inbox/inbox.json"),
-            maximumByteCount: 4 * 1_024 * 1_024
-        )
-
-        let afterTreeDigest = try capabilityTreeDigest(root)
-        guard beforeTreeDigest == afterTreeDigest else {
-            throw ProbeError.activationInvalid
-        }
-        let semantic = RootSemanticIdentity(
+        return RootSemanticIdentity(
             state: state,
-            vaultID: catalog.vaultID,
-            vaultGeneration: revision.generation,
-            vaultCommitID: revision.commitID,
-            vaultCatalogDigest: revision.catalogDigest,
-            vaultObjectCount: readSnapshot.objects.count,
-            vaultObjectDigest: ContentDigest.sha256(vaultBytes),
-            inboxGeneration: inbox.generation,
-            inboxCommitID: inbox.commitID,
-            inboxManifestDigest: ContentDigest.sha256(inboxManifest),
-            inboxItemCount: inbox.items.count,
-            inboxBlobCount: inbox.blobs.count,
-            inboxTerminalCount: inbox.contentTerminals.count,
-            rootTreeDigest: afterTreeDigest
+            generation: try source.currentRevision().vault.generation,
+            logicalDigest: validation.digest,
+            memberCount: validation.memberCount,
+            inboxItemCount: validation.inboxItemCount,
+            inboxTerminalCount: inbox.contentTerminals.count
         )
-        if let expected, semantic != expected {
-            throw ProbeError.activationInvalid
-        }
-        return semantic
     }
 
-    static func activationVaultBytes(_ state: RootState) throws -> Data {
+    static func activationMemberName(_ state: RootState) throws -> String {
         switch state {
-        case .old: Data("KLG-U0-VAULT-OLD-COMMITTED".utf8)
-        case .new: Data("KLG-U0-VAULT-NEW-COMMITTED".utf8)
+        case .old: "Synthetic previous root"
+        case .new: "Synthetic restored root"
         case .absent: throw ProbeError.activationInvalid
         }
     }
@@ -2277,81 +2190,11 @@ private extension BackupCapabilityProbe {
         }
     }
 
-    static func activationState(vaultBytes: Data) throws -> RootState {
-        if vaultBytes == (try activationVaultBytes(.old)) { return .old }
-        if vaultBytes == (try activationVaultBytes(.new)) { return .new }
+    static func activationState(memberName: String) throws -> RootState {
+        if memberName == (try activationMemberName(.old)) { return .old }
+        if memberName == (try activationMemberName(.new)) { return .new }
         throw ProbeError.activationInvalid
     }
-
-    static func capabilityTreeDigest(_ root: URL) throws -> Data {
-        var hasher = SHA256()
-        var entryCount = 0
-        var totalBytes = 0
-        try hashCapabilityTree(
-            root,
-            relativePath: "",
-            depth: 0,
-            entryCount: &entryCount,
-            totalBytes: &totalBytes,
-            hasher: &hasher
-        )
-        return Data(hasher.finalize())
-    }
-
-    static func hashCapabilityTree(
-        _ directory: URL,
-        relativePath: String,
-        depth: Int,
-        entryCount: inout Int,
-        totalBytes: inout Int,
-        hasher: inout SHA256
-    ) throws {
-        guard depth <= 32 else { throw ProbeError.resourceLimit }
-        try validateOwnedDirectory(directory)
-        let children = try FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil
-        ).sorted { $0.lastPathComponent < $1.lastPathComponent }
-        for child in children {
-            entryCount += 1
-            guard entryCount <= 4_096 else { throw ProbeError.resourceLimit }
-            let childRelative = relativePath.isEmpty
-                ? child.lastPathComponent
-                : "\(relativePath)/\(child.lastPathComponent)"
-            var metadata = stat()
-            guard lstat(child.path, &metadata) == 0,
-                  metadata.st_uid == geteuid() else {
-                throw ProbeError.activationInvalid
-            }
-            if metadata.st_mode & S_IFMT == S_IFDIR {
-                hasher.update(data: Data("D\0\(childRelative)\0".utf8))
-                try hashCapabilityTree(
-                    child,
-                    relativePath: childRelative,
-                    depth: depth + 1,
-                    entryCount: &entryCount,
-                    totalBytes: &totalBytes,
-                    hasher: &hasher
-                )
-            } else if metadata.st_mode & S_IFMT == S_IFREG,
-                      metadata.st_nlink == 1,
-                      metadata.st_size >= 0,
-                      metadata.st_size <= 4 * 1_024 * 1_024 {
-                let data = try readPrivateFile(child, maximumByteCount: 4 * 1_024 * 1_024)
-                let nextTotal = totalBytes.addingReportingOverflow(data.count)
-                guard !nextTotal.overflow,
-                      nextTotal.partialValue <= 64 * 1_024 * 1_024 else {
-                    throw ProbeError.resourceLimit
-                }
-                totalBytes = nextTotal.partialValue
-                hasher.update(data: Data("F\0\(childRelative)\0\(data.count)\0".utf8))
-                hasher.update(data: data)
-            } else {
-                throw ProbeError.activationInvalid
-            }
-        }
-    }
-
 }
 
 // MARK: - Named 20,000-object / 2 GiB encrypted dataset

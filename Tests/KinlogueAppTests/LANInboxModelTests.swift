@@ -888,7 +888,7 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
     func setRefreshError(_ failed: Bool) { refreshError = failed }
     func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxScreenSnapshot {
         if pageError { throw LANInboxError.storageFailure }
-        let response = LANInboxScreenSnapshot(page: try PlaintextLANInboxStore.page(durableSnapshot, cursor: cursor, processing: false, openEpoch: queryEpoch), storage: screenSnapshot.storage)
+        let response = LANInboxScreenSnapshot(page: try stubInboxPage(durableSnapshot, cursor: cursor, processing: false, openEpoch: queryEpoch), storage: screenSnapshot.storage)
         if let gate = pageGate { pageGate = nil; await gate.wait() }
         return response
     }
@@ -899,7 +899,7 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
             await gate.wait()
             throw LANInboxError.storageFailure
         }
-        return try PlaintextLANInboxStore.page(durableSnapshot, cursor: cursor, processing: true, openEpoch: queryEpoch)
+        return try stubInboxPage(durableSnapshot, cursor: cursor, processing: true, openEpoch: queryEpoch)
     }
 
     func setArchiveError(_ error: any Error) { archiveError = error }

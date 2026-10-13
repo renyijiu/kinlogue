@@ -2,6 +2,13 @@ import Darwin
 import Foundation
 import KinlogueCore
 
+/// The points at which a test can interrupt a whole-library deletion.
+public enum PlaintextVaultTransactionFault: Equatable, Sendable {
+    case afterDeletionReceipt
+    case afterDeletionRename
+    case afterDeletionQuarantineRemoval
+}
+
 /// A filesystem-only destruction transaction. The sibling receipt survives a
 /// partial recursive removal, so a later process can finish deleting the exact
 /// inode that was validated before the active vault was quarantined.

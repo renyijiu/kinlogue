@@ -52,107 +52,46 @@ struct LiveDICOMAppServiceIntegrationTests {
     }
 
     @Test
-    func cancellationAfterManifestCommitWaitsForProjectionAndReportsSuccess() async throws {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "kinlogue-app-dicom-cancel-after-commit-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        let root = base.appendingPathComponent("Vault", isDirectory: true)
-        let source = base.appendingPathComponent("GeneratedSource", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: false)
-        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: base) }
-        try GeneratedDICOMFixture.explicitVRLittleEndianMR().write(
-            to: source.appendingPathComponent("generated-object.dcm"),
-            options: .atomic
-        )
-        let vault = try PlaintextVault(rootURL: root)
-        _ = try await vault.initialize()
-        let catalogLoadGate = AsyncOperationGate()
-        let gatedVault = CatalogLoadGatedVault(underlying: vault, gate: catalogLoadGate)
-        let draftStore = VaultImportDraftStore(vault: vault)
-        let dicomWorkflow = try DICOMImportWorkflow(
-            rootURL: root,
-            vault: vault,
-            decoder: GeneratedAppDICOMDecoder()
-        )
-        let service = LiveAppService(
-            vault: gatedVault,
-            draftStore: draftStore,
-            workflow: ImportWorkflow(
-                store: draftStore,
-                textExtractor: GeneratedAppTextExtractor()
-            ),
-            startupCompleted: true,
-            dicomRuntime: DICOMAppRuntime(
-                workflow: dicomWorkflow,
-                securityScope: .notRequiredForTesting
-            )
-        )
+    func cancellationAfterTheCommitWaitsForTheOutcomeAndReportsSuccess() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let source = try generatedSource(in: fixture)
+        // The study is committed before the service reads it back for the outcome; that read waits.
+        let outcomeRead = AsyncOperationGate()
+        let service = try liveService(fixture, studies: InterceptedDICOMStore(fixture.studies, before: { call in
+            if call == .details { await outcomeRead.wait() }
+        }))
         let model = DICOMImportModel(service: service)
 
         let importTask = Task {
             await model.handleImporterResult(.success([source]))
         }
-        #expect(await catalogLoadGate.waitUntilStarted())
-        let committedCatalog = try await vault.loadCatalog()
-        #expect(committedCatalog.dicomStudies.count == 1)
+        #expect(await outcomeRead.waitUntilStarted())
+        let committed = try await fixture.studies.summaries().items
+        #expect(committed.count == 1)
 
         let cancelTask = Task { await model.cancel() }
         for _ in 0..<100 where model.phase != .cancelling {
             await Task.yield()
         }
         #expect(model.phase == .cancelling)
-        await catalogLoadGate.open()
+        await outcomeRead.open()
         await cancelTask.value
         await importTask.value
 
         #expect(model.phase == .succeeded)
-        #expect(model.result?.studyID == committedCatalog.dicomStudies.first?.id)
+        #expect(model.result?.studyID == committed.first?.id)
         #expect(model.result?.destination == .review)
-        #expect(try await gatedVault.loadCatalog().dicomStudies.count == 1)
+        #expect(try await fixture.studies.summaries().items.map(\.id) == committed.map(\.id))
     }
 
     @Test
     func generatedFolderImportsReviewsConfirmsReimportsAndDeletesThroughTheLiveService() async throws {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "kinlogue-app-dicom-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        let root = base.appendingPathComponent("Vault", isDirectory: true)
-        let source = base.appendingPathComponent("GeneratedSource", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: false)
-        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: base) }
-
-        let objectData = GeneratedDICOMFixture.explicitVRLittleEndianMR()
-        try objectData.write(
-            to: source.appendingPathComponent("generated-object.dcm"),
-            options: .atomic
-        )
-        let vault = try PlaintextVault(rootURL: root)
-        _ = try await vault.initialize()
-        let draftStore = VaultImportDraftStore(vault: vault)
-        let dicomWorkflow = try DICOMImportWorkflow(
-            rootURL: root,
-            vault: vault,
-            decoder: GeneratedAppDICOMDecoder()
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let source = try generatedSource(in: fixture)
         let lifecycle = LibraryLifecycleCoordinator()
-        let service = LiveAppService(
-            vault: vault,
-            draftStore: draftStore,
-            workflow: ImportWorkflow(
-                store: draftStore,
-                textExtractor: GeneratedAppTextExtractor()
-            ),
-            startupCompleted: true,
-            dicomRuntime: DICOMAppRuntime(
-                workflow: dicomWorkflow,
-                lifecycle: lifecycle,
-                securityScope: .notRequiredForTesting
-            )
-        )
+        let service = try liveService(fixture, lifecycle: lifecycle)
         let memberSnapshot = try await service.createMember(
             displayName: "Synthetic imaging integration member",
             disambiguationLabel: nil
@@ -208,21 +147,20 @@ struct LiveDICOMAppServiceIntegrationTests {
             contentTypeIdentifier: "public.png",
             sha256Digest: ContentDigest.sha256(reportBytes)
         )
-        guard case .created(let reportDraftID) = try await draftStore.stage(reportFile) else {
+        guard case .created(let reportDraftID) = try await fixture.reports.stage(reportFile) else {
             Issue.record("Expected a report draft after confirming the DICOM study")
             return
         }
         let afterReportStage = try await service.refresh()
         try #require(afterReportStage.dicomStudies.map(\.id) == [imported.studyID])
-        let reportDraft = try #require(
-            try await vault.loadCatalog().importDrafts.first { $0.id == reportDraftID }
-        )
-        try await draftStore.discard(
+        let reportDraft = try await fixture.reports.draft(reportDraftID)
+        try await fixture.reports.discard(
             draftID: reportDraftID,
             expectedRevision: reportDraft.revision
         )
-        let afterReportDiscard = try await vault.loadCatalog()
+        let afterReportDiscard = try await service.refresh()
         #expect(afterReportDiscard.dicomStudies.map(\.id) == [imported.studyID])
+        #expect(afterReportDiscard.draftCount == 0)
         #expect(try await service.loadDICOMStudyViewer(studyID: imported.studyID).study.id == imported.studyID)
 
         let duplicate = try await service.importDICOMDirectory(at: source)
@@ -261,52 +199,20 @@ struct LiveDICOMAppServiceIntegrationTests {
     }
 
     @Test
-    func cancellationDuringCatalogProjectionReturnsTheSameCommittedOutcome() async throws {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "kinlogue-app-dicom-cancel-projection-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        let root = base.appendingPathComponent("Vault", isDirectory: true)
-        let source = base.appendingPathComponent("GeneratedSource", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: false)
-        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: base) }
-
-        try GeneratedDICOMFixture.explicitVRLittleEndianMR().write(
-            to: source.appendingPathComponent("generated-object.dcm"),
-            options: .atomic
-        )
-        let vault = try PlaintextVault(rootURL: root)
-        _ = try await vault.initialize()
-        let projectedVault = DICOMOutcomeProjectionVault(underlying: vault)
-        let draftStore = VaultImportDraftStore(vault: vault)
-        let workflow = try DICOMImportWorkflow(
-            rootURL: root,
-            vault: vault,
-            decoder: GeneratedAppDICOMDecoder()
-        )
-        let service = LiveAppService(
-            vault: projectedVault,
-            draftStore: draftStore,
-            workflow: ImportWorkflow(
-                store: draftStore,
-                textExtractor: GeneratedAppTextExtractor()
-            ),
-            startupCompleted: true,
-            dicomRuntime: DICOMAppRuntime(
-                workflow: workflow,
-                lifecycle: nil,
-                securityScope: .notRequiredForTesting
-            )
-        )
-        let gate = DICOMOutcomeProjectionGate()
-        await projectedVault.gateNextCatalogLoad(with: gate)
+    func cancellationWhileTheOutcomeIsReadReturnsTheSameCommittedOutcome() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let source = try generatedSource(in: fixture)
+        let outcomeRead = AsyncOperationGate()
+        let service = try liveService(fixture, studies: InterceptedDICOMStore(fixture.studies, before: { call in
+            if call == .details { await outcomeRead.wait() }
+        }))
 
         let importing = Task { try await service.importDICOMDirectory(at: source) }
-        await gate.waitUntilStarted()
+        #expect(await outcomeRead.waitUntilStarted())
         let cancelling = Task { try await service.cancelDICOMImport() }
         #expect(await service.waitUntilCurrentDICOMImportCancellationClaimedForTesting())
-        await gate.open()
+        await outcomeRead.open()
 
         let imported = try await importing.value
         let cancelled = try #require(try await cancelling.value)
@@ -316,42 +222,10 @@ struct LiveDICOMAppServiceIntegrationTests {
 
     @Test
     func cancellationAfterImportCallReturnsStillObservesTheCommittedOutcome() async throws {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "kinlogue-app-dicom-late-cancel-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        let root = base.appendingPathComponent("Vault", isDirectory: true)
-        let source = base.appendingPathComponent("GeneratedSource", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: false)
-        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: base) }
-
-        try GeneratedDICOMFixture.explicitVRLittleEndianMR().write(
-            to: source.appendingPathComponent("generated-object.dcm"),
-            options: .atomic
-        )
-        let vault = try PlaintextVault(rootURL: root)
-        _ = try await vault.initialize()
-        let draftStore = VaultImportDraftStore(vault: vault)
-        let workflow = try DICOMImportWorkflow(
-            rootURL: root,
-            vault: vault,
-            decoder: GeneratedAppDICOMDecoder()
-        )
-        let service = LiveAppService(
-            vault: vault,
-            draftStore: draftStore,
-            workflow: ImportWorkflow(
-                store: draftStore,
-                textExtractor: GeneratedAppTextExtractor()
-            ),
-            startupCompleted: true,
-            dicomRuntime: DICOMAppRuntime(
-                workflow: workflow,
-                lifecycle: nil,
-                securityScope: .notRequiredForTesting
-            )
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let source = try generatedSource(in: fixture)
+        let service = try liveService(fixture)
 
         let imported = try await service.importDICOMDirectory(at: source)
         let cancelled = try #require(try await service.cancelDICOMImport())
@@ -360,123 +234,38 @@ struct LiveDICOMAppServiceIntegrationTests {
         #expect(imported.destination == .review)
         #expect(try await service.cancelDICOMImport() == nil)
     }
-}
 
-private actor DICOMOutcomeProjectionVault: VaultStore {
-    private let underlying: PlaintextVault
-    private var nextLoadGate: DICOMOutcomeProjectionGate?
-
-    init(underlying: PlaintextVault) {
-        self.underlying = underlying
+    /// One generated MR object in a folder of its own, the way a user would pick it.
+    private func generatedSource(in fixture: SQLiteAppQueryFixture) throws -> URL {
+        let source = fixture.base.appendingPathComponent("GeneratedSource", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
+        try GeneratedDICOMFixture.explicitVRLittleEndianMR().write(
+            to: source.appendingPathComponent("generated-object.dcm"),
+            options: .atomic
+        )
+        return source
     }
 
-    func gateNextCatalogLoad(with gate: DICOMOutcomeProjectionGate) {
-        nextLoadGate = gate
-    }
-
-    func inspect() async -> VaultAccessState { await underlying.inspect() }
-    func loadValidatedCatalog() async throws -> VaultCatalog {
-        try await underlying.loadValidatedCatalog()
-    }
-    func initialize() async throws -> VaultCatalog { try await underlying.initialize() }
-
-    func loadCatalog() async throws -> VaultCatalog {
-        if let gate = nextLoadGate {
-            nextLoadGate = nil
-            await gate.wait()
-        }
-        return try await underlying.loadCatalog()
-    }
-
-    func readObject(_ reference: VaultObjectReference) async throws -> Data {
-        try await underlying.readObject(reference)
-    }
-
-    func readSnapshot(
-        selecting references: @Sendable (VaultCatalog) throws -> [VaultObjectReference]
-    ) async throws -> VaultReadSnapshot {
-        _ = try await loadCatalog()
-        return try await underlying.readSnapshot(selecting: references)
-    }
-
-    func commit(_ request: VaultCommitRequest) async throws -> VaultCatalog {
-        try await underlying.commit(request)
-    }
-
-    func destroy() async throws { try await underlying.destroy() }
-}
-
-private actor DICOMOutcomeProjectionGate {
-    private var started = false
-    private var isOpen = false
-    private var startWaiters: [CheckedContinuation<Void, Never>] = []
-    private var openWaiters: [CheckedContinuation<Void, Never>] = []
-
-    func wait() async {
-        started = true
-        let waiters = startWaiters
-        startWaiters.removeAll()
-        waiters.forEach { $0.resume() }
-        guard !isOpen else { return }
-        await withCheckedContinuation { openWaiters.append($0) }
-    }
-
-    func waitUntilStarted() async {
-        guard !started else { return }
-        await withCheckedContinuation { startWaiters.append($0) }
-    }
-
-    func open() {
-        isOpen = true
-        let waiters = openWaiters
-        openWaiters.removeAll()
-        waiters.forEach { $0.resume() }
-    }
-}
-
-private actor CatalogLoadGatedVault: VaultStore {
-    let underlying: PlaintextVault
-    let gate: AsyncOperationGate
-
-    init(underlying: PlaintextVault, gate: AsyncOperationGate) {
-        self.underlying = underlying
-        self.gate = gate
-    }
-
-    func inspect() async -> VaultAccessState {
-        await underlying.inspect()
-    }
-
-    func loadValidatedCatalog() async throws -> VaultCatalog {
-        try await underlying.loadValidatedCatalog()
-    }
-
-    func initialize() async throws -> VaultCatalog {
-        try await underlying.initialize()
-    }
-
-    func loadCatalog() async throws -> VaultCatalog {
-        await gate.wait()
-        return try await underlying.loadCatalog()
-    }
-
-    func readObject(_ reference: VaultObjectReference) async throws -> Data {
-        try await underlying.readObject(reference)
-    }
-
-    func readSnapshot(
-        selecting references: @Sendable (VaultCatalog) throws -> [VaultObjectReference]
-    ) async throws -> VaultReadSnapshot {
-        _ = try await loadCatalog()
-        return try await underlying.readSnapshot(selecting: references)
-    }
-
-    func commit(_ request: VaultCommitRequest) async throws -> VaultCatalog {
-        try await underlying.commit(request)
-    }
-
-    func destroy() async throws {
-        try await underlying.destroy()
+    /// The live service on the fixture's library. `studies` replaces the store the service reads
+    /// a study back from; imports always commit through the real repository.
+    private func liveService(
+        _ fixture: SQLiteAppQueryFixture,
+        studies: (any LibraryDICOMStoring)? = nil,
+        lifecycle: LibraryLifecycleCoordinator? = nil
+    ) throws -> LiveAppService {
+        LiveAppService(
+            reports: fixture.reports,
+            studies: studies ?? fixture.studies,
+            draftStore: fixture.reports,
+            workflow: ImportWorkflow(store: fixture.reports, textExtractor: GeneratedAppTextExtractor()),
+            startupCompleted: true,
+            lifecycle: lifecycle,
+            dicomRuntime: DICOMAppRuntime(
+                workflow: try DICOMImportWorkflow(repository: fixture.studies, decoder: GeneratedAppDICOMDecoder()),
+                lifecycle: lifecycle,
+                securityScope: .notRequiredForTesting
+            )
+        )
     }
 }
 

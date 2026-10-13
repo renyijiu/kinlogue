@@ -146,20 +146,6 @@ public actor LANItemPreprocessor {
     private let candidateExtractor: ReportCandidateExtractor
     private let makeID: IDGenerator
 
-    public init(
-        inbox: PlaintextLANInboxStore,
-        validator: ImportedFileValidator = ImportedFileValidator(),
-        textExtractor: any TextExtractionService = OnDeviceTextExtractionService(),
-        candidateExtractor: ReportCandidateExtractor = ReportCandidateExtractor(),
-        makeID: @escaping IDGenerator = { UUID() }
-    ) {
-        self.inbox = inbox
-        self.validator = validator
-        self.textExtractor = textExtractor
-        self.candidateExtractor = candidateExtractor
-        self.makeID = makeID
-    }
-
     package init(
         inbox: any LANPendingItemStoring,
         validator: ImportedFileValidator = ImportedFileValidator(),

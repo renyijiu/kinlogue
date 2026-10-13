@@ -3,14 +3,16 @@ import Testing
 @testable import KinlogueCore
 @testable import KinloguePlatform
 
+// `ImportWorkflow` driven against the SQLite report repository. Draft transitions, duplicate
+// claims and confirmation on the repository itself are covered by `LibraryQueryIntegrationTests`.
+
 @Test
-func workflowStoresAttachmentAndReviewDocumentInThePlaintextVault() async throws {
-    let root = temporaryImportVaultRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let vault = try PlaintextVault(rootURL: root)
-    _ = try await vault.initialize()
-    let store = VaultImportDraftStore(vault: vault)
-    let workflow = ImportWorkflow(store: store, textExtractor: SyntheticTextExtractor())
+func workflowStoresTheOriginalAndItsReviewDocumentInTheLibrary() async throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let kernel = try SQLiteLibraryStore(rootURL: root)
+    let repository = SQLiteReportRepository(store: kernel)
+    let workflow = ImportWorkflow(store: repository, textExtractor: SyntheticWorkflowExtractor())
     let plaintext = Data("SYNTHETIC-ATTACHMENT-BYTES".utf8)
     let file = try ValidatedImportedFile(
         data: plaintext,
@@ -25,198 +27,65 @@ func workflowStoresAttachmentAndReviewDocumentInThePlaintextVault() async throws
         return
     }
 
-    let catalog = try await vault.loadCatalog()
-    let draft = try #require(catalog.importDrafts.first { $0.id == draftID })
+    let draft = try await repository.draft(draftID)
     #expect(draft.state == .needsReview)
     #expect(draft.memberID == nil)
-    let attachmentID = try #require(draft.soleAttachmentID)
-    let attachment = try #require(catalog.attachments.first { $0.id == attachmentID })
-    #expect(try await vault.readObject(VaultObjectReference(
-        id: attachment.id,
-        kind: .attachment
-    )) == plaintext)
-    let document = try await store.loadDocument(draftID: draftID)
+    let originalID = try #require(draft.soleAttachmentID)
+    #expect(try await repository.loadSource(draftID: draftID) == file)
+    let document = try await repository.loadDocument(draftID: draftID)
     #expect(document.candidates.memberName?.transcription == "合成成员")
+    #expect(document.blocks.map(\.sourceID) == [draft.sources.first.id])
 
-    let duplicate = try await workflow.importFile(file)
-    #expect(duplicate == .existingDraft(draftID))
+    #expect(try await workflow.importFile(file) == .existingDraft(draftID))
 
-    let layout = try PlaintextVaultLayout(rootURL: root)
-    let attachmentURL = root.appendingPathComponent(layout.objectPath(
-        VaultObjectReference(id: attachment.id, kind: .attachment)
-    ))
-    #expect(try Data(contentsOf: attachmentURL) == plaintext)
+    // The original is one plain file named by its identifier, and nothing else was written for it.
+    let originals = root.appendingPathComponent("originals", isDirectory: true)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: originals.path) == [originalID.uuidString.lowercased() + ".data"])
+    #expect(try Data(contentsOf: originals.appendingPathComponent(originalID.uuidString.lowercased() + ".data")) == plaintext)
 
-    let reopenedVault = try PlaintextVault(rootURL: root)
-    let reopenedStore = VaultImportDraftStore(vault: reopenedVault)
-    #expect(try await reopenedVault.readObject(VaultObjectReference(
-        id: attachment.id,
-        kind: .attachment
-    )) == plaintext)
-    #expect(try await reopenedStore.loadDocument(draftID: draftID) == document)
+    try kernel.close()
+    let reopened = try SQLiteLibraryStore(rootURL: root)
+    defer { try? reopened.close() }
+    let reopenedRepository = SQLiteReportRepository(store: reopened)
+    #expect(try await reopenedRepository.loadSource(draftID: draftID).data == plaintext)
+    #expect(try await reopenedRepository.loadDocument(draftID: draftID) == document)
 }
 
 @Test
-func reviewSnapshotReadsTheDocumentAndFirstSourceFromOneCatalogGeneration() async throws {
-    let root = temporaryImportVaultRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let vault = try PlaintextVault(rootURL: root)
-    let initial = try await vault.initialize()
-    let firstBytes = Data("SYNTHETIC-FIRST-REVIEW-SOURCE".utf8)
-    let secondBytes = Data("SYNTHETIC-SECOND-REVIEW-SOURCE".utf8)
-    let firstAttachment = try Attachment(
-        contentTypeIdentifier: "public.png",
-        byteCount: firstBytes.count,
-        sha256Digest: ContentDigest.sha256(firstBytes)
-    )
-    let secondAttachment = try Attachment(
-        contentTypeIdentifier: "public.png",
-        byteCount: secondBytes.count,
-        sha256Digest: ContentDigest.sha256(secondBytes)
-    )
-    let firstSource = try ReportSource(
-        attachmentID: firstAttachment.id,
-        displayName: "synthetic-first.png",
-        pageCount: 1
-    )
-    let secondSource = try ReportSource(
-        attachmentID: secondAttachment.id,
-        displayName: "synthetic-second.png",
-        pageCount: 1
-    )
-    let documentObjectID = UUID()
-    let draft = ImportDraft(
-        sources: try ReportSources([firstSource, secondSource]),
-        state: .needsReview,
-        documentObjectID: documentObjectID
-    )
-    let document = ImportDraftDocument(blocks: [], candidates: ReportCandidates())
+func reviewSnapshotCarriesTheDocumentTheFirstOriginalAndTheMembers() async throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let kernel = try SQLiteLibraryStore(rootURL: root)
+    defer { try? kernel.close() }
+    let repository = SQLiteReportRepository(store: kernel)
     let member = try FamilyMember(displayName: "Synthetic review member")
-    let catalog = try VaultCatalog(
-        vaultID: initial.vaultID,
-        generation: initial.generation + 1,
-        members: [member],
-        attachments: [firstAttachment, secondAttachment],
-        importDrafts: [draft]
-    )
-    _ = try await vault.commit(try VaultCommitRequest(
-        expectedGeneration: initial.generation,
-        catalog: catalog,
-        writes: [
-            VaultObjectWrite(
-                reference: VaultObjectReference(id: firstAttachment.id, kind: .attachment),
-                plaintext: firstBytes
-            ),
-            VaultObjectWrite(
-                reference: VaultObjectReference(id: secondAttachment.id, kind: .attachment),
-                plaintext: secondBytes
-            ),
-            VaultObjectWrite(
-                reference: VaultObjectReference(id: documentObjectID, kind: .ocr),
-                plaintext: try CanonicalVaultJSON.encode(document)
-            ),
-        ]
-    ))
-
-    let snapshot = try await VaultImportDraftStore(vault: vault).loadReviewSnapshot(
-        draftID: draft.id
-    )
-
-    #expect(snapshot.draft == draft)
-    #expect(snapshot.document == document)
-    #expect(snapshot.members == [member])
-    #expect(snapshot.attachment == firstAttachment)
-    #expect(snapshot.originalData == firstBytes)
-}
-
-@Test
-func duplicateSkipVerifiesTheCurrentObjectBytesBeforeDiscardingTheNewSelection() async throws {
-    let root = temporaryImportVaultRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let vault = try PlaintextVault(rootURL: root)
-    _ = try await vault.initialize()
-    let store = VaultImportDraftStore(vault: vault)
-    let bytes = Data("SYNTHETIC-DUPLICATE-INTEGRITY".utf8)
-    let file = try ValidatedImportedFile(
-        data: bytes,
-        kind: .image,
-        contentTypeIdentifier: "public.png",
-        sha256Digest: ContentDigest.sha256(bytes)
-    )
-    guard case .created(let draftID) = try await store.stage(file) else {
-        Issue.record("Expected a draft")
+    try await repository.saveMember(member, replacing: nil)
+    let bytes = Data("SYNTHETIC-FIRST-REVIEW-SOURCE".utf8)
+    let file = try ValidatedImportedFile(data: bytes, kind: .image, contentTypeIdentifier: "public.png",
+                                         sha256Digest: ContentDigest.sha256(bytes))
+    let workflow = ImportWorkflow(store: repository, textExtractor: SyntheticWorkflowExtractor())
+    guard case .needsReview(let draftID) = try await workflow.importFile(file) else {
+        Issue.record("Expected a review draft")
         return
     }
-    let lease = try await store.beginProcessing(draftID: draftID, attemptID: UUID())
-    try await store.completeProcessing(
-        lease: lease,
-        document: ImportDraftDocument(blocks: [], candidates: ReportCandidates())
-    )
-    let catalog = try await vault.loadCatalog()
-    let draft = try #require(catalog.importDrafts.first { $0.id == draftID })
-    let attachmentID = try #require(draft.soleAttachmentID)
-    let objectPath = try PlaintextVaultLayout(rootURL: root).objectPath(
-        VaultObjectReference(id: attachmentID, kind: .attachment)
-    )
-    try AtomicFileStore(rootURL: root).replaceAtomically(
-        Data(repeating: 0x7F, count: bytes.count),
-        relativePath: objectPath
-    )
 
-    await #expect(throws: VaultError.invalidDigest) {
-        _ = try await store.stage(file)
-    }
+    let snapshot = try await repository.loadReviewSnapshot(draftID: draftID)
 
-    #expect(try await vault.loadCatalog().importDrafts.map(\.id) == [draftID])
-}
-
-@Test
-func duplicateSkipVerifiesTheDraftOCRDocumentBeforeDiscardingTheNewSelection() async throws {
-    let root = temporaryImportVaultRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let vault = try PlaintextVault(rootURL: root)
-    _ = try await vault.initialize()
-    let store = VaultImportDraftStore(vault: vault)
-    let bytes = Data("SYNTHETIC-DUPLICATE-OCR-INTEGRITY".utf8)
-    let file = try ValidatedImportedFile(
-        data: bytes,
-        kind: .image,
-        contentTypeIdentifier: "public.png",
-        sha256Digest: ContentDigest.sha256(bytes)
-    )
-    guard case .created(let draftID) = try await store.stage(file) else {
-        Issue.record("Expected a draft")
-        return
-    }
-    let lease = try await store.beginProcessing(draftID: draftID, attemptID: UUID())
-    try await store.completeProcessing(
-        lease: lease,
-        document: ImportDraftDocument(blocks: [], candidates: ReportCandidates())
-    )
-    let draft = try #require(
-        try await vault.loadCatalog().importDrafts.first { $0.id == draftID }
-    )
-    let documentID = try #require(draft.documentObjectID)
-    let objectPath = try PlaintextVaultLayout(rootURL: root).objectPath(
-        VaultObjectReference(id: documentID, kind: .ocr)
-    )
-    try AtomicFileStore(rootURL: root).replaceAtomically(
-        Data("tampered-ocr".utf8),
-        relativePath: objectPath
-    )
-
-    await #expect(throws: VaultError.invalidDigest) {
-        _ = try await store.stage(file)
-    }
+    #expect(snapshot.draft == (try await repository.draft(draftID)))
+    #expect(snapshot.document == (try await repository.loadDocument(draftID: draftID)))
+    #expect(snapshot.originalData == bytes)
+    #expect(snapshot.attachment.id == snapshot.draft.sources.first.attachmentID)
+    #expect(snapshot.attachment.sha256Digest == ContentDigest.sha256(bytes))
+    #expect(snapshot.members.map(\.id) == [member.id])
 }
 
 @Test
 func loadingAStagedMultiPageSourcePreservesItsPageCount() async throws {
-    let root = temporaryImportVaultRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let vault = try PlaintextVault(rootURL: root)
-    _ = try await vault.initialize()
-    let store = VaultImportDraftStore(vault: vault)
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let kernel = try SQLiteLibraryStore(rootURL: root)
+    defer { try? kernel.close() }
+    let repository = SQLiteReportRepository(store: kernel)
     let bytes = Data("SYNTHETIC-MULTIPAGE".utf8)
     let file = try ValidatedImportedFile(
         data: bytes,
@@ -225,324 +94,74 @@ func loadingAStagedMultiPageSourcePreservesItsPageCount() async throws {
         sha256Digest: ContentDigest.sha256(bytes),
         pageCount: 3
     )
-    guard case .created(let draftID) = try await store.stage(file) else {
+    guard case .created(let draftID) = try await repository.stage(file) else {
         Issue.record("Expected a draft")
         return
     }
 
-    #expect(try await store.loadSource(draftID: draftID).pageCount == 3)
+    #expect(try await repository.loadSource(draftID: draftID).pageCount == 3)
+    #expect(try await repository.loadSource(draftID: draftID).kind == .pdf)
 }
 
 @Test
-func deferredReviewEditsSurviveReopeningThePlaintextVault() async throws {
-    let root = temporaryImportVaultRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let vault = try PlaintextVault(rootURL: root)
-    let initial = try await vault.initialize()
-    let member = try FamilyMember(displayName: "Synthetic member")
-    _ = try await vault.commit(try VaultCommitRequest(
-        expectedGeneration: initial.generation,
-        catalog: try VaultCatalog(
-            vaultID: initial.vaultID,
-            generation: initial.generation + 1,
-            members: [member]
-        ),
-        writes: []
-    ))
-    let store = VaultImportDraftStore(vault: vault)
+func deferredReviewEditsSurviveReopeningTheLibrary() async throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let kernel = try SQLiteLibraryStore(rootURL: root)
+    let repository = SQLiteReportRepository(store: kernel)
+    let member = try FamilyMember(displayName: "Synthetic deferred member")
+    try await repository.saveMember(member, replacing: nil)
     let bytes = Data("SYNTHETIC-DEFERRED-REVIEW".utf8)
-    let file = try ValidatedImportedFile(
-        data: bytes,
-        kind: .image,
-        contentTypeIdentifier: "public.png",
-        sha256Digest: ContentDigest.sha256(bytes)
-    )
-    guard case .created(let draftID) = try await store.stage(file) else {
-        Issue.record("Expected a new draft")
+    let file = try ValidatedImportedFile(data: bytes, kind: .image, contentTypeIdentifier: "public.png",
+                                         sha256Digest: ContentDigest.sha256(bytes))
+    let workflow = ImportWorkflow(store: repository, textExtractor: SyntheticWorkflowExtractor())
+    guard case .needsReview(let draftID) = try await workflow.importFile(file) else {
+        Issue.record("Expected a review draft")
         return
     }
-    let lease = try await store.beginProcessing(draftID: draftID, attemptID: UUID())
-    try await store.completeProcessing(
-        lease: lease,
-        document: ImportDraftDocument(blocks: [], candidates: ReportCandidates())
-    )
-    let beforeDeferral = try await vault.loadCatalog()
-    let originalRevision = try #require(
-        beforeDeferral.importDrafts.first { $0.id == draftID }?.revision
-    )
-    let originalDocumentObjectID = try #require(
-        beforeDeferral.importDrafts.first { $0.id == draftID }?.documentObjectID
-    )
-    let reviewState = ImportDraftReviewState(
-        timelineDateSelection: .manual(Date(timeIntervalSince1970: 1_784_419_200)),
-        title: "Synthetic title",
-        organization: "Synthetic organization",
-        department: "Synthetic department",
-        reportType: "Synthetic type",
-        reportedResults: "Synthetic results",
-        conclusion: "Synthetic conclusion",
-        abnormalItems: ["Synthetic abnormal item"],
-        userNote: "Synthetic note"
-    )
-
-    try await store.saveReview(
-        draftID: draftID,
-        expectedRevision: originalRevision,
-        memberID: member.id,
-        document: ImportDraftDocument(
-            blocks: [],
-            candidates: ReportCandidates(),
-            reviewState: reviewState
+    let recognized = try await repository.loadDocument(draftID: draftID)
+    let draft = try await repository.draft(draftID)
+    let edited = ImportDraftDocument(
+        blocks: recognized.blocks,
+        candidates: recognized.candidates,
+        candidateExtractionVersion: recognized.candidateExtractionVersion,
+        reviewState: ImportDraftReviewState(
+            timelineDateSelection: .unknown,
+            title: "Synthetic deferred title",
+            organization: "",
+            department: "",
+            reportType: "",
+            reportedResults: "",
+            conclusion: "Synthetic deferred conclusion",
+            abnormalItems: ["Synthetic abnormal item"],
+            userNote: "Synthetic note"
         )
     )
 
-    let reopenedVault = try PlaintextVault(rootURL: root)
-    let reopenedCatalog = try await reopenedVault.loadCatalog()
-    let reopenedDraft = try #require(reopenedCatalog.importDrafts.first { $0.id == draftID })
-    #expect(reopenedCatalog.generation == beforeDeferral.generation + 1)
-    #expect(reopenedDraft.revision == originalRevision + 1)
-    #expect(reopenedDraft.memberID == member.id)
-    #expect(reopenedDraft.documentObjectID != originalDocumentObjectID)
-    let reopenedStore = VaultImportDraftStore(vault: reopenedVault)
-    #expect(try await reopenedStore.loadDocument(draftID: draftID).reviewState == reviewState)
-    await #expect(throws: VaultError.objectMissing) {
-        _ = try await reopenedVault.readObject(VaultObjectReference(
-            id: originalDocumentObjectID,
-            kind: .ocr
-        ))
+    try await repository.saveReview(draftID: draftID, expectedRevision: draft.revision, memberID: member.id, document: edited)
+    try kernel.close()
+
+    let reopened = try SQLiteLibraryStore(rootURL: root)
+    defer { try? reopened.close() }
+    let reopenedRepository = SQLiteReportRepository(store: reopened)
+    let saved = try await reopenedRepository.draft(draftID)
+    #expect(saved.state == .needsReview)
+    #expect(saved.memberID == member.id)
+    #expect(saved.revision == draft.revision + 1)
+    #expect(try await reopenedRepository.loadDocument(draftID: draftID) == edited)
+    // A review saved against the revision it replaced is refused and changes nothing.
+    await #expect(throws: (any Error).self) {
+        try await reopenedRepository.saveReview(draftID: draftID, expectedRevision: draft.revision, memberID: nil, document: edited)
     }
-    let layout = try PlaintextVaultLayout(rootURL: root)
-    #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(
-        layout.objectPath(VaultObjectReference(id: originalDocumentObjectID, kind: .ocr))
-    ).path))
-    let manifestData = try Data(contentsOf: root.appendingPathComponent("library.json"))
-    #expect(!manifestData.contains(Data("reviewState".utf8)))
-
-    let reconciledState = ImportDraftReviewState(
-        timelineDateSelection: .unknown,
-        title: "Synthetic title after response loss",
-        organization: "",
-        department: "",
-        reportType: "",
-        reportedResults: "",
-        conclusion: "",
-        abnormalItems: [],
-        userNote: ""
-    )
-    let responseLostVault = try PlaintextVault(
-        rootURL: root,
-        transactionFailureInjector: { $0 == .afterManifestCommit }
-    )
-    let responseLostStore = VaultImportDraftStore(vault: responseLostVault)
-    try await responseLostStore.saveReview(
-        draftID: draftID,
-        expectedRevision: reopenedDraft.revision,
-        memberID: member.id,
-        document: ImportDraftDocument(
-            blocks: [],
-            candidates: ReportCandidates(),
-            reviewState: reconciledState
-        )
-    )
-
-    let afterResponseLoss = try PlaintextVault(rootURL: root)
-    let afterResponseLossStore = VaultImportDraftStore(vault: afterResponseLoss)
-    #expect(
-        try await afterResponseLossStore.loadDocument(draftID: draftID).reviewState
-            == reconciledState
-    )
-    await #expect(throws: ImportDraftError.staleAttempt) {
-        try await reopenedStore.saveReview(
-            draftID: draftID,
-            expectedRevision: reopenedDraft.revision,
-            memberID: member.id,
-            document: ImportDraftDocument(
-                blocks: [],
-                candidates: ReportCandidates(),
-                reviewState: reviewState
-            )
-        )
-    }
-}
-
-@Test
-func staleConfirmationCannotRemoveANewerReviewSavedByAnotherVaultInstance() async throws {
-    let root = temporaryImportVaultRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let prepared = try await prepareReviewDraft(at: root)
-    let staleVault = try PlaintextVault(rootURL: root)
-    let staleStore = VaultImportDraftStore(vault: staleVault)
-    let newerVault = try PlaintextVault(rootURL: root)
-    let newerStore = VaultImportDraftStore(vault: newerVault)
-    let newerState = syntheticReviewState(title: "Newer title")
-
-    try await newerStore.saveReview(
-        draftID: prepared.draft.id,
-        expectedRevision: prepared.draft.revision,
-        memberID: prepared.member.id,
-        document: ImportDraftDocument(
-            blocks: [],
-            candidates: ReportCandidates(),
-            reviewState: newerState
-        )
-    )
-    let staleRecord = try HealthRecord(
-        id: prepared.draft.id,
-        memberID: prepared.member.id,
-        sources: prepared.draft.sources,
-        ocrDocumentObjectID: prepared.draft.documentObjectID,
-        importState: .confirmed
-    )
-
-    await #expect(throws: ImportDraftError.staleAttempt) {
-        _ = try await staleStore.confirm(
-            draftID: prepared.draft.id,
-            expectedRevision: prepared.draft.revision,
-            record: staleRecord
-        )
-    }
-
-    let current = try await staleVault.loadCatalog()
-    let currentDraft = try #require(current.importDrafts.first {
-        $0.id == prepared.draft.id
-    })
-    #expect(currentDraft.revision == prepared.draft.revision + 1)
-    #expect(current.records.isEmpty)
-    #expect(try await staleStore.loadDocument(draftID: prepared.draft.id).reviewState == newerState)
-}
-
-@Test
-func staleDiscardCannotRemoveANewerReviewSavedByAnotherVaultInstance() async throws {
-    let root = temporaryImportVaultRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let prepared = try await prepareReviewDraft(at: root)
-    let staleVault = try PlaintextVault(rootURL: root)
-    let staleStore = VaultImportDraftStore(vault: staleVault)
-    let newerVault = try PlaintextVault(rootURL: root)
-    let newerStore = VaultImportDraftStore(vault: newerVault)
-    let newerState = syntheticReviewState(title: "Newer title")
-
-    try await newerStore.saveReview(
-        draftID: prepared.draft.id,
-        expectedRevision: prepared.draft.revision,
-        memberID: prepared.member.id,
-        document: ImportDraftDocument(
-            blocks: [],
-            candidates: ReportCandidates(),
-            reviewState: newerState
-        )
-    )
-
-    await #expect(throws: ImportDraftError.staleAttempt) {
-        _ = try await staleStore.discard(
-            draftID: prepared.draft.id,
-            expectedRevision: prepared.draft.revision
-        )
-    }
-
-    let current = try await staleVault.loadCatalog()
-    let currentDraft = try #require(current.importDrafts.first {
-        $0.id == prepared.draft.id
-    })
-    #expect(currentDraft.revision == prepared.draft.revision + 1)
-    #expect(try await staleStore.loadDocument(draftID: prepared.draft.id).reviewState == newerState)
-}
-
-@Test
-func processingDraftCanBeReacquiredAfterAStoreRestartAndRejectsTheOldLease() async throws {
-    let root = temporaryImportVaultRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let vault = try PlaintextVault(rootURL: root)
-    _ = try await vault.initialize()
-    let firstStore = VaultImportDraftStore(vault: vault)
-    let bytes = Data("SYNTHETIC-RESTART".utf8)
-    let file = try ValidatedImportedFile(
-        data: bytes,
-        kind: .image,
-        contentTypeIdentifier: "public.png",
-        sha256Digest: ContentDigest.sha256(bytes)
-    )
-    let stage = try await firstStore.stage(file)
-    guard case .created(let draftID) = stage else {
-        Issue.record("Expected a new draft")
-        return
-    }
-    let oldLease = try await firstStore.beginProcessing(draftID: draftID, attemptID: UUID())
-
-    let restartedStore = VaultImportDraftStore(vault: vault)
-    #expect(try await restartedStore.resumableDraftIDs() == [draftID])
-    let newLease = try await restartedStore.beginProcessing(draftID: draftID, attemptID: UUID())
-    #expect(newLease.revision > oldLease.revision)
-    let document = ImportDraftDocument(blocks: [], candidates: ReportCandidates())
-    await #expect(throws: ImportDraftError.staleAttempt) {
-        try await restartedStore.completeProcessing(lease: oldLease, document: document)
-    }
-    try await restartedStore.completeProcessing(lease: newLease, document: document)
-    #expect(try await restartedStore.loadDocument(draftID: draftID) == document)
-}
-
-@Test(arguments: [ImportState.processing, .needsReview, .failed], [false, true])
-func processingTransitionRejectsDraftReplacedBeforeCommit(
-    transition: ImportState,
-    deleted: Bool
-) async throws {
-    let root = temporaryImportVaultRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let vault = try PlaintextVault(rootURL: root)
-    _ = try await vault.initialize()
-    let otherStore = VaultImportDraftStore(vault: vault)
-    let bytes = Data("SYNTHETIC-PROCESSING-RACE".utf8)
-    guard case .created(let draftID) = try await otherStore.stage(ValidatedImportedFile(
-        data: bytes, kind: .image, contentTypeIdentifier: "public.png",
-        sha256Digest: ContentDigest.sha256(bytes)
-    )) else { Issue.record("Expected a synthetic draft"); return }
-    let oldLease = try await otherStore.beginProcessing(draftID: draftID, attemptID: UUID())
-    let newerAttemptID = UUID()
-    let racingStore = VaultImportDraftStore(vault: vault, processingWillCommit: { _ in
-        if deleted {
-            _ = try await otherStore.discard(draftID: draftID, expectedRevision: oldLease.revision)
-        } else {
-            _ = try await otherStore.beginProcessing(draftID: draftID, attemptID: newerAttemptID)
-        }
-    })
-    do {
-        switch transition {
-        case .processing:
-            _ = try await racingStore.beginProcessing(draftID: draftID, attemptID: UUID())
-        case .needsReview:
-            try await racingStore.completeProcessing(
-                lease: oldLease,
-                document: ImportDraftDocument(blocks: [], candidates: ReportCandidates())
-            )
-        case .failed:
-            try await racingStore.failProcessing(lease: oldLease, failureCode: .textExtractionFailed)
-        default:
-            Issue.record("Unexpected test transition")
-        }
-        Issue.record("The replaced draft must reject the old transition")
-    } catch {
-        if deleted { #expect(error as? VaultImportDraftStoreError == .draftNotFound) }
-        else { #expect(error as? ImportDraftError == .staleAttempt) }
-    }
-    let catalog = try await vault.loadValidatedCatalog()
-    if deleted {
-        #expect(catalog.importDrafts.isEmpty)
-    } else {
-        let draft = try #require(catalog.importDrafts.first)
-        #expect(draft.state == .processing)
-        #expect(draft.attemptID == newerAttemptID)
-        #expect(draft.revision == oldLease.revision + 1)
-        #expect(draft.documentObjectID == nil)
-    }
+    #expect(try await reopenedRepository.draft(draftID) == saved)
 }
 
 @Test
 func failedDraftIsNotAutomaticallyResumedButExplicitRetryStillProcessesIt() async throws {
-    let root = temporaryImportVaultRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let vault = try PlaintextVault(rootURL: root)
-    _ = try await vault.initialize()
-    let store = VaultImportDraftStore(vault: vault)
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let kernel = try SQLiteLibraryStore(rootURL: root)
+    let repository = SQLiteReportRepository(store: kernel)
     let bytes = Data("SYNTHETIC-FAILED-RETRY".utf8)
     let file = try ValidatedImportedFile(
         data: bytes,
@@ -550,144 +169,60 @@ func failedDraftIsNotAutomaticallyResumedButExplicitRetryStillProcessesIt() asyn
         contentTypeIdentifier: "public.png",
         sha256Digest: ContentDigest.sha256(bytes)
     )
-    guard case .created(let draftID) = try await store.stage(file) else {
+    guard case .created(let draftID) = try await repository.stage(file) else {
         Issue.record("Expected a new draft")
         return
     }
-    let lease = try await store.beginProcessing(draftID: draftID, attemptID: UUID())
-    try await store.failProcessing(
-        lease: lease,
-        failureCode: .textExtractionFailed
-    )
-    let failed = try #require(
-        try await vault.loadCatalog().importDrafts.first { $0.id == draftID }
-    )
+    let lease = try await repository.beginProcessing(draftID: draftID, attemptID: UUID())
+    try await repository.failProcessing(lease: lease, failureCode: .textExtractionFailed)
+    let failed = try await repository.draft(draftID)
+    #expect(failed.state == .failed)
+    try kernel.close()
 
-    let restartedStore = VaultImportDraftStore(vault: try PlaintextVault(rootURL: root))
-    let restartedWorkflow = ImportWorkflow(
-        store: restartedStore,
-        textExtractor: SyntheticTextExtractor()
-    )
-    #expect(try await restartedStore.resumableDraftIDs().isEmpty)
+    let restarted = try SQLiteLibraryStore(rootURL: root)
+    defer { try? restarted.close() }
+    let restartedRepository = SQLiteReportRepository(store: restarted)
+    let restartedWorkflow = ImportWorkflow(store: restartedRepository, textExtractor: SyntheticWorkflowExtractor())
+    #expect(try await restartedRepository.resumableDraftIDs().isEmpty)
     #expect(try await restartedWorkflow.resumeInterruptedImports().isEmpty)
-    let afterBootstrapRecovery = try #require(
-        try await vault.loadCatalog().importDrafts.first { $0.id == draftID }
-    )
-    #expect(afterBootstrapRecovery == failed)
+    #expect(try await restartedRepository.draft(draftID) == failed)
 
     #expect(try await restartedWorkflow.retry(draftID: draftID) == .needsReview(draftID))
-    let retried = try #require(
-        try await vault.loadCatalog().importDrafts.first { $0.id == draftID }
-    )
+    let retried = try await restartedRepository.draft(draftID)
     #expect(retried.state == .needsReview)
     #expect(retried.revision == failed.revision + 2)
     #expect(retried.failureCode == nil)
 }
 
 @Test
-func confirmingDraftAtomicallyAddsAConfirmedRecordAndRemovesTheDraft() async throws {
-    let root = temporaryImportVaultRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let vault = try PlaintextVault(rootURL: root)
-    let initial = try await vault.initialize()
-    let member = try FamilyMember(displayName: "Synthetic member")
-    let withMember = try VaultCatalog(
-        vaultID: initial.vaultID,
-        generation: initial.generation + 1,
-        members: [member]
-    )
-    _ = try await vault.commit(try VaultCommitRequest(
-        expectedGeneration: initial.generation,
-        catalog: withMember,
-        writes: []
-    ))
-    let store = VaultImportDraftStore(vault: vault)
-    let bytes = Data("SYNTHETIC-CONFIRM".utf8)
-    let file = try ValidatedImportedFile(
-        data: bytes,
-        kind: .image,
-        contentTypeIdentifier: "public.png",
-        sha256Digest: ContentDigest.sha256(bytes)
-    )
-    guard case .created(let draftID) = try await store.stage(file) else {
+func aCancelledAttemptLeavesTheDraftInProcessingForTheNextLaunch() async throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let kernel = try SQLiteLibraryStore(rootURL: root)
+    defer { try? kernel.close() }
+    let repository = SQLiteReportRepository(store: kernel)
+    let bytes = Data("SYNTHETIC-CANCELLED-ATTEMPT".utf8)
+    let file = try ValidatedImportedFile(data: bytes, kind: .image, contentTypeIdentifier: "public.png",
+                                         sha256Digest: ContentDigest.sha256(bytes))
+    guard case .created(let draftID) = try await repository.stage(file) else {
         Issue.record("Expected a new draft")
         return
     }
-    let lease = try await store.beginProcessing(draftID: draftID, attemptID: UUID())
-    try await store.completeProcessing(
-        lease: lease,
-        document: ImportDraftDocument(blocks: [], candidates: ReportCandidates())
-    )
-    let staged = try await vault.loadCatalog()
-    let draft = try #require(staged.importDrafts.first { $0.id == draftID })
-    let record = try HealthRecord(
-        memberID: member.id,
-        sources: draft.sources,
-        ocrDocumentObjectID: draft.documentObjectID,
-        importState: .confirmed
-    )
+    let lease = try await repository.beginProcessing(draftID: draftID, attemptID: UUID())
 
-    var archivedMember = member
-    archivedMember.isArchived = true
-    let beforeArchive = try await vault.loadCatalog()
-    let archivedCatalog = try VaultCatalog(
-        formatVersion: beforeArchive.formatVersion,
-        vaultID: beforeArchive.vaultID,
-        generation: beforeArchive.generation + 1,
-        members: [archivedMember],
-        records: beforeArchive.records,
-        attachments: beforeArchive.attachments,
-        importDrafts: beforeArchive.importDrafts
-    )
-    _ = try await vault.commit(try VaultCommitRequest(
-        expectedGeneration: beforeArchive.generation,
-        catalog: archivedCatalog,
-        writes: []
-    ))
-    await #expect(throws: VaultImportDraftStoreError.invalidDraftDocument) {
-        _ = try await store.confirm(
-            draftID: draftID,
-            expectedRevision: draft.revision,
-            record: record
-        )
+    // Recording the failure of a cancelled attempt would turn an interrupted import into one the
+    // user has to retry by hand; the draft has to stay resumable instead.
+    let cancelled = Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        try await repository.failProcessing(lease: lease, failureCode: .cancelled)
     }
+    await #expect(throws: CancellationError.self) { try await cancelled.value }
 
-    let beforeUnarchive = try await vault.loadCatalog()
-    let activeCatalog = try VaultCatalog(
-        formatVersion: beforeUnarchive.formatVersion,
-        vaultID: beforeUnarchive.vaultID,
-        generation: beforeUnarchive.generation + 1,
-        members: [member],
-        records: beforeUnarchive.records,
-        attachments: beforeUnarchive.attachments,
-        importDrafts: beforeUnarchive.importDrafts
-    )
-    _ = try await vault.commit(try VaultCommitRequest(
-        expectedGeneration: beforeUnarchive.generation,
-        catalog: activeCatalog,
-        writes: []
-    ))
-
-    _ = try await store.confirm(
-        draftID: draftID,
-        expectedRevision: draft.revision,
-        record: record
-    )
-
-    let committed = try await vault.loadCatalog()
-    #expect(committed.records == [record])
-    #expect(committed.importDrafts.isEmpty)
-    #expect(committed.attachments.contains { $0.id == record.soleAttachmentID })
-    #expect(committed.records.first?.ocrDocumentObjectID == draft.documentObjectID)
-    if let documentObjectID = draft.documentObjectID {
-        #expect(try await vault.readObject(VaultObjectReference(
-            id: documentObjectID,
-            kind: .ocr
-        )).isEmpty == false)
-    }
+    #expect(try await repository.draft(draftID).state == .processing)
+    #expect(try await repository.resumableDraftIDs() == [draftID])
 }
 
-private actor SyntheticTextExtractor: TextExtractionService {
+private actor SyntheticWorkflowExtractor: TextExtractionService {
     func extractText(from file: ValidatedImportedFile) async throws -> [OCRBlock] {
         [try OCRBlock(
             pageNumber: 1,
@@ -698,60 +233,4 @@ private actor SyntheticTextExtractor: TextExtractionService {
             engineVersion: "synthetic"
         )]
     }
-}
-
-private func prepareReviewDraft(
-    at root: URL
-) async throws -> (member: FamilyMember, draft: ImportDraft) {
-    let vault = try PlaintextVault(rootURL: root)
-    let initial = try await vault.initialize()
-    let member = try FamilyMember(displayName: "Synthetic member")
-    _ = try await vault.commit(try VaultCommitRequest(
-        expectedGeneration: initial.generation,
-        catalog: try VaultCatalog(
-            vaultID: initial.vaultID,
-            generation: initial.generation + 1,
-            members: [member]
-        ),
-        writes: []
-    ))
-    let store = VaultImportDraftStore(vault: vault)
-    let bytes = Data("SYNTHETIC-STALE-TERMINAL-ACTION".utf8)
-    let file = try ValidatedImportedFile(
-        data: bytes,
-        kind: .image,
-        contentTypeIdentifier: "public.png",
-        sha256Digest: ContentDigest.sha256(bytes)
-    )
-    guard case .created(let draftID) = try await store.stage(file) else {
-        throw VaultImportDraftStoreError.invalidDraftDocument
-    }
-    let lease = try await store.beginProcessing(draftID: draftID, attemptID: UUID())
-    try await store.completeProcessing(
-        lease: lease,
-        document: ImportDraftDocument(blocks: [], candidates: ReportCandidates())
-    )
-    let draft = try #require(
-        try await vault.loadCatalog().importDrafts.first { $0.id == draftID }
-    )
-    return (member, draft)
-}
-
-private func syntheticReviewState(title: String) -> ImportDraftReviewState {
-    ImportDraftReviewState(
-        timelineDateSelection: .unknown,
-        title: title,
-        organization: "",
-        department: "",
-        reportType: "",
-        reportedResults: "",
-        conclusion: "",
-        abnormalItems: [],
-        userNote: ""
-    )
-}
-
-private func temporaryImportVaultRoot() -> URL {
-    FileManager.default.temporaryDirectory
-        .appendingPathComponent("kinlogue-import-\(UUID().uuidString)", isDirectory: true)
 }

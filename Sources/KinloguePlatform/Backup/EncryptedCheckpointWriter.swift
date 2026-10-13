@@ -323,51 +323,22 @@ private final class CheckpointWorkFile: @unchecked Sendable {
 // SAFETY: All collaborators and injected closures are immutable Sendable
 // values; each write owns its work file and otherwise delegates to actors.
 public final class EncryptedCheckpointWriter: @unchecked Sendable {
-    private let source: CheckpointLibrarySource
+    private let source: SQLiteLogicalBackupSource
     private let configurationStore: BackupLocalConfigurationStore
     private let containerWriter: EncryptedBackupContainerWriter
     private let eventHandler: @Sendable (EncryptedCheckpointWriterEvent) async throws -> Void
     private let writeFailureInjector: @Sendable (EncryptedCheckpointWritePhase) -> Int32?
 
-    public init(
-        source: PlaintextLibraryBackupSource,
-        configurationStore: BackupLocalConfigurationStore
-    ) {
-        self.source = .legacy(source)
-        self.configurationStore = configurationStore
-        containerWriter = .init()
-        eventHandler = { _ in }
-        writeFailureInjector = { _ in nil }
-    }
-
-    init(
-        source: PlaintextLibraryBackupSource,
-        configurationStore: BackupLocalConfigurationStore,
-        containerWriter: EncryptedBackupContainerWriter,
-        eventHandler: @escaping @Sendable (EncryptedCheckpointWriterEvent) async throws -> Void = { _ in },
-        writeFailureInjector: @escaping @Sendable (EncryptedCheckpointWritePhase) -> Int32? = { _ in nil }
-    ) {
-        self.source = .legacy(source)
-        self.configurationStore = configurationStore
-        self.containerWriter = containerWriter
-        self.eventHandler = eventHandler
-        self.writeFailureInjector = writeFailureInjector
-    }
-
-    package init(source: CheckpointLibrarySource, configurationStore: BackupLocalConfigurationStore) {
+    package init(source: SQLiteLogicalBackupSource, configurationStore: BackupLocalConfigurationStore) {
         self.source = source; self.configurationStore = configurationStore
         containerWriter = .init(); eventHandler = { _ in }; writeFailureInjector = { _ in nil }
     }
-    init(source: CheckpointLibrarySource, configurationStore: BackupLocalConfigurationStore,
+    init(source: SQLiteLogicalBackupSource, configurationStore: BackupLocalConfigurationStore,
          containerWriter: EncryptedBackupContainerWriter,
          eventHandler: @escaping @Sendable (EncryptedCheckpointWriterEvent) async throws -> Void = { _ in },
          writeFailureInjector: @escaping @Sendable (EncryptedCheckpointWritePhase) -> Int32? = { _ in nil }) {
         self.source = source; self.configurationStore = configurationStore; self.containerWriter = containerWriter
         self.eventHandler = eventHandler; self.writeFailureInjector = writeFailureInjector
-    }
-
-    package convenience init(source: SQLiteLogicalBackupSource, configurationStore: BackupLocalConfigurationStore) {
-        self.init(source: .logical(source), configurationStore: configurationStore)
     }
 
     func write(
@@ -442,7 +413,7 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
                 },
                 readBackSource: work.source,
                 finalizeAndReadBackSource: {
-                    [source, configurationStore, eventHandler, publicationFenceValidator]
+                    [configurationStore, eventHandler, publicationFenceValidator]
                     checkpointID in
                     try await eventHandler(.beforeFinalSourceValidation)
                     do {
@@ -455,9 +426,9 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
                           current.writerIdentity == configuration.writerIdentity else {
                         throw EncryptedCheckpointWriterError.invalidConfiguration
                     }
-                    let published = try await source.withValidatedCurrentPair(for: plan) {
-                        try work.synchronizeAndPublish(checkpointID: checkpointID)
-                    }
+                    // The captured originals must still be intact at the moment the leaf is published.
+                    try plan.validate()
+                    let published = try work.synchronizeAndPublish(checkpointID: checkpointID)
                     publicationState.set(published)
                     try await eventHandler(.afterPublication(
                         repositoryURL.appendingPathComponent(published.leafName)
@@ -468,7 +439,7 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
             let containerResult: EncryptedBackupContainerWriteResult
             do {
                 containerResult = try await containerWriter.write(
-                    entries: try await source.containerSources(for: plan),
+                    entries: plan.sources(),
                     revisionPair: plan.revisionPair,
                     sequence: sequence,
                     signer: signer,
@@ -538,7 +509,7 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
             } catch {
                 throw EncryptedCheckpointWriterError.publicationIndeterminate
             }
-            let maximumOpen = await source.maximumSimultaneousOpenFileCount(for: plan)
+            let maximumOpen = plan.pins.maximumSimultaneousOpenFileCount
             work.close()
             return EncryptedCheckpointWriteResult(
                 finalLeafName: publication.leafName,
@@ -564,9 +535,6 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
         } catch SQLiteLibraryError.ioFailure(ENOSPC) {
             work?.close()
             throw EncryptedCheckpointWriterError.capacityInsufficient
-        } catch PlaintextLibraryBackupSourceError.sourceChanged {
-            work?.close()
-            throw EncryptedCheckpointWriterError.sourceChanged
         } catch BackupContainerError.sourceIntegrityFailure {
             work?.close()
             throw EncryptedCheckpointWriterError.sourceChanged

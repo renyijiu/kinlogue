@@ -14,19 +14,14 @@ public enum DICOMSliceServiceError: Error, Equatable, Sendable {
     case closed
 }
 
+/// Identifies one series as one open library saw it; decoded slices are cached under it.
 public struct DICOMVaultSessionToken: Hashable, Sendable {
-    enum Identity: Hashable, Sendable {
-        case legacy(vaultID: UUID, generation: UInt64, commitID: UUID, catalogDigest: Data)
-        case sqlite(libraryID: UUID, epoch: UUID, studyID: UUID, contentRevision: UInt64, seriesID: UUID, seriesHash: Data)
-    }
-    let identity: Identity
-    public init(vaultID: UUID, revision: VaultRevision) throws {
-        guard revision.catalogDigest.count == 32 else { throw DICOMSliceServiceError.integrityFailure }
-        identity = .legacy(vaultID: vaultID, generation: revision.generation, commitID: revision.commitID, catalogDigest: revision.catalogDigest)
-    }
-    init(libraryID: UUID, epoch: UUID, studyID: UUID, contentRevision: UInt64, seriesID: UUID, seriesHash: Data) {
-        identity = .sqlite(libraryID: libraryID, epoch: epoch, studyID: studyID, contentRevision: contentRevision, seriesID: seriesID, seriesHash: seriesHash)
-    }
+    let libraryID: UUID
+    let epoch: UUID
+    let studyID: UUID
+    let contentRevision: UInt64
+    let seriesID: UUID
+    let seriesHash: Data
 }
 
 public struct DICOMSliceInstanceDescriptor: Equatable, Sendable {
@@ -178,29 +173,6 @@ protocol DICOMVerifiedSliceSource: Sendable {
     ) async throws -> DICOMVerifiedDecodedFrame
 }
 
-struct PlaintextVaultDICOMSliceSource: DICOMVerifiedSliceSource, Sendable {
-    let vault: PlaintextVault
-    let decoder: any DICOMFrameDecoding
-
-    func openSeries(
-        studyID: DICOMStudy.ID,
-        seriesID: DICOMStudyIndex.Series.ID
-    ) async throws -> DICOMSliceSeriesSession {
-        try await vault.openVerifiedDICOMSeries(studyID: studyID, seriesID: seriesID)
-    }
-
-    func decode(
-        _ instance: DICOMSliceInstanceDescriptor,
-        in session: DICOMSliceSeriesSession
-    ) async throws -> DICOMVerifiedDecodedFrame {
-        try await vault.decodeVerifiedDICOMInstance(
-            instance,
-            in: session,
-            decoder: decoder
-        )
-    }
-}
-
 public actor DICOMSliceService {
     private static let maximumPrefetchWorkingSet = 64 * 1_024 * 1_024
     /// Rendering validates its target against storage and may wait there, so the actor runs
@@ -244,17 +216,6 @@ public actor DICOMSliceService {
         prefetch?.task.cancel()
         retainedRender?.pixels.invalidate()
         retainedRender?.reservation.release()
-    }
-
-    public init(
-        vault: PlaintextVault,
-        decoder: any DICOMFrameDecoding = DICOMDecoderAdapter()
-    ) {
-        let runtime = DICOMSliceRuntime.shared
-        source = PlaintextVaultDICOMSliceSource(vault: vault, decoder: decoder)
-        budget = runtime.budget
-        cache = runtime.cache
-        scheduler = runtime.scheduler
     }
 
     package init(repository: SQLiteDICOMRepository, decoder: any DICOMFrameDecoding = DICOMDecoderAdapter()) {

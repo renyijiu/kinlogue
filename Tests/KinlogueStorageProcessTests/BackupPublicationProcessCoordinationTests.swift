@@ -13,9 +13,12 @@ func twoRealProcessesPublishOneLinearWitnessedRepositoryHistory() async throws {
             .appendingPathComponent(".kinlogue-backup-v1", isDirectory: true)
 
         try await withStorageProcessFixture(processCount: 2) { processes in
+            // One library has one owner, so each process publishes from a library of its own;
+            // what they contend for is the repository.
             try processes[0].send(.init(
                 operation: "barrierPublishBackup",
-                rootURL: fixture.rootURL
+                rootURL: fixture.rootURL,
+                variant: 1
             ))
             let firstEntered = try await processes[0].nextResponse()
             #expect(firstEntered.event == "backupPublicationCriticalSectionEntered")
@@ -33,7 +36,8 @@ func twoRealProcessesPublishOneLinearWitnessedRepositoryHistory() async throws {
 
             try processes[1].send(.init(
                 operation: "barrierPublishBackup",
-                rootURL: fixture.rootURL
+                rootURL: fixture.rootURL,
+                variant: 2
             ))
             await #expect(throws: StorageProcessHarnessError.timedOut) {
                 _ = try await processes[1].nextResponse(timeout: .milliseconds(250))
@@ -107,9 +111,6 @@ func twoRealProcessesPublishOneLinearWitnessedRepositoryHistory() async throws {
 private func prepareProcessBackupFixture(
     _ fixture: StorageProcessVaultFixture
 ) async throws -> BackupLocalConfiguration {
-    let vault = try PlaintextVault(rootURL: fixture.rootURL)
-    _ = try await vault.initialize()
-    _ = try await PlaintextLANInboxStore(rootURL: fixture.rootURL).initialize()
     let selected = fixture.parentURL.appendingPathComponent("selected", isDirectory: true)
     let repository = selected.appendingPathComponent(
         ".kinlogue-backup-v1",

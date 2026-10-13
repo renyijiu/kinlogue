@@ -6,10 +6,10 @@
 
 | 面 | 当前实现 | 不应声称 |
 | --- | --- | --- |
-| 本地存储 | App Sandbox 内明文文件；Vault/inbox 有 generation、digest、路径和权限检查 | 应用层加密、保密存储、抗恶意回滚 |
+| 本地存储 | App Sandbox 内的明文数据库和原件文件；有 revision、行摘要、路径和权限检查 | 应用层加密、保密存储、抗恶意回滚 |
 | 备份 | 用户选择目录中的自包含 checkpoint 使用 HPKE + AES-GCM 认证加密、设备签名和完整正式文件回读 | 活动 Vault 已加密、网盘已经上传、远端保留 N 份、全局最新性 |
 | 密钥 | 不使用 Keychain；恢复 seed/私钥不持久化，本机只保存不能解密 checkpoint 的设备签名 seed 与恢复根公钥 | 服务端找回恢复码、设备身份能解密、同登录会话恶意软件防护 |
-| 完整性 | SHA-256 检测意外截断、缺失和错误引用，并参与本机精确去重；catalog/object metadata 交叉校验 | 密码学认证、签名、防篡改或攻击者重写防护 |
+| 完整性 | SHA-256 检测意外截断、缺失和错误引用，并参与本机精确去重；数据库行摘要与原件元数据交叉校验 | 密码学认证、签名、防篡改或攻击者重写防护 |
 | 网络 | 用户主动开启的临时 LAN listener；只绑定所选本机地址并在 HTTP 前限制为其已验证 IPv4/IPv6 前缀；普通 HTTP；pairing + cookie + CSRF + session generation | TLS、公共网络安全、跨前缀远程访问或云同步 |
 | OCR | macOS Vision/PDFKit 本机处理 | 云端 OCR、医学诊断或治疗建议 |
 | 供应链 | SwiftPM exact versions + resolved commit；SwiftNIO/ZIPFoundation 锁定版本高于本次复核的公开修复线；GitHub Actions 固定完整 SHA | 未启用远端扫描时的“零漏洞”、DICOM 解码器或备份密码学已独立审计 |
@@ -22,7 +22,7 @@
 
 ### 保护对象
 
-报告原件、成员资料、OCR blocks、人工修正、搜索字段、source references、LAN inbox blobs/derived data、catalog 关系和可推断的存在性信息。
+报告原件、成员资料、OCR blocks、人工修正、搜索字段、source references、LAN inbox 的原件与预处理结果、记录之间的引用关系和可推断的存在性信息。
 
 ### 当前纳入的风险
 
@@ -44,25 +44,24 @@
 
 ## 代码中的保护边界
 
-- `SQLiteLibraryStore` / `SQLiteLibraryOwner`：界面入口使用的资料库。资料库打开期间持有单实例 owner 锁，校验可信根与文件身份；STRICT 表的每行带内容摘要并在读取时校验；原件经 `staged → live → deleting` 发布和回收，reader pin 防止提前删除。搜索用的解码缓存只在进程内，关闭数据库时清空。
-- `PlaintextVault`（旧 JSON 格式，界面和安装验收都不再打开，只有测试仍使用）：对象 immutable、`library.json` 单一提交点、generation/Catalog validation、SHA-256、orphan cleanup、原子 replace。
-- `AtomicFileStore`、`VaultRootBinding`、`VaultProcessLock`：`O_NOFOLLOW`、descriptor identity、父/root inode 检查、共享 root mutation coordination。
-- `PlaintextVaultInitializationTransaction` / `PlaintextVaultDeletionTransaction`：初始化和删除 receipt、quarantine、同步和崩溃恢复。
+- `SQLiteLibraryStore` / `SQLiteLibraryOwner`：资料库的唯一实现。资料库打开期间持有单实例 owner 锁，校验可信根与文件身份；STRICT 表的每行带内容摘要并在读取时校验；原件经 `staged → live → deleting` 发布和回收，reader pin 防止提前删除。搜索用的解码缓存只在进程内，关闭数据库时清空。
+- `AtomicFileStore`、`VaultProcessLock`、`VaultCanonicalRootPath`：`O_NOFOLLOW`、descriptor identity、父/root inode 检查；owner 锁文件按资料库解析后的身份命名，路径被替换时拒绝使用。
+- `SQLiteLibraryInitialization` / `PlaintextVaultDeletionTransaction`：初始化和删除 receipt、quarantine、同步和崩溃恢复。
 - `ImportedFileValidator`、`PDFTextExtractor`、`VisionTextRecognizer`：输入类型、页/像素/输出预算、单页处理和取消检查。
 - `LANNetworkInterfaceResolver` / `LANServerTransport`：从连续且非零的 netmask 固化所选接口前缀；未知、不可解析、IPv4-mapped IPv6、跨地址族或越界 socket 对端在安装 HTTP pipeline 前失败关闭。IPv6 global unicast 可用但只接收同前缀对端；当前拒绝需要 zone identifier 的 IPv6 link-local。
 - `LANSession`：一次性 pairing、session generation、idle timeout、constant-time comparison、peer/global rate limits。
 - `LANHTTPHandler`：authority/origin/framing、header/body deadlines、认证先于 body/remote ID、粗粒度 phone error mapping。
-- `LANInboxPartialContext` / `PlaintextLANInboxStore`：partial descriptor、inode identity、blob/derived 原子发布、manifest 后提交和失败清理。
+- `SQLiteLANInboxStore` / `LANUploadSink`：接收字节之前登记上传的归属和实际 inode；完成后在同一 inode 上校验长度与摘要，一个事务发布原件、队列项和回执；取消和恢复只清理归属可以证明的文件。
 - `LANSessionLifecycleMonitor` / `LibraryLifecycleCoordinator`：停止事件撤销 credential、关闭连接和删除前关闭接收入口。
-- `OriginalArchivePlan` / `PlaintextOriginalArchiveExporter`：只选择已确认原始附件；输出名称经过 Unicode、保留名、路径分隔符、长度和碰撞处理，不包含内部 ID。导出固定 Vault revision，逐项通过 no-follow descriptor 流式复核长度/digest，写入同卷私有非 `.zip` 暂存，全量验证后才原子发布；取消和提交前失败不会留下成功外观的 partial。`LibraryLifecycleCoordinator` 让整库删除先取消并等待已进入的导出，提交阶段不可取消。
+- `OriginalArchivePlan` / `PlaintextOriginalArchiveExporter`：只选择已确认原始附件；输出名称经过 Unicode、保留名、路径分隔符、长度和碰撞处理，不包含内部 ID。导出 pin 住准备时可达的原件，逐项通过 no-follow descriptor 流式复核长度/digest，写入同卷私有非 `.zip` 暂存，全量验证后才原子发布；取消和提交前失败不会留下成功外观的 partial。`LibraryLifecycleCoordinator` 让整库删除先取消并等待已进入的导出，提交阶段不可取消。
 - `BackupKeyHierarchy` / `BackupLocalConfigurationStore`：CryptoKit 域分离派生恢复签名与 HPKE 根；恢复 seed 不持久化。app-private 0700/0600 canonical 配置绑定 bookmark、repository identity、public roots、device authorization、scheduler 和 full-reader witness，missing/corrupt/mismatch 均失败关闭。
 - `EncryptedBackupContainerWriter` / `BackupContainerReader` / `BackupTrustVerifier`：manifest 加密、256 KiB 有界 frame、fresh DEK/nonce domain、HPKE envelope、AES-GCM 与 signed footer；public-only 验证不接触恢复 seed，seed-only reader 先验证签名与 ciphertext commitment，再解密和解释 entry。
-- `PlaintextLibraryBackupSource` / `EncryptedCheckpointWriter` / `BackupRepository`：在同一 Vault-wide lease 冻结 exact Vault + inbox pair，逐 entry 通过短 lease和 no-follow descriptor 流读；repository 只处理固定 opaque direct-child regular leaves，排他发布、同 inode private full-reader 后才签发 durable witness。unknown/corrupt/fork 状态阻止 writer 或 retention。
+- `SQLiteLogicalBackupSource` / `EncryptedCheckpointWriter` / `BackupRepository`：在一次 admission 内固定 revision、pin 住可达原件并取得数据库的内部副本，之后在副本上逐项严格验证并流式输出逻辑记录；原件在读取时才通过 no-follow descriptor 打开并复核；repository 只处理固定 opaque direct-child regular leaves，排他发布、同 inode private full-reader 后才签发 durable witness。unknown/corrupt/fork 状态阻止 writer 或 retention。
 - `BackupRestoreVerifier` / `BackupRestoreTransaction`：首个 staging 明文字节前先持久化 preflight receipt；只在 app-private 同卷 staging 解密并 strict reopen，确认后以 root-bound typed receipt 执行 replace/rollback，启动时先收敛遗留事务。本机配置删除位于 destructive fence 内，外部 checkpoint 不受影响。
 - `DICOMPart10Envelope` / `KinlogueDICOMIPC`：主进程只做有界 Part 10 envelope 与 typed DTO 校验；跨进程只传一个只读 descriptor 和受大小限制的 `Data`，不传 URL、路径或 Vault authority。
-- `DICOMFolderScanner` / `VaultDICOMStudyStaging` / `VaultDICOMImportJournal`：security-scoped source 只通过 no-follow descriptor traversal 读取；staging 使用同卷、opaque UUID、私有权限和只读文件。receipt 在首个 staged byte 前持久化并绑定目录 identity；重启清理先咨询当前 catalog reachability，拒绝 symlink/replacement，失败时保留 opaque receipt 重试。
+- `DICOMFolderScanner` / `VaultDICOMStudyStaging` / `VaultDICOMImportJournal`：security-scoped source 只通过 no-follow descriptor traversal 读取；staging 使用同卷、opaque UUID、私有权限和只读文件。receipt 在首个 staged byte 前持久化并绑定目录 identity；重启清理按资料库登记的归属判断，拒绝 symlink/replacement，失败时保留 opaque receipt 重试。
 - `KinlogueDICOMDecoderHelper.xpc`：exact DICOM-Swift 1.5.0 只链接进独立 App Sandbox Helper。Helper entitlement 只有 App Sandbox，无 network client/server、inherit、用户文件或 Vault-root 权限；创建私有临时文件后、写入前立即 unlink，通过仍打开的 descriptor 保存有界独立副本，并以 `/dev/fd` 交给 decoder。最后一个 descriptor 关闭或进程退出后由内核回收，crash/watchdog 不依赖 defer 删除具名原件；解析由硬 watchdog 有界终止。VOI LUT Function 只按单 tag 惰性读取，非 `LINEAR` 函数拒绝，不通过 `getAllTags()` 展开无关自由文本。主 App 没有 `DicomCore` 或 DICOM 网络实现，也没有解码失败时的进程内 fallback；真实进程门禁用合成自由文本/URL canary 验证 unified log 不泄漏且 Helper 运行时无 network socket。
-- `DICOMSliceService`：只接受 `PlaintextVault` 产生的 opaque revision/instance descriptor；managed object 在 decode 前后复核 digest、identity 和长度，raw frame 仍只经 XPC adapter。cache key 不含路径、UID 或 W/L history，错误只暴露固定 Kinlogue case。canonical/current-render 像素只在有界内存中存在；RAII lease 保证 service 释放不遗留预算，switch/close/lifecycle failure 只清对应 session token，pressure 才全局清 cache 并使旧 image handle 失效。这不承诺安全擦除调用方主动复制的 bytes、原始明文附件或系统备份。
+- `DICOMSliceService`：只接受资料库产生的 opaque 会话令牌和 instance descriptor；原件在 decode 前后复核 digest、identity 和长度，raw frame 仍只经 XPC adapter。cache key 不含路径、UID 或 W/L history，错误只暴露固定 Kinlogue case。canonical/current-render 像素只在有界内存中存在；RAII lease 保证 service 释放不遗留预算，switch/close/lifecycle failure 只清对应 session token，pressure 才全局清 cache 并使旧 image handle 失效。这不承诺安全擦除调用方主动复制的 bytes、原始明文附件或系统备份。
 - `DICOMImportModel` / `DICOMStudyReviewModel` / `DICOMLibraryModel` / `DICOMStudyViewerModel`：用户界面只显示检查状态、用户确认的成员/日期、modality、尺寸、切片/Series 与 inert-object 聚合状态，不展示或记录文件名、路径、原始 UID 或 DICOM 自由文本。确认后的检查只把日期、成员和对象数量等检查级摘要投影到成员时间线；DICOM 原件、自由文本和像素仍不进入报告 OCR、搜索或比较。Viewer canvas 为当前帧保留一份有界的拥有式内存快照，不写预览/截图；App registry 在单 study 删除、外部删除刷新或 whole-Vault revoke 时先让所有目标窗口同步清空像素/失效请求，再等待 slice service close 并关闭窗口。普通关闭、Series 切换或 memory pressure 同样会使对应旧结果/handle 失效。
 
 这些保护主要解决“意外损坏、错误状态、资源滥用和错误路径写入”；它们不把明文文件变成加密文件。
@@ -81,7 +80,7 @@
 - Mac 选择的源文件不会被修改或删除；App 会复制到自己的 Vault。
 - U3 DICOM Platform import 只从 Vault-owned staged bytes 派生持久事实；成功/取消后回收 staging，进程崩溃时由下一次受协调的 reopen/import 回收。原始 DICOM bytes 会作为明文 immutable attachment 保留，但不会进入 OCR、搜索或自动导出，也不会生成持久预览。
 - U4 on-demand slice service 不生成持久 thumbnail、preview、截图或像素日志。Vault destroy 在等待 active descriptor read 前撤销 slice lifecycle generation，晚到 transform 不能重新发布旧像素；删除仍是 ordinary unlink，不描述为 secure erasure。
-- U5 App 确认只保存用户选择的家庭成员与日期；它不把 DICOM 内容转录成报告字段。删除检查会移除其 catalog/index 引用和不再共享的 App-owned 原件，最初选择的文件夹不受影响。
+- U5 App 确认只保存用户选择的家庭成员与日期；它不把 DICOM 内容转录成报告字段。删除检查会移除其数据库行和不再共享的 App-owned 原件，最初选择的文件夹不受影响。
 - U6 Viewer 只在当前 presentation 内保存 Series/切片、W/L、pan/zoom 与一个可失效 image handle；没有持久 thumbnail、截图、导出、剪贴板或拖放入口。像素本身可能烧录身份信息，因此仍按敏感明文处理；删除检查或整库前会先清空所有相关窗口的拥有式快照，再等待底层 session 关闭。
 - 手机完整上传的唯一原件保留在 Mac 待确认队列，直到用户明确删除或把所选项成功归档；不会自动过期。手机只可在当前会话中取消尚未保存的文件，不能删除 Mac 已发布的待确认项。
 - 提交后 Vault 原件由 record/draft/source ownership 持有；删除 inbox 副本不会删除已经归档的原件。

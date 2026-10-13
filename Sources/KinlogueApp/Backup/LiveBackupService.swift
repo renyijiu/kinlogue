@@ -96,7 +96,7 @@ actor LiveBackupService: BackupServicing {
     private let activeVaultURL: URL
     private let setupService: BackupSetupService
     private let destinationAuthority: BackupDestinationAuthority
-    private let source: CheckpointLibrarySource
+    private let source: SQLiteLogicalBackupSource
     private let scheduler: BackupScheduler
     private let selectedDirectoryScope: any BackupSelectedDirectorySecurityScope
     private let requiresSelectedDirectoryScope: Bool
@@ -105,28 +105,8 @@ actor LiveBackupService: BackupServicing {
     private let clock: @Sendable () -> Date
     private var setupSession: BackupSetupSession?
     #if DEBUG
-    private var sourcePreparationCount = 0
+    private var sourceRevisionReadCount = 0
     #endif
-
-    init(
-        activeVaultURL: URL,
-        configurationStore: BackupLocalConfigurationStore,
-        vault: PlaintextVault,
-        inboxStore: PlaintextLANInboxStore? = nil,
-        requiresSelectedDirectoryScope: Bool,
-        destinationAuthority: BackupDestinationAuthority = BackupDestinationAuthority(),
-        selectedDirectoryScope: any BackupSelectedDirectorySecurityScope =
-            SystemBackupSelectedDirectorySecurityScope(),
-        repositoryOpener: any BackupRepositoryOpening = SystemBackupRepositoryOpener(),
-        clock: @escaping @Sendable () -> Date = { Date() }
-    ) throws {
-        let source: PlaintextLibraryBackupSource
-        if let inboxStore { source = try PlaintextLibraryBackupSource(vault: vault, inboxStore: inboxStore) }
-        else { source = try PlaintextLibraryBackupSource(vault: vault, deferredInboxRootURL: activeVaultURL) }
-        self.init(source: .legacy(source), activeVaultURL: activeVaultURL, configurationStore: configurationStore,
-            requiresSelectedDirectoryScope: requiresSelectedDirectoryScope, destinationAuthority: destinationAuthority,
-            selectedDirectoryScope: selectedDirectoryScope, repositoryOpener: repositoryOpener, clock: clock)
-    }
 
     init(store: SQLiteLibraryStore, configurationStore: BackupLocalConfigurationStore,
         requiresSelectedDirectoryScope: Bool,
@@ -134,12 +114,12 @@ actor LiveBackupService: BackupServicing {
         selectedDirectoryScope: any BackupSelectedDirectorySecurityScope = SystemBackupSelectedDirectorySecurityScope(),
         repositoryOpener: any BackupRepositoryOpening = SystemBackupRepositoryOpener(),
         clock: @escaping @Sendable () -> Date = { Date() }) {
-        self.init(source: .logical(SQLiteLogicalBackupSource(store: store)), activeVaultURL: store.rootURL, configurationStore: configurationStore,
+        self.init(source: SQLiteLogicalBackupSource(store: store), activeVaultURL: store.rootURL, configurationStore: configurationStore,
             requiresSelectedDirectoryScope: requiresSelectedDirectoryScope, destinationAuthority: destinationAuthority,
             selectedDirectoryScope: selectedDirectoryScope, repositoryOpener: repositoryOpener, clock: clock)
     }
 
-    private init(source: CheckpointLibrarySource, activeVaultURL: URL, configurationStore: BackupLocalConfigurationStore,
+    private init(source: SQLiteLogicalBackupSource, activeVaultURL: URL, configurationStore: BackupLocalConfigurationStore,
         requiresSelectedDirectoryScope: Bool,
         destinationAuthority: BackupDestinationAuthority = BackupDestinationAuthority(),
         selectedDirectoryScope: any BackupSelectedDirectorySecurityScope = SystemBackupSelectedDirectorySecurityScope(),
@@ -410,14 +390,16 @@ actor LiveBackupService: BackupServicing {
 
     private func currentRevision() async throws -> BackupRevisionPair {
         #if DEBUG
-        if case .legacy = source { sourcePreparationCount += 1 }
+        sourceRevisionReadCount += 1
         #endif
-        return try await source.currentRevision()
+        // A short read, but one that waits for the library's admission lock.
+        return try await LibraryStorageExecutor.run { try source.currentRevision() }
     }
 
     #if DEBUG
-    func sourcePreparationCountForTesting() -> Int {
-        sourcePreparationCount
+    /// How often the library's current revision was read from the source.
+    func sourceRevisionReadCountForTesting() -> Int {
+        sourceRevisionReadCount
     }
     #endif
 
@@ -468,7 +450,7 @@ private func makeRepository(
 
 private struct BookmarkScopedCheckpointCreator: BackupCheckpointCreating {
     let authority: BackupDestinationAuthority
-    let source: CheckpointLibrarySource
+    let source: SQLiteLogicalBackupSource
     let configurationStore: BackupLocalConfigurationStore
     let bookmarkRefreshObserver: BookmarkRefreshObserver
 

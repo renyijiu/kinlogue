@@ -27,7 +27,6 @@ UPGRADE_APP=""
 BOOKMARK_DIRECTORY=""
 CONTAINER_DIRECTORY=""
 WRITER_PID=""
-ACTIVATION_PID=""
 PROBE_PID=""
 
 fail() {
@@ -42,10 +41,6 @@ cleanup() {
   if [[ -n "$PROBE_PID" && "$PROBE_PID" == <-> ]]; then
     /bin/kill -TERM "$PROBE_PID" >/dev/null 2>&1 || true
     wait "$PROBE_PID" >/dev/null 2>&1 || true
-  fi
-  if [[ -n "$ACTIVATION_PID" && "$ACTIVATION_PID" == <-> ]]; then
-    /bin/kill -TERM "$ACTIVATION_PID" >/dev/null 2>&1 || true
-    wait "$ACTIVATION_PID" >/dev/null 2>&1 || true
   fi
   if [[ -n "$WRITER_PID" && "$WRITER_PID" == <-> ]]; then
     /bin/kill -TERM "$WRITER_PID" >/dev/null 2>&1 || true
@@ -355,14 +350,6 @@ fixture_expect() {
   if [[ -n "$expected_code" ]]; then
     [[ "$(json_string "$response_file" code 2>/dev/null || true)" \
         == "$expected_code" ]] || return 1
-  fi
-}
-
-stop_activation_process() {
-  if [[ -n "$ACTIVATION_PID" && "$ACTIVATION_PID" == <-> ]]; then
-    /bin/kill -TERM "$ACTIVATION_PID" >/dev/null 2>&1 || true
-    wait "$ACTIVATION_PID" >/dev/null 2>&1 || true
-    ACTIVATION_PID=""
   fi
 }
 
@@ -734,54 +721,58 @@ activation_case() {
       && "$(json_bool "$verify_out" semanticValidated)" == true ]] || return 1
 }
 
-real_writer_activation_case() {
+# A library has a single owner. While another process holds it, activation must be
+# turned away before it prepares anything; once the owner lets go, the same
+# activation succeeds and the former owner opens the restored library.
+occupied_library_activation_case() {
   local case_id="real-writer"
+  local refused_out="$TEMP_DIRECTORY/$case_id-refused.json"
+  local untouched_out="$TEMP_DIRECTORY/$case_id-untouched.json"
   local activated_out="$TEMP_DIRECTORY/$case_id-activated.json"
-  local final_out="$TEMP_DIRECTORY/$case_id-final.json"
-  local activation_out="$TEMP_DIRECTORY/$case_id-execute.json"
   local root_path="$CONTAINER_DIRECTORY/Data/Library/Application Support/Kinlogue/BackupCapability/$RUN_ID/activation-$case_id/Vault"
 
-  run_probe "$TEMP_DIRECTORY/$case_id-seed.json" activation-seed-writer \
+  run_probe "$TEMP_DIRECTORY/$case_id-seed.json" activation-seed \
     --run-id "$RUN_ID" --case-id "$case_id" --scenario existing || return 1
 
   coproc "$INSTALLED_EXECUTABLE" 2>/dev/null
   WRITER_PID=$!
   fixture_send handshake "" "" 2 || return 1
   fixture_expect handshake || return 1
-  fixture_send loadCatalog "$root_path" || return 1
-  fixture_expect catalogLoaded || return 1
-  fixture_send holdCatalogCommit "" 1 || return 1
-  fixture_expect leaseHeld || return 1
+  fixture_send openSQLite "$root_path" || return 1
+  fixture_expect sqliteOpened || return 1
 
-  "$INSTALLED_EXECUTABLE" --backup-capability activation-execute \
+  local refused_status=0
+  run_probe "$refused_out" activation-execute --run-id "$RUN_ID" \
+    --case-id "$case_id" --scenario existing --fault none || refused_status=$?
+  [[ "$refused_status" -ne 0 \
+      && "$(json_string "$refused_out" code 2>/dev/null || true)" \
+        == libraryOccupied ]] || return 1
+
+  fixture_send closeSQLite || return 1
+  fixture_expect sqliteClosed || return 1
+  run_probe "$untouched_out" activation-verify \
+    --run-id "$RUN_ID" --case-id "$case_id" || return 1
+  [[ "$(json_string "$untouched_out" rootState)" == old \
+      && "$(json_bool "$untouched_out" receiptPresent)" == false \
+      && "$(json_bool "$untouched_out" stagingPresent)" == false \
+      && "$(json_bool "$untouched_out" rollbackPresent)" == false ]] || return 1
+
+  run_probe "$TEMP_DIRECTORY/$case_id-execute.json" activation-execute \
     --run-id "$RUN_ID" --case-id "$case_id" --scenario existing --fault none \
-    >"$activation_out" 2>/dev/null &
-  ACTIVATION_PID=$!
-  /bin/sleep 1
-  /bin/kill -0 "$ACTIVATION_PID" >/dev/null 2>&1 || return 1
-
-  fixture_send release || return 1
-  fixture_expect catalogCommitted || return 1
-  local activation_status=0
-  wait_for_pid "$ACTIVATION_PID" "$PROBE_TIMEOUT_SECONDS" \
-    || activation_status=$?
-  ACTIVATION_PID=""
-  [[ "$activation_status" -eq 0 ]] || return 1
+    || return 1
   run_probe "$activated_out" activation-verify \
     --run-id "$RUN_ID" --case-id "$case_id" || return 1
   [[ "$(json_string "$activated_out" rootState)" == new \
+      && "$(json_bool "$activated_out" mixedState)" == false \
       && "$(json_bool "$activated_out" receiptPresent)" == false \
       && "$(json_bool "$activated_out" stagingPresent)" == false \
       && "$(json_bool "$activated_out" rollbackPresent)" == false \
       && "$(json_bool "$activated_out" semanticValidated)" == true ]] || return 1
 
-  fixture_send commitLoadedCatalog "" 2 || return 1
-  fixture_expect operationFailed rootReplaced || return 1
-  run_probe "$final_out" activation-verify \
-    --run-id "$RUN_ID" --case-id "$case_id" || return 1
-  [[ "$(json_string "$final_out" rootState)" == new \
-      && "$(json_bool "$final_out" mixedState)" == false \
-      && "$(json_bool "$final_out" semanticValidated)" == true ]] || return 1
+  fixture_send openSQLite "$root_path" || return 1
+  fixture_expect sqliteOpened || return 1
+  fixture_send closeSQLite || return 1
+  fixture_expect sqliteClosed || return 1
   fixture_send exit || return 1
   fixture_expect exiting || return 1
   wait_for_pid "$WRITER_PID" "$FIXTURE_TIMEOUT_SECONDS" || return 1
@@ -790,9 +781,8 @@ real_writer_activation_case() {
 
 ACTIVATION_MECHANICS_STATUS="passed"
 ACTIVATION_STATUS="blocked"
-if ! real_writer_activation_case; then
+if ! occupied_library_activation_case; then
   ACTIVATION_MECHANICS_STATUS="blocked"
-  stop_activation_process
   stop_writer_process
 fi
 activation_case existing after-intent old \

@@ -3,20 +3,17 @@ import Foundation
 import KinlogueCore
 import KinloguePlatform
 
-/// Characterizes the current plaintext Vault and LAN inbox at synthetic scale.
+/// Characterizes the SQLite library and its LAN inbox at synthetic scale.
 ///
 /// Every byte is generated at run time inside an owned temporary work
-/// directory. The probe drives the production stores through their public
-/// API; it does not reimplement manifest, commit, or backup algorithms, and it
-/// never opens the App's Application Support Vault.
+/// directory. The probe drives the production repositories through their own
+/// API; it does not reimplement commit, query or backup algorithms, and it
+/// never opens the App's Application Support library.
 enum StorageScaleProbe {
     private static let workDirectoryPrefix = "kinlogue-storage-scale-probe."
     private static let reserveByteCount: Int64 = 16 * 1_024 * 1_024 * 1_024
     private static let memberCount = 6
     private static let ocrBlockCount = 60
-    private static let reportBatchByteCount = 256 * 1_024 * 1_024
-    private static let reportBatchCount = 250
-    private static let seriesInstanceCount = 250
 
     static func run(arguments: [String]) async -> Int32 {
         do {
@@ -28,12 +25,6 @@ enum StorageScaleProbe {
                 _ = try fileByteCount(configuration.rootURL.appendingPathComponent("library.sqlite"))
             }
             switch configuration.command {
-            case .generate: try await generate(configuration, into: &report)
-            case .startup: try await startup(configuration, into: &report)
-            case .operations: try await operations(configuration, into: &report)
-            case .inbox: try await inbox(configuration, into: &report)
-            case .capacityInbox: try await capacityInbox(configuration, into: &report)
-            case .backup: try await backup(configuration, into: &report)
             case .logicalGenerate: try await logicalGenerate(configuration, into: &report)
             case .logicalCapture: try await logicalCapture(configuration, into: &report)
             case .logicalQueries: try await logicalQueries(configuration, into: &report)
@@ -66,8 +57,6 @@ enum StorageScaleProbe {
     }
 
     private enum Command: String {
-        case generate, startup, operations, inbox, backup
-        case capacityInbox = "capacity-inbox"
         case logicalGenerate = "logical-generate"
         case logicalCapture = "logical-capture"
         case logicalQueries = "logical-queries"
@@ -83,11 +72,6 @@ enum StorageScaleProbe {
         let workDirectory: URL
         var reportCount = 0
         var attachmentByteCount = 64 * 1_024
-        var largeAttachmentCount = 0
-        var largeAttachmentByteCount = 100 * 1_024 * 1_024
-        var dicomStudyCount = 0
-        var dicomObjectsPerStudy = 0
-        var dicomObjectByteCount = 0
         var inboxCheckpoints: [Int] = []
         var inboxItemByteCount = 32 * 1_024
         var iterations = 7
@@ -116,12 +100,6 @@ enum StorageScaleProbe {
                     workDirectory = try Self.validatedWorkDirectory(arguments[index + 1])
                 case "--reports": reportCount = try integer(0...(command == .logicalCapacity ? 20_000 : 10_000))
                 case "--attachment-bytes": attachmentByteCount = try integer(1_024...8 * 1_024 * 1_024)
-                case "--large-attachments": largeAttachmentCount = try integer(0...64)
-                case "--large-attachment-bytes":
-                    largeAttachmentByteCount = try integer(1_024 * 1_024...100 * 1_024 * 1_024)
-                case "--dicom-studies": dicomStudyCount = try integer(0...5)
-                case "--dicom-objects-per-study": dicomObjectsPerStudy = try integer(0...2_000)
-                case "--dicom-object-bytes": dicomObjectByteCount = try integer(0...4 * 1_024 * 1_024)
                 case "--inbox-item-bytes": inboxItemByteCount = try integer(1_024...4 * 1_024 * 1_024)
                 case "--iterations": iterations = try integer(3...25)
                 case "--inbox-checkpoints":
@@ -166,95 +144,7 @@ enum StorageScaleProbe {
 
     // MARK: - Generate
 
-    private static func generate(
-        _ configuration: Configuration,
-        into report: inout ProbeReport
-    ) async throws {
-        let plannedByteCount = Int64(configuration.reportCount)
-            * Int64(configuration.attachmentByteCount + 48 * 1_024)
-            + Int64(configuration.largeAttachmentCount) * Int64(configuration.largeAttachmentByteCount)
-            + Int64(configuration.dicomStudyCount) * Int64(configuration.dicomObjectsPerStudy)
-            * Int64(configuration.dicomObjectByteCount)
-        // Source, encrypted checkpoint and restored library coexist during verification.
-        try requireAvailableCapacity(
-            at: configuration.workDirectory,
-            byteCount: plannedByteCount * 3 + reserveByteCount
-        )
-
-        let started = now()
-        let vault = try PlaintextVault(rootURL: configuration.rootURL)
-        var catalog = try await vault.initialize()
-        _ = try await PlaintextLANInboxStore(rootURL: configuration.rootURL).initialize()
-
-        let members = try (0..<memberCount).map {
-            try FamilyMember(displayName: "合成成员 \($0 + 1)")
-        }
-        catalog = try await vault.commit(try VaultCommitRequest(
-            expectedGeneration: catalog.generation,
-            catalog: try catalog.replacing(members: members),
-            writes: []
-        ))
-
-        let bytes = SyntheticBytes()
-        let draftCount = min(configuration.reportCount, max(16, configuration.reportCount / 50))
-        var batch = ReportBatch()
-        var ordinal = 0
-        func flush() async throws {
-            guard !batch.isEmpty else { return }
-            catalog = try await vault.commit(try VaultCommitRequest(
-                expectedGeneration: catalog.generation,
-                catalog: try catalog.replacing(
-                    records: catalog.records + batch.records,
-                    attachments: catalog.attachments + batch.attachments,
-                    importDrafts: catalog.importDrafts + batch.drafts
-                ),
-                writes: batch.writes
-            ))
-            batch = ReportBatch()
-        }
-        func append(byteCount: Int, contentType: String) async throws {
-            try batch.append(makeReport(
-                ordinal: ordinal,
-                member: members[ordinal % members.count],
-                attachmentBytes: bytes.make(byteCount: byteCount, domain: 1, ordinal: ordinal),
-                contentType: contentType,
-                isDraft: ordinal < draftCount
-            ))
-            ordinal += 1
-            if batch.byteCount >= reportBatchByteCount || batch.count >= reportBatchCount {
-                try await flush()
-            }
-        }
-        for _ in 0..<configuration.reportCount {
-            try await append(byteCount: configuration.attachmentByteCount, contentType: "public.jpeg")
-        }
-        for _ in 0..<configuration.largeAttachmentCount {
-            try await append(
-                byteCount: configuration.largeAttachmentByteCount,
-                contentType: "com.adobe.pdf"
-            )
-        }
-        try await flush()
-
-        for studyOrdinal in 0..<configuration.dicomStudyCount {
-            catalog = try await appendDICOMStudy(
-                ordinal: studyOrdinal,
-                objectCount: configuration.dicomObjectsPerStudy,
-                objectByteCount: configuration.dicomObjectByteCount,
-                member: members[studyOrdinal % members.count],
-                bytes: bytes,
-                catalog: catalog,
-                vault: vault
-            )
-        }
-
-        report.set("generate_ms", milliseconds(since: started))
-        try describe(catalog, rootURL: configuration.rootURL, into: &report)
-    }
-
-    /// Same synthetic shape as `generate`, committed through real SQLite repositories.
     private static func logicalGenerate(_ configuration: Configuration, into report: inout ProbeReport) async throws {
-        guard configuration.largeAttachmentCount == 0, configuration.dicomStudyCount == 0 else { throw ProbeError.invalidArguments }
         try requireAvailableCapacity(at: configuration.workDirectory,
             byteCount: Int64(configuration.reportCount) * Int64(configuration.attachmentByteCount + 96 * 1_024) * 3 + reserveByteCount)
         let started = now()
@@ -265,16 +155,13 @@ enum StorageScaleProbe {
         for member in members { try await repository.saveMember(member, replacing: nil) }
         let bytes = SyntheticBytes()
         let draftCount = min(configuration.reportCount, max(16, configuration.reportCount / 50))
-        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .millisecondsSince1970
         for ordinal in 0..<configuration.reportCount {
             let data = bytes.make(byteCount: configuration.attachmentByteCount, domain: 1, ordinal: ordinal)
             let file = try ValidatedImportedFile(data: data, kind: .image, contentTypeIdentifier: "public.jpeg", sha256Digest: ContentDigest.sha256(data))
             guard case let .created(id) = try await repository.stage(file) else { throw ProbeError.unexpectedState }
             let initial = try await repository.draft(id)
             let member = members[ordinal % members.count]
-            let generated = try makeReport(ordinal: ordinal, member: member, attachmentBytes: data,
-                contentType: "public.jpeg", isDraft: ordinal < draftCount, suppliedSource: initial.sources.elements[0])
-            let document = try decoder.decode(ImportDraftDocument.self, from: generated.writes[1].plaintext)
+            let document = try makeDocument(ordinal: ordinal, member: member, source: initial.sources.elements[0])
             let lease = try await repository.beginProcessing(draftID: id, attemptID: UUID())
             try await repository.completeProcessing(lease: lease, document: document)
             if ordinal >= draftCount {
@@ -328,7 +215,6 @@ enum StorageScaleProbe {
         try await inbox.prepare()
         guard let member = try await repository.members().first else { throw ProbeError.unexpectedState }
         let bytes = SyntheticBytes()
-        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .millisecondsSince1970
         let beforeInboxCount = try await inbox.queueScreen().storage.itemCount
         var stage = Samples(), read = Samples(), save = Samples(), confirm = Samples(), edit = Samples(), publish = Samples()
         for iteration in 0...configuration.iterations {
@@ -340,9 +226,7 @@ enum StorageScaleProbe {
             let stageElapsed = milliseconds(since: started)
             guard initial.state == .staging, initial.sources.elements.count == 1,
                   try await repository.loadSource(draftID: id).data == file.data else { throw ProbeError.unexpectedState }
-            let generated = try makeReport(ordinal: iteration, member: member, attachmentBytes: data,
-                contentType: "public.jpeg", isDraft: true, suppliedSource: initial.sources.first)
-            let document = try decoder.decode(ImportDraftDocument.self, from: generated.writes[1].plaintext)
+            let document = try makeDocument(ordinal: iteration, member: member, source: initial.sources.first)
             let lease = try await repository.beginProcessing(draftID: id, attemptID: UUID())
             try await repository.completeProcessing(lease: lease, document: document)
             started = now()
@@ -599,58 +483,19 @@ enum StorageScaleProbe {
         report.set("footprint_peak_bytes", Memory.current().peakFootprint)
     }
 
-    private struct GeneratedReport {
-        let attachment: Attachment
-        let record: HealthRecord?
-        let draft: ImportDraft?
-        let writes: [VaultObjectWrite]
-    }
-
-    private struct ReportBatch {
-        var records: [HealthRecord] = []
-        var drafts: [ImportDraft] = []
-        var attachments: [Attachment] = []
-        var writes: [VaultObjectWrite] = []
-        var byteCount = 0
-        var count: Int { attachments.count }
-        var isEmpty: Bool { attachments.isEmpty }
-
-        mutating func append(_ report: GeneratedReport) {
-            attachments.append(report.attachment)
-            if let record = report.record { records.append(record) }
-            if let draft = report.draft { drafts.append(draft) }
-            writes.append(contentsOf: report.writes)
-            byteCount += report.writes.reduce(0) { $0 + $1.plaintext.count }
-        }
-    }
-
     /// One single-page report shaped like a reviewed lab report: 60 OCR
     /// blocks, nine sourced fields, two date candidates and three abnormal
     /// items. Text is obviously synthetic and carries no real identity.
-    private static func makeReport(
+    private static func makeDocument(
         ordinal: Int,
         member: FamilyMember,
-        attachmentBytes: Data,
-        contentType: String,
-        isDraft: Bool,
-        suppliedSource: ReportSource? = nil
-    ) throws -> GeneratedReport {
-        let attachment = try Attachment(
-            id: suppliedSource?.attachmentID ?? UUID(),
-            contentTypeIdentifier: contentType,
-            byteCount: attachmentBytes.count,
-            sha256Digest: ContentDigest.sha256(attachmentBytes)
-        )
-        let source = try suppliedSource ?? ReportSource(
-            attachmentID: attachment.id,
-            displayName: "synthetic-report-\(ordinal).jpg",
-            pageCount: 1
-        )
+        source: ReportSource
+    ) throws -> ImportDraftDocument {
         let sources = try ReportSources([source])
         let blocks = try (0..<ocrBlockCount).map { blockIndex in
             try OCRBlock(
                 sourceID: source.id,
-                attachmentID: attachment.id,
+                attachmentID: source.attachmentID,
                 filePageNumber: 1,
                 text: syntheticText(seed: ordinal &* 131 &+ blockIndex, characterCount: 18),
                 boundingBox: try NormalizedRect(
@@ -669,7 +514,7 @@ enum StorageScaleProbe {
                 originalTranscription: text,
                 references: [try SourceReference(
                     sourceID: source.id,
-                    attachmentID: attachment.id,
+                    attachmentID: source.attachmentID,
                     filePageNumber: 1,
                     boundingBox: blocks[block].boundingBox,
                     blockID: blocks[block].id
@@ -709,44 +554,8 @@ enum StorageScaleProbe {
                 try field(syntheticText(seed: ordinal &* 37 &+ $0, characterCount: 24), block: 9 + $0)
             }
         )
-        let documentID = UUID()
-        let document = try ImportDraftDocument(blocks: blocks, candidates: candidates)
+        return try ImportDraftDocument(blocks: blocks, candidates: candidates)
             .attributedAndValidated(for: sources)
-        let writes = [
-            VaultObjectWrite(
-                reference: VaultObjectReference(id: attachment.id, kind: .attachment),
-                plaintext: attachmentBytes
-            ),
-            VaultObjectWrite(
-                reference: VaultObjectReference(id: documentID, kind: .ocr),
-                plaintext: try canonicalJSON(document)
-            ),
-        ]
-        if isDraft {
-            return GeneratedReport(
-                attachment: attachment,
-                record: nil,
-                draft: ImportDraft(
-                    sources: sources,
-                    state: .needsReview,
-                    revision: 2,
-                    documentObjectID: documentID
-                ),
-                writes: writes
-            )
-        }
-        return GeneratedReport(
-            attachment: attachment,
-            record: try confirmedRecord(
-                member: member,
-                sources: sources,
-                documentID: documentID,
-                candidates: candidates,
-                note: ordinal % 4 == 0 ? "合成备注 \(ordinal)" : nil
-            ),
-            draft: nil,
-            writes: writes
-        )
     }
 
     private static func confirmedRecord(
@@ -774,533 +583,6 @@ enum StorageScaleProbe {
         )
     }
 
-    /// Opaque synthetic bytes stand in for DICOM originals. The Vault only
-    /// hashes them; the separately stored index is a real, geometry-ordered
-    /// `DICOMStudyIndex`, so reopen validation does its production work.
-    private static func appendDICOMStudy(
-        ordinal: Int,
-        objectCount: Int,
-        objectByteCount: Int,
-        member: FamilyMember,
-        bytes: SyntheticBytes,
-        catalog initial: VaultCatalog,
-        vault: PlaintextVault
-    ) async throws -> VaultCatalog {
-        guard objectCount > 0, objectByteCount >= 1_024 else { throw ProbeError.invalidArguments }
-        var catalog = initial
-        var owned: [Attachment] = []
-        owned.reserveCapacity(objectCount)
-        var pending: [Attachment] = []
-        var writes: [VaultObjectWrite] = []
-        var pendingByteCount = 0
-        func flush() async throws {
-            guard !pending.isEmpty else { return }
-            catalog = try await vault.commit(try VaultCommitRequest(
-                expectedGeneration: catalog.generation,
-                catalog: try catalog.replacing(attachments: catalog.attachments + pending),
-                writes: writes
-            ))
-            pending = []
-            writes = []
-            pendingByteCount = 0
-        }
-        for objectOrdinal in 0..<objectCount {
-            let data = bytes.make(
-                byteCount: objectByteCount,
-                domain: 2,
-                ordinal: ordinal * 10_000 + objectOrdinal
-            )
-            let attachment = try Attachment(
-                contentTypeIdentifier: "org.nema.dicom",
-                byteCount: data.count,
-                sha256Digest: ContentDigest.sha256(data)
-            )
-            owned.append(attachment)
-            pending.append(attachment)
-            writes.append(VaultObjectWrite(
-                reference: VaultObjectReference(id: attachment.id, kind: .attachment),
-                plaintext: data
-            ))
-            pendingByteCount += data.count
-            if pendingByteCount >= reportBatchByteCount { try await flush() }
-        }
-        try await flush()
-
-        let studyID = UUID()
-        var instances: [DICOMStudyIndex.Instance] = []
-        var series: [DICOMStudyIndex.Series] = []
-        let row = try DICOMStudyIndex.Vector3(x: 1, y: 0, z: 0)
-        let column = try DICOMStudyIndex.Vector3(x: 0, y: 1, z: 0)
-        for (seriesOrdinal, slice) in stride(from: 0, to: owned.count, by: seriesInstanceCount)
-            .enumerated() {
-            let seriesID = UUID()
-            let members = owned[slice..<min(owned.count, slice + seriesInstanceCount)]
-            let seriesInstances = try members.enumerated().map { order, attachment in
-                try DICOMStudyIndex.Instance(
-                    id: UUID(),
-                    attachmentID: attachment.id,
-                    seriesID: seriesID,
-                    sopInstanceUIDDigest: try .init(
-                        scope: .sopInstance,
-                        digest: digest("sop-\(ordinal)-\(seriesOrdinal)-\(order)")
-                    ),
-                    canonicalOrder: order,
-                    sopClass: .mrImageStorage,
-                    transferSyntax: .explicitVRLittleEndian,
-                    modality: .mr,
-                    attributes: try .init(
-                        rows: 512,
-                        columns: 512,
-                        samplesPerPixel: 1,
-                        bitsAllocated: 16,
-                        bitsStored: 12,
-                        highBit: 11,
-                        pixelRepresentation: .unsigned,
-                        photometricInterpretation: .monochrome2,
-                        imagePositionPatient: try .init(x: 0, y: 0, z: Double(order) * 3),
-                        imageOrientationPatientRow: row,
-                        imageOrientationPatientColumn: column,
-                        rescaleSlope: 1,
-                        rescaleIntercept: 0,
-                        windowCenter: 400,
-                        windowWidth: 800
-                    )
-                )
-            }
-            series.append(try DICOMStudyIndex.Series(
-                id: seriesID,
-                ordinal: seriesOrdinal + 1,
-                instanceIDs: seriesInstances.map(\.id),
-                seriesUIDDigest: try .init(
-                    scope: .series,
-                    digest: digest("series-\(ordinal)-\(seriesOrdinal)")
-                ),
-                orderingProvenance: .geometryProjection
-            ))
-            instances.append(contentsOf: seriesInstances)
-        }
-        let index = try DICOMStudyIndex(
-            studyID: studyID,
-            studyUIDDigest: try .init(scope: .study, digest: digest("study-\(ordinal)")),
-            retainedObjects: owned.map { .init(attachmentID: $0.id, kind: .viewableImage) },
-            instances: instances,
-            series: series
-        )
-        let indexID = UUID()
-        let study = try DICOMStudy(
-            id: studyID,
-            state: .confirmed,
-            fingerprint: try DICOMStudyFingerprint(objects: owned.map {
-                try .init(sha256Digest: $0.sha256Digest, byteCount: $0.byteCount)
-            }),
-            indexObjectID: indexID,
-            attachmentIDs: owned.map(\.id),
-            confirmedMemberID: member.id,
-            effectiveDate: Date(timeIntervalSince1970: TimeInterval(1_700_000_000 + ordinal * 86_400))
-        )
-        return try await vault.commit(try VaultCommitRequest(
-            expectedGeneration: catalog.generation,
-            catalog: try catalog.replacing(dicomStudies: catalog.dicomStudies + [study]),
-            writes: [VaultObjectWrite(
-                reference: VaultObjectReference(id: indexID, kind: .record),
-                plaintext: try canonicalJSON(index)
-            )]
-        ))
-    }
-
-    // MARK: - Startup
-
-    /// Meant to run in a fresh process so the peak footprint belongs to the
-    /// validated open alone.
-    private static func startup(
-        _ configuration: Configuration,
-        into report: inout ProbeReport
-    ) async throws {
-        let before = Memory.current()
-        let vault = try PlaintextVault(rootURL: configuration.rootURL)
-        let started = now()
-        let catalog = try await vault.loadValidatedCatalog()
-        report.set("load_validated_catalog_ms", milliseconds(since: started))
-        let after = Memory.current()
-        report.set("footprint_before_bytes", before.footprint)
-        report.set("footprint_peak_bytes", after.peakFootprint)
-        report.set("max_rss_bytes", after.maximumResidentSize)
-        report.set("record_count", catalog.records.count)
-        report.set("attachment_count", catalog.attachments.count)
-    }
-
-    // MARK: - Operations
-
-    private static func operations(
-        _ configuration: Configuration,
-        into report: inout ProbeReport
-    ) async throws {
-        let iterations = configuration.iterations
-        let vault = try PlaintextVault(rootURL: configuration.rootURL)
-        let store = VaultImportDraftStore(vault: vault)
-        var catalog = try await vault.loadCatalog()
-        guard let member = catalog.members.first else { throw ProbeError.unexpectedState }
-        try describe(catalog, rootURL: configuration.rootURL, into: &report)
-
-        // `LiveAppService.refresh` is `loadCatalog` plus this confirmed filter.
-        var refresh = Samples()
-        var confirmed: [HealthRecord] = []
-        for _ in 0..<iterations {
-            let started = now()
-            let loaded = try await vault.loadCatalog()
-            confirmed = loaded.records.filter { $0.importState == .confirmed }
-            refresh.append(milliseconds(since: started))
-        }
-        report.set("app_refresh_load_catalog", refresh)
-
-        // `AppModel.rebuildSearch` runs this on every search-field edit.
-        for (name, term) in [
-            ("search_common_term", "合成"),
-            ("search_rare_term", "项目\(max(0, catalog.records.count - 1))"),
-            ("search_no_match", "zzqx"),
-            ("search_date_term", "2020-01"),
-        ] {
-            var samples = Samples()
-            var matchCount = 0
-            for _ in 0..<iterations {
-                let started = now()
-                matchCount = RecordQuery.search(
-                    term,
-                    records: confirmed,
-                    members: catalog.members
-                ).count
-                samples.append(milliseconds(since: started))
-            }
-            report.set(name, samples)
-            report.set("\(name)_matches", matchCount)
-        }
-        var timeline = Samples()
-        for _ in 0..<iterations {
-            let started = now()
-            _ = RecordQuery.timeline(records: confirmed, memberID: member.id)
-            timeline.append(milliseconds(since: started))
-        }
-        report.set("timeline_one_member", timeline)
-
-        let drafts = catalog.importDrafts.filter { $0.state == .needsReview }
-        guard drafts.count >= iterations else { throw ProbeError.unexpectedState }
-
-        var reviewSnapshot = Samples()
-        for draft in drafts.prefix(iterations) {
-            let started = now()
-            _ = try await store.loadReviewSnapshot(draftID: draft.id)
-            reviewSnapshot.append(milliseconds(since: started))
-        }
-        report.set("read_snapshot_review", reviewSnapshot)
-
-        var saveReview = Samples()
-        var confirm = Samples()
-        for draft in drafts.prefix(iterations) {
-            let document = try await store.loadDocument(draftID: draft.id)
-            let reviewed = ImportDraftDocument(
-                blocks: document.blocks,
-                candidates: document.candidates,
-                candidateExtractionVersion: document.candidateExtractionVersion,
-                reviewState: ImportDraftReviewState(
-                    timelineDateSelection: .unknown,
-                    title: document.candidates.title?.transcription ?? "",
-                    organization: document.candidates.organization?.transcription ?? "",
-                    department: document.candidates.department?.transcription ?? "",
-                    reportType: document.candidates.reportType?.transcription ?? "",
-                    reportedResults: document.candidates.reportedResults?.transcription ?? "",
-                    conclusion: document.candidates.conclusion?.transcription ?? "",
-                    abnormalItems: document.candidates.abnormalItems.map(\.transcription),
-                    userNote: "合成复核备注"
-                )
-            )
-            var started = now()
-            try await store.saveReview(
-                draftID: draft.id,
-                expectedRevision: draft.revision,
-                memberID: member.id,
-                document: reviewed
-            )
-            saveReview.append(milliseconds(since: started))
-
-            catalog = try await vault.loadCatalog()
-            guard let saved = catalog.importDrafts.first(where: { $0.id == draft.id }) else {
-                throw ProbeError.unexpectedState
-            }
-            let record = try confirmedRecord(
-                member: member,
-                sources: saved.sources,
-                documentID: saved.documentObjectID,
-                candidates: document.candidates,
-                note: "合成复核备注"
-            )
-            started = now()
-            try await store.confirm(
-                draftID: saved.id,
-                expectedRevision: saved.revision,
-                record: record
-            )
-            confirm.append(milliseconds(since: started))
-            catalog = try await vault.loadCatalog()
-        }
-        report.set("commit_save_review", saveReview)
-        report.set("commit_confirm", confirm)
-
-        // Mirrors `LiveAppService.mutateCatalog`: load, transform, commit.
-        var edit = Samples()
-        for iteration in 0..<iterations {
-            let started = now()
-            let current = try await vault.loadCatalog()
-            guard let index = current.records.firstIndex(where: {
-                $0.importState == .confirmed
-            }) else { throw ProbeError.unexpectedState }
-            let record = current.records[index]
-            var records = current.records
-            records[index] = try HealthRecord(
-                id: record.id,
-                memberID: record.memberID,
-                sources: record.sources,
-                ocrDocumentObjectID: record.ocrDocumentObjectID,
-                importState: .confirmed,
-                revision: record.revision + 1,
-                title: record.title,
-                organization: record.organization,
-                department: record.department,
-                reportType: record.reportType,
-                dateCandidates: record.dateCandidates,
-                timelineDateCandidateID: record.timelineDateCandidateID,
-                reportedResults: record.reportedResults,
-                conclusion: record.conclusion,
-                abnormalItems: record.abnormalItems,
-                notes: [try UserNote(text: "合成编辑备注 \(iteration)")]
-            )
-            catalog = try await vault.commit(try VaultCommitRequest(
-                expectedGeneration: current.generation,
-                catalog: try current.replacing(records: records),
-                writes: []
-            ))
-            edit.append(milliseconds(since: started))
-        }
-        report.set("commit_edit_confirmed_record", edit)
-
-        // Isolates the lookup cost from JSON loading, hashing, and committing.
-        let unmatched = try ReportFingerprint(sources: [
-            .init(sha256Digest: Data(repeating: 0xA7, count: 32), byteCount: 1)
-        ])
-        var duplicateLookup = Samples()
-        for _ in 0..<iterations {
-            let started = now()
-            let duplicate = DuplicateDetector.find(
-                fingerprint: unmatched,
-                attachments: catalog.attachments,
-                records: catalog.records,
-                drafts: catalog.importDrafts
-            )
-            duplicateLookup.append(milliseconds(since: started))
-            guard duplicate == nil else { throw ProbeError.unexpectedState }
-        }
-        report.set("duplicate_detector_no_match", duplicateLookup)
-
-        var stage = Samples()
-        let bytes = SyntheticBytes()
-        for iteration in 0..<iterations {
-            let data = bytes.make(
-                byteCount: configuration.attachmentByteCount,
-                domain: 3,
-                ordinal: iteration
-            )
-            let file = try ValidatedImportedFile(
-                data: data,
-                kind: .image,
-                contentTypeIdentifier: "public.jpeg",
-                sha256Digest: ContentDigest.sha256(data)
-            )
-            let started = now()
-            guard case .created = try await store.stage(file) else {
-                throw ProbeError.unexpectedState
-            }
-            stage.append(milliseconds(since: started))
-        }
-        report.set("commit_stage_new_original", stage)
-
-        try componentEstimates(rootURL: configuration.rootURL, iterations: iterations, into: &report)
-        report.set("footprint_peak_bytes", Memory.current().peakFootprint)
-    }
-
-    /// Splits one manifest resolution into its parts with mirror types. These
-    /// are estimates taken outside the Vault actor, not instrumented
-    /// production timings.
-    private static func componentEstimates(
-        rootURL: URL,
-        iterations: Int,
-        into report: inout ProbeReport
-    ) throws {
-        struct ObjectMirror: Decodable {
-            let reference: VaultObjectReference
-            let byteCount: Int
-            let sha256Digest: Data
-        }
-        struct ManifestMirror: Decodable {
-            let catalog: VaultCatalog
-            let objects: [ObjectMirror]
-        }
-        let manifestURL = rootURL.appendingPathComponent("library.json", isDirectory: false)
-        var decode = Samples()
-        var encode = Samples()
-        var digestSamples = Samples()
-        var stat = Samples()
-        var manifest: ManifestMirror?
-        for _ in 0..<iterations {
-            let data = try Data(contentsOf: manifestURL)
-            var started = now()
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .millisecondsSince1970
-            manifest = try decoder.decode(ManifestMirror.self, from: data)
-            decode.append(milliseconds(since: started))
-            guard let manifest else { throw ProbeError.unexpectedState }
-            started = now()
-            let encoded = try canonicalJSON(manifest.catalog)
-            encode.append(milliseconds(since: started))
-            started = now()
-            _ = ContentDigest.sha256(encoded)
-            digestSamples.append(milliseconds(since: started))
-        }
-        guard let manifest else { throw ProbeError.unexpectedState }
-        let objectsURL = rootURL.appendingPathComponent("objects", isDirectory: true)
-        for _ in 0..<iterations {
-            let started = now()
-            var metadata = Darwin.stat()
-            var count = 0
-            for directory in try FileManager.default.contentsOfDirectory(atPath: objectsURL.path) {
-                let directoryURL = objectsURL.appendingPathComponent(directory, isDirectory: true)
-                for name in try FileManager.default.contentsOfDirectory(atPath: directoryURL.path) {
-                    if lstat(directoryURL.appendingPathComponent(name).path, &metadata) == 0 {
-                        count += 1
-                    }
-                }
-            }
-            stat.append(milliseconds(since: started))
-            guard count >= manifest.objects.count else { throw ProbeError.unexpectedState }
-        }
-        report.set("estimate_manifest_json_decode", decode)
-        report.set("estimate_catalog_json_encode", encode)
-        report.set("estimate_catalog_sha256", digestSamples)
-        report.set("estimate_object_list_and_lstat", stat)
-    }
-
-    // MARK: - LAN inbox
-
-    private static func inbox(
-        _ configuration: Configuration,
-        into report: inout ProbeReport
-    ) async throws {
-        guard !configuration.inboxCheckpoints.isEmpty else { throw ProbeError.invalidArguments }
-        let vault = try PlaintextVault(rootURL: configuration.rootURL)
-        if await vault.inspect() == .absent { _ = try await vault.initialize() }
-        let catalog = try await vault.loadCatalog()
-        let store = try PlaintextLANInboxStore(rootURL: configuration.rootURL)
-        if await store.inspect() == .absent { _ = try await store.initialize() }
-        try requireAvailableCapacity(
-            at: configuration.workDirectory,
-            byteCount: Int64(configuration.inboxCheckpoints.last ?? 0)
-                * Int64(configuration.inboxItemByteCount) + reserveByteCount
-        )
-        report.set("vault_object_count", catalog.reachableObjectReferences.count)
-        report.set("inbox_item_bytes", configuration.inboxItemByteCount)
-
-        let bytes = SyntheticBytes()
-        let manifestURL = configuration.rootURL
-            .appendingPathComponent("lan-inbox", isDirectory: true)
-            .appendingPathComponent("inbox.json", isDirectory: false)
-        var uploaded = try await store.loadSnapshot().items.count
-        var sessionID = UUID()
-        var sessionUploadCount = 0
-        func upload() async throws -> Double {
-            if sessionUploadCount == 200 {
-                try await store.endItemSession(sessionID: sessionID)
-                sessionID = UUID()
-                sessionUploadCount = 0
-            }
-            let data = bytes.make(
-                byteCount: configuration.inboxItemByteCount,
-                domain: 4,
-                ordinal: uploaded
-            )
-            let metadata = try LANInboxTransportMetadata(
-                displayName: try LANInboxDisplayName(rawValue: "synthetic-\(uploaded).jpg"),
-                declaredByteCount: data.count,
-                mediaType: "image/jpeg"
-            )
-            let started = now()
-            let admission = try await store.itemAdmissionGeneration()
-            guard case let .sink(sink) = try await store.startItemUpload(
-                transport: LANInboxTransportIdentity(sessionID: sessionID, remoteFileID: UUID()),
-                metadata: metadata,
-                attemptRevision: 1,
-                admissionGeneration: admission
-            ) else { throw ProbeError.unexpectedState }
-            try await sink.write(data).value
-            _ = try await sink.finish()
-            let elapsed = milliseconds(since: started)
-            uploaded += 1
-            sessionUploadCount += 1
-            return elapsed
-        }
-
-        let fillStarted = now()
-        for checkpoint in configuration.inboxCheckpoints {
-            guard checkpoint >= uploaded else { throw ProbeError.invalidArguments }
-            while uploaded < checkpoint { _ = try await upload() }
-            var entry = ProbeReport()
-            entry.set("pending_items_before", uploaded)
-            entry.set("inbox_manifest_bytes", try fileByteCount(manifestURL))
-            var refresh = Samples()
-            for _ in 0..<configuration.iterations {
-                let started = now()
-                _ = try await store.snapshotAndStorageSummary()
-                refresh.append(milliseconds(since: started))
-            }
-            entry.set("screen_refresh", refresh)
-            var publish = Samples()
-            for _ in 0..<configuration.iterations { publish.append(try await upload()) }
-            entry.set("publish_one_item", publish)
-            report.set("checkpoint_\(checkpoint)", entry)
-        }
-        report.set("fill_and_measure_ms", milliseconds(since: fillStarted))
-        report.set("footprint_peak_bytes", Memory.current().peakFootprint)
-    }
-
-    /// Adds a durable blob and a valid derived document above a full Vault's object cap.
-    private static func capacityInbox(
-        _ configuration: Configuration,
-        into report: inout ProbeReport
-    ) async throws {
-        let vault = try PlaintextVault(rootURL: configuration.rootURL)
-        guard try await vault.loadCatalog().reachableObjectReferences.count == 20_000 else {
-            throw ProbeError.unexpectedState
-        }
-        var uploadConfiguration = configuration
-        uploadConfiguration.inboxCheckpoints = [0]
-        uploadConfiguration.iterations = 1
-        try await inbox(uploadConfiguration, into: &report)
-        let store = try PlaintextLANInboxStore(rootURL: configuration.rootURL)
-        let snapshot = try await store.loadSnapshot()
-        guard snapshot.items.count == 1, let item = snapshot.items.first else {
-            throw ProbeError.unexpectedState
-        }
-        let document = try LANPreprocessedSourceDocument(
-            source: ReportSource(attachmentID: UUID(), displayName: item.displayName.rawValue, pageCount: 1),
-            contentTypeIdentifier: "public.jpeg", blocks: []
-        )
-        let sink = try await store.beginItemDerivedArtifact(itemID: item.id, expectedRevision: item.revision)
-        try await sink.write(canonicalJSON(document)).value
-        _ = try await sink.finish()
-        let completed = try await store.loadSnapshot()
-        guard completed.items.count == 1, completed.blobs.count == 1,
-              completed.items.first?.derivedArtifact != nil else { throw ProbeError.unexpectedState }
-        report.set("durable_blob_count", completed.blobs.count)
-        report.set("derived_document_count", completed.items.compactMap(\.derivedArtifact).count)
-    }
-
     // MARK: - Backup
 
     /// Runs the production publisher end to end: repository scan, source
@@ -1311,11 +593,9 @@ enum StorageScaleProbe {
         into report: inout ProbeReport
     ) async throws {
         let selected = configuration.workDirectory.appendingPathComponent("selected", isDirectory: true)
-        if configuration.command == .logicalBackup || configuration.command == .logicalCapacity {
-            for name in ["selected", "BackupIdentity", "restored"] {
-                guard !FileManager.default.fileExists(atPath: configuration.workDirectory.appendingPathComponent(name).path) else {
-                    throw ProbeError.invalidWorkDirectory
-                }
+        for name in ["selected", "BackupIdentity", "restored"] {
+            guard !FileManager.default.fileExists(atPath: configuration.workDirectory.appendingPathComponent(name).path) else {
+                throw ProbeError.invalidWorkDirectory
             }
         }
         let repositoryURL = selected.appendingPathComponent(".kinlogue-backup-v1", isDirectory: true)
@@ -1355,79 +635,8 @@ enum StorageScaleProbe {
             expectedRevision: created.revision
         )
 
-        if configuration.command == .logicalBackup || configuration.command == .logicalCapacity {
-            try await logicalBackup(configuration, repositoryURL: repositoryURL, configurationStore: configurationStore,
-                enabled: enabled, recoveryCode: material.recoveryCode, into: &report)
-            return
-        }
-
-        let vault = try PlaintextVault(rootURL: configuration.rootURL)
-        let inboxStore = try PlaintextLANInboxStore(rootURL: configuration.rootURL)
-        let source = try PlaintextLibraryBackupSource(vault: vault, inboxStore: inboxStore)
-        var started = now()
-        let plan: PlaintextLibraryBackupPlan
-        do {
-            plan = try await source.prepare()
-        } catch PlaintextLibraryBackupSourceError.resourceLimit {
-            // The library is valid but exceeds what one restore point may hold.
-            report.set("prepare_source_plan_ms", milliseconds(since: started))
-            report.set("publish_outcome", "refusedResourceLimit")
-            report.set("format_maximum_entry_count", BackupFormatLimits.maximumEntryCount)
-            report.set("format_maximum_plaintext_bytes", BackupFormatLimits.maximumPlaintextByteCount)
-            try describe(try await vault.loadCatalog(), rootURL: configuration.rootURL, into: &report)
-            return
-        }
-        report.set("prepare_source_plan_ms", milliseconds(since: started))
-        report.set("plan_entry_count", plan.entryCount)
-        report.set("plan_plaintext_bytes", plan.totalPlaintextByteCount)
-
-        // Full validation is now paid at final publication, once per snapshot.
-        // The old per-entry multiplier no longer predicts this implementation.
-        started = now()
-        try await source.validateCurrentPair(for: plan)
-        report.set("final_source_pair_validation_ms", milliseconds(since: started))
-
-        let before = Memory.current()
-        started = now()
-        let result = try await BackupCheckpointPublisher(
-            repository: BackupRepository(
-                repositoryURL: repositoryURL,
-                expectedIdentity: enabled.repositoryDirectoryIdentity,
-                trustedDescriptor: enabled.descriptor,
-                expectedAuthorizationID: enabled.authorization.authorizationID,
-                leaseAuthority: .init(
-                    configurationRootURL: configurationStore.rootURL,
-                    configuration: enabled
-                )
-            ),
-            writer: EncryptedCheckpointWriter(source: source, configurationStore: configurationStore),
-            configurationStore: configurationStore
-        ).publishNext(configuration: enabled)
-        report.set("publish_restore_point_ms", milliseconds(since: started))
-        report.set("publish_outcome", "published")
-        let after = Memory.current()
-        report.set("restore_point_bytes", result.fileIdentity.byteCount)
-        report.set("footprint_before_bytes", before.footprint)
-        report.set("footprint_peak_bytes", after.peakFootprint)
-        report.set("max_rss_bytes", after.maximumResidentSize)
-
-        let destination = configuration.workDirectory.appendingPathComponent("restored", isDirectory: true)
-        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: false,
-                                                attributes: [.posixPermissions: 0o700])
-        let restoredRoot = destination.appendingPathComponent("Vault", isDirectory: true)
-        let verifier = try BackupRestoreVerifier(stableParentURL: destination, activeRootURL: restoredRoot)
-        started = now()
-        let prepared = try await verifier.prepare(
-            checkpointURL: repositoryURL.appendingPathComponent(result.finalLeafName),
-            recoveryCode: material.recoveryCode
-        )
-        guard prepared.summary.revisionPair == plan.revisionPair else { throw ProbeError.unexpectedState }
-        let transaction = try BackupRestoreTransaction(activeRootURL: restoredRoot)
-        _ = try await transaction.activate(prepared: prepared, resetWriter: {})
-        _ = try await transaction.reconcile()
-        report.set("strict_restore_ms", milliseconds(since: started))
-        report.set("restore_outcome", "verifiedAndActivated")
-        report.set("restore_footprint_peak_bytes", Memory.current().peakFootprint)
+        try await logicalBackup(configuration, repositoryURL: repositoryURL, configurationStore: configurationStore,
+            enabled: enabled, recoveryCode: material.recoveryCode, into: &report)
     }
 
     private static func logicalBackup(
@@ -1584,25 +793,6 @@ enum StorageScaleProbe {
 
     // MARK: - Helpers
 
-    private static func describe(
-        _ catalog: VaultCatalog,
-        rootURL: URL,
-        into report: inout ProbeReport
-    ) throws {
-        let byteCount = catalog.attachments.reduce(Int64(0)) { $0 + Int64($1.byteCount) }
-        report.set("vault_object_count", catalog.reachableObjectReferences.count)
-        report.set("member_count", catalog.members.count)
-        report.set("record_count", catalog.records.count)
-        report.set("draft_count", catalog.importDrafts.count)
-        report.set("attachment_count", catalog.attachments.count)
-        report.set("dicom_study_count", catalog.dicomStudies.count)
-        report.set("attachment_bytes", byteCount)
-        report.set(
-            "manifest_bytes",
-            try fileByteCount(rootURL.appendingPathComponent("library.json", isDirectory: false))
-        )
-    }
-
     private static func requireAvailableCapacity(at url: URL, byteCount: Int64) throws {
         let values = try url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         guard let available = values.volumeAvailableCapacityForImportantUsage,
@@ -1627,18 +817,6 @@ enum StorageScaleProbe {
         return .init(device: UInt64(metadata.st_dev), inode: UInt64(metadata.st_ino))
     }
 
-    /// Same settings as the Platform's canonical Vault JSON.
-    private static func canonicalJSON<Value: Encodable>(_ value: Value) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        encoder.dateEncodingStrategy = .millisecondsSince1970
-        return try encoder.encode(value)
-    }
-
-    private static func digest(_ label: String) -> Data {
-        ContentDigest.sha256(Data(label.utf8))
-    }
-
     private static let vocabulary = [
         "合成", "项目", "结果", "参考", "区间", "单位", "数值", "样本", "编号", "正常",
         "偏高", "偏低", "未见", "复查", "synthetic", "value", "range",
@@ -1659,26 +837,6 @@ enum StorageScaleProbe {
 
     private static func milliseconds(since started: UInt64) -> Double {
         Double(now() - started) / 1_000_000
-    }
-}
-
-private extension VaultCatalog {
-    func replacing(
-        members: [FamilyMember]? = nil,
-        records: [HealthRecord]? = nil,
-        attachments: [Attachment]? = nil,
-        importDrafts: [ImportDraft]? = nil,
-        dicomStudies: [DICOMStudy]? = nil
-    ) throws -> VaultCatalog {
-        try VaultCatalog(
-            vaultID: vaultID,
-            generation: try VaultGeneration.successor(of: generation),
-            members: members ?? self.members,
-            records: records ?? self.records,
-            attachments: attachments ?? self.attachments,
-            importDrafts: importDrafts ?? self.importDrafts,
-            dicomStudies: dicomStudies ?? self.dicomStudies
-        )
     }
 }
 

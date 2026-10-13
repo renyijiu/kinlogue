@@ -70,67 +70,48 @@ enum PlaintextOriginalArchiveExporterFault: Equatable, Sendable {
     case afterDestinationParentBinding
 }
 
+/// The plan of one export and the pins that keep its originals readable until it ends.
 struct PlaintextOriginalArchiveSnapshot: Sendable {
     let plan: OriginalArchivePlan
-    let revision: VaultRevision?
-    let manifestIdentity: PlaintextVaultManifestIdentity?
-    let metadataByAttachmentID: [Attachment.ID: PlaintextVaultObjectMetadata]
+    let pins: SQLiteLogicalOriginalPins
     let vaultRootURL: URL
-    let sqlitePins: SQLiteLogicalOriginalPins?
-    init(plan: OriginalArchivePlan, revision: VaultRevision, manifestIdentity: PlaintextVaultManifestIdentity,
-         metadataByAttachmentID: [Attachment.ID: PlaintextVaultObjectMetadata], vaultRootURL: URL) {
-        self.plan = plan; self.revision = revision; self.manifestIdentity = manifestIdentity
-        self.metadataByAttachmentID = metadataByAttachmentID; self.vaultRootURL = vaultRootURL; sqlitePins = nil
-    }
+
     init(plan: OriginalArchivePlan, pins: SQLiteLogicalOriginalPins, rootURL: URL) {
-        self.plan = plan; sqlitePins = pins; vaultRootURL = rootURL
-        revision = nil; manifestIdentity = nil; metadataByAttachmentID = [:]
+        self.plan = plan
+        self.pins = pins
+        vaultRootURL = rootURL
     }
 }
 
-// SAFETY: `lock` serializes the only mutable state and makes descriptor close
+// SAFETY: `lock` serializes the only mutable state and makes closing the reader
 // idempotent. Reads occur only before the actor calls `close()`.
 final class PlaintextOriginalArchiveSource: @unchecked Sendable {
-    let descriptor: Int32
     let byteCount: Int
     let sha256Digest: Data
     private let lock = NSLock()
     private var isClosed = false
-    private let sqliteReader: SQLiteLogicalOriginalReader?
+    private let reader: SQLiteLogicalOriginalReader
 
-    init(descriptor: Int32, byteCount: Int, sha256Digest: Data) {
-        self.descriptor = descriptor
-        sqliteReader = nil
+    init(reader: SQLiteLogicalOriginalReader, byteCount: Int, sha256Digest: Data) {
+        self.reader = reader
         self.byteCount = byteCount
         self.sha256Digest = sha256Digest
     }
 
-    init(reader: SQLiteLogicalOriginalReader, byteCount: Int, sha256Digest: Data) {
-        descriptor = -1; sqliteReader = reader; self.byteCount = byteCount; self.sha256Digest = sha256Digest
-    }
     func read(offset: Int, count: Int) throws -> Data {
         try lock.withLock {
             guard !isClosed else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
-            if let sqliteReader { return try sqliteReader.read(offset: UInt64(offset), maximumByteCount: count) }
-            var data = Data(count: count)
-            let actual = data.withUnsafeMutableBytes { buffer -> Int in
-                while true {
-                    let result = pread(descriptor, buffer.baseAddress, count, off_t(offset))
-                    if result < 0, errno == EINTR { continue }; return result
-                }
-            }
-            guard actual == count else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
-            return data
+            return try reader.read(offset: UInt64(offset), maximumByteCount: count)
         }
     }
 
-    func reportDigestMismatch() { sqliteReader?.reportDigestMismatch() }
+    func reportDigestMismatch() { reader.reportDigestMismatch() }
 
     func close() {
         lock.withLock {
             guard !isClosed else { return }
             isClosed = true
-            if let sqliteReader { sqliteReader.close() } else { Darwin.close(descriptor) }
+            reader.close()
         }
     }
 
@@ -148,56 +129,43 @@ struct PlaintextOriginalArchiveDestinationAccess: Sendable {
     )
 }
 
-/// Creates one plaintext, stored ZIP from a pinned vault revision. ZIPFoundation
-/// is confined to this actor and each source is read through a descriptor whose
-/// identity was fixed under the vault mutation lease.
+/// Creates one plaintext, stored ZIP from the originals a preparation pinned. ZIPFoundation
+/// is confined to this actor and each source is read through the pin that fixed its identity.
 public actor PlaintextOriginalArchiveExporter {
     public typealias ProgressHandler = @Sendable (OriginalArchiveExportProgress) -> Void
     private static let bufferSize = 64 * 1_024
     private static let stableModificationDate = Date(timeIntervalSince1970: 315_532_800)
 
-    private let vault: PlaintextVault?
-    private let sqliteStore: SQLiteLibraryStore?
+    private let store: SQLiteLibraryStore
     private let fileManager: FileManager
     private let destinationAccess: PlaintextOriginalArchiveDestinationAccess
     private let parentDirectorySync: @Sendable (URL) throws -> Void
     private let failureInjector: (@Sendable (PlaintextOriginalArchiveExporterFault) -> Bool)?
 
-    public init(vault: PlaintextVault) {
-        self.vault = vault
-        sqliteStore = nil
-        fileManager = .default
-        destinationAccess = .live
-        parentDirectorySync = Self.syncParentDirectory
-        failureInjector = nil
+    package init(store: SQLiteLibraryStore) {
+        self.init(store: store, fileManager: .default)
     }
 
     init(
-        vault: PlaintextVault,
-        fileManager: FileManager = .default,
+        store: SQLiteLibraryStore,
+        fileManager: FileManager,
         destinationAccess: PlaintextOriginalArchiveDestinationAccess = .live,
         parentDirectorySync: @escaping @Sendable (URL) throws -> Void =
             PlaintextOriginalArchiveExporter.syncParentDirectory,
         failureInjector: (@Sendable (PlaintextOriginalArchiveExporterFault) -> Bool)? = nil
     ) {
-        self.vault = vault
-        sqliteStore = nil
+        self.store = store
         self.fileManager = fileManager
         self.destinationAccess = destinationAccess
         self.parentDirectorySync = parentDirectorySync
         self.failureInjector = failureInjector
     }
 
-    package init(store: SQLiteLibraryStore) {
-        vault = nil; sqliteStore = store; fileManager = .default; destinationAccess = .live
-        parentDirectorySync = Self.syncParentDirectory; failureInjector = nil
-    }
-
+    /// Pins the originals one export will read. The export that receives the preparation releases
+    /// them when it ends, whatever the outcome, so each export needs a preparation of its own.
     public func prepare(undatedToken: String) async throws -> PlaintextOriginalArchivePreparation {
         let snapshot: PlaintextOriginalArchiveSnapshot
-        if let sqliteStore { snapshot = try await SQLiteOriginalArchiveSource(store: sqliteStore).prepare(undatedToken: undatedToken) }
-        else if let vault { snapshot = try await vault.prepareOriginalArchiveExport(undatedToken: undatedToken) }
-        else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
+        snapshot = try await SQLiteOriginalArchiveSource(store: store).prepare(undatedToken: undatedToken)
         guard !snapshot.plan.entries.isEmpty else {
             throw PlaintextOriginalArchiveExportError.emptyArchive
         }
@@ -210,7 +178,7 @@ public actor PlaintextOriginalArchiveExporter {
         progress: @escaping ProgressHandler = { _ in }
     ) async throws -> PlaintextOriginalArchiveExportResult {
         let snapshot = preparation.snapshot
-        defer { snapshot.sqlitePins?.release() }
+        defer { snapshot.pins.release() }
         try Task.checkCancellation()
         progress(Self.progress(.preparing, snapshot: snapshot))
         let destinationCandidate = try normalizedDestination(
@@ -257,9 +225,7 @@ public actor PlaintextOriginalArchiveExporter {
             ))
             try verify(workURL, against: snapshot.plan)
             try failIfRequested(.beforeFinalRevisionCheck)
-            if let pins = snapshot.sqlitePins { try pins.validate() }
-            else if let vault { try await vault.validateOriginalArchiveRevision(snapshot) }
-            else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
+            try snapshot.pins.validate()
             try Task.checkCancellation()
             try failIfRequested(.beforeCommit)
             progress(Self.progress(
@@ -331,11 +297,8 @@ private extension PlaintextOriginalArchiveExporter {
         var completedEntries = 0
         for entry in snapshot.plan.entries {
             try Task.checkCancellation()
-            let source: PlaintextOriginalArchiveSource
-            if let pins = snapshot.sqlitePins {
-                source = PlaintextOriginalArchiveSource(reader: try pins.open(entry.attachmentID), byteCount: entry.byteCount, sha256Digest: entry.sha256Digest)
-            } else if let vault { source = try await vault.openOriginalArchiveSource(for: entry, snapshot: snapshot) }
-            else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
+            let source = PlaintextOriginalArchiveSource(reader: try snapshot.pins.open(entry.attachmentID),
+                                                        byteCount: entry.byteCount, sha256Digest: entry.sha256Digest)
             defer { source.close() }
             try write(
                 entry,

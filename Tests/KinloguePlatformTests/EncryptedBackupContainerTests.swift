@@ -376,8 +376,8 @@ func capacityFrameBudgetKeepsManifestNonceSeparateAndRejectsOverflow() throws {
         + ContainerFormat.maximumAuthorizationByteCount + ContainerFormat.maximumPrologueByteCount
         + ContainerFormat.maximumEnvelopeByteCount + ContainerFormat.authenticationTagByteCount
         + 4 + ContainerFormat.maximumFooterByteCount <= 4_096)
-    #expect(BackupFormatLimits.maximumEntryCount == PlaintextVaultResourcePolicy.maximumObjectCount
-        + LANInboxSnapshot.maximumBlobCount + LANInboxSnapshot.maximumItemCount + 2)
+    // Frozen with the container format; readers of existing checkpoints depend on it.
+    #expect(BackupFormatLimits.maximumEntryCount == 30_002)
 }
 
 @Test

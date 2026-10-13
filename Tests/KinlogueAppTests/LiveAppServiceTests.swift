@@ -7,44 +7,21 @@ import UniformTypeIdentifiers
 @testable import KinlogueCore
 @testable import KinloguePlatform
 
+/// `LiveAppService` on a real SQLite library. A test that needs to pause or fail one storage
+/// call wraps the repository in an intercepting store; nothing here replaces the library itself.
 struct LiveAppServiceTests {
     @Test
     func restoreRevocationCancelsAndDrainsBlockedReportOCRBeforeReturning() async throws {
-        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "kinlogue-report-restore-lifecycle-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        try FileManager.default.createDirectory(
-            at: parent,
-            withIntermediateDirectories: false
-        )
-        defer { try? FileManager.default.removeItem(at: parent) }
-        let vault = try PlaintextVault(
-            rootURL: parent.appendingPathComponent("Vault", isDirectory: true)
-        )
-        _ = try await vault.initialize()
-        let store = VaultImportDraftStore(vault: vault)
-        let staged = try await store.stage(
-            ImportedFileValidator().validate(data: try reportLifecyclePNG())
-        )
-        guard case .created(let draftID) = staged else {
-            Issue.record("Expected a newly staged synthetic report")
-            return
-        }
-        let extractor = ReportLifecycleTextExtractor()
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let draftID = try await stagedDraft(fixture, try liveServicePNG())
+        let extractor = LiveServiceGatedExtractor()
         let lifecycle = LibraryLifecycleCoordinator()
-        let service = LiveAppService(
-            vault: vault,
-            draftStore: store,
-            workflow: ImportWorkflow(store: store, textExtractor: extractor),
-            textExtractor: extractor,
-            startupCompleted: true,
-            lifecycle: lifecycle
-        )
+        let service = liveService(fixture, extractor: extractor, lifecycle: lifecycle)
 
         let importing = Task { try await service.retryDraft(id: draftID) }
         await extractor.waitUntilEntered()
-        let revokeCompleted = ReportLifecycleCompletionProbe()
+        let revokeCompleted = LiveServiceCompletionProbe()
         let revoking = Task {
             await lifecycle.revoke()
             await revokeCompleted.markCompleted()
@@ -57,70 +34,45 @@ struct LiveAppServiceTests {
             _ = try await importing.value
         }
         await revoking.value
-        let settled = try await vault.loadCatalog()
+        let settled = try await fixture.reports.draft(draftID)
         try await Task.sleep(for: .milliseconds(30))
-        let later = try await vault.loadCatalog()
+        let later = try await fixture.reports.draft(draftID)
 
         #expect(await extractor.observedCancellation)
         #expect(settled == later)
-        #expect(settled.importDrafts.count == 1)
-        #expect(settled.importDrafts.first?.state == .processing)
+        #expect(settled.state == .processing)
+        #expect(try await fixture.reports.header().draftCount == 1)
     }
 
     @Test(arguments: [false, true])
     @MainActor
     func recoveredOCRPublishesItsTerminalStateAfterTheLibraryIsReady(fails: Bool) async throws {
-        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: parent) }
-        let vault = try PlaintextVault(rootURL: parent.appendingPathComponent("Vault"))
-        let initial = try await vault.initialize()
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let member = try FamilyMember(displayName: "Synthetic member")
-        let original = try ImportedFileValidator().validate(data: reportLifecyclePNG(red: 0))
-        let attachment = try Attachment(
-            contentTypeIdentifier: original.contentTypeIdentifier,
-            byteCount: original.data.count,
-            sha256Digest: original.sha256Digest
-        )
-        let record = try HealthRecord(
-            memberID: member.id, attachmentID: attachment.id, importState: .confirmed
-        )
-        _ = try await vault.commit(VaultCommitRequest(
-            expectedGeneration: initial.generation,
-            catalog: VaultCatalog(
-                vaultID: initial.vaultID, generation: initial.generation + 1,
-                members: [member], records: [record], attachments: [attachment]
-            ),
-            writes: [VaultObjectWrite(
-                reference: VaultObjectReference(id: attachment.id, kind: .attachment),
-                plaintext: original.data
-            )]
-        ))
+        try await fixture.reports.saveMember(member, replacing: nil)
+        let record = try await fixture.confirmed(member: member, seed: "synthetic confirmed original")
+        // The result of recognition, success or failure, waits here before it is committed.
         let commitGate = AsyncOperationGate()
-        let store = VaultImportDraftStore(vault: vault, processingWillCommit: { draft in
-            if draft.state == .needsReview || draft.state == .failed { await commitGate.wait() }
+        let drafts = InterceptedDraftStore(fixture.reports, before: { call in
+            switch call {
+            case .completeProcessing, .failProcessing: await commitGate.wait()
+            default: break
+            }
         })
-        guard case .created(let draftID) = try await store.stage(
-            ImportedFileValidator().validate(data: reportLifecyclePNG())
-        ) else { Issue.record("Expected a synthetic draft"); return }
-        var followingDraftID: ImportDraft.ID?
-        if fails {
-            guard case .created(let id) = try await store.stage(
-                ImportedFileValidator().validate(data: reportLifecyclePNG(red: 0.5))
-            ) else { Issue.record("Expected a second synthetic draft"); return }
-            followingDraftID = id
-        }
-        let extractor = ReportLifecycleTextExtractor(fails: fails)
+        _ = try await stagedDraft(fixture, try liveServicePNG())
+        if fails { _ = try await stagedDraft(fixture, try liveServicePNG(red: 0.5)) }
+        // Recovery takes the drafts in the order the library lists them, not the order staged.
+        let recoveryOrder = try await fixture.reports.resumableDraftIDs()
+        let draftID = try #require(recoveryOrder.first)
+        let followingDraftID = fails ? recoveryOrder.last : nil
+        let extractor = LiveServiceGatedExtractor(fails: fails)
         let lifecycle = LibraryLifecycleCoordinator()
-        let service = LiveAppService(
-            vault: vault, draftStore: store,
-            workflow: ImportWorkflow(store: store, textExtractor: extractor),
-            lifecycle: lifecycle
-        )
+        let service = liveService(fixture, drafts: drafts, extractor: extractor, startupCompleted: false, lifecycle: lifecycle)
         let model = AppModel(service: service)
         let completion = AsyncOperationGate()
         let followingCompletion = AsyncOperationGate()
-        let completed = ReportLifecycleCompletionProbe()
+        let completed = LiveServiceCompletionProbe()
         let processing = AppProcessingCoordinator(
             lanService: UnavailableLANInboxService(), lifecycle: lifecycle,
             onCatalogChanged: {
@@ -146,8 +98,7 @@ struct LiveAppServiceTests {
         await model.waitForCurrentPage()
         #expect(model.timelineSections.flatMap(\.records) == [LibraryReportSummary(record: record)])
         await model.selectRecord(record.id)
-        #expect(model.originalDocument?.data == original.data)
-
+        #expect(model.originalDocument?.data == Data("synthetic confirmed original".utf8))
         await extractor.resume()
         #expect(await commitGate.waitUntilStarted())
         #expect(await model.createMember(displayName: "Concurrent synthetic member", disambiguationLabel: nil))
@@ -172,6 +123,7 @@ struct LiveAppServiceTests {
             await followingCompletion.open()
         }
         await lifecycle.revoke()
+        await model.beginDestructiveVaultLifecycle()
     }
 
     @Test(arguments: [ImportState.processing, .needsReview], [false, true])
@@ -180,32 +132,22 @@ struct LiveAppServiceTests {
         failingState: ImportState,
         superseded: Bool
     ) async throws {
-        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: parent) }
-        let vault = try PlaintextVault(rootURL: parent.appendingPathComponent("Vault"))
-        _ = try await vault.initialize()
-        let fault = RecoveryCommitFailureInjector(state: failingState)
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let fault = LiveServiceCommitFailureInjector(state: failingState)
         let retryGate = AsyncOperationGate()
-        let store = VaultImportDraftStore(vault: vault, processingWillCommit: { draft in
-            if await fault.isRetry(draft) { await retryGate.wait() }
-            try await fault.beforeCommit(draft)
+        let drafts = InterceptedDraftStore(fixture.reports, before: { call in
+            if await fault.isRetry(call) { await retryGate.wait() }
+            try await fault.beforeCommit(call)
         })
-        guard case .created(let draftID) = try await store.stage(
-            ImportedFileValidator().validate(data: reportLifecyclePNG())
-        ) else { Issue.record("Expected a synthetic draft"); return }
-        guard case .created(let followingID) = try await store.stage(
-            ImportedFileValidator().validate(data: reportLifecyclePNG(red: 0.5))
-        ) else { Issue.record("Expected a second synthetic draft"); return }
-        let extractor = LiveAppServiceTextExtractorStub(blocks: [])
-        let service = LiveAppService(
-            vault: vault, draftStore: store,
-            workflow: ImportWorkflow(store: store, textExtractor: extractor)
-        )
+        let draftID = try await stagedDraft(fixture, try liveServicePNG())
+        let followingID = try await stagedDraft(fixture, try liveServicePNG(red: 0.5))
+        let extractor = LiveServiceRecordingExtractor(blocks: [])
+        let service = liveService(fixture, drafts: drafts, extractor: extractor, startupCompleted: false)
         let model = AppModel(service: service)
         let completion = AsyncOperationGate()
         let followingCompletion = AsyncOperationGate()
-        let completed = ReportLifecycleCompletionProbe()
+        let completed = LiveServiceCompletionProbe()
         let processing = AppProcessingCoordinator(
             lanService: UnavailableLANInboxService(),
             onCatalogChanged: {
@@ -219,71 +161,67 @@ struct LiveAppServiceTests {
         await processing.startRecovery(using: service)
         #expect(await completion.waitUntilStarted())
         #expect(model.phase == .ready)
-        #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.canRetryRecovery == true)
-        #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.state == (failingState == .processing ? .staging : .processing))
-        model.requestDiscardDraft(draftID)
+        // The injected failure belongs to whichever draft recovery reached first.
+        let failedID = try #require(await fault.failedDraftID)
+        let otherID = failedID == draftID ? followingID : draftID
+        #expect(model.backgroundDrafts.first(where: { $0.id == failedID })?.canRetryRecovery == true)
+        #expect(model.backgroundDrafts.first(where: { $0.id == failedID })?.state == (failingState == .processing ? .staging : .processing))
+        model.requestDiscardDraft(failedID)
         #expect(model.pendingDiscardDraftID == nil)
         await completion.open()
         #expect(await followingCompletion.waitUntilStarted())
-        #expect(model.reviewQueue.map(\.id) == [followingID])
+        #expect(model.reviewQueue.map(\.id) == [otherID])
         await followingCompletion.open()
         await processing.startRecovery(using: service)
         await service.resumeInterruptedImports(onDraftCompleted: {})
         await model.refresh()
         #expect(await fault.failureCount == 1)
-        #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.canRetryRecovery == true)
+        #expect(model.backgroundDrafts.first(where: { $0.id == failedID })?.canRetryRecovery == true)
         #expect(await extractor.files.count == (failingState == .processing ? 1 : 2))
 
         if superseded {
-            _ = try await VaultImportDraftStore(vault: vault).beginProcessing(
-                draftID: draftID, attemptID: UUID()
-            )
+            _ = try await fixture.reports.beginProcessing(draftID: failedID, attemptID: UUID())
             await model.refresh()
-            #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.state == .processing)
-            #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.canRetryRecovery == false)
+            #expect(model.backgroundDrafts.first(where: { $0.id == failedID })?.state == .processing)
+            #expect(model.backgroundDrafts.first(where: { $0.id == failedID })?.canRetryRecovery == false)
             await processing.cancelAndDrain()
+            await model.beginDestructiveVaultLifecycle()
             return
         }
-        let retry = Task { await model.retryDraft(draftID) }
+        let retry = Task { await model.retryDraft(failedID) }
         #expect(await retryGate.waitUntilStarted())
         await model.refresh()
-        #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.canRetryRecovery == false)
+        #expect(model.backgroundDrafts.first(where: { $0.id == failedID })?.canRetryRecovery == false)
         #expect(await extractor.files.count == (failingState == .processing ? 1 : 2))
         await retryGate.open()
         await retry.value
         #expect(await fault.failureCount == 2)
-        #expect(model.backgroundDrafts.first(where: { $0.id == draftID })?.canRetryRecovery == true)
+        #expect(model.backgroundDrafts.first(where: { $0.id == failedID })?.canRetryRecovery == true)
 
-        await model.retryDraft(draftID)
+        await model.retryDraft(failedID)
         #expect(model.phase == .ready)
-        #expect(Set(model.reviewQueue.map(\.id)) == [followingID, draftID])
+        #expect(Set(model.reviewQueue.map(\.id)) == [failedID, otherID])
         #expect(model.reviewQueue.allSatisfy { !$0.canRetryRecovery })
         #expect(model.backgroundDrafts.isEmpty)
         await processing.cancelAndDrain()
+        await model.beginDestructiveVaultLifecycle()
     }
 
     @Test(arguments: [false, true])
     @MainActor
     func revocationDrainsStartupRecoveryAndRejectsItsLateCallback(atCommitBoundary: Bool) async throws {
-        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: parent) }
-        let vault = try PlaintextVault(rootURL: parent.appendingPathComponent("Vault"))
-        _ = try await vault.initialize()
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let commitGate = AsyncOperationGate()
-        let store = VaultImportDraftStore(vault: vault, processingWillCommit: { draft in
-            if draft.state == .needsReview { await commitGate.wait() }
+        let drafts = InterceptedDraftStore(fixture.reports, before: { call in
+            if case .completeProcessing = call { await commitGate.wait() }
         })
-        _ = try await store.stage(ImportedFileValidator().validate(data: reportLifecyclePNG()))
-        let extractor = ReportLifecycleTextExtractor()
+        let draftID = try await stagedDraft(fixture, try liveServicePNG())
+        let extractor = LiveServiceGatedExtractor()
         let lifecycle = LibraryLifecycleCoordinator()
-        let service = LiveAppService(
-            vault: vault, draftStore: store,
-            workflow: ImportWorkflow(store: store, textExtractor: extractor),
-            lifecycle: lifecycle
-        )
+        let service = liveService(fixture, drafts: drafts, extractor: extractor, startupCompleted: false, lifecycle: lifecycle)
         let model = AppModel(service: service)
-        let callback = ReportLifecycleCompletionProbe()
+        let callback = LiveServiceCompletionProbe()
         let processing = AppProcessingCoordinator(
             lanService: UnavailableLANInboxService(), lifecycle: lifecycle,
             onCatalogChanged: { await callback.markCompleted() }
@@ -296,7 +234,7 @@ struct LiveAppServiceTests {
             #expect(await commitGate.waitUntilStarted())
         }
         await model.beginDestructiveVaultLifecycle()
-        let drained = ReportLifecycleCompletionProbe()
+        let drained = LiveServiceCompletionProbe()
         let revocation = Task {
             await lifecycle.revoke()
             await drained.markCompleted()
@@ -310,33 +248,20 @@ struct LiveAppServiceTests {
         #expect(!(await callback.isCompleted))
         #expect(model.reviewQueue.isEmpty)
         #expect(model.backgroundDrafts.isEmpty)
-        #expect(try await vault.loadCatalog().importDrafts.first?.state == .processing)
+        #expect(try await fixture.reports.draft(draftID).state == .processing)
     }
 
     @Test
-    func vaultDeletionWaitsForReceiverStartupToExit() async throws {
-        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "kinlogue-lan-start-delete-race-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        try FileManager.default.createDirectory(
-            at: parent,
-            withIntermediateDirectories: false
-        )
-        defer { try? FileManager.default.removeItem(at: parent) }
-        let root = parent.appendingPathComponent("Vault", isDirectory: true)
-        let vault = try PlaintextVault(rootURL: root)
-        _ = try await vault.initialize()
+    func libraryDeletionWaitsForReceiverStartupToExit() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let gate = AsyncOperationGate()
         let lifecycle = LibraryLifecycleCoordinator()
         let revocationGate = try await installRevocationGate(on: lifecycle)
-        let receiver = LANReceiver(rootURL: root)
-        let service = LiveLANInboxService(
-            rootURL: root,
-            vault: vault,
+        let service = try LiveLANInboxService(
+            store: fixture.store,
             lifecycle: lifecycle,
             dependencies: .init(
-                receiver: receiver,
                 receiverStart: { receiver, _ in
                     await gate.wait()
                     return try await receiver.start(
@@ -369,7 +294,7 @@ struct LiveAppServiceTests {
             Issue.record("Timed out waiting for receiver startup")
             return
         }
-        let destroy = LANVaultDestroySpy()
+        let destroy = LiveServiceDestroySpy()
         let coordinated = LifecycleCoordinatedVaultDestroyService(
             lifecycle: lifecycle,
             underlying: destroy
@@ -393,7 +318,7 @@ struct LiveAppServiceTests {
         await gate.open()
         do {
             _ = try await start.value
-            Issue.record("Receiver startup unexpectedly survived vault deletion")
+            Issue.record("Receiver startup unexpectedly survived library deletion")
         } catch LibraryLifecycleCoordinatorError.revoked {
             // Expected: the late-started receiver was stopped before returning.
         } catch LANReceiverError.sessionEnded {
@@ -406,56 +331,45 @@ struct LiveAppServiceTests {
         #expect(!(await service.isReceiving()))
     }
 
+    // MARK: Startup
+
     @Test
-    func bootstrapFullyValidatesBeforeTheFinalCatalogAccess() async throws {
-        let catalog = try syntheticCatalog()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: catalog),
-            initializedCatalog: catalog,
-            catalogReads: [.success(catalog)],
-            requiresBootstrap: true
+    func bootstrapInitializesTheLibraryEnumeratesRecoveryAndThenReadsTheHeader() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        _ = try await stagedDraft(fixture, try liveServicePNG())
+        let log = StorageCallLog()
+        let service = liveService(
+            fixture,
+            reports: InterceptedReportStore(fixture.reports, before: { await log.append("\($0)") }),
+            drafts: InterceptedDraftStore(fixture.reports, before: { await log.append($0.name) }),
+            startupCompleted: false
         )
 
-        _ = try await fixture.service.bootstrap()
+        let snapshot = try await service.bootstrap()
 
-        #expect(await fixture.bootstrapCalls.values == [
-            .loadValidatedCatalog,
-            .loadCatalog,
-        ])
+        // Recovery is only enumerated here; nothing starts processing before the library is ready.
+        #expect(await log.values == ["initializeLibrary", "resumableDraftIDs", "header"])
+        #expect(snapshot.draftCount == 1 && snapshot.reportCount == 0)
     }
 
     @Test
-    func concurrentVaultAccessWaitsForTheSharedStartupTask() async throws {
-        let catalog = try syntheticCatalog()
-        let calls = LiveAppServiceBootstrapCallRecorder()
-        let inspectGate = AsyncOperationGate()
-        let vault = LiveAppServiceVaultStub(
-            state: try readyState(for: catalog),
-            initializedCatalog: catalog,
-            catalogReads: [
-                .success(catalog),
-                .success(catalog),
-            ],
-            commitErrorAfterApplying: false,
-            bootstrapCalls: calls,
-            inspectGate: inspectGate
-        )
-        let draftStore = LiveAppServiceDraftStoreStub()
-        let service = LiveAppService(
-            vault: vault,
-            draftStore: draftStore,
-            workflow: ImportWorkflow(
-                store: draftStore,
-                textExtractor: LiveAppServiceTextExtractorStub()
-            )
-        )
+    func concurrentAccessWaitsForTheSharedStartupTask() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let log = StorageCallLog()
+        let initializeGate = AsyncOperationGate()
+        let service = liveService(fixture, reports: InterceptedReportStore(fixture.reports, before: { call in
+            await log.append("\(call)")
+            if call == .initializeLibrary { await initializeGate.wait() }
+        }), startupCompleted: false)
 
         let bootstrap = Task { try await service.bootstrap() }
-        guard await inspectGate.waitUntilStarted() else {
+        guard await initializeGate.waitUntilStarted() else {
             bootstrap.cancel()
-            await inspectGate.open()
+            await initializeGate.open()
             _ = try? await bootstrap.value
-            Issue.record("Timed out waiting for validated Vault startup")
+            Issue.record("Timed out waiting for library startup")
             return
         }
         let refreshWaitGate = AsyncOperationGate()
@@ -467,78 +381,59 @@ struct LiveAppServiceTests {
             refresh.cancel()
             bootstrap.cancel()
             await refreshWaitGate.open()
-            await inspectGate.open()
+            await initializeGate.open()
             _ = try? await bootstrap.value
             _ = try? await refresh.value
-            Issue.record("Timed out waiting for refresh to join Vault startup")
+            Issue.record("Timed out waiting for refresh to join library startup")
             return
         }
 
-        #expect(await calls.values == [.loadValidatedCatalog])
-        #expect(await vault.callCounts == LiveAppServiceVaultCallCounts(
-            initialize: 0,
-            loadValidatedCatalog: 0,
-            loadCatalog: 0,
-            commit: 0
-        ))
+        #expect(await log.values == ["initializeLibrary"])
 
         await refreshWaitGate.open()
-        await inspectGate.open()
-        _ = try await bootstrap.value
-        #expect(try await refresh.value.generation == catalog.generation)
-        #expect(await vault.callCounts.loadCatalog == 2)
+        await initializeGate.open()
+        let started = try await bootstrap.value
+        #expect(try await refresh.value.revision == started.revision)
+        #expect(await log.count("header") == 2)
+        #expect(await log.count("initializeLibrary") == 1)
     }
 
     @Test
-    func repeatedBootstrapReloadsTheVaultInsteadOfReturningCachedStartupState() async throws {
-        let catalog = try syntheticCatalog()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: catalog),
-            initializedCatalog: catalog,
-            catalogReads: [
-                .success(catalog),
-                .failure(.catalogRead),
-            ],
-            requiresBootstrap: true
-        )
+    func repeatedBootstrapReadsTheLibraryAgainInsteadOfReturningCachedStartupState() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let log = StorageCallLog()
+        let service = liveService(fixture, reports: InterceptedReportStore(fixture.reports, before: { call in
+            await log.append("\(call)")
+            if call == .header, await log.count("header") == 2 { throw LiveServiceSyntheticFailure() }
+        }), startupCompleted: false)
 
-        _ = try await fixture.service.bootstrap()
-        await #expect(throws: LiveAppServiceFixtureError.catalogRead) {
-            try await fixture.service.bootstrap()
+        _ = try await service.bootstrap()
+        await #expect(throws: LiveServiceSyntheticFailure.self) {
+            try await service.bootstrap()
         }
 
-        #expect(await fixture.vault.callCounts.loadCatalog == 2)
+        #expect(await log.count("header") == 2)
+        #expect(await log.count("initializeLibrary") == 1)
     }
 
     @Test
     func cancellingOneStartupWaiterDoesNotCancelTheSharedStartupTask() async throws {
-        let catalog = try syntheticCatalog()
-        let calls = LiveAppServiceBootstrapCallRecorder()
-        let inspectGate = AsyncOperationGate()
-        let vault = LiveAppServiceVaultStub(
-            state: try readyState(for: catalog),
-            initializedCatalog: catalog,
-            catalogReads: [.success(catalog)],
-            commitErrorAfterApplying: false,
-            bootstrapCalls: calls,
-            inspectGate: inspectGate
-        )
-        let draftStore = LiveAppServiceDraftStoreStub()
-        let service = LiveAppService(
-            vault: vault,
-            draftStore: draftStore,
-            workflow: ImportWorkflow(
-                store: draftStore,
-                textExtractor: LiveAppServiceTextExtractorStub()
-            )
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let log = StorageCallLog()
+        let initializeGate = AsyncOperationGate()
+        let service = liveService(fixture, reports: InterceptedReportStore(fixture.reports, before: { call in
+            await log.append("\(call)")
+            if call == .initializeLibrary { await initializeGate.wait() }
+        }), startupCompleted: false)
 
         let bootstrap = Task { try await service.bootstrap() }
-        guard await inspectGate.waitUntilStarted() else {
+        guard await initializeGate.waitUntilStarted() else {
             bootstrap.cancel()
-            await inspectGate.open()
+            await initializeGate.open()
             _ = try? await bootstrap.value
-            Issue.record("Timed out waiting for validated Vault startup")
+            Issue.record("Timed out waiting for library startup")
             return
         }
         let refreshWaitGate = AsyncOperationGate()
@@ -550,154 +445,103 @@ struct LiveAppServiceTests {
             cancelledRefresh.cancel()
             bootstrap.cancel()
             await refreshWaitGate.open()
-            await inspectGate.open()
+            await initializeGate.open()
             _ = try? await bootstrap.value
             _ = try? await cancelledRefresh.value
-            Issue.record("Timed out waiting for refresh to join Vault startup")
+            Issue.record("Timed out waiting for refresh to join library startup")
             return
         }
         cancelledRefresh.cancel()
         await refreshWaitGate.open()
-        await inspectGate.open()
+        await initializeGate.open()
 
-        #expect(try await bootstrap.value.generation == catalog.generation)
+        _ = try await bootstrap.value
         await #expect(throws: CancellationError.self) {
             try await cancelledRefresh.value
         }
-        #expect(await vault.callCounts.loadCatalog == 1)
+        #expect(await log.count("header") == 1)
     }
 
-    @Test(arguments: [
-        VaultAccessState.operationInProgress,
-        VaultAccessState.legacyEncrypted,
-        VaultAccessState.damaged,
-        VaultAccessState.unsupportedVersion,
-    ])
-    func bootstrapFailsClosedForUnusableVaultStates(_ state: VaultAccessState) async throws {
-        let fixture = try LiveAppServiceFixture(
-            state: state,
-            requiresBootstrap: true
+    @Test
+    func bootstrapPropagatesALibraryFailureWithoutEnumeratingRecovery() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let log = StorageCallLog()
+        let service = liveService(
+            fixture,
+            reports: InterceptedReportStore(fixture.reports, before: { call in
+                await log.append("\(call)")
+                if call == .initializeLibrary { throw SQLiteLibraryError.damaged }
+            }),
+            drafts: InterceptedDraftStore(fixture.reports, before: { await log.append($0.name) }),
+            startupCompleted: false
         )
 
-        await #expect(throws: AppServiceError.vaultUnavailable) {
-            try await fixture.service.bootstrap()
+        await #expect(throws: SQLiteLibraryError.damaged) {
+            try await service.bootstrap()
         }
 
-        let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.initialize == 0)
-        #expect(vaultCalls.loadValidatedCatalog == 1)
-        #expect(vaultCalls.loadCatalog == 0)
-        #expect(vaultCalls.commit == 0)
-        #expect(await fixture.draftStore.resumableCallCount == 0)
+        #expect(await log.values == ["initializeLibrary"])
     }
 
     @Test
-    func startupSynchronizationTimesOutWhenInspectionIsNeverReached() async {
-        let inspectGate = AsyncOperationGate()
+    func startupSynchronizationTimesOutWhenTheGateIsNeverReached() async {
+        let gate = AsyncOperationGate()
 
-        #expect(!(await inspectGate.waitUntilStarted(timeout: .milliseconds(20))))
+        #expect(!(await gate.waitUntilStarted(timeout: .milliseconds(20))))
     }
 
     @Test
-    func absentVaultInitializesExactlyOnceAndReturnsThePersistedSnapshot() async throws {
-        let catalog = try syntheticCatalog()
-        let fixture = try LiveAppServiceFixture(
-            state: .absent,
-            initializedCatalog: catalog,
-            catalogReads: [.success(catalog)],
-            requiresBootstrap: true
+    func bootstrapPropagatesAFinalReadFailureAfterRecoveryInsteadOfReturningAStaleSnapshot() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let log = StorageCallLog()
+        let service = liveService(
+            fixture,
+            reports: InterceptedReportStore(fixture.reports, before: { call in
+                await log.append("\(call)")
+                if call == .header { throw LiveServiceSyntheticFailure() }
+            }),
+            drafts: InterceptedDraftStore(fixture.reports, before: { await log.append($0.name) }),
+            startupCompleted: false
         )
 
-        let snapshot = try await fixture.service.bootstrap()
-
-        #expect(snapshot.generation == catalog.generation)
-        #expect(snapshot.members == catalog.members.map(LibraryMemberSummary.init))
-        #expect(snapshot.reportCount == catalog.records.filter { $0.importState == .confirmed }.count)
-        #expect(snapshot.draftCount == catalog.importDrafts.count)
-        let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.initialize == 1)
-        #expect(vaultCalls.loadCatalog == 1)
-        #expect(vaultCalls.commit == 0)
-        #expect(await fixture.draftStore.resumableCallCount == 1)
-    }
-
-    @Test
-    func readyVaultPropagatesFinalReadFailureAfterRecoveryInsteadOfReturningStaleSnapshot() async throws {
-        let catalog = try syntheticCatalog()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: catalog),
-            initializedCatalog: catalog,
-            catalogReads: [.failure(.catalogRead)],
-            requiresBootstrap: true
-        )
-
-        await #expect(throws: LiveAppServiceFixtureError.catalogRead) {
-            try await fixture.service.bootstrap()
+        await #expect(throws: LiveServiceSyntheticFailure.self) {
+            try await service.bootstrap()
         }
 
-        let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.initialize == 0)
-        #expect(vaultCalls.loadValidatedCatalog == 1)
-        #expect(vaultCalls.loadCatalog == 1)
-        #expect(vaultCalls.commit == 0)
-        #expect(await fixture.draftStore.resumableCallCount == 1)
-    }
-
-    @Test
-    func bootstrapEnumeratesRecoveryIDsWithoutStartingProcessing() async throws {
-        let catalog = try syntheticCatalog()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: catalog),
-            initializedCatalog: catalog,
-            catalogReads: [.success(catalog)],
-            requiresBootstrap: true
-        )
-
-        _ = try await fixture.service.bootstrap()
-
-        #expect(await fixture.draftStore.resumableCallCount == 1)
-        #expect(await fixture.draftStore.beginProcessingCallCount == 0)
+        #expect(await log.values == ["initializeLibrary", "resumableDraftIDs", "header"])
     }
 
     @Test
     func bootstrapReadinessDoesNotDependOnRecoveryProcessing() async throws {
-        let transaction = try SyntheticDraftTransaction()
-        let resumableDraft = ImportDraft(attachmentID: transaction.attachment.id)
-        let catalog = try VaultCatalog(
-            vaultID: transaction.beforeCommit.vaultID,
-            generation: transaction.beforeCommit.generation,
-            members: [transaction.member],
-            attachments: [transaction.attachment],
-            importDrafts: [resumableDraft]
-        )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: catalog),
-            initializedCatalog: catalog,
-            catalogReads: [.success(catalog), .success(catalog), .success(catalog)],
-            beginProcessingError: .recoveryProcessing,
-            requiresBootstrap: true
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        _ = try await stagedDraft(fixture, try liveServicePNG())
+        let log = StorageCallLog()
+        let service = liveService(fixture, drafts: InterceptedDraftStore(fixture.reports, before: { call in
+            await log.append(call.name)
+            if case .beginProcessing = call { throw LiveServiceSyntheticFailure() }
+        }), startupCompleted: false)
 
-        _ = try await fixture.service.bootstrap()
-        _ = try await fixture.service.bootstrap()
-        #expect(await fixture.draftStore.beginProcessingCallCount == 0)
-        await fixture.service.resumeInterruptedImports(onDraftCompleted: {})
-        await fixture.service.resumeInterruptedImports(onDraftCompleted: {})
-        #expect(await fixture.draftStore.resumableCallCount == 1)
-        #expect(await fixture.draftStore.beginProcessingCallCount == 1)
-        #expect(try await fixture.service.draftPage(states: [.staging], cursor: nil).items.first?.canRetryRecovery == true)
+        _ = try await service.bootstrap()
+        _ = try await service.bootstrap()
+        #expect(await log.count("beginProcessing") == 0)
+        await service.resumeInterruptedImports(onDraftCompleted: {})
+        await service.resumeInterruptedImports(onDraftCompleted: {})
+        #expect(await log.count("resumableDraftIDs") == 1)
+        #expect(await log.count("beginProcessing") == 1)
+        #expect(try await service.draftPage(states: [.staging], cursor: nil).items.first?.canRetryRecovery == true)
     }
+
+    // MARK: Review, confirmation and discard
 
     @Test
     func confirmDraftLoadsTheSnapshotAfterTheStoreCommits() async throws {
-        let transaction = try SyntheticDraftTransaction()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [.success(transaction.beforeCommit)],
-            draftDocument: transaction.document,
-            confirmCatalog: transaction.afterCommit
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let transaction = try await LiveServiceReviewDraft.make(fixture)
+        let service = liveService(fixture)
         let command = ConfirmDraftCommand(
             draftID: transaction.draft.id,
             expectedRevision: transaction.draft.revision,
@@ -713,28 +557,20 @@ struct LiveAppServiceTests {
             userNote: ""
         )
 
-        let snapshot = try await fixture.service.confirmDraft(command)
+        let snapshot = try await service.confirmDraft(command)
 
-        #expect(try await fixture.service.reportPage(query: "", memberID: nil, cursor: nil).items.map(\.id) == [transaction.committedRecord.id])
-        #expect(snapshot.draftCount == 0)
-        #expect(await fixture.draftStore.confirmCallCount == 1)
-        #expect(
-            await fixture.draftStore.lastConfirmedExpectedRevision
-                == command.expectedRevision
-        )
-        let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.loadCatalog == 4)
-        #expect(vaultCalls.commit == 0)
+        #expect(try await service.reportPage(query: "", memberID: nil, cursor: nil).items.map(\.id) == [transaction.draft.id])
+        #expect(snapshot.draftCount == 0 && snapshot.reportCount == 1)
+        #expect(try await fixture.reports.record(transaction.draft.id).memberID == transaction.member.id)
     }
 
     @Test
     func confirmDraftRejectsAStaleRevisionBeforeLoadingTheDraftDocument() async throws {
-        let transaction = try SyntheticDraftTransaction()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [.success(transaction.beforeCommit)]
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let transaction = try await LiveServiceReviewDraft.make(fixture)
+        let log = StorageCallLog()
+        let service = liveService(fixture, drafts: InterceptedDraftStore(fixture.reports, before: { await log.append($0.name) }))
         let staleCommand = ConfirmDraftCommand(
             draftID: transaction.confirmCommand.draftID,
             expectedRevision: transaction.confirmCommand.expectedRevision + 1,
@@ -751,22 +587,20 @@ struct LiveAppServiceTests {
         )
 
         await #expect(throws: AppServiceError.invalidReview) {
-            try await fixture.service.confirmDraft(staleCommand)
+            try await service.confirmDraft(staleCommand)
         }
 
-        #expect(await fixture.draftStore.confirmCallCount == 0)
-        #expect(await fixture.vault.callCounts.loadCatalog == 1)
+        // The stale revision is refused before the draft store is asked for anything.
+        #expect(await log.values.isEmpty)
+        #expect(try await fixture.reports.draft(transaction.draft.id) == transaction.draft)
     }
 
     @Test
     func deferDraftPersistsTheCompleteReviewStateThroughTheDraftStore() async throws {
-        let transaction = try SyntheticDraftTransaction()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [.success(transaction.beforeCommit)],
-            draftDocument: transaction.document
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let transaction = try await LiveServiceReviewDraft.make(fixture)
+        let service = liveService(fixture)
         let manualDate = Date(timeIntervalSince1970: 1_784_419_200)
         let command = DeferDraftCommand(
             draftID: transaction.draft.id,
@@ -783,11 +617,11 @@ struct LiveAppServiceTests {
             userNote: "Synthetic note"
         )
 
-        try await fixture.service.deferDraft(command)
+        try await service.deferDraft(command)
 
-        #expect(await fixture.draftStore.lastSavedReviewMemberID == transaction.member.id)
+        #expect(try await fixture.reports.draft(transaction.draft.id).memberID == transaction.member.id)
         let canonicalDate = try #require(ReportDateSemantics.canonicalDate(from: manualDate))
-        #expect(await fixture.draftStore.lastSavedReviewState == ImportDraftReviewState(
+        #expect(try await fixture.reports.loadDocument(draftID: transaction.draft.id).reviewState == ImportDraftReviewState(
             timelineDateSelection: .manual(canonicalDate),
             title: "Synthetic title",
             organization: "Synthetic organization",
@@ -802,14 +636,10 @@ struct LiveAppServiceTests {
 
     @Test
     func confirmDraftPersistsManualDateResultsAndConclusionWithoutOCRCandidates() async throws {
-        let transaction = try SyntheticDraftTransaction()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [.success(transaction.beforeCommit)],
-            draftDocument: transaction.document,
-            confirmCatalog: transaction.afterCommit
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let transaction = try await LiveServiceReviewDraft.make(fixture)
+        let service = liveService(fixture)
         let manualDate = Date(timeIntervalSince1970: 1_784_332_800)
         let command = ConfirmDraftCommand(
             draftID: transaction.draft.id,
@@ -826,9 +656,9 @@ struct LiveAppServiceTests {
             userNote: ""
         )
 
-        _ = try await fixture.service.confirmDraft(command)
+        _ = try await service.confirmDraft(command)
 
-        let record = try #require(await fixture.draftStore.lastConfirmedRecord)
+        let record = try await fixture.reports.record(transaction.draft.id)
         #expect(record.timelineDate != nil)
         #expect(record.timelineDate.flatMap(ReportDateSemantics.transcription) == "2026-07-18")
         #expect(record.dateCandidates.count == 1)
@@ -842,7 +672,8 @@ struct LiveAppServiceTests {
 
     @Test
     func confirmDraftPersistsTheSelectedDetectedDateAndItsSource() async throws {
-        let transaction = try SyntheticDraftTransaction()
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let source = try SourceField(
             originalTranscription: "2026-07-18",
             references: [try SourceReference(pageNumber: 1)]
@@ -856,16 +687,11 @@ struct LiveAppServiceTests {
             kind: .report,
             source: source
         )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [.success(transaction.beforeCommit)],
-            draftDocument: ImportDraftDocument(
+        let transaction = try await LiveServiceReviewDraft.make(fixture, document: ImportDraftDocument(
                 blocks: [],
                 candidates: ReportCandidates(dateCandidates: [candidate])
-            ),
-            confirmCatalog: transaction.afterCommit
-        )
+            ))
+        let service = liveService(fixture)
         let command = ConfirmDraftCommand(
             draftID: transaction.draft.id,
             expectedRevision: transaction.draft.revision,
@@ -881,9 +707,9 @@ struct LiveAppServiceTests {
             userNote: ""
         )
 
-        _ = try await fixture.service.confirmDraft(command)
+        _ = try await service.confirmDraft(command)
 
-        let record = try #require(await fixture.draftStore.lastConfirmedRecord)
+        let record = try await fixture.reports.record(transaction.draft.id)
         let attributedCandidate = ReportDateCandidate(
             id: candidate.id,
             date: candidate.date,
@@ -897,7 +723,8 @@ struct LiveAppServiceTests {
 
     @Test
     func confirmDraftReprojectsLegacyCachedCandidatesFromStoredOCRBlocks() async throws {
-        let transaction = try SyntheticDraftTransaction()
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let heading = try OCRBlock(
             pageNumber: 1,
             text: "丨检查结论",
@@ -919,13 +746,8 @@ struct LiveAppServiceTests {
             candidates: ReportCandidates(),
             candidateExtractionVersion: nil
         )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [.success(transaction.beforeCommit)],
-            draftDocument: legacyDocument,
-            confirmCatalog: transaction.afterCommit
-        )
+        let transaction = try await LiveServiceReviewDraft.make(fixture, document: legacyDocument)
+        let service = liveService(fixture)
         let command = ConfirmDraftCommand(
             draftID: transaction.draft.id,
             expectedRevision: transaction.draft.revision,
@@ -941,16 +763,17 @@ struct LiveAppServiceTests {
             userNote: ""
         )
 
-        _ = try await fixture.service.confirmDraft(command)
+        _ = try await service.confirmDraft(command)
 
-        let record = try #require(await fixture.draftStore.lastConfirmedRecord)
+        let record = try await fixture.reports.record(transaction.draft.id)
         #expect(record.conclusion?.entryMethod == nil)
         #expect(record.conclusion?.references.map(\.blockID) == [body.id])
     }
 
     @Test
     func confirmDraftKeepsWhatRecognitionReadBehindARestoredVariantCharacter() async throws {
-        let transaction = try SyntheticDraftTransaction()
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let heading = try OCRBlock(
             pageNumber: 1,
             text: "检査所见：",
@@ -972,16 +795,10 @@ struct LiveAppServiceTests {
             candidates: ReportCandidates(),
             candidateExtractionVersion: ReportCandidateExtractor.extractionVersion - 1
         )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [.success(transaction.beforeCommit)],
-            draftDocument: previousVersionDocument,
-            confirmCatalog: transaction.afterCommit,
-            readObjectData: Data([1, 2, 3, 4])
-        )
+        let transaction = try await LiveServiceReviewDraft.make(fixture, document: previousVersionDocument, original: Data([1, 2, 3, 4]))
+        let service = liveService(fixture)
 
-        let review = try await fixture.service.loadReview(draftID: transaction.draft.id)
+        let review = try await service.loadReview(draftID: transaction.draft.id)
         let proposal = try #require(review.document.candidates.reportedResults)
         #expect(proposal.transcription == "合成复查所见。")
         #expect(review.document.blocks.map(\.text) == ["检査所见：", "合成复査所见。"])
@@ -1000,9 +817,9 @@ struct LiveAppServiceTests {
             abnormalItems: [],
             userNote: ""
         )
-        _ = try await fixture.service.confirmDraft(command)
+        _ = try await service.confirmDraft(command)
 
-        let record = try #require(await fixture.draftStore.lastConfirmedRecord)
+        let record = try await fixture.reports.record(transaction.draft.id)
         #expect(record.reportedResults?.transcription == "合成复查所见。")
         #expect(record.reportedResults?.originalTranscription == "合成复査所见。")
         #expect(record.reportedResults?.entryMethod == nil)
@@ -1010,156 +827,9 @@ struct LiveAppServiceTests {
     }
 
     @Test
-    func confirmDraftReextractsStaleMultiSourceOCRWithoutConflatingFileLocalPages() async throws {
-        let member = try FamilyMember(displayName: "Synthetic member")
-        let firstAttachment = try Attachment(
-            contentTypeIdentifier: "public.png",
-            byteCount: 4,
-            sha256Digest: Data(repeating: 0x31, count: 32)
-        )
-        let secondAttachment = try Attachment(
-            contentTypeIdentifier: "public.png",
-            byteCount: 4,
-            sha256Digest: Data(repeating: 0x32, count: 32)
-        )
-        let firstSource = try ReportSource(
-            attachmentID: firstAttachment.id,
-            displayName: "synthetic-first.png",
-            pageCount: 1
-        )
-        let secondSource = try ReportSource(
-            attachmentID: secondAttachment.id,
-            displayName: "synthetic-second.png",
-            pageCount: 1
-        )
-        let sources = try ReportSources([firstSource, secondSource])
-        let documentObjectID = UUID()
-        let draft = ImportDraft(
-            sources: sources,
-            state: .needsReview,
-            documentObjectID: documentObjectID
-        )
-        let firstLabel = try OCRBlock(
-            sourceID: firstSource.id,
-            attachmentID: firstAttachment.id,
-            filePageNumber: 1,
-            text: "报告日期：",
-            boundingBox: NormalizedRect(x: 0.05, y: 0.8, width: 0.12, height: 0.04),
-            confidence: 0.99,
-            method: .vision,
-            engineVersion: "synthetic"
-        )
-        let firstValue = try OCRBlock(
-            sourceID: firstSource.id,
-            attachmentID: firstAttachment.id,
-            filePageNumber: 1,
-            text: "2026-07-18",
-            boundingBox: NormalizedRect(x: 0.22, y: 0.8, width: 0.15, height: 0.04),
-            confidence: 0.99,
-            method: .vision,
-            engineVersion: "synthetic"
-        )
-        let secondLabel = try OCRBlock(
-            sourceID: secondSource.id,
-            attachmentID: secondAttachment.id,
-            filePageNumber: 1,
-            text: "报告日期：",
-            boundingBox: NormalizedRect(x: 0.05, y: 0.8, width: 0.12, height: 0.04),
-            confidence: 0.99,
-            method: .vision,
-            engineVersion: "synthetic"
-        )
-        let secondValue = try OCRBlock(
-            sourceID: secondSource.id,
-            attachmentID: secondAttachment.id,
-            filePageNumber: 1,
-            text: "2026-07-19",
-            boundingBox: NormalizedRect(x: 0.26, y: 0.8, width: 0.15, height: 0.04),
-            confidence: 0.99,
-            method: .vision,
-            engineVersion: "synthetic"
-        )
-        let staleDocument = ImportDraftDocument(
-            blocks: [firstLabel, firstValue, secondLabel, secondValue],
-            candidates: ReportCandidates(),
-            candidateExtractionVersion: nil
-        )
-        let beforeCommit = try VaultCatalog(
-            vaultID: UUID(),
-            generation: 1,
-            members: [member],
-            attachments: [firstAttachment, secondAttachment],
-            importDrafts: [draft]
-        )
-        let committedRecord = try HealthRecord(
-            id: draft.id,
-            memberID: member.id,
-            sources: sources,
-            ocrDocumentObjectID: documentObjectID,
-            importState: .confirmed
-        )
-        let afterCommit = try VaultCatalog(
-            vaultID: beforeCommit.vaultID,
-            generation: 2,
-            members: [member],
-            records: [committedRecord],
-            attachments: [firstAttachment, secondAttachment]
-        )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: beforeCommit),
-            initializedCatalog: beforeCommit,
-            catalogReads: [.success(beforeCommit)],
-            draftDocument: staleDocument,
-            confirmCatalog: afterCommit
-        )
-        let command = ConfirmDraftCommand(
-            draftID: draft.id,
-            expectedRevision: draft.revision,
-            memberID: member.id,
-            timelineDateSelection: .unknown,
-            title: "",
-            organization: "",
-            department: "",
-            reportType: "",
-            reportedResults: "",
-            conclusion: "",
-            abnormalItems: [],
-            userNote: ""
-        )
-
-        _ = try await fixture.service.confirmDraft(command)
-
-        let record = try #require(await fixture.draftStore.lastConfirmedRecord)
-        #expect(record.dateCandidates.count == 2)
-        let firstCandidate = try #require(record.dateCandidates.first {
-            $0.id == firstLabel.id
-        })
-        let secondCandidate = try #require(record.dateCandidates.first {
-            $0.id == secondLabel.id
-        })
-        #expect(firstCandidate.source.transcription == "2026-07-18")
-        #expect(secondCandidate.source.transcription == "2026-07-19")
-        #expect(firstCandidate.source.references.map(\.sourceID) == [
-            firstSource.id,
-            firstSource.id,
-        ])
-        #expect(secondCandidate.source.references.map(\.sourceID) == [
-            secondSource.id,
-            secondSource.id,
-        ])
-        #expect(firstCandidate.source.references.map(\.filePageNumber) == [1, 1])
-        #expect(secondCandidate.source.references.map(\.filePageNumber) == [1, 1])
-        #expect(firstCandidate.source.references.compactMap {
-            $0.logicalPage(in: sources)
-        } == [1, 1])
-        #expect(secondCandidate.source.references.compactMap {
-            $0.logicalPage(in: sources)
-        } == [2, 2])
-    }
-
-    @Test
     func loadReviewShowsRefreshedCandidatesForAnExistingLegacyDraft() async throws {
-        let transaction = try SyntheticDraftTransaction()
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let heading = try OCRBlock(
             pageNumber: 1,
             text: "丨检查结论",
@@ -1176,31 +846,24 @@ struct LiveAppServiceTests {
             method: .vision,
             engineVersion: "synthetic"
         )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [.success(transaction.beforeCommit)],
-            draftDocument: ImportDraftDocument(
+        let transaction = try await LiveServiceReviewDraft.make(fixture, document: ImportDraftDocument(
                 blocks: [heading, body],
                 candidates: ReportCandidates(),
                 candidateExtractionVersion: nil
-            ),
-            readObjectData: Data([1, 2, 3, 4])
-        )
+            ), original: Data([1, 2, 3, 4]))
+        let service = liveService(fixture)
 
-        let review = try await fixture.service.loadReview(draftID: transaction.draft.id)
+        let review = try await service.loadReview(draftID: transaction.draft.id)
 
         #expect(review.document.candidates.conclusion?.transcription == "Synthetic refreshed conclusion")
         #expect(review.document.candidates.conclusion?.references.map(\.blockID) == [body.id])
         #expect(review.original.data == Data([1, 2, 3, 4]))
-        #expect(await fixture.draftStore.loadReviewSnapshotCallCount == 1)
-        #expect(await fixture.draftStore.loadDocumentCallCount == 0)
-        #expect(await fixture.vault.callCounts.loadCatalog == 1)
     }
 
     @Test
     func loadReviewRefreshesCandidatesFromThePreviousExtractionVersion() async throws {
-        let transaction = try SyntheticDraftTransaction()
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let findingHeading = try OCRBlock(
             pageNumber: 1,
             text: "放射学表现",
@@ -1241,19 +904,14 @@ struct LiveAppServiceTests {
             method: .vision,
             engineVersion: "synthetic"
         )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [.success(transaction.beforeCommit)],
-            draftDocument: ImportDraftDocument(
+        let transaction = try await LiveServiceReviewDraft.make(fixture, document: ImportDraftDocument(
                 blocks: [findingHeading, findingBody, conclusionHeading, conclusionBody, examinationTime],
                 candidates: ReportCandidates(),
                 candidateExtractionVersion: ReportCandidateExtractor.extractionVersion - 1
-            ),
-            readObjectData: Data([1, 2, 3, 4])
-        )
+            ), original: Data([1, 2, 3, 4]))
+        let service = liveService(fixture)
 
-        let review = try await fixture.service.loadReview(draftID: transaction.draft.id)
+        let review = try await service.loadReview(draftID: transaction.draft.id)
 
         #expect(review.document.candidateExtractionVersion == ReportCandidateExtractor.extractionVersion)
         #expect(review.document.candidates.reportedResults?.transcription == "Synthetic refreshed finding")
@@ -1263,7 +921,8 @@ struct LiveAppServiceTests {
 
     @Test
     func loadReviewPreservesPopulatedLegacyCandidatesOverReextraction() async throws {
-        let transaction = try SyntheticDraftTransaction()
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let heading = try OCRBlock(
             pageNumber: 1,
             text: "丨检查结论",
@@ -1311,11 +970,7 @@ struct LiveAppServiceTests {
                 references: [storedReference]
             )
         )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [.success(transaction.beforeCommit)],
-            draftDocument: ImportDraftDocument(
+        let transaction = try await LiveServiceReviewDraft.make(fixture, document: ImportDraftDocument(
                 blocks: [heading, body, dateBlock],
                 candidates: ReportCandidates(
                     dateCandidates: [storedDateCandidate],
@@ -1323,22 +978,32 @@ struct LiveAppServiceTests {
                     conclusion: storedConclusion
                 ),
                 candidateExtractionVersion: nil
-            ),
-            readObjectData: Data([1, 2, 3, 4])
-        )
+            ), original: Data([1, 2, 3, 4]))
+        let service = liveService(fixture)
 
-        let review = try await fixture.service.loadReview(draftID: transaction.draft.id)
+        let review = try await service.loadReview(draftID: transaction.draft.id)
 
         #expect(review.document.candidates.reportedResults == storedResults)
         #expect(review.document.candidates.reportedResults?.entryMethod == .manual)
-        #expect(review.document.candidates.conclusion == storedConclusion)
-        #expect(review.document.candidates.conclusion?.references == [storedReference])
-        #expect(review.document.candidates.dateCandidates == [storedDateCandidate])
+        // The library keeps references attributed to the draft's source; the stored text and
+        // the block each field points at are what the review must preserve.
+        let sources = transaction.draft.sources
+        let attributedConclusion = try storedConclusion.attributedAndValidated(for: sources)
+        #expect(review.document.candidates.conclusion == attributedConclusion)
+        #expect(review.document.candidates.conclusion?.transcription == "Synthetic corrected conclusion")
+        #expect(review.document.candidates.conclusion?.references.map(\.blockID) == [body.id])
+        #expect(review.document.candidates.dateCandidates == [ReportDateCandidate(
+            id: storedDateCandidate.id,
+            date: storedDateCandidate.date,
+            kind: storedDateCandidate.kind,
+            source: try storedDateCandidate.source.attributedAndValidated(for: sources)
+        )])
     }
 
     @Test
     func explicitRecognitionRerunsOCRAndPersistsRecognizedValuesOverSavedEdits() async throws {
-        let transaction = try SyntheticDraftTransaction()
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let blocks = try [
             OCRBlock(
                 pageNumber: 1,
@@ -1381,7 +1046,7 @@ struct LiveAppServiceTests {
                 engineVersion: "synthetic"
             ),
         ]
-        let extractor = LiveAppServiceTextExtractorStub(blocks: blocks)
+        let extractor = LiveServiceRecordingExtractor(blocks: blocks)
         let oldDocument = ImportDraftDocument(
             blocks: [],
             candidates: ReportCandidates(),
@@ -1398,19 +1063,10 @@ struct LiveAppServiceTests {
             )
         )
         let manualDate = Date(timeIntervalSince1970: 1_784_419_200)
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [
-                .success(transaction.beforeCommit),
-                .success(transaction.beforeCommit),
-            ],
-            draftDocument: oldDocument,
-            readObjectDataByID: [transaction.attachment.id: Data([1, 2, 3, 4])],
-            textExtractor: extractor
-        )
+        let transaction = try await LiveServiceReviewDraft.make(fixture, document: oldDocument, original: Data([1, 2, 3, 4]))
+        let service = liveService(fixture, extractor: extractor)
 
-        let recognized = try await fixture.service.recognizeReview(RecognizeReviewCommand(
+        let recognized = try await service.recognizeReview(RecognizeReviewCommand(
             draftID: transaction.draft.id,
             expectedRevision: transaction.draft.revision,
             memberID: transaction.member.id,
@@ -1431,1023 +1087,453 @@ struct LiveAppServiceTests {
             return
         }
         #expect(persistedDate == ReportDateSemantics.canonicalDate(from: manualDate))
-        #expect(await fixture.draftStore.lastSavedReviewMemberID == transaction.member.id)
-        #expect(await fixture.draftStore.lastSavedReviewDocument == recognized.document)
-        #expect(await fixture.draftStore.lastSavedReviewExpectedRevision == transaction.draft.revision)
+        let saved = try await fixture.reports.draft(transaction.draft.id)
+        #expect(saved.memberID == transaction.member.id && saved.revision == transaction.draft.revision + 1)
+        #expect(try await fixture.reports.loadDocument(draftID: transaction.draft.id) == recognized.document)
         #expect(await extractor.files.map(\.data) == [Data([1, 2, 3, 4])])
         #expect(recognized.document.blocks.allSatisfy {
             $0.sourceID == transaction.draft.sources.first.id
-                && $0.attachmentID == transaction.attachment.id
+                && $0.attachmentID == transaction.draft.sources.first.attachmentID
         })
     }
 
     @Test
     func discardDraftLoadsTheSnapshotAfterTheStoreCommits() async throws {
-        let transaction = try SyntheticDraftTransaction()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            discardCatalog: transaction.afterCommit
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let transaction = try await LiveServiceReviewDraft.make(fixture)
+        let service = liveService(fixture)
 
         let command = DiscardDraftCommand(
             draftID: transaction.draft.id,
             expectedRevision: transaction.draft.revision
         )
-        let snapshot = try await fixture.service.discardDraft(command)
+        let snapshot = try await service.discardDraft(command)
 
-        #expect(try await fixture.service.reportPage(query: "", memberID: nil, cursor: nil).items.map(\.id) == [transaction.committedRecord.id])
-        #expect(snapshot.draftCount == 0)
-        #expect(await fixture.draftStore.discardCallCount == 1)
-        #expect(await fixture.draftStore.lastDiscardedDraftID == command.draftID)
-        #expect(await fixture.draftStore.lastDiscardedExpectedRevision == command.expectedRevision)
-        let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.loadCatalog == 2)
-        #expect(vaultCalls.commit == 0)
+        #expect(try await service.reportPage(query: "", memberID: nil, cursor: nil).items.isEmpty)
+        #expect(snapshot.draftCount == 0 && snapshot.reportCount == 0)
+        await #expect(throws: (any Error).self) { try await fixture.reports.draft(transaction.draft.id) }
     }
 
     @Test
-    func refreshProjectsOnlyConfirmedRecordsFromTheCatalog() async throws {
-        let projection = try SyntheticRecordProjection()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: projection.catalog),
-            initializedCatalog: projection.catalog,
-            catalogReads: [.success(projection.catalog)]
-        )
+    func confirmDraftReextractsStaleMultiSourceOCRWithoutConflatingFileLocalPages() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let member = try FamilyMember(displayName: "Synthetic member")
+        try await fixture.reports.saveMember(member, replacing: nil)
+        var labels: [OCRBlock] = []
+        // Both files carry their date on their own first page.
+        let draft = try await multiSourceReviewDraft(fixture, files: [
+            .init(data: Data("synthetic first page".utf8), name: "synthetic-first.png"),
+            .init(data: Data("synthetic second page".utf8), name: "synthetic-second.png"),
+        ]) { sources in
+            var blocks: [OCRBlock] = []
+            for (source, value) in zip(sources.elements, ["2026-07-18", "2026-07-19"]) {
+                let label = try OCRBlock(
+                    sourceID: source.id, attachmentID: source.attachmentID, filePageNumber: 1,
+                    text: "报告日期：",
+                    boundingBox: NormalizedRect(x: 0.05, y: 0.8, width: 0.12, height: 0.04),
+                    confidence: 0.99, method: .vision, engineVersion: "synthetic")
+                labels.append(label)
+                blocks.append(label)
+                blocks.append(try OCRBlock(
+                    sourceID: source.id, attachmentID: source.attachmentID, filePageNumber: 1,
+                    text: value,
+                    boundingBox: NormalizedRect(x: 0.22, y: 0.8, width: 0.15, height: 0.04),
+                    confidence: 0.99, method: .vision, engineVersion: "synthetic"))
+            }
+            return ImportDraftDocument(blocks: blocks, candidates: ReportCandidates(), candidateExtractionVersion: nil)
+        }
+        let sources = draft.sources
+        let command = ConfirmDraftCommand(
+            draftID: draft.id, expectedRevision: draft.revision, memberID: member.id,
+            timelineDateSelection: .unknown, title: "", organization: "", department: "", reportType: "",
+            reportedResults: "", conclusion: "", abnormalItems: [], userNote: "")
 
-        _ = try await fixture.service.refresh()
+        _ = try await liveService(fixture).confirmDraft(command)
 
-        #expect(try await fixture.service.reportPage(query: "", memberID: nil, cursor: nil).items.map(\.id) == [projection.confirmed.id])
-        #expect(try await !fixture.service.reportPage(query: "", memberID: nil, cursor: nil).items.contains { $0.id == projection.needsReview.id })
-        #expect(await fixture.vault.callCounts.loadCatalog == 3)
+        let record = try await fixture.reports.record(draft.id)
+        #expect(record.dateCandidates.count == 2)
+        let firstCandidate = try #require(record.dateCandidates.first { $0.id == labels[0].id })
+        let secondCandidate = try #require(record.dateCandidates.first { $0.id == labels[1].id })
+        #expect(firstCandidate.source.transcription == "2026-07-18")
+        #expect(secondCandidate.source.transcription == "2026-07-19")
+        #expect(firstCandidate.source.references.map(\.sourceID) == [sources.elements[0].id, sources.elements[0].id])
+        #expect(secondCandidate.source.references.map(\.sourceID) == [sources.elements[1].id, sources.elements[1].id])
+        #expect(firstCandidate.source.references.map(\.filePageNumber) == [1, 1])
+        #expect(secondCandidate.source.references.map(\.filePageNumber) == [1, 1])
+        #expect(firstCandidate.source.references.compactMap { $0.logicalPage(in: sources) } == [1, 1])
+        #expect(secondCandidate.source.references.compactMap { $0.logicalPage(in: sources) } == [2, 2])
+    }
+
+    // MARK: Confirmed records and their originals
+
+    @Test
+    func reportPageListsConfirmedReportsAndNeverADraftWaitingForReview() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let waiting = try await LiveServiceReviewDraft.make(fixture)
+        let confirmed = try await fixture.confirmed(member: waiting.member, seed: "synthetic confirmed report")
+        let service = liveService(fixture)
+
+        let snapshot = try await service.refresh()
+
+        #expect(try await service.reportPage(query: "", memberID: nil, cursor: nil).items.map(\.id) == [confirmed.id])
+        #expect(snapshot.reportCount == 1 && snapshot.draftCount == 1)
+        #expect(try await service.draftPage(states: [.needsReview], cursor: nil).items.map(\.id) == [waiting.draft.id])
     }
 
     @Test
     func updateRecordCanReplaceUnknownDateAndMissingFieldsWithManualValues() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let member = try FamilyMember(displayName: "Synthetic member")
-        let attachment = try Attachment(
-            contentTypeIdentifier: "public.png",
-            byteCount: 4,
-            sha256Digest: Data(repeating: 0x44, count: 32)
-        )
-        let record = try HealthRecord(
-            memberID: member.id,
-            attachmentID: attachment.id,
-            importState: .confirmed
-        )
-        let catalog = try VaultCatalog(
-            vaultID: UUID(),
-            generation: 1,
-            members: [member],
-            records: [record],
-            attachments: [attachment]
-        )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: catalog),
-            initializedCatalog: catalog,
-            catalogReads: [.success(catalog)]
-        )
+        try await fixture.reports.saveMember(member, replacing: nil)
+        let draft = try await LiveServiceReviewDraft.make(fixture, member: member)
+        let service = liveService(fixture)
+        _ = try await service.confirmDraft(draft.confirmCommand)
+        let record = try await fixture.reports.record(draft.draft.id)
         let manualDate = Date(timeIntervalSince1970: 1_784_332_800)
 
-        _ = try await fixture.service.updateRecord(UpdateRecordCommand(
-            recordID: record.id,
-            expectedRevision: record.revision,
-            memberID: member.id,
-            timelineDateSelection: .manual(manualDate),
-            title: "",
-            organization: "",
-            department: "",
-            reportType: "",
-            reportedResults: "Manual result",
-            conclusion: "Manual conclusion",
-            abnormalItems: [],
-            userNote: ""
-        ))
+        _ = try await service.updateRecord(UpdateRecordCommand(
+            recordID: record.id, expectedRevision: record.revision, memberID: member.id,
+            timelineDateSelection: .manual(manualDate), title: "", organization: "", department: "", reportType: "",
+            reportedResults: "Manual result", conclusion: "Manual conclusion", abnormalItems: [], userNote: ""))
 
-        let updated = try #require(try await fixture.service.loadRecords(ids: [record.id]).records.first)
+        let updated = try #require(try await service.loadRecords(ids: [record.id]).records.first)
         #expect(updated.timelineDateCandidate?.source.entryMethod == .manual)
         #expect(updated.reportedResults?.entryMethod == .manual)
         #expect(updated.reportedResults?.transcription == "Manual result")
         #expect(updated.conclusion?.entryMethod == .manual)
-        #expect(await fixture.vault.callCounts.commit == 1)
+        #expect(updated.revision == record.revision + 1)
     }
 
     @Test
     func updateRecordRejectsAnUnknownDetectedDateCandidate() async throws {
-        let projection = try SyntheticRecordProjection()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: projection.catalog),
-            initializedCatalog: projection.catalog,
-            catalogReads: [.success(projection.catalog)]
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let member = try FamilyMember(displayName: "Synthetic member")
+        try await fixture.reports.saveMember(member, replacing: nil)
+        let record = try await fixture.confirmed(member: member, seed: "synthetic unknown date candidate")
+        let service = liveService(fixture)
 
         await #expect(throws: AppServiceError.invalidReview) {
-            try await fixture.service.updateRecord(UpdateRecordCommand(
-                recordID: projection.confirmed.id,
-                expectedRevision: projection.confirmed.revision,
-                memberID: projection.confirmed.memberID,
-                timelineDateSelection: .detected(UUID()),
-                title: "",
-                organization: "",
-                department: "",
-                reportType: "",
-                reportedResults: "",
-                conclusion: "",
-                abnormalItems: [],
-                userNote: ""
-            ))
+            try await service.updateRecord(UpdateRecordCommand(
+                recordID: record.id, expectedRevision: record.revision, memberID: member.id,
+                timelineDateSelection: .detected(UUID()), title: "", organization: "", department: "", reportType: "",
+                reportedResults: "", conclusion: "", abnormalItems: [], userNote: ""))
         }
 
-        #expect(await fixture.vault.callCounts.commit == 0)
-    }
-
-    @Test
-    func updateRecordRejectsRevisionExhaustionWithoutCommitting() async throws {
-        let member = try FamilyMember(displayName: "Synthetic member")
-        let attachment = try Attachment(
-            contentTypeIdentifier: "public.png",
-            byteCount: 4,
-            sha256Digest: Data(repeating: 0x73, count: 32)
-        )
-        let record = try HealthRecord(
-            memberID: member.id,
-            attachmentID: attachment.id,
-            importState: .confirmed,
-            revision: UInt64.max
-        )
-        let catalog = try VaultCatalog(
-            vaultID: UUID(),
-            generation: 1,
-            members: [member],
-            records: [record],
-            attachments: [attachment]
-        )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: catalog),
-            initializedCatalog: catalog,
-            catalogReads: [.success(catalog)]
-        )
-
-        await #expect(throws: AppServiceError.recordChanged) {
-            try await fixture.service.updateRecord(UpdateRecordCommand(
-                recordID: record.id,
-                expectedRevision: record.revision,
-                memberID: member.id,
-                timelineDateSelection: .unknown,
-                title: "",
-                organization: "",
-                department: "",
-                reportType: "",
-                reportedResults: "",
-                conclusion: "",
-                abnormalItems: [],
-                userNote: ""
-            ))
-        }
-
-        #expect(await fixture.vault.callCounts.commit == 0)
+        #expect(try await fixture.reports.record(record.id) == record)
     }
 
     @Test
     func staleRecordEditFromAnotherServiceCannotOverwriteTheNewerSave() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "kinlogue-stale-record-edit-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        defer { try? FileManager.default.removeItem(at: root) }
-        let seedVault = try PlaintextVault(rootURL: root)
-        let initial = try await seedVault.initialize()
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let member = try FamilyMember(displayName: "Synthetic member")
-        let attachmentBytes = Data(repeating: 0x74, count: 4)
-        let attachment = try Attachment(
-            contentTypeIdentifier: "public.png",
-            byteCount: attachmentBytes.count,
-            sha256Digest: ContentDigest.sha256(attachmentBytes)
-        )
-        let record = try HealthRecord(
-            memberID: member.id,
-            attachmentID: attachment.id,
-            importState: .confirmed,
-            title: try .manualEntry("Original title")
-        )
-        _ = try await seedVault.commit(try VaultCommitRequest(
-            expectedGeneration: initial.generation,
-            catalog: try VaultCatalog(
-                vaultID: initial.vaultID,
-                generation: initial.generation + 1,
-                members: [member],
-                records: [record],
-                attachments: [attachment]
-            ),
-            writes: [VaultObjectWrite(
-                reference: VaultObjectReference(id: attachment.id, kind: .attachment),
-                plaintext: attachmentBytes
-            )]
-        ))
-        let first = try makeRealDataService(rootURL: root)
-        let stale = try makeRealDataService(rootURL: root)
-        let firstCommand = UpdateRecordCommand(
-            recordID: record.id,
-            expectedRevision: record.revision,
-            memberID: member.id,
-            timelineDateSelection: .unknown,
-            title: "First saved title",
-            organization: "",
-            department: "",
-            reportType: "",
-            reportedResults: "",
-            conclusion: "",
-            abnormalItems: [],
-            userNote: ""
-        )
-        let staleCommand = UpdateRecordCommand(
-            recordID: record.id,
-            expectedRevision: record.revision,
-            memberID: member.id,
-            timelineDateSelection: .unknown,
-            title: "Stale overwritten title",
-            organization: "",
-            department: "",
-            reportType: "",
-            reportedResults: "",
-            conclusion: "",
-            abnormalItems: [],
-            userNote: ""
-        )
-
-        let firstSnapshot = try await first.updateRecord(firstCommand)
-        #expect(firstSnapshot.reportCount == 1)
-        #expect(try await first.loadRecords(ids: [record.id]).records.first?.revision == record.revision + 1)
-        await #expect(throws: AppServiceError.recordChanged) {
-            try await stale.updateRecord(staleCommand)
+        try await fixture.reports.saveMember(member, replacing: nil)
+        let record = try await fixture.confirmed(member: member, seed: "synthetic stale edit")
+        let first = liveService(fixture)
+        let stale = liveService(fixture)
+        func command(title: String) -> UpdateRecordCommand {
+            UpdateRecordCommand(
+                recordID: record.id, expectedRevision: record.revision, memberID: member.id,
+                timelineDateSelection: .unknown, title: title, organization: "", department: "", reportType: "",
+                reportedResults: "", conclusion: "", abnormalItems: [], userNote: "")
         }
 
-        let persisted = try #require(
-            try await PlaintextVault(rootURL: root).loadCatalog().records.first
-        )
+        let firstSnapshot = try await first.updateRecord(command(title: "First saved title"))
+        #expect(firstSnapshot.reportCount == 1)
+        #expect(try await first.loadRecords(ids: [record.id]).records.first?.revision == record.revision + 1)
+
+        await #expect(throws: AppServiceError.recordChanged) {
+            try await stale.updateRecord(command(title: "Stale overwritten title"))
+        }
+
+        let persisted = try await fixture.reports.record(record.id)
         #expect(persisted.title?.transcription == "First saved title")
         #expect(persisted.revision == record.revision + 1)
     }
 
     @Test
-    func originalLoadingRejectsAnUnconfirmedRecordBeforeReadingItsObject() async throws {
-        let projection = try SyntheticRecordProjection()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: projection.catalog),
-            initializedCatalog: projection.catalog,
-            catalogReads: [.success(projection.catalog)]
-        )
+    func originalLoadingRejectsADraftBeforeReadingAnyOriginal() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let waiting = try await LiveServiceReviewDraft.make(fixture)
+        let service = liveService(fixture)
+        let library = try await service.refresh().revision
+        let readBefore = fixture.store.originalReadMetrics.verifiedReadByteCount
 
-        await #expect(throws: AppServiceError.recordUnavailable) {
-            try await fixture.service.loadTestOriginal(
-                recordID: projection.needsReview.id,
-                sourceID: projection.needsReview.sources.first.id
-            )
+        // A draft is not a record, even though a confirmed record would take over its identifier.
+        await #expect(throws: (any Error).self) {
+            _ = try await service.loadOriginal(
+                recordID: waiting.draft.id, sourceID: waiting.draft.sources.first.id,
+                expectedRevision: waiting.draft.revision, expectedLibrary: library)
         }
 
-        #expect(await fixture.vault.callCounts.loadCatalog == 1)
+        #expect(fixture.store.originalReadMetrics.verifiedReadByteCount == readBefore)
     }
 
     @Test
     func orderedOriginalLoadingReadsTheExactSelectedSource() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
         let member = try FamilyMember(displayName: "Synthetic member")
-        let firstAttachment = try Attachment(
-            contentTypeIdentifier: "public.png",
-            byteCount: 1,
-            sha256Digest: Data(repeating: 0x31, count: 32)
-        )
-        let secondAttachment = try Attachment(
-            contentTypeIdentifier: "com.adobe.pdf",
-            byteCount: 1,
-            sha256Digest: Data(repeating: 0x32, count: 32)
-        )
-        let firstSource = try ReportSource(
-            attachmentID: firstAttachment.id,
-            displayName: "first.png",
-            pageCount: 1
-        )
-        let secondSource = try ReportSource(
-            attachmentID: secondAttachment.id,
-            displayName: "second.pdf",
-            pageCount: 2
-        )
-        let record = try HealthRecord(
-            memberID: member.id,
-            sources: ReportSources([firstSource, secondSource]),
-            importState: .confirmed
-        )
-        let catalog = try VaultCatalog(
-            vaultID: UUID(),
-            generation: 1,
-            members: [member],
-            records: [record],
-            attachments: [firstAttachment, secondAttachment]
-        )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: catalog),
-            initializedCatalog: catalog,
-            catalogReads: [.success(catalog), .success(catalog)],
-            readObjectDataByID: [
-                firstAttachment.id: Data([1]),
-                secondAttachment.id: Data([2]),
-            ]
-        )
+        try await fixture.reports.saveMember(member, replacing: nil)
+        let firstBytes = Data([1])
+        let secondBytes = Data(repeating: 2, count: 4_096)
+        let draft = try await multiSourceReviewDraft(fixture, files: [
+            .init(data: firstBytes, name: "first.png"),
+            .init(data: secondBytes, name: "second.pdf", kind: .pdf, contentType: "com.adobe.pdf", pageCount: 2),
+        ]) { _ in ImportDraftDocument(blocks: [], candidates: ReportCandidates()) }
+        try await fixture.reports.confirm(draftID: draft.id, expectedRevision: draft.revision, record: HealthRecord(
+            id: draft.id, memberID: member.id, sources: draft.sources,
+            ocrDocumentObjectID: draft.documentObjectID, importState: .confirmed))
+        let (firstSource, secondSource) = (draft.sources.elements[0], draft.sources.elements[1])
+        let service = liveService(fixture)
+        let metrics = fixture.store.originalReadMetrics
+        let readBefore = metrics.verifiedReadByteCount
 
-        let first = try await fixture.service.loadTestOriginal(
-            recordID: record.id,
-            sourceID: firstSource.id
-        )
-        let second = try await fixture.service.loadTestOriginal(
-            recordID: record.id,
-            sourceID: secondSource.id
-        )
+        let first = try await service.loadTestOriginal(recordID: draft.id, sourceID: firstSource.id)
+        // Only the selected original was read; the other one is far larger than what was read.
+        #expect(metrics.verifiedReadByteCount - readBefore < UInt64(secondBytes.count))
+        let second = try await service.loadTestOriginal(recordID: draft.id, sourceID: secondSource.id)
 
-        #expect(first.data == Data([1]))
+        #expect(first.data == firstBytes)
         #expect(first.sourceID == firstSource.id)
-        #expect(second.data == Data([2]))
+        #expect(second.data == secondBytes)
         #expect(second.sourceID == secondSource.id)
-        #expect(second.attachmentID == secondAttachment.id)
+        #expect(second.attachmentID == secondSource.attachmentID)
         #expect(second.displayName == "second.pdf")
         #expect(second.pageCount == 2)
-        #expect(await fixture.vault.readObjectReferences.map(\.id) == [
-            firstAttachment.id,
-            secondAttachment.id,
-        ])
     }
+
+    // MARK: A store that fails after it committed
 
     @Test
     func confirmDraftReconcilesACommittedExactRecordAfterTheStoreThrows() async throws {
-        let transaction = try SyntheticDraftTransaction()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [
-                .success(transaction.beforeCommit),
-                .success(transaction.afterCommit),
-            ],
-            draftDocument: transaction.document,
-            confirmError: .commitResponseLost
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let transaction = try await LiveServiceReviewDraft.make(fixture)
+        let log = StorageCallLog()
+        let service = liveService(fixture, drafts: InterceptedDraftStore(fixture.reports, after: { call in
+            guard case .confirm = call else { return }
+            await log.append(call.name)
+            throw LiveServiceSyntheticFailure()
+        }))
 
-        let snapshot = try await fixture.service.confirmDraft(
-            transaction.confirmCommand
-        )
+        let snapshot = try await service.confirmDraft(transaction.confirmCommand)
 
-        #expect(try await fixture.service.loadRecords(ids: [transaction.committedRecord.id]).records == [transaction.committedRecord])
-        #expect(snapshot.draftCount == 0)
-        #expect(await fixture.draftStore.confirmCallCount == 1)
-        #expect(await fixture.vault.callCounts.loadCatalog == 5)
+        #expect(try await service.loadRecords(ids: [transaction.draft.id]).records.map(\.id) == [transaction.draft.id])
+        #expect(snapshot.draftCount == 0 && snapshot.reportCount == 1)
+        #expect(await log.values == ["confirm"])
     }
 
     @Test
     func confirmDraftRethrowsWhenReconciliationRecordIsNotAnExactMatch() async throws {
-        let transaction = try SyntheticDraftTransaction()
-        let mismatchedRecord = try HealthRecord(
-            id: transaction.draft.id,
-            memberID: transaction.member.id,
-            attachmentID: transaction.attachment.id,
-            ocrDocumentObjectID: transaction.draft.documentObjectID,
-            importState: .confirmed,
-            conclusion: try SourceField(originalTranscription: "Synthetic mismatch")
-        )
-        let mismatchedCatalog = try VaultCatalog(
-            vaultID: transaction.beforeCommit.vaultID,
-            generation: 2,
-            members: [transaction.member],
-            records: [mismatchedRecord],
-            attachments: [transaction.attachment]
-        )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [
-                .success(transaction.beforeCommit),
-                .success(mismatchedCatalog),
-            ],
-            draftDocument: transaction.document,
-            confirmError: .commitResponseLost
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let transaction = try await LiveServiceReviewDraft.make(fixture)
+        // Something else confirms the draft with different content just before this confirmation fails.
+        let mismatched = try HealthRecord(
+            id: transaction.draft.id, memberID: transaction.member.id, sources: transaction.draft.sources,
+            ocrDocumentObjectID: transaction.draft.documentObjectID, importState: .confirmed,
+            conclusion: try SourceField.manualEntry("Synthetic mismatch"))
+        let service = liveService(fixture, drafts: InterceptedDraftStore(fixture.reports, before: { call in
+            guard case .confirm = call else { return }
+            try await fixture.reports.confirm(draftID: transaction.draft.id, expectedRevision: transaction.draft.revision, record: mismatched)
+            throw LiveServiceSyntheticFailure()
+        }))
 
-        await #expect(throws: LiveAppServiceFixtureError.commitResponseLost) {
-            try await fixture.service.confirmDraft(transaction.confirmCommand)
+        await #expect(throws: LiveServiceSyntheticFailure.self) {
+            try await service.confirmDraft(transaction.confirmCommand)
         }
 
-        #expect(await fixture.draftStore.confirmCallCount == 1)
-        #expect(await fixture.vault.callCounts.loadCatalog == 3)
+        #expect(try await fixture.reports.record(transaction.draft.id) == mismatched)
     }
 
     @Test
     func discardDraftReconcilesSuccessWhenNeitherDraftNorSameIDRecordRemains() async throws {
-        let transaction = try SyntheticDraftTransaction()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [.success(transaction.afterDiscard)],
-            discardError: .commitResponseLost
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let transaction = try await LiveServiceReviewDraft.make(fixture)
+        let service = liveService(fixture, drafts: InterceptedDraftStore(fixture.reports, after: { call in
+            if case .discard = call { throw LiveServiceSyntheticFailure() }
+        }))
 
-        let snapshot = try await fixture.service.discardDraft(DiscardDraftCommand(
+        let snapshot = try await service.discardDraft(DiscardDraftCommand(
             draftID: transaction.draft.id,
             expectedRevision: transaction.draft.revision
         ))
 
         #expect(snapshot.reportCount == 0)
         #expect(snapshot.draftCount == 0)
-        #expect(await fixture.draftStore.discardCallCount == 1)
-        #expect(await fixture.vault.callCounts.loadCatalog == 2)
     }
 
     @Test
     func discardDraftRethrowsWhenAConfirmedRecordWithTheDraftIDExists() async throws {
-        let transaction = try SyntheticDraftTransaction()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: transaction.beforeCommit),
-            initializedCatalog: transaction.beforeCommit,
-            catalogReads: [.success(transaction.afterCommit)],
-            discardError: .commitResponseLost
-        )
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let transaction = try await LiveServiceReviewDraft.make(fixture)
+        let confirmed = try HealthRecord(
+            id: transaction.draft.id, memberID: transaction.member.id, sources: transaction.draft.sources,
+            ocrDocumentObjectID: transaction.draft.documentObjectID, importState: .confirmed)
+        let service = liveService(fixture, drafts: InterceptedDraftStore(fixture.reports, before: { call in
+            guard case .discard = call else { return }
+            try await fixture.reports.confirm(draftID: transaction.draft.id, expectedRevision: transaction.draft.revision, record: confirmed)
+            throw LiveServiceSyntheticFailure()
+        }))
 
-        await #expect(throws: LiveAppServiceFixtureError.commitResponseLost) {
-            try await fixture.service.discardDraft(DiscardDraftCommand(
+        await #expect(throws: LiveServiceSyntheticFailure.self) {
+            try await service.discardDraft(DiscardDraftCommand(
                 draftID: transaction.draft.id,
                 expectedRevision: transaction.draft.revision
             ))
         }
 
-        #expect(await fixture.draftStore.discardCallCount == 1)
-        #expect(await fixture.vault.callCounts.loadCatalog == 1)
+        #expect(try await fixture.reports.record(transaction.draft.id) == confirmed)
     }
 
     @Test
-    func createMemberReconcilesTheExactAppliedCatalogAfterCommitResponseIsLost() async throws {
-        let catalog = try VaultCatalog(vaultID: UUID(), generation: 1)
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: catalog),
-            initializedCatalog: catalog,
-            catalogReads: [.success(catalog)],
-            commitErrorAfterApplying: true
-        )
-
-        let snapshot = try await fixture.service.createMember(
-            displayName: "Synthetic new member",
-            disambiguationLabel: nil
-        )
-
-        let applied = try #require(await fixture.vault.lastCommitCatalog)
-        #expect(snapshot.generation == 2)
-        #expect(snapshot.members.count == 1)
-        #expect(snapshot.members == applied.members.map(LibraryMemberSummary.init))
-        #expect(snapshot.members.first?.displayName == "Synthetic new member")
-        let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.loadCatalog == 3)
-        #expect(vaultCalls.commit == 1)
-    }
-
-    @Test
-    func deleteRecordReconcilesTheAppliedCatalogAfterCommitResponseIsLost() async throws {
-        let projection = try SyntheticDeletionProjection()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: projection.catalog),
-            initializedCatalog: projection.catalog,
-            catalogReads: [.success(projection.catalog)],
-            commitErrorAfterApplying: true
-        )
-
-        let snapshot = try await fixture.service.deleteRecord(id: projection.record.id)
-
-        #expect(snapshot.reportCount == 0)
-        #expect(try await fixture.service.draftPage(states: [.staging], cursor: nil).items.map(\.id) == [projection.draft.id])
-        let applied = try #require(await fixture.vault.lastCommitCatalog)
-        #expect(applied.records.isEmpty)
-        #expect(applied.attachments == [projection.draftAttachment])
-        let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.loadCatalog == 5)
-        #expect(vaultCalls.commit == 1)
-    }
-
-    @Test
-    func deleteMemberReturnsOnlyReferenceCountsWithoutCommitting() async throws {
-        let projection = try SyntheticDeletionProjection()
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: projection.catalog),
-            initializedCatalog: projection.catalog,
-            catalogReads: [.success(projection.catalog)]
-        )
+    func deleteMemberReturnsOnlyReferenceCountsWithoutChangingTheLibrary() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        let waiting = try await LiveServiceReviewDraft.make(fixture)
+        _ = try await fixture.confirmed(member: waiting.member, seed: "synthetic referenced report")
+        let service = liveService(fixture)
+        // The waiting draft is assigned to the same member, as a saved review does.
+        try await service.deferDraft(DeferDraftCommand(
+            draftID: waiting.draft.id, expectedRevision: waiting.draft.revision, memberID: waiting.member.id,
+            timelineDateSelection: .unknown, title: "", organization: "", department: "", reportType: "",
+            reportedResults: "", conclusion: "", abnormalItems: [], userNote: ""))
+        let before = try await service.refresh()
 
         await #expect(throws: AppServiceError.memberStillReferenced(
             recordCount: 1,
             draftCount: 1
         )) {
-            try await fixture.service.deleteMember(id: projection.member.id)
+            try await service.deleteMember(id: waiting.member.id)
         }
 
-        let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.loadCatalog == 1)
-        #expect(vaultCalls.commit == 0)
-    }
-
-    @Test
-    func deleteUnreferencedMemberReconcilesTheAppliedCatalogAfterResponseLoss() async throws {
-        let projection = try SyntheticDeletionProjection()
-        let catalog = try VaultCatalog(
-            vaultID: projection.catalog.vaultID,
-            generation: projection.catalog.generation,
-            members: [projection.member]
-        )
-        let fixture = try LiveAppServiceFixture(
-            state: try readyState(for: catalog),
-            initializedCatalog: catalog,
-            catalogReads: [.success(catalog)],
-            commitErrorAfterApplying: true
-        )
-
-        let snapshot = try await fixture.service.deleteMember(id: projection.member.id)
-
-        #expect(snapshot.members.isEmpty)
-        #expect(snapshot.reportCount == 0)
-        let vaultCalls = await fixture.vault.callCounts
-        #expect(vaultCalls.loadCatalog == 3)
-        #expect(vaultCalls.commit == 1)
+        #expect(try await service.refresh().revision == before.revision)
     }
 }
 
-private func makeRealDataService(rootURL: URL) throws -> LiveAppService {
-    let vault = try PlaintextVault(rootURL: rootURL)
-    let store = VaultImportDraftStore(vault: vault)
-    let extractor = LiveAppServiceTextExtractorStub()
+// MARK: - Fixture helpers
+
+/// The live service on the fixture's library. `reports` and `drafts` replace the stores the
+/// service talks to; both default to the real repository.
+func liveService(
+    _ fixture: SQLiteAppQueryFixture,
+    reports: (any LibraryReportStoring)? = nil,
+    drafts: (any ImportDraftStore)? = nil,
+    extractor: any TextExtractionService = LiveServiceRecordingExtractor(),
+    startupCompleted: Bool = true,
+    lifecycle: LibraryLifecycleCoordinator? = nil
+) -> LiveAppService {
+    let draftStore = drafts ?? fixture.reports
     return LiveAppService(
-        vault: vault,
-        draftStore: store,
-        workflow: ImportWorkflow(store: store, textExtractor: extractor),
+        reports: reports ?? fixture.reports,
+        studies: fixture.studies,
+        draftStore: draftStore,
+        workflow: ImportWorkflow(store: draftStore, textExtractor: extractor),
         textExtractor: extractor,
-        startupCompleted: true
+        startupCompleted: startupCompleted,
+        lifecycle: lifecycle
     )
 }
 
-private struct LiveAppServiceFixture {
-    let vault: LiveAppServiceVaultStub
-    let draftStore: LiveAppServiceDraftStoreStub
-    let bootstrapCalls: LiveAppServiceBootstrapCallRecorder
-    let service: LiveAppService
+/// Stages one validated file and returns the draft the library made for it.
+func stagedDraft(_ fixture: SQLiteAppQueryFixture, _ data: Data) async throws -> ImportDraft.ID {
+    guard case .created(let id) = try await fixture.reports.stage(ImportedFileValidator().validate(data: data)) else {
+        throw LibraryReportError.invalidDocument
+    }
+    return id
+}
 
-    init(
-        state: VaultAccessState,
-        initializedCatalog: VaultCatalog? = nil,
-        catalogReads: [LiveAppServiceCatalogRead] = [],
-        draftDocument: ImportDraftDocument? = nil,
-        confirmCatalog: VaultCatalog? = nil,
-        discardCatalog: VaultCatalog? = nil,
-        confirmError: LiveAppServiceFixtureError? = nil,
-        discardError: LiveAppServiceFixtureError? = nil,
-        resumableError: LiveAppServiceFixtureError? = nil,
-        resumableDraftIDs: [ImportDraft.ID] = [],
-        beginProcessingError: LiveAppServiceFixtureError? = nil,
-        readObjectData: Data? = nil,
-        readObjectDataByID: [KinlogueCore.Attachment.ID: Data] = [:],
-        textExtractor: any TextExtractionService = LiveAppServiceTextExtractorStub(),
-        commitErrorAfterApplying: Bool = false,
-        requiresBootstrap: Bool = false
-    ) throws {
-        let catalog = try initializedCatalog ?? syntheticCatalog()
-        let bootstrapCalls = LiveAppServiceBootstrapCallRecorder()
-        let vault = LiveAppServiceVaultStub(
-            state: state,
-            initializedCatalog: catalog,
-            catalogReads: catalogReads,
-            readObjectData: readObjectData,
-            readObjectDataByID: readObjectDataByID,
-            commitErrorAfterApplying: commitErrorAfterApplying,
-            bootstrapCalls: bootstrapCalls
-        )
-        let draftStore = LiveAppServiceDraftStoreStub(
-            vault: vault,
-            document: draftDocument,
-            reviewCatalog: catalog,
-            originalData: readObjectData,
-            originalDataByID: readObjectDataByID,
-            confirmCatalog: confirmCatalog,
-            discardCatalog: discardCatalog,
-            confirmError: confirmError,
-            discardError: discardError,
-            resumableError: resumableError,
-            resumableDraftIDs: resumableDraftIDs.isEmpty ? catalog.importDrafts.filter(\.isResumableAfterInterruption).map(\.id) : resumableDraftIDs,
-            beginProcessingError: beginProcessingError
-        )
-        self.vault = vault
-        self.draftStore = draftStore
-        self.bootstrapCalls = bootstrapCalls
-        service = LiveAppService(
-            vault: vault,
-            draftStore: draftStore,
-            workflow: ImportWorkflow(
-                store: draftStore,
-                textExtractor: textExtractor
-            ),
-            textExtractor: textExtractor,
-            startupCompleted: !requiresBootstrap
+/// A member and one draft waiting for review on a real library.
+struct LiveServiceReviewDraft {
+    let member: FamilyMember
+    let draft: ImportDraft
+
+    /// Stages `original`, records `document` as what recognition produced, and returns the draft.
+    static func make(
+        _ fixture: SQLiteAppQueryFixture,
+        member existing: FamilyMember? = nil,
+        document: ImportDraftDocument = ImportDraftDocument(blocks: [], candidates: ReportCandidates()),
+        original: Data = Data("synthetic review original".utf8)
+    ) async throws -> Self {
+        let member: FamilyMember
+        if let existing { member = existing } else {
+            member = try FamilyMember(displayName: "Synthetic member")
+            try await fixture.reports.saveMember(member, replacing: nil)
+        }
+        let file = try ValidatedImportedFile(data: original, kind: .image, contentTypeIdentifier: "public.png",
+                                             sha256Digest: ContentDigest.sha256(original))
+        guard case .created(let id) = try await fixture.reports.stage(file) else { throw LibraryReportError.invalidDocument }
+        let lease = try await fixture.reports.beginProcessing(draftID: id, attemptID: UUID())
+        try await fixture.reports.completeProcessing(lease: lease, document: document)
+        return Self(member: member, draft: try await fixture.reports.draft(id))
+    }
+
+    var confirmCommand: ConfirmDraftCommand {
+        ConfirmDraftCommand(
+            draftID: draft.id,
+            expectedRevision: draft.revision,
+            memberID: member.id,
+            timelineDateSelection: .unknown,
+            title: "",
+            organization: "",
+            department: "",
+            reportType: "",
+            reportedResults: "",
+            conclusion: "",
+            abnormalItems: [],
+            userNote: ""
         )
     }
 }
 
-private enum LiveAppServiceFixtureError: Error, Equatable, Sendable {
-    case catalogRead
-    case commitResponseLost
-    case recoveryRead
-    case recoveryProcessing
-    case unexpectedCall
+/// One original of a draft built by `multiSourceReviewDraft`.
+struct LiveServiceSourceFile {
+    var data: Data
+    var name: String
+    var kind: ImportedContentKind = .image
+    var contentType = "public.png"
+    var pageCount = 1
 }
 
-private enum LiveAppServiceBootstrapCall: Equatable, Sendable {
-    case loadValidatedCatalog
-    case loadCatalog
+/// A draft waiting for review that owns several originals, as an archived phone selection does.
+/// Staging makes one draft per original; this draft takes over all of them and the single
+/// drafts are discarded. `document` receives the sources so its blocks can refer to them.
+func multiSourceReviewDraft(
+    _ fixture: SQLiteAppQueryFixture,
+    files: [LiveServiceSourceFile],
+    document: (ReportSources) throws -> ImportDraftDocument
+) async throws -> ImportDraft {
+    var staged: [ImportDraft] = []
+    for file in files {
+        let validated = try ValidatedImportedFile(data: file.data, kind: file.kind, contentTypeIdentifier: file.contentType,
+                                                  sha256Digest: ContentDigest.sha256(file.data), pageCount: file.pageCount)
+        guard case .created(let id) = try await fixture.reports.stage(validated) else { throw LibraryReportError.invalidDocument }
+        staged.append(try await fixture.reports.draft(id))
+    }
+    let sources = try ReportSources(zip(staged, files).map { single, file in
+        try ReportSource(attachmentID: single.sources.first.attachmentID, displayName: file.name, pageCount: file.pageCount)
+    })
+    let draft = ImportDraft(sources: sources, state: .needsReview, documentObjectID: UUID())
+    let content = try document(sources)
+    try fixture.store.write { db in
+        let digest = try SQLiteReportRows.saveDocument(content, id: draft.documentObjectID!, revision: draft.revision, sources: sources, db)
+        try SQLiteReportRows.saveDraft(draft, documentHash: digest, db, replaceSources: true)
+        try SQLiteLibraryState.advance(in: db)
+    }
+    for single in staged { try await fixture.reports.discard(draftID: single.id, expectedRevision: single.revision) }
+    return draft
 }
 
-private actor LiveAppServiceBootstrapCallRecorder {
-    private(set) var values: [LiveAppServiceBootstrapCall] = []
-
-    func append(_ value: LiveAppServiceBootstrapCall) {
-        values.append(value)
-    }
-}
-
-private enum LiveAppServiceCatalogRead: Sendable {
-    case success(VaultCatalog)
-    case failure(LiveAppServiceFixtureError)
-}
-
-private struct LiveAppServiceVaultCallCounts: Equatable, Sendable {
-    let initialize: Int
-    let loadValidatedCatalog: Int
-    let loadCatalog: Int
-    let commit: Int
-}
-
-private actor LiveAppServiceVaultStub: VaultStore {
-    private let state: VaultAccessState
-    private let initializedCatalog: VaultCatalog
-    private let readObjectData: Data?
-    private let readObjectDataByID: [KinlogueCore.Attachment.ID: Data]
-    private let commitErrorAfterApplying: Bool
-    private let bootstrapCalls: LiveAppServiceBootstrapCallRecorder
-    private let inspectGate: AsyncOperationGate?
-    private var catalogReads: [LiveAppServiceCatalogRead]
-    private var appliedCatalog: VaultCatalog?
-    private(set) var lastCommitCatalog: VaultCatalog?
-    private(set) var readObjectReferences: [VaultObjectReference] = []
-    private var initializeCallCount = 0
-    private var loadValidatedCatalogCallCount = 0
-    private var loadCatalogCallCount = 0
-    private var commitCallCount = 0
-
-    init(
-        state: VaultAccessState,
-        initializedCatalog: VaultCatalog,
-        catalogReads: [LiveAppServiceCatalogRead],
-        readObjectData: Data? = nil,
-        readObjectDataByID: [KinlogueCore.Attachment.ID: Data] = [:],
-        commitErrorAfterApplying: Bool,
-        bootstrapCalls: LiveAppServiceBootstrapCallRecorder,
-        inspectGate: AsyncOperationGate? = nil
-    ) {
-        self.state = state
-        self.initializedCatalog = initializedCatalog
-        self.readObjectData = readObjectData
-        self.readObjectDataByID = readObjectDataByID
-        self.catalogReads = catalogReads
-        self.commitErrorAfterApplying = commitErrorAfterApplying
-        self.bootstrapCalls = bootstrapCalls
-        self.inspectGate = inspectGate
-    }
-
-    var callCounts: LiveAppServiceVaultCallCounts {
-        LiveAppServiceVaultCallCounts(
-            initialize: initializeCallCount,
-            loadValidatedCatalog: loadValidatedCatalogCallCount,
-            loadCatalog: loadCatalogCallCount,
-            commit: commitCallCount
-        )
-    }
-
-    func inspect() async -> VaultAccessState {
-        state
-    }
-
-    func loadValidatedCatalog() async throws -> VaultCatalog {
-        await bootstrapCalls.append(.loadValidatedCatalog)
-        if let inspectGate { await inspectGate.wait() }
-        loadValidatedCatalogCallCount += 1
-        switch state {
-        case .ready:
-            return initializedCatalog
-        case .absent:
-            throw VaultError.vaultMissing
-        case .operationInProgress:
-            throw VaultError.mutationConflict
-        case .legacyEncrypted:
-            throw VaultError.legacyEncryptedVault
-        case .damaged:
-            throw VaultError.invalidCatalog
-        case .unsupportedVersion:
-            throw VaultError.unsupportedVersion(-1)
-        }
-    }
-
-    func initialize() async throws -> VaultCatalog {
-        initializeCallCount += 1
-        return initializedCatalog
-    }
-
-    func loadCatalog() async throws -> VaultCatalog {
-        await bootstrapCalls.append(.loadCatalog)
-        loadCatalogCallCount += 1
-        if !catalogReads.isEmpty {
-            switch catalogReads.removeFirst() {
-            case .success(let catalog): appliedCatalog = catalog; return catalog
-            case .failure(let error): throw error
-            }
-        }
-        if let appliedCatalog { return appliedCatalog }
-        return initializedCatalog
-    }
-
-    func readObject(_ reference: VaultObjectReference) async throws -> Data {
-        readObjectReferences.append(reference)
-        if let data = readObjectDataByID[reference.id] { return data }
-        guard let readObjectData else { throw LiveAppServiceFixtureError.unexpectedCall }
-        return readObjectData
-    }
-
-    func readSnapshot(
-        selecting references: @Sendable (VaultCatalog) throws -> [VaultObjectReference]
-    ) async throws -> VaultReadSnapshot {
-        let catalog = try await loadCatalog()
-        let selected = try references(catalog)
-        guard selected.count <= VaultReadSnapshotPolicy.maximumObjectCount,
-              Set(selected).count == selected.count else {
-            throw VaultError.resourceLimitExceeded
-        }
-        var objects: [VaultObjectReference: Data] = [:]
-        for reference in selected {
-            objects[reference] = try await readObject(reference)
-        }
-        return try VaultReadSnapshot(catalog: catalog, objects: objects)
-    }
-
-    func commit(_ request: VaultCommitRequest) async throws -> VaultCatalog {
-        commitCallCount += 1
-        lastCommitCatalog = request.catalog
-        if commitErrorAfterApplying {
-            appliedCatalog = request.catalog
-            throw LiveAppServiceFixtureError.commitResponseLost
-        }
-        appliedCatalog = request.catalog
-        return request.catalog
-    }
-
-    func applyDraftCommit(_ catalog: VaultCatalog) { appliedCatalog = catalog }
-
-    func destroy() async throws {}
-}
-
-private actor LiveAppServiceDraftStoreStub: ImportDraftStore {
-    private let vault: LiveAppServiceVaultStub?
-    private let document: ImportDraftDocument?
-    private let reviewSnapshot: ImportDraftReviewSnapshot?
-    private let confirmCatalog: VaultCatalog?
-    private let discardCatalog: VaultCatalog?
-    private let confirmError: LiveAppServiceFixtureError?
-    private let discardError: LiveAppServiceFixtureError?
-    private let resumableError: LiveAppServiceFixtureError?
-    private let resumableDraftIDs: [ImportDraft.ID]
-    private let beginProcessingError: LiveAppServiceFixtureError?
-    private(set) var resumableCallCount = 0
-    private(set) var beginProcessingCallCount = 0
-    private(set) var loadDocumentCallCount = 0
-    private(set) var loadReviewSnapshotCallCount = 0
-    private(set) var confirmCallCount = 0
-    private(set) var discardCallCount = 0
-    private(set) var lastConfirmedRecord: HealthRecord?
-    private(set) var lastConfirmedExpectedRevision: UInt64?
-    private(set) var lastDiscardedDraftID: ImportDraft.ID?
-    private(set) var lastDiscardedExpectedRevision: UInt64?
-    private(set) var lastSavedReviewMemberID: FamilyMember.ID?
-    private(set) var lastSavedReviewState: ImportDraftReviewState?
-    private(set) var lastSavedReviewDocument: ImportDraftDocument?
-    private(set) var lastSavedReviewExpectedRevision: UInt64?
-
-    init(
-        vault: LiveAppServiceVaultStub? = nil,
-        document: ImportDraftDocument? = nil,
-        reviewCatalog: VaultCatalog? = nil,
-        originalData: Data? = nil,
-        originalDataByID: [KinlogueCore.Attachment.ID: Data] = [:],
-        confirmCatalog: VaultCatalog? = nil,
-        discardCatalog: VaultCatalog? = nil,
-        confirmError: LiveAppServiceFixtureError? = nil,
-        discardError: LiveAppServiceFixtureError? = nil,
-        resumableError: LiveAppServiceFixtureError? = nil,
-        resumableDraftIDs: [ImportDraft.ID] = [],
-        beginProcessingError: LiveAppServiceFixtureError? = nil
-    ) {
-        self.vault = vault
-        self.document = document
-        if let document,
-           let reviewCatalog,
-           let draft = reviewCatalog.importDrafts.first(where: { $0.state == .needsReview }),
-           let attachment = reviewCatalog.attachments.first(where: {
-               $0.id == draft.sources.first.attachmentID
-           }),
-           let data = originalDataByID[attachment.id] ?? originalData {
-            reviewSnapshot = ImportDraftReviewSnapshot(
-                draft: draft,
-                document: document,
-                members: reviewCatalog.members,
-                attachment: attachment,
-                originalData: data
-            )
-        } else {
-            reviewSnapshot = nil
-        }
-        self.confirmCatalog = confirmCatalog
-        self.discardCatalog = discardCatalog
-        self.confirmError = confirmError
-        self.discardError = discardError
-        self.resumableError = resumableError
-        self.resumableDraftIDs = resumableDraftIDs
-        self.beginProcessingError = beginProcessingError
-    }
-
-    func stage(_ file: ValidatedImportedFile) async throws -> ImportStageOutcome {
-        throw LiveAppServiceFixtureError.unexpectedCall
-    }
-
-    func beginProcessing(
-        draftID: ImportDraft.ID,
-        attemptID: UUID
-    ) async throws -> ImportProcessingLease {
-        beginProcessingCallCount += 1
-        if let beginProcessingError { throw beginProcessingError }
-        throw LiveAppServiceFixtureError.unexpectedCall
-    }
-
-    func loadSource(draftID: ImportDraft.ID) async throws -> ValidatedImportedFile {
-        throw LiveAppServiceFixtureError.unexpectedCall
-    }
-
-    func completeProcessing(
-        lease: ImportProcessingLease,
-        document: ImportDraftDocument
-    ) async throws {
-        throw LiveAppServiceFixtureError.unexpectedCall
-    }
-
-    func failProcessing(
-        lease: ImportProcessingLease,
-        failureCode: ImportFailureCode
-    ) async throws {
-        throw LiveAppServiceFixtureError.unexpectedCall
-    }
-
-    func resumableDraftIDs() async throws -> [ImportDraft.ID] {
-        resumableCallCount += 1
-        if let resumableError { throw resumableError }
-        return resumableDraftIDs
-    }
-
-    func loadDocument(draftID: ImportDraft.ID) async throws -> ImportDraftDocument {
-        loadDocumentCallCount += 1
-        guard let document else { throw LiveAppServiceFixtureError.unexpectedCall }
-        return document
-    }
-
-    func loadReviewSnapshot(
-        draftID: ImportDraft.ID
-    ) async throws -> ImportDraftReviewSnapshot {
-        loadReviewSnapshotCallCount += 1
-        guard let reviewSnapshot, reviewSnapshot.draft.id == draftID else {
-            throw LiveAppServiceFixtureError.unexpectedCall
-        }
-        return reviewSnapshot
-    }
-
-    func saveReview(
-        draftID: ImportDraft.ID,
-        expectedRevision: UInt64,
-        memberID: FamilyMember.ID?,
-        document: ImportDraftDocument
-    ) async throws {
-        lastSavedReviewMemberID = memberID
-        lastSavedReviewState = document.reviewState
-        lastSavedReviewDocument = document
-        lastSavedReviewExpectedRevision = expectedRevision
-    }
-
-    func confirm(
-        draftID: ImportDraft.ID,
-        expectedRevision: UInt64,
-        record: HealthRecord
-    ) async throws {
-        confirmCallCount += 1
-        lastConfirmedExpectedRevision = expectedRevision
-        lastConfirmedRecord = record
-        if let confirmError { throw confirmError }
-        guard let confirmCatalog else { throw LiveAppServiceFixtureError.unexpectedCall }
-        await vault?.applyDraftCommit(confirmCatalog)
-    }
-
-    func discard(
-        draftID: ImportDraft.ID,
-        expectedRevision: UInt64
-    ) async throws {
-        discardCallCount += 1
-        lastDiscardedDraftID = draftID
-        lastDiscardedExpectedRevision = expectedRevision
-        if let discardError { throw discardError }
-        guard let discardCatalog else { throw LiveAppServiceFixtureError.unexpectedCall }
-        await vault?.applyDraftCommit(discardCatalog)
-    }
-}
-
-private actor LiveAppServiceTextExtractorStub: TextExtractionService {
-    private let blocks: [OCRBlock]?
-    private(set) var files: [ValidatedImportedFile] = []
-
-    init(blocks: [OCRBlock]? = nil) {
-        self.blocks = blocks
-    }
-
-    func extractText(from file: ValidatedImportedFile) async throws -> [OCRBlock] {
-        files.append(file)
-        guard let blocks else { throw LiveAppServiceFixtureError.unexpectedCall }
-        return blocks
-    }
-}
-
-private actor RecoveryCommitFailureInjector {
-    let state: ImportState
-    private(set) var failureCount = 0
-    private var failedDraftID: ImportDraft.ID?
-
-    init(state: ImportState) { self.state = state }
-
-    func isRetry(_ draft: ImportDraft) -> Bool {
-        failureCount == 1 && draft.id == failedDraftID && draft.state == .processing
-    }
-
-    func beforeCommit(_ draft: ImportDraft) throws {
-        guard draft.state == state, failureCount < 2,
-              failedDraftID == nil || draft.id == failedDraftID else { return }
-        failedDraftID = draft.id
-        failureCount += 1
-        throw VaultError.ioFailure(5)
-    }
-}
-
-private actor ReportLifecycleTextExtractor: TextExtractionService {
-    private let gate = AsyncOperationGate()
-    private let fails: Bool
-    private(set) var observedCancellation = false
-    private(set) var callCount = 0
-
-    init(fails: Bool = false) { self.fails = fails }
-
-    func extractText(from file: ValidatedImportedFile) async throws -> [OCRBlock] {
-        _ = file
-        callCount += 1
-        await gate.wait()
-        do {
-            try Task.checkCancellation()
-        } catch {
-            observedCancellation = true
-            throw error
-        }
-        if fails && callCount == 1 { throw LiveAppServiceFixtureError.recoveryProcessing }
-        return []
-    }
-
-    func waitUntilEntered() async {
-        guard await gate.waitUntilStarted() else {
-            Issue.record("Timed out waiting for report OCR")
-            return
-        }
-    }
-
-    func resume() async {
-        await gate.open()
-    }
-}
-
-private actor ReportLifecycleCompletionProbe {
-    private(set) var isCompleted = false
-    private(set) var count = 0
-
-    func markCompleted() {
-        isCompleted = true
-        count += 1
-    }
-}
-
-private func reportLifecyclePNG(red: CGFloat = 1) throws -> Data {
+func liveServicePNG(red: CGFloat = 1) throws -> Data {
     let context = try #require(CGContext(
         data: nil,
         width: 8,
@@ -2472,174 +1558,106 @@ private func reportLifecyclePNG(red: CGFloat = 1) throws -> Data {
     return data as Data
 }
 
-private actor LANVaultDestroySpy: VaultDestroyServicing {
+struct LiveServiceSyntheticFailure: Error, Equatable {}
+
+/// Returns fixed blocks and remembers every file it was asked to read. Without blocks it fails,
+/// which marks a test that must not reach recognition.
+actor LiveServiceRecordingExtractor: TextExtractionService {
+    private let blocks: [OCRBlock]?
+    private(set) var files: [ValidatedImportedFile] = []
+
+    init(blocks: [OCRBlock]? = nil) {
+        self.blocks = blocks
+    }
+
+    func extractText(from file: ValidatedImportedFile) async throws -> [OCRBlock] {
+        files.append(file)
+        guard let blocks else { throw LiveServiceSyntheticFailure() }
+        return blocks
+    }
+}
+
+/// Blocks inside recognition until resumed, and records whether it was cancelled meanwhile.
+actor LiveServiceGatedExtractor: TextExtractionService {
+    private let gate = AsyncOperationGate()
+    private let fails: Bool
+    private(set) var observedCancellation = false
+    private(set) var callCount = 0
+
+    init(fails: Bool = false) { self.fails = fails }
+
+    func extractText(from file: ValidatedImportedFile) async throws -> [OCRBlock] {
+        _ = file
+        callCount += 1
+        await gate.wait()
+        do {
+            try Task.checkCancellation()
+        } catch {
+            observedCancellation = true
+            throw error
+        }
+        if fails && callCount == 1 { throw LiveServiceSyntheticFailure() }
+        return []
+    }
+
+    func waitUntilEntered() async {
+        guard await gate.waitUntilStarted() else {
+            Issue.record("Timed out waiting for report OCR")
+            return
+        }
+    }
+
+    func resume() async {
+        await gate.open()
+    }
+}
+
+actor LiveServiceCompletionProbe {
+    private(set) var isCompleted = false
+    private(set) var count = 0
+
+    func markCompleted() {
+        isCompleted = true
+        count += 1
+    }
+}
+
+/// Fails the first two attempts to commit one processing transition of one draft: starting
+/// (`processing`) or completing (`needsReview`). The draft is the first one that reaches it.
+actor LiveServiceCommitFailureInjector {
+    let state: ImportState
+    private(set) var failureCount = 0
+    private(set) var failedDraftID: ImportDraft.ID?
+
+    init(state: ImportState) { self.state = state }
+
+    private func transition(_ call: InterceptedDraftStore.Call) -> (ImportDraft.ID, ImportState)? {
+        switch call {
+        case .beginProcessing(let id): (id, .processing)
+        case .completeProcessing(let id): (id, .needsReview)
+        case .failProcessing(let id): (id, .failed)
+        default: nil
+        }
+    }
+
+    func isRetry(_ call: InterceptedDraftStore.Call) -> Bool {
+        guard let (id, state) = transition(call) else { return false }
+        return failureCount == 1 && id == failedDraftID && state == .processing
+    }
+
+    func beforeCommit(_ call: InterceptedDraftStore.Call) throws {
+        guard let (id, next) = transition(call), next == state, failureCount < 2,
+              failedDraftID == nil || id == failedDraftID else { return }
+        failedDraftID = id
+        failureCount += 1
+        throw LiveServiceSyntheticFailure()
+    }
+}
+
+actor LiveServiceDestroySpy: VaultDestroyServicing {
     private(set) var callCount = 0
 
     func destroyCurrentVault() async throws {
         callCount += 1
     }
-}
-
-private func syntheticCatalog() throws -> VaultCatalog {
-    let member = try FamilyMember(displayName: "Synthetic member")
-    return try VaultCatalog(
-        vaultID: UUID(),
-        generation: 1,
-        members: [member]
-    )
-}
-
-private struct SyntheticDraftTransaction {
-    let member: FamilyMember
-    let attachment: KinlogueCore.Attachment
-    let draft: ImportDraft
-    let document: ImportDraftDocument
-    let committedRecord: HealthRecord
-    let beforeCommit: VaultCatalog
-    let afterCommit: VaultCatalog
-    let afterDiscard: VaultCatalog
-
-    init() throws {
-        let member = try FamilyMember(displayName: "Synthetic member")
-        let attachment = try Attachment(
-            contentTypeIdentifier: "com.adobe.pdf",
-            byteCount: 4,
-            sha256Digest: Data(repeating: 0x12, count: 32)
-        )
-        let documentObjectID = UUID()
-        let draft = ImportDraft(
-            attachmentID: attachment.id,
-            state: .needsReview,
-            documentObjectID: documentObjectID
-        )
-        let committedRecord = try HealthRecord(
-            id: draft.id,
-            memberID: member.id,
-            attachmentID: attachment.id,
-            ocrDocumentObjectID: documentObjectID,
-            importState: .confirmed
-        )
-        self.member = member
-        self.attachment = attachment
-        self.draft = draft
-        document = ImportDraftDocument(blocks: [], candidates: ReportCandidates())
-        self.committedRecord = committedRecord
-        beforeCommit = try VaultCatalog(
-            vaultID: UUID(),
-            generation: 1,
-            members: [member],
-            attachments: [attachment],
-            importDrafts: [draft]
-        )
-        afterCommit = try VaultCatalog(
-            vaultID: beforeCommit.vaultID,
-            generation: 2,
-            members: [member],
-            records: [committedRecord],
-            attachments: [attachment]
-        )
-        afterDiscard = try VaultCatalog(
-            vaultID: beforeCommit.vaultID,
-            generation: 2,
-            members: [member],
-            attachments: [attachment]
-        )
-    }
-
-    var confirmCommand: ConfirmDraftCommand {
-        ConfirmDraftCommand(
-            draftID: draft.id,
-            expectedRevision: draft.revision,
-            memberID: member.id,
-            timelineDateSelection: .unknown,
-            title: "",
-            organization: "",
-            department: "",
-            reportType: "",
-            reportedResults: "",
-            conclusion: "",
-            abnormalItems: [],
-            userNote: ""
-        )
-    }
-}
-
-private struct SyntheticRecordProjection {
-    let confirmed: HealthRecord
-    let needsReview: HealthRecord
-    let catalog: VaultCatalog
-
-    init() throws {
-        let member = try FamilyMember(displayName: "Synthetic member")
-        let attachment = try Attachment(
-            contentTypeIdentifier: "public.jpeg",
-            byteCount: 3,
-            sha256Digest: Data(repeating: 0x34, count: 32)
-        )
-        confirmed = try HealthRecord(
-            memberID: member.id,
-            attachmentID: attachment.id,
-            importState: .confirmed
-        )
-        needsReview = try HealthRecord(
-            memberID: member.id,
-            attachmentID: attachment.id,
-            importState: .needsReview
-        )
-        catalog = try VaultCatalog(
-            vaultID: UUID(),
-            generation: 1,
-            members: [member],
-            records: [needsReview, confirmed],
-            attachments: [attachment]
-        )
-    }
-}
-
-private struct SyntheticDeletionProjection {
-    let member: FamilyMember
-    let recordAttachment: KinlogueCore.Attachment
-    let draftAttachment: KinlogueCore.Attachment
-    let record: HealthRecord
-    let draft: ImportDraft
-    let catalog: VaultCatalog
-
-    init() throws {
-        member = try FamilyMember(displayName: "Synthetic deletion member")
-        recordAttachment = try Attachment(
-            contentTypeIdentifier: "public.jpeg",
-            byteCount: 3,
-            sha256Digest: Data(repeating: 0x61, count: 32)
-        )
-        draftAttachment = try Attachment(
-            contentTypeIdentifier: "public.png",
-            byteCount: 5,
-            sha256Digest: Data(repeating: 0x62, count: 32)
-        )
-        record = try HealthRecord(
-            memberID: member.id,
-            attachmentID: recordAttachment.id,
-            importState: .confirmed
-        )
-        draft = ImportDraft(
-            attachmentID: draftAttachment.id,
-            memberID: member.id
-        )
-        catalog = try VaultCatalog(
-            vaultID: UUID(),
-            generation: 4,
-            members: [member],
-            records: [record],
-            attachments: [recordAttachment, draftAttachment],
-            importDrafts: [draft]
-        )
-    }
-}
-
-private func readyState(for catalog: VaultCatalog) throws -> VaultAccessState {
-    .ready(try VaultRevision(
-        generation: catalog.generation,
-        commitID: UUID(),
-        catalogDigest: Data(repeating: 0xA5, count: 32)
-    ))
 }

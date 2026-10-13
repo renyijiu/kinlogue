@@ -25,7 +25,7 @@ flowchart LR
   DICOMIndex --> Inert["inert retained objects"]
 ```
 
-`VaultCatalog` 是 catalog v3 的单一领域快照，包含 `members`、`records`、`attachments`、`importDrafts` 和独立的 `dicomStudies` 根。原件和 OCR 大对象在 Vault 对象目录中保存，catalog 通过稳定 UUID 引用它们；每个 DICOM study 还通过一个独立 `.record` index 闭合 retained object、Series 和可查看 instance 的关系。
+这些对象保存在[资料库](sqlite-storage.md)的各张表里：成员、报告（含详情与搜索投影）、草稿、来源和 OCR 文档各有自己的行，原件是 `originals/` 下的文件，由来源行按稳定 UUID 引用；每个 DICOM study 的保留对象、Series 和可查看 instance 的关系由规范化的四张表闭合。资料库没有整份的领域快照。
 
 ## 核心对象
 
@@ -36,7 +36,7 @@ flowchart LR
 | `ReportSource` | source row ID、attachment ID、展示名、文件页数 | 页数 > 0；source row ID 独立于 attachment ID。 |
 | `ReportSources` | 一份报告的有序、非空 source rows | 同一 attachment 可以出现多次；每个 attachment 的 page count 必须一致；逻辑页码由顺序动态投影。 |
 | `ImportDraft` | sources、状态、revision、processing attempt、OCR object、可选成员 | 只有 `.needsReview` 可保存/确认；`processing` 用 lease 防止旧任务回写。 |
-| `HealthRecord` | 成员、sources、OCR provenance、字段候选、日期候选、notes、import state、revision | 只有 `.confirmed` 参与正常 timeline/search/comparison；字段引用必须指向现有 source 和合法文件页；编辑必须匹配当前 revision。catalog v3 中缺少 revision 时按 `0` 读取，revision 为 `0` 时编码继续省略该 key，以保持既有 v3 canonical bytes/digest 可重开。 |
+| `HealthRecord` | 成员、sources、OCR provenance、字段候选、日期候选、notes、import state、revision | 只有 `.confirmed` 参与正常 timeline/search/comparison；字段引用必须指向现有 source 和合法文件页；编辑必须匹配当前 revision。编码中缺少 revision 时按 `0` 读取，revision 为 `0` 时编码继续省略该 key。 |
 | `SourceField` | OCR 原文、可选修正、source references、entry method | 修正替换显示转录但保留原文；已确认记录中的修正是用户确认过的文字，待确认候选中可以是抽取规则对识别异体字的还原建议；无来源的文本必须显式标为 manual。 |
 | `ReportDateCandidate` | 日期、日期类型、来源字段 | 时间线选择必须指向候选或显式手工日期；不把猜测日期写成事实。 |
 | `OCRBlock` | 页码、文本、bounding box、confidence、方法、engine version、block ID | OCR 文档只存来源转录与 provenance，不生成医学结论。 |
@@ -48,7 +48,7 @@ flowchart LR
 
 `ImageAttributes` 只接受有限 rescale 和成对 W/L；Default LINEAR Window Width 必须至少为 1。相同下界也在 XPC frame 和运行时 custom window 入口重验，避免持久层、Helper reply 与显示层产生不同解释。
 
-查看态不进入 catalog schema。`DICOMSliceSeriesSession` 只携带 vault revision token、opaque study/Series/instance/attachment ID、content digest/length 与受限 image attributes；`DICOMSliceImage` 的 8-bit pixel storage 是可失效的引用型运行时对象，不持久化，也不进入 OCR、搜索、时间线或比较。
+查看态不持久化。`DICOMSliceSeriesSession` 只携带资料库的会话令牌、opaque study/Series/instance/attachment ID、content digest/length 与受限 image attributes；`DICOMSliceImage` 的 8-bit pixel storage 是可失效的引用型运行时对象，不持久化，也不进入 OCR、搜索、时间线或比较。
 
 ## ImportDraft 状态机
 
@@ -68,13 +68,13 @@ stateDiagram-v2
   discarded --> [*]
 ```
 
-`ImportState.canTransition` 是唯一状态转移规则；任何旧 attempt 或 stale revision 都不能覆盖新状态。review 界面加载时冻结 draft revision，保存、确认和放弃都把它作为 expected revision 传到 Vault mutation；store 在同一代 catalog 上验证 revision 后才提交，因此另一个进程或窗口已经保存 N+1 时，N 的终态动作不能移除新内容。`confirmed` 和 `discarded` 是终态，确认后的记录仍保留原件和 OCR provenance。
+`ImportState.canTransition` 是唯一状态转移规则；任何旧 attempt 或 stale revision 都不能覆盖新状态。review 界面加载时冻结 draft revision，保存、确认和放弃都把它作为 expected revision 传给资料库；仓库在同一个事务里验证 revision 后才提交，因此另一个进程或窗口已经保存 N+1 时，N 的终态动作不能移除新内容。`confirmed` 和 `discarded` 是终态，确认后的记录仍保留原件和 OCR provenance。
 
 启动恢复只自动取得 `.staging` 和上次中断的 `.processing` draft；`.failed` 保持失败终态，必须由用户显式重试后才重新进入 processing，避免每次启动重复执行已知失败的 OCR。
 
 ## 已确认记录的并发编辑
 
-编辑页打开时冻结 `HealthRecord.revision`，保存命令把它作为 `expectedRevision` 传入真实 App service。服务在同一 catalog mutation 中验证记录仍是 `.confirmed`、revision 未变，并把成功保存后的 revision 严格推进一；如果另一窗口或进程已经保存，旧命令返回结构化 `recordChanged`。App 随后刷新 catalog：能取得同一记录的新 revision 时，编辑页先保留本地表单并停用旧 revision 的重复保存，再由用户显式选择“重新载入最新版本”；该动作会明确替换未保存字段，并让下一次保存使用新 revision。若无法安全取得最新记录，则要求关闭编辑页，不会用通用失败提示诱导重复提交旧内容。revision 达到 `UInt64.max` 时同样失败关闭，不发生整数回绕。
+编辑页打开时冻结 `HealthRecord.revision`，保存命令把它作为 `expectedRevision` 传入真实 App service。服务在同一个事务中验证记录仍是 `.confirmed`、revision 未变，并把成功保存后的 revision 严格推进一；如果另一窗口或进程已经保存，旧命令返回结构化 `recordChanged`。App 随后刷新 catalog：能取得同一记录的新 revision 时，编辑页先保留本地表单并停用旧 revision 的重复保存，再由用户显式选择“重新载入最新版本”；该动作会明确替换未保存字段，并让下一次保存使用新 revision。若无法安全取得最新记录，则要求关闭编辑页，不会用通用失败提示诱导重复提交旧内容。revision 达到 `UInt64.max` 时同样失败关闭，不发生整数回绕。
 
 ## 来源转录与逻辑页
 
@@ -83,7 +83,7 @@ stateDiagram-v2
 - OCR reference 持有 `sourceID`、`attachmentID` 和 file-local page number；
 - `ReportSources.logicalPage(forSourceID:filePage:)` 按当前 source 顺序计算逻辑页；
 - 排序或移除文件只改变派生的逻辑页投影，不改写持久化 OCR block 的 file-local provenance；
-- `HealthRecord.hasValidSourceReferences` 和 catalog validation 在加载/提交时重新校验引用。
+- `HealthRecord.hasValidSourceReferences` 和资料库的行 codec 在加载/提交时重新校验引用。
 
 这让 UI 可以保留“来自哪一个原件、哪一页、哪一个 OCR block”的可追溯关系。LAN 待确认项各自缓存 file-local OCR；Mac 调整本次报告顺序时只重新投影逻辑页，不重跑 OCR。
 
@@ -104,7 +104,7 @@ DICOM 使用独立的 `DICOMStudyFingerprint`：对 exact duplicate 折叠后的
 
 - 持久化只有 `needsReview` 和 `confirmed`；扫描、校验、staging 和 commit 进度属于未持久的导入状态，不塞进 study header。
 - 确认/重新分配只能改成员和用户确认日期，不改 study ID、fingerprint、index 或原件集合。
-- DICOM 原件、自由文本和像素不进入报告 OCR、搜索或比较。U3 Platform service 从一个目录原子发布完整 `needsReview` study，U4 Platform service 可从已验证 Vault object 按需生成一个可失效的 8-bit slice；App snapshot 只投影 study 摘要，`confirmed` 检查按成员和日期进入对应成员时间线，与报告共用同一条时间线和右栏详情，不再有独立的医学影像导航域；`needsReview` 检查不会进入时间线。时间线的“全部 / 报告 / 影像”筛选和当前选中项都是 App 层查看态，不进入 catalog。用户必须明确确认成员与日期。
+- DICOM 原件、自由文本和像素不进入报告 OCR、搜索或比较。U3 Platform service 从一个目录原子发布完整 `needsReview` study，U4 Platform service 可从已验证的原件按需生成一个可失效的 8-bit slice；App snapshot 只投影 study 摘要，`confirmed` 检查按成员和日期进入对应成员时间线，与报告共用同一条时间线和右栏详情，不再有独立的医学影像导航域；`needsReview` 检查不会进入时间线。时间线的“全部 / 报告 / 影像”筛选和当前选中项都是 App 层查看态，不进入 catalog。用户必须明确确认成员与日期。
 
 ## LAN inbox 领域状态
 

@@ -8,7 +8,6 @@ import KinlogueCore
 /// components.
 enum VaultCanonicalRootPath {
     struct CoordinatorIdentity: Sendable {
-        let registryKey: String
         let lockLocations: [VaultProcessLockLocation]
     }
 
@@ -62,7 +61,6 @@ enum VaultCanonicalRootPath {
 
         guard let parent = physicalDirectoryIdentity(for: requestedParent) else {
             return CoordinatorIdentity(
-                registryKey: legacyKey,
                 lockLocations: [VaultProcessLockLocation(
                     parentURL: URL(fileURLWithPath: legacyKey)
                         .deletingLastPathComponent(),
@@ -92,7 +90,6 @@ enum VaultCanonicalRootPath {
             )
         }
         return CoordinatorIdentity(
-            registryKey: stableKey,
             lockLocations: namingKeys.sorted().map {
                 VaultProcessLockLocation(
                     parentURL: parent.url,
@@ -217,243 +214,5 @@ enum VaultCanonicalRootPath {
 
     private static func sameObject(_ lhs: stat, _ rhs: stat) -> Bool {
         lhs.st_dev == rhs.st_dev && lhs.st_ino == rhs.st_ino
-    }
-}
-
-fileprivate struct VaultMutationCoordinatorIdentity: Equatable, Sendable {
-    let canonicalRootPath: String
-    let token: UUID
-}
-
-/// A per-vault asynchronous mutex backed by both a process-local queue and a
-/// kernel advisory lock shared with other app processes.
-///
-/// A vault is an actor, but callers can create more than one actor for the same
-/// on-disk root, including from separate processes. A lease is released
-/// synchronously so callers can cover a non-suspending file transaction
-/// without introducing an actor reentrancy window.
-// SAFETY: `lock` protects queue/ownership state and continuations are removed
-// before resumption; the process lock supplies cross-process exclusion.
-final class VaultMutationCoordinator: @unchecked Sendable {
-    private struct Waiter {
-        let id: UUID
-        let continuation: CheckedContinuation<VaultMutationLease, Error>
-    }
-
-    private final class WeakCoordinator {
-        weak var value: VaultMutationCoordinator?
-
-        init(_ value: VaultMutationCoordinator) {
-            self.value = value
-        }
-    }
-
-    // SAFETY: `lock` protects the weak coordinator registry and cleanup.
-    private final class Registry: @unchecked Sendable {
-        private let lock = NSLock()
-        private var coordinators: [String: WeakCoordinator] = [:]
-
-        func coordinator(
-            for pathIdentity: VaultCanonicalRootPath.CoordinatorIdentity
-        ) -> VaultMutationCoordinator {
-            lock.withLock {
-                if let existing = coordinators[pathIdentity.registryKey]?.value {
-                    return existing
-                }
-                coordinators = coordinators.filter { $0.value.value != nil }
-                let coordinator = VaultMutationCoordinator(pathIdentity: pathIdentity)
-                coordinators[pathIdentity.registryKey] = WeakCoordinator(coordinator)
-                return coordinator
-            }
-        }
-    }
-
-    private static let registry = Registry()
-
-    private let lock = NSLock()
-    private let processLock: VaultProcessLock
-    fileprivate let identity: VaultMutationCoordinatorIdentity
-    private var isHeld = false
-    private var waiters: [Waiter] = []
-    private var dicomSliceLifecycleGeneration: UInt64 = 0
-
-    private init(pathIdentity: VaultCanonicalRootPath.CoordinatorIdentity) {
-        identity = VaultMutationCoordinatorIdentity(
-            canonicalRootPath: pathIdentity.registryKey,
-            token: UUID()
-        )
-        processLock = VaultProcessLock(locations: pathIdentity.lockLocations)
-    }
-
-    static func shared(for rootURL: URL) -> VaultMutationCoordinator {
-        registry.coordinator(
-            for: VaultCanonicalRootPath.coordinatorIdentity(for: rootURL)
-        )
-    }
-
-    func acquire() async throws -> VaultMutationLease {
-        let waiterID = UUID()
-        let lease = try await withTaskCancellationHandler {
-            try Task.checkCancellation()
-            return try await withCheckedThrowingContinuation { continuation in
-                enum Action {
-                    case grant
-                    case enqueue
-                    case reject(Error)
-                }
-
-                let action = lock.withLock { () -> Action in
-                    if Task.isCancelled {
-                        return .reject(CancellationError())
-                    }
-                    guard isHeld else {
-                        isHeld = true
-                        return .grant
-                    }
-                    waiters.append(Waiter(
-                        id: waiterID,
-                        continuation: continuation
-                    ))
-                    return .enqueue
-                }
-                switch action {
-                case .grant:
-                    continuation.resume(
-                        returning: VaultMutationLease(coordinator: self)
-                    )
-                case .enqueue:
-                    break
-                case .reject(let error):
-                    continuation.resume(throwing: error)
-                }
-            }
-        } onCancel: {
-            self.cancelWaiter(id: waiterID)
-        }
-
-        do {
-            try Task.checkCancellation()
-            let processLease = try await processLock.acquire()
-            try lease.attach(processLease: processLease)
-            try Task.checkCancellation()
-            return lease
-        } catch {
-            lease.release()
-            throw error
-        }
-    }
-
-    var waitingCountForTesting: Int {
-        lock.withLock { waiters.count }
-    }
-
-    var processLockWaiterCountForTesting: Int {
-        processLock.waiterCountForTesting
-    }
-
-    var processLockURLForTesting: URL {
-        processLock.lockURL
-    }
-
-    var processLockURLsForTesting: [URL] {
-        processLock.lockURLs
-    }
-
-    func invalidateDICOMSliceLifecycle() {
-        lock.withLock { dicomSliceLifecycleGeneration &+= 1 }
-    }
-
-    func dicomSliceLifecycleSnapshot() -> UInt64 {
-        lock.withLock { dicomSliceLifecycleGeneration }
-    }
-
-    func isDICOMSliceLifecycleCurrent(_ generation: UInt64) -> Bool {
-        lock.withLock { dicomSliceLifecycleGeneration == generation }
-    }
-
-    /// Keeps validation and the authorized synchronous transaction inside the
-    /// lease lock, so a concurrent release cannot revoke the process lock in
-    /// the middle of reconciliation.
-    func withValidatedLease<Result>(
-        _ lease: VaultMutationLease,
-        perform operation: () throws -> Result
-    ) throws -> Result {
-        try lease.withValidatedCoordinator(
-            identity,
-            perform: operation
-        )
-    }
-
-    fileprivate func release() {
-        let next = lock.withLock { () -> Waiter? in
-            guard !waiters.isEmpty else {
-                isHeld = false
-                return nil
-            }
-            return waiters.removeFirst()
-        }
-        next?.continuation.resume(
-            returning: VaultMutationLease(coordinator: self)
-        )
-    }
-
-    private func cancelWaiter(id: UUID) {
-        let cancelled = lock.withLock { () -> Waiter? in
-            guard let index = waiters.firstIndex(where: { $0.id == id }) else {
-                return nil
-            }
-            return waiters.remove(at: index)
-        }
-        cancelled?.continuation.resume(throwing: CancellationError())
-    }
-}
-
-// SAFETY: `lock` protects coordinator and process-lease ownership, making attach
-// and release atomic and release idempotent.
-final class VaultMutationLease: @unchecked Sendable {
-    private let lock = NSLock()
-    private var coordinator: VaultMutationCoordinator?
-    private var processLease: VaultProcessLease?
-
-    fileprivate init(coordinator: VaultMutationCoordinator) {
-        self.coordinator = coordinator
-    }
-
-    fileprivate func attach(processLease: VaultProcessLease) throws {
-        try lock.withLock {
-            guard coordinator != nil, self.processLease == nil else {
-                throw VaultError.mutationConflict
-            }
-            self.processLease = processLease
-        }
-    }
-
-    fileprivate func withValidatedCoordinator<Result>(
-        _ expectedIdentity: VaultMutationCoordinatorIdentity,
-        perform operation: () throws -> Result
-    ) throws -> Result {
-        try lock.withLock {
-            guard coordinator?.identity == expectedIdentity,
-                  processLease != nil else {
-                throw VaultError.mutationConflict
-            }
-            return try operation()
-        }
-    }
-
-    func release() {
-        let resources = lock.withLock { () -> (VaultProcessLease?, VaultMutationCoordinator?) in
-            defer {
-                processLease = nil
-                coordinator = nil
-            }
-            return (processLease, coordinator)
-        }
-        resources.0?.release()
-        resources.1?.release()
-    }
-
-    deinit {
-        release()
     }
 }

@@ -9,7 +9,7 @@ struct LANReceiverIdleTests {
         let fixture = try await LANInboxStoreTestFixture.make()
         defer { fixture.destroy() }
         let receiver = LANReceiver(
-            rootURL: fixture.rootURL,
+            store: fixture.store,
             session: LANSession(),
             idleDuration: .milliseconds(2_500)
         )

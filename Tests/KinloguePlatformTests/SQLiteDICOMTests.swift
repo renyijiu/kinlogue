@@ -408,8 +408,8 @@ func sqliteDICOMStagedFIFOIsRejectedWithoutBlockingAdoption() async throws {
     let repository = try SQLiteDICOMRepository(store: fixture.store)
     let staging = try VaultDICOMStudyStaging(rootURL: fixture.store.rootURL)
     let session = try await repository.beginImport(operationID: UUID(), staging: staging)
-    let scan = try await DICOMFolderScanner().scan(directoryURL: fixture.source, operationID: session.stagingOwnership.operationID,
-        securityScope: .notRequiredForTesting, staging: staging, ownership: session.stagingOwnership)
+    let scan = try await DICOMFolderScanner().scan(directoryURL: fixture.source, operationID: session.ownership.operationID,
+        securityScope: .notRequiredForTesting, staging: staging, ownership: session.ownership)
     let object = try #require(scan.stagedObjects.first)
     let path = fixture.store.rootURL.appendingPathComponent(object.relativePath)
     try FileManager.default.removeItem(at: path)
@@ -437,16 +437,15 @@ func sqliteDICOMAdoptionGapProtectsOwnedBytesAndPreservesReplacedInode(replaced:
     let repository = try SQLiteDICOMRepository(store: fixture.store)
     let staging = try VaultDICOMStudyStaging(rootURL: fixture.store.rootURL)
     let session = try await repository.beginImport(operationID: UUID(), staging: staging)
-    let scan = try await DICOMFolderScanner().scan(directoryURL: fixture.source, operationID: session.stagingOwnership.operationID,
-        securityScope: .notRequiredForTesting, staging: staging, ownership: session.stagingOwnership)
-    let proposal = try await DICOMStudyIndexer(decoder: SQLiteDICOMDecoder()).index(stagedObjects: scan.stagedObjects, vaultID: session.vaultID, staging: staging)
-    guard case let .sqlite(sqlSession) = session else { throw DICOMImportError.integrityFailure }
+    let scan = try await DICOMFolderScanner().scan(directoryURL: fixture.source, operationID: session.ownership.operationID,
+        securityScope: .notRequiredForTesting, staging: staging, ownership: session.ownership)
+    let proposal = try await DICOMStudyIndexer(decoder: SQLiteDICOMDecoder()).index(stagedObjects: scan.stagedObjects, vaultID: session.libraryID, staging: staging)
     let object = try #require(proposal.objects.first)
-    try fixture.store.adoptDICOMOriginal(object, session: sqlSession, staging: staging)
+    try fixture.store.adoptDICOMOriginal(object, session: session, staging: staging)
     let path = fixture.store.originalsURL.appendingPathComponent(fixture.store.originalFilename(object.attachment.id, staged: true))
     #expect(fixture.store.activeOriginals.isEmpty)
     #expect(try fixture.store.recoverOriginals().isEmpty)
-    #expect(try fixture.store.reclaimOriginals(operationID: sqlSession.operationID) == [object.attachment.id])
+    #expect(try fixture.store.reclaimOriginals(operationID: session.operationID) == [object.attachment.id])
     #expect(FileManager.default.fileExists(atPath: path.path))
     #expect(throws: SQLiteLibraryError.originalBusy) { try fixture.store.close() }
     #expect(throws: SQLiteLibraryError.originalBusy) { try fixture.store.closeDatabaseForReplacement() }
@@ -668,12 +667,11 @@ func sqliteDICOMTerminalCleanupPreservesUnrelatedStagedReport(abort: Bool) async
     let report = try sqliteStage(Data("synthetic report awaiting publication".utf8), in: fixture.store, operationID: reportOperation)
     let staging = try VaultDICOMStudyStaging(rootURL: fixture.store.rootURL)
     let session = try await repository.beginImport(operationID: UUID(), staging: staging)
-    let scan = try await DICOMFolderScanner().scan(directoryURL: fixture.source, operationID: session.stagingOwnership.operationID,
-        securityScope: .notRequiredForTesting, staging: staging, ownership: session.stagingOwnership)
-    let proposal = try await DICOMStudyIndexer(decoder: SQLiteDICOMDecoder()).index(stagedObjects: scan.stagedObjects, vaultID: session.vaultID, staging: staging)
+    let scan = try await DICOMFolderScanner().scan(directoryURL: fixture.source, operationID: session.ownership.operationID,
+        securityScope: .notRequiredForTesting, staging: staging, ownership: session.ownership)
+    let proposal = try await DICOMStudyIndexer(decoder: SQLiteDICOMDecoder()).index(stagedObjects: scan.stagedObjects, vaultID: session.libraryID, staging: staging)
     if abort {
-        guard case let .sqlite(sqlSession) = session else { throw DICOMImportError.integrityFailure }
-        for object in proposal.objects { try fixture.store.adoptDICOMOriginal(object, session: sqlSession, staging: staging) }
+        for object in proposal.objects { try fixture.store.adoptDICOMOriginal(object, session: session, staging: staging) }
         try await repository.abortImport(session)
     } else { _ = try await repository.commitImport(proposal, session: session, staging: staging, metrics: nil) }
     #expect(try fixture.store.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM originals") } == (abort ? 1 : proposal.objects.count + 1))
@@ -764,4 +762,43 @@ func sqliteDICOMKnownDamageRejectsAlreadyCachedPixelsAndPreservesStudy() async t
     await #expect(throws: SQLiteLibraryError.damaged) { try await repository.delete(imported.studyID, expectedRevision: details.study.contentRevision) }
     #expect(try fixture.store.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM dicom_studies") } == 1)
     await service.close()
+}
+
+@Test
+func sqliteDICOMCancellingAQueuedMultiHundredFileImportStopsWithinOneSecond() async throws {
+    let fixture = try SQLiteDICOMFixture()
+    defer { fixture.cleanup() }
+    try FileManager.default.removeItem(at: fixture.source.appendingPathComponent("synthetic.dcm"))
+    for ordinal in 0..<220 {
+        try GeneratedDICOMFixture.explicitVRLittleEndianMR(sopInstanceUID: "2.25.\(300_000 + ordinal)")
+            .write(to: fixture.source.appendingPathComponent("synthetic-\(ordinal).dcm"))
+    }
+    let control = SQLiteBlockingWorkerControl()
+    let repository = try SQLiteDICOMRepository(store: fixture.store)
+    let workflow = try DICOMImportWorkflow(rootURL: fixture.store.rootURL, vault: repository, decoder: SQLiteDICOMDecoder(),
+        metrics: DICOMImportMetricsRecorder(), scannerControl: control)
+    let task = Task { try await workflow.importDirectory(fixture.source, securityScope: .notRequiredForTesting) }
+    while !(await control.hasStarted) { try await Task.sleep(for: .milliseconds(2)) }
+    #expect(await workflow.state == .staging)
+
+    let clock = ContinuousClock()
+    let start = clock.now
+    #expect(try await workflow.cancelCurrentImport() == nil)
+    await #expect(throws: DICOMImportError.cancelled) { _ = try await task.value }
+
+    #expect(start.duration(to: clock.now) < .seconds(1))
+    #expect(await workflow.state == .cancelled)
+    #expect(try await repository.summaries().items.isEmpty)
+    #expect(try fixture.store.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM originals") } == 0)
+    #expect(fixture.store.activeDICOMImports.isEmpty)
+}
+
+/// Holds the first scanner worker so that the rest of the folder stays queued.
+private actor SQLiteBlockingWorkerControl: DICOMFolderScannerControl {
+    private(set) var hasStarted = false
+    func sourceAdmitted(ordinal: Int) async throws {}
+    func workerStarted() async throws {
+        hasStarted = true
+        try await Task.sleep(for: .seconds(30))
+    }
 }

@@ -9,19 +9,6 @@ public enum VaultMutationLockNaming {
             .joined()
         return ".kinlogue-mutation-\(digest).lock"
     }
-
-    /// Includes the filesystem-stable name and every legacy path-keyed name
-    /// this process may leave beside the vault. Cleanup code must accept only
-    /// this exact set, while tolerating that an older release created just one
-    /// compatibility member.
-    public static func filenames(forRootURL rootURL: URL) -> Set<String> {
-        Set(
-            VaultCanonicalRootPath.coordinatorIdentity(for: rootURL)
-                .lockLocations.map {
-                    filename(forCanonicalRootPath: $0.namingKey)
-                }
-        )
-    }
 }
 
 struct VaultProcessLockLocation: Hashable, Sendable {
@@ -29,20 +16,12 @@ struct VaultProcessLockLocation: Hashable, Sendable {
     let namingKey: String
 }
 
-/// A kernel-managed advisory write lock shared by every process opening the
-/// same canonical vault root. The sibling lock file is intentionally stable:
-/// unlinking it while another process has it open could create two lock inodes.
-/// Stable and legacy compatibility locks are deduplicated and acquired in one
-/// global path order so overlapping upgraded-process lock sets cannot deadlock.
-// SAFETY: Lock URLs are immutable and `stateLock` protects process-local waiter
-// accounting; kernel descriptors move into lock-protected leases.
-final class VaultProcessLock: @unchecked Sendable {
+/// The lock files that sit beside a library root, one per name the root may be reached by.
+/// The files are intentionally never unlinked while in use: removing one that another process
+/// has open could create two lock inodes. Names are deduplicated and kept in one global path
+/// order so that overlapping lock sets cannot deadlock.
+struct VaultProcessLock: Sendable {
     let lockURLs: [URL]
-
-    var lockURL: URL { lockURLs[0] }
-
-    private let stateLock = NSLock()
-    private var waiterCount = 0
 
     init(locations: [VaultProcessLockLocation]) {
         precondition(!locations.isEmpty)
@@ -58,59 +37,8 @@ final class VaultProcessLock: @unchecked Sendable {
         }
     }
 
-    var waiterCountForTesting: Int {
-        stateLock.withLock { waiterCount }
-    }
-
-    func acquire() async throws -> VaultProcessLease {
-        stateLock.withLock { waiterCount += 1 }
-        defer { stateLock.withLock { waiterCount -= 1 } }
-
-        var descriptors: [Int32] = []
-        do {
-            for lockURL in lockURLs {
-                let descriptor = try openValidatedDescriptor(at: lockURL)
-                do {
-                    try await acquireWriteLock(on: descriptor)
-                    descriptors.append(descriptor)
-                } catch {
-                    Darwin.close(descriptor)
-                    throw error
-                }
-            }
-            try Task.checkCancellation()
-            return VaultProcessLease(descriptors: descriptors)
-        } catch {
-            for descriptor in descriptors.reversed() {
-                Darwin.close(descriptor)
-            }
-            throw error
-        }
-    }
-
-    private func acquireWriteLock(on descriptor: Int32) async throws {
-        while true {
-            try Task.checkCancellation()
-            var request = Darwin.flock()
-            request.l_type = Int16(F_WRLCK)
-            request.l_whence = Int16(SEEK_SET)
-            request.l_start = 0
-            request.l_len = 0
-            if fcntl(descriptor, F_SETLK, &request) == 0 {
-                try Task.checkCancellation()
-                return
-            }
-            switch errno {
-            case EINTR:
-                continue
-            case EACCES, EAGAIN:
-                try await Task.sleep(for: .milliseconds(10))
-            default:
-                throw VaultError.ioFailure(errno)
-            }
-        }
-    }
-
+    /// Opens (creating if needed) one lock file without following links, and refuses anything
+    /// that is not a private regular file owned by this user.
     func openValidatedDescriptor(at lockURL: URL) throws -> Int32 {
         let parentURL = lockURL.deletingLastPathComponent()
         let parentDescriptor = Darwin.open(
@@ -153,35 +81,5 @@ final class VaultProcessLock: @unchecked Sendable {
             Darwin.close(descriptor)
             throw error
         }
-    }
-}
-
-// SAFETY: `lock` protects descriptor ownership and makes release idempotent.
-final class VaultProcessLease: @unchecked Sendable {
-    private let lock = NSLock()
-    private var descriptors: [Int32]
-
-    init(descriptors: [Int32]) {
-        self.descriptors = descriptors
-    }
-
-    func release() {
-        let descriptors = lock.withLock { () -> [Int32] in
-            defer { self.descriptors.removeAll(keepingCapacity: false) }
-            return self.descriptors
-        }
-        for descriptor in descriptors.reversed() {
-            var request = Darwin.flock()
-            request.l_type = Int16(F_UNLCK)
-            request.l_whence = Int16(SEEK_SET)
-            request.l_start = 0
-            request.l_len = 0
-            _ = fcntl(descriptor, F_SETLK, &request)
-            Darwin.close(descriptor)
-        }
-    }
-
-    deinit {
-        release()
     }
 }

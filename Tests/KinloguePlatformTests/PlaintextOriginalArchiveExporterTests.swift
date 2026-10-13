@@ -12,7 +12,7 @@ func originalArchiveExporterStreamsConfirmedOriginalsAndPublishesAReadableZIP() 
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
     try Data("replace me".utf8).write(to: destination)
-    let exporter = PlaintextOriginalArchiveExporter(vault: fixture.vault)
+    let exporter = PlaintextOriginalArchiveExporter(store: fixture.store)
 
     let preparation = try await exporter.prepare(undatedToken: "Undated")
     #expect(preparation.entryCount == 1)
@@ -38,7 +38,8 @@ func originalArchiveExporterPreservesExistingDestinationAndLeavesNoSuccessLookin
     let prior = Data("prior archive bytes".utf8)
     try prior.write(to: destination)
     let exporter = PlaintextOriginalArchiveExporter(
-        vault: fixture.vault,
+        store: fixture.store,
+        fileManager: .default,
         failureInjector: { $0 == .beforeVerification }
     )
 
@@ -57,11 +58,8 @@ func originalArchiveExporterRejectsSourceDigestMismatchBeforePublication() async
     let fixture = try await OriginalArchiveExportFixture.make()
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
-    let layout = try PlaintextVaultLayout(rootURL: fixture.vaultRoot)
-    let reference = VaultObjectReference(id: fixture.attachment.id, kind: .attachment)
-    let objectURL = fixture.vaultRoot.appendingPathComponent(layout.objectPath(reference))
-    try Data(repeating: 0x44, count: fixture.bytes.count).write(to: objectURL)
-    let exporter = PlaintextOriginalArchiveExporter(vault: fixture.vault)
+    try Data(repeating: 0x44, count: fixture.bytes.count).write(to: fixture.originalURL)
+    let exporter = PlaintextOriginalArchiveExporter(store: fixture.store)
 
     let preparation = try await exporter.prepare(undatedToken: "Undated")
     await #expect(throws: PlaintextOriginalArchiveExportError.sourceIntegrityFailure) {
@@ -71,13 +69,14 @@ func originalArchiveExporterRejectsSourceDigestMismatchBeforePublication() async
 }
 
 @Test
-func originalArchiveExporterAbortsWhenVaultRevisionChangesBeforeCommit() async throws {
+func originalArchiveExporterKeepsItsCapturedOriginalsWhenTheLibraryChangesBeforeCommit() async throws {
     let fixture = try await OriginalArchiveExportFixture.make(byteCount: 2 * 1_024 * 1_024)
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
     let gate = ExportRevisionGate()
     let exporter = PlaintextOriginalArchiveExporter(
-        vault: fixture.vault,
+        store: fixture.store,
+        fileManager: .default,
         failureInjector: { fault in
             guard fault == .beforeFinalRevisionCheck else { return false }
             gate.reachAndWait()
@@ -90,34 +89,26 @@ func originalArchiveExporterAbortsWhenVaultRevisionChangesBeforeCommit() async t
     }
     await gate.waitUntilReached()
     defer { gate.release() }
-    let current = try await fixture.vault.loadCatalog()
-    let next = try VaultCatalog(
-        vaultID: current.vaultID,
-        generation: current.generation + 1,
-        members: current.members,
-        records: current.records,
-        attachments: current.attachments,
-        importDrafts: current.importDrafts,
-        dicomStudies: current.dicomStudies
-    )
-    _ = try await fixture.vault.commit(try VaultCommitRequest(
-        expectedGeneration: current.generation,
-        catalog: next,
-        writes: []
-    ))
+    // The archive was written from pinned originals. Deleting the report now removes its last
+    // reference, yet the pinned bytes stay until the export lets go of them.
+    try await fixture.reports.deleteRecord(fixture.record.id, expectedRevision: fixture.record.revision)
+    #expect(FileManager.default.fileExists(atPath: fixture.originalURL.path))
     gate.release()
 
-    await #expect(throws: PlaintextOriginalArchiveExportError.vaultChanged) {
-        _ = try await exportTask.value
-    }
-    #expect(!FileManager.default.fileExists(atPath: destination.path))
+    let result = try await exportTask.value
+    #expect(result.entryCount == 1)
+    let archive = try Archive(url: destination, accessMode: .read)
+    var extracted = Data()
+    _ = try archive.extract(try #require(Array(archive).first), bufferSize: 64 * 1_024) { extracted.append($0) }
+    #expect(extracted == fixture.bytes)
+    #expect(!FileManager.default.fileExists(atPath: fixture.originalURL.path))
 }
 
 @Test
 func originalArchiveExporterRejectsInvalidDestinations() async throws {
     let fixture = try await OriginalArchiveExportFixture.make()
     defer { fixture.remove() }
-    let exporter = PlaintextOriginalArchiveExporter(vault: fixture.vault)
+    let exporter = PlaintextOriginalArchiveExporter(store: fixture.store)
     let preparation = try await exporter.prepare(undatedToken: "Undated")
 
     await #expect(throws: PlaintextOriginalArchiveExportError.invalidDestination) {
@@ -153,7 +144,8 @@ func originalArchiveExporterRevalidatesAParentReplacedBeforePublication() async 
         symlinkTarget: fixture.vaultRoot
     )
     let exporter = PlaintextOriginalArchiveExporter(
-        vault: fixture.vault,
+        store: fixture.store,
+        fileManager: .default,
         destinationAccess: .init(start: { _ in .notRequired }, stop: { _ in }),
         failureInjector: { fault in
             if fault == .beforeCommit { swap.perform() }
@@ -192,7 +184,8 @@ func originalArchiveExporterKeepsFinalPublicationBoundToTheValidatedParent() asy
         symlinkTarget: fixture.vaultRoot
     )
     let exporter = PlaintextOriginalArchiveExporter(
-        vault: fixture.vault,
+        store: fixture.store,
+        fileManager: .default,
         destinationAccess: .init(start: { _ in .notRequired }, stop: { _ in }),
         failureInjector: { fault in
             if fault == .afterDestinationParentBinding { swap.perform() }
@@ -225,7 +218,8 @@ func originalArchiveExporterDetectsPayloadCorruptionDuringFullVerification() asy
     let prior = Data("prior archive bytes".utf8)
     try prior.write(to: destination)
     let exporter = PlaintextOriginalArchiveExporter(
-        vault: fixture.vault,
+        store: fixture.store,
+        fileManager: .default,
         failureInjector: { $0 == .corruptWorkArchiveBeforeVerification }
     )
 
@@ -244,7 +238,8 @@ func originalArchiveExporterRejectsAnInjectedShortSourceRead() async throws {
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
     let exporter = PlaintextOriginalArchiveExporter(
-        vault: fixture.vault,
+        store: fixture.store,
+        fileManager: .default,
         failureInjector: { $0 == .shortSourceRead }
     )
 
@@ -262,7 +257,7 @@ func originalArchiveExporterHonorsTaskCancellationBeforeCommit() async throws {
     let fixture = try await OriginalArchiveExportFixture.make(byteCount: 2 * 1_024 * 1_024)
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
-    let exporter = PlaintextOriginalArchiveExporter(vault: fixture.vault)
+    let exporter = PlaintextOriginalArchiveExporter(store: fixture.store)
     let preparation = try await exporter.prepare(undatedToken: "Undated")
     let taskBox = ExportTaskBox()
     let task = Task {
@@ -288,7 +283,7 @@ func originalArchiveExporterRejectsSymlinkTargetAndBalancesGrantedDestinationAcc
     let symlinkTarget = fixture.container.appendingPathComponent("target.data")
     try Data("target".utf8).write(to: symlinkTarget)
     try FileManager.default.createSymbolicLink(at: destination, withDestinationURL: symlinkTarget)
-    let exporter = PlaintextOriginalArchiveExporter(vault: fixture.vault)
+    let exporter = PlaintextOriginalArchiveExporter(store: fixture.store)
     let preparation = try await exporter.prepare(undatedToken: "Undated")
     await #expect(throws: PlaintextOriginalArchiveExportError.invalidDestination) {
         _ = try await exporter.export(preparation, to: destination)
@@ -297,15 +292,18 @@ func originalArchiveExporterRejectsSymlinkTargetAndBalancesGrantedDestinationAcc
     try FileManager.default.removeItem(at: destination)
     let access = DestinationAccessCounter()
     let failingExporter = PlaintextOriginalArchiveExporter(
-        vault: fixture.vault,
+        store: fixture.store,
+        fileManager: .default,
         destinationAccess: .init(
             start: { _ in access.started(); return .granted },
             stop: { _ in access.stopped() }
         ),
         failureInjector: { $0 == .beforeVerification }
     )
+    // An export consumes its preparation: it releases the originals it had pinned.
+    let retried = try await failingExporter.prepare(undatedToken: "Undated")
     await #expect(throws: PlaintextOriginalArchiveExportError.injectedFailure) {
-        _ = try await failingExporter.export(preparation, to: destination)
+        _ = try await failingExporter.export(retried, to: destination)
     }
     #expect(access.counts == (1, 1))
 }
@@ -317,7 +315,8 @@ func originalArchiveExporterDeniesDestinationAccessWithoutCreatingOutput() async
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
     let access = DestinationAccessCounter()
     let exporter = PlaintextOriginalArchiveExporter(
-        vault: fixture.vault,
+        store: fixture.store,
+        fileManager: .default,
         destinationAccess: .init(
             start: { _ in access.started(); return .denied },
             stop: { _ in access.stopped() }
@@ -340,7 +339,8 @@ func originalArchiveExporterReportsIndeterminateWhenParentSyncFailsAfterCommit()
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
     let exporter = PlaintextOriginalArchiveExporter(
-        vault: fixture.vault,
+        store: fixture.store,
+        fileManager: .default,
         parentDirectorySync: { _ in
             throw PlaintextOriginalArchiveExportError.ioFailure(EIO)
         }
@@ -365,7 +365,8 @@ func originalArchiveExporterAcceptsUnavailableParentSyncAfterCommit(
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
     let exporter = PlaintextOriginalArchiveExporter(
-        vault: fixture.vault,
+        store: fixture.store,
+        fileManager: .default,
         parentDirectorySync: { _ in
             throw PlaintextOriginalArchiveExportError.ioFailure(errorCode)
         }
@@ -479,53 +480,41 @@ private final class ExportRevisionGate: @unchecked Sendable {
 private struct OriginalArchiveExportFixture {
     let container: URL
     let vaultRoot: URL
-    let vault: PlaintextVault
-    let attachment: KinlogueCore.Attachment
+    let store: SQLiteLibraryStore
+    let reports: SQLiteReportRepository
+    let record: HealthRecord
     let bytes: Data
 
+    /// Where the library keeps the one original of this fixture.
+    var originalURL: URL {
+        store.originalsURL.appendingPathComponent(record.sources.first.attachmentID.uuidString.lowercased() + ".data")
+    }
+
     static func make(byteCount: Int = 128 * 1_024) async throws -> Self {
-        let container = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let container = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+            .appendingPathComponent(UUID().uuidString)
         let root = container.appendingPathComponent("Vault", isDirectory: true)
-        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
-        let vault = try PlaintextVault(rootURL: root)
-        let initial = try await vault.initialize()
+        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: false,
+                                                attributes: [.posixPermissions: 0o700])
+        let store = try SQLiteLibraryStore(rootURL: root)
+        let reports = SQLiteReportRepository(store: store)
         let member = try FamilyMember(displayName: "Synthetic Member")
+        try await reports.saveMember(member, replacing: nil)
         let bytes = Data((0..<byteCount).map { UInt8(truncatingIfNeeded: $0) })
-        let attachment = try KinlogueCore.Attachment(
-            contentTypeIdentifier: "com.adobe.pdf",
-            byteCount: bytes.count,
-            sha256Digest: Data(SHA256.hash(data: bytes))
-        )
-        let record = try HealthRecord(
-            memberID: member.id,
-            attachmentID: attachment.id,
-            importState: .confirmed
-        )
-        let catalog = try VaultCatalog(
-            vaultID: initial.vaultID,
-            generation: initial.generation + 1,
-            members: [member],
-            records: [record],
-            attachments: [attachment]
-        )
-        _ = try await vault.commit(try VaultCommitRequest(
-            expectedGeneration: initial.generation,
-            catalog: catalog,
-            writes: [VaultObjectWrite(
-                reference: .init(id: attachment.id, kind: .attachment),
-                plaintext: bytes
-            )]
-        ))
-        return Self(
-            container: container,
-            vaultRoot: root,
-            vault: vault,
-            attachment: attachment,
-            bytes: bytes
-        )
+        let file = try ValidatedImportedFile(data: bytes, kind: .pdf, contentTypeIdentifier: "com.adobe.pdf",
+                                             sha256Digest: Data(SHA256.hash(data: bytes)), pageCount: 1)
+        guard case .created(let draftID) = try await reports.stage(file) else { throw LibraryReportError.invalidDocument }
+        let lease = try await reports.beginProcessing(draftID: draftID, attemptID: UUID())
+        try await reports.completeProcessing(lease: lease, document: ImportDraftDocument(blocks: [], candidates: ReportCandidates()))
+        let draft = try await reports.draft(draftID)
+        let record = try HealthRecord(id: draftID, memberID: member.id, sources: draft.sources,
+                                      ocrDocumentObjectID: draft.documentObjectID, importState: .confirmed)
+        try await reports.confirm(draftID: draftID, expectedRevision: draft.revision, record: record)
+        return Self(container: container, vaultRoot: root, store: store, reports: reports, record: record, bytes: bytes)
     }
 
     func remove() {
+        try? store.close()
         try? FileManager.default.removeItem(at: container)
     }
 }

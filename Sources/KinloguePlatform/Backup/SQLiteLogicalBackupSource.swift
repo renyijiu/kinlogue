@@ -281,7 +281,7 @@ package final class SQLiteLogicalBackupSnapshot: Sendable {
         }
         return try BackupManifest(revisionPair: revisionPair, entries: entries)
     }
-    func sources() -> [BackupContainerEntrySource] {
+    package func sources() -> [BackupContainerEntrySource] {
         let logical = segments.enumerated().map { index, segment in
             BackupContainerEntrySource(kind: .logicalSegment, path: String(format: "logical/%08d.data", index), plaintextByteCount: UInt64(segment.count), plaintextDigest: segment.digest) { [spool] in
                 try spool.validate()
@@ -345,7 +345,7 @@ package struct SQLiteLogicalBackupSource: Sendable {
             } onCancel: { cancellation.cancel() }
         }
     }
-    func validateStrict(check: () throws -> Void = { try Task.checkCancellation() }) throws -> SQLiteLogicalValidation {
+    package func validateStrict(check: () throws -> Void = { try Task.checkCancellation() }) throws -> SQLiteLogicalValidation {
         let snapshot = try captureStrict(check: check)
         defer { snapshot.release() }
         for original in snapshot.pins.originals.values {

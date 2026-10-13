@@ -279,6 +279,9 @@ package actor SQLiteReportRepository: ImportDraftStore {
     @concurrent
     package nonisolated func failProcessing(lease: ImportProcessingLease, failureCode: ImportFailureCode) async throws {
         try await LibraryStorageExecutor.run {
+            // A cancelled attempt records nothing: the draft stays in processing and is resumed
+            // on the next launch instead of being left as a failure the user has to retry.
+            try Task.checkCancellation()
             try store.write { db in
                 let next = try usableDraft(lease.draftID, db).failingProcessing(
                     expectedRevision: lease.revision, attemptID: lease.attemptID, failureCode: failureCode)

@@ -898,16 +898,19 @@ private struct SliceServiceFixture {
         instanceCount: Int,
         attributes: DICOMStudyIndex.ImageAttributes = try! sliceAttributes()
     ) throws -> DICOMSliceSeriesSession {
-        let revision = try VaultRevision(
-            generation: 3,
-            commitID: UUID(),
-            catalogDigest: Data(repeating: 0xa1, count: 32)
+        let studyID = UUID(), seriesID = UUID()
+        let token = DICOMVaultSessionToken(
+            libraryID: UUID(),
+            epoch: UUID(),
+            studyID: studyID,
+            contentRevision: 3,
+            seriesID: seriesID,
+            seriesHash: Data(repeating: 0xa1, count: 32)
         )
-        let token = try DICOMVaultSessionToken(vaultID: UUID(), revision: revision)
         return try DICOMSliceSeriesSession(
             token: token,
-            studyID: UUID(),
-            seriesID: UUID(),
+            studyID: studyID,
+            seriesID: seriesID,
             orderingProvenance: .geometryProjection,
             instances: (0..<instanceCount).map { ordinal in
                 try DICOMSliceInstanceDescriptor(

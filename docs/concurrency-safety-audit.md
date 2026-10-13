@@ -4,7 +4,7 @@ This audit covers production declarations under `Sources/`. It records why the
 remaining compiler escape hatches are safe, what invariant must remain true,
 and how repository automation detects unreviewed additions.
 
-<!-- concurrency-inventory: unchecked=82 files=45 dicom=10 core=0 unsafe=2 -->
+<!-- concurrency-inventory: unchecked=70 files=37 dicom=10 core=0 unsafe=2 -->
 
 ## Current inventory
 
@@ -12,13 +12,13 @@ and how repository automation detects unreviewed additions.
 | --- | --- | --- |
 | `KinlogueCore` | 0 unchecked declarations | Domain values and state machines remain checked `Sendable`. |
 | `KinloguePlatform/DICOM` | 10 `@unchecked Sendable` declarations | Lock-protected pixel/reply/budget state, actor-backed runtime services, and one scanner-owned descriptor lease with structured concurrent read-only use. |
-| LAN and storage platform code | 42 `@unchecked Sendable` declarations | Private locks/serial queues, actor confinement, SwiftNIO event-loop confinement, or immutable task-local error transport. |
+| LAN and storage platform code | 31 `@unchecked Sendable` declarations | Private locks/serial queues, actor confinement, SwiftNIO event-loop confinement, or immutable task-local error transport. |
 | Original export orchestration and capability probes | 10 `@unchecked Sendable` declarations | Lock-protected cancellation/progress and probe metrics; one exporter-owned descriptor whose close lifetime is structured and idempotent. |
-| Encrypted backup and restore | 19 `@unchecked Sendable` declarations | Immutable service authority, actor/cross-process serialization, lock-protected configuration/history/metrics and publication leases, and structured descriptor lifetimes. |
+| Encrypted backup and restore | 18 `@unchecked Sendable` declarations | Immutable service authority, actor/cross-process serialization, lock-protected configuration/history/metrics and publication leases, and structured descriptor lifetimes. |
 | App backup destination authority | 1 `@unchecked Sendable` declaration | Immutable authority context with synchronized access. |
 | DICOM XPC Helper | 2 `nonisolated(unsafe)` properties | One private lock protects both process-lifecycle collections. |
 
-The inventory is 82 unchecked conformances across 45 files, plus two unsafe
+The inventory is 70 unchecked conformances across 37 files, plus two unsafe
 static properties in the Helper. The audit found no demonstrated data race.
 Three immutable/stateless wrappers (`LANManualReadHandler`,
 `LANInboundBytesHandler`, and `LANUploadSink.PendingReservations`) use checked
@@ -58,7 +58,7 @@ idle task and cancellation/drain identity stay on MainActor.
 
 - **Private-lock ownership.** Reply completion, pixel lifetime, DICOM memory
   reservations, LAN admission/permit accounting, partial-file ownership,
-  filesystem durability state, mutation/process leases and network-monitor
+  filesystem durability state and network-monitor
   lifecycle keep all shared mutable state behind a
   private `NSLock`. RAII permits remove their owner under the lock before
   releasing an upstream reservation, so repeated release/deinit remains
@@ -66,12 +66,6 @@ idle task and cancellation/drain identity stay on MainActor.
 - **Actor confinement.** `LANReceiver.Runtime` is created, read and mutated only
   by the enclosing `LANReceiver` actor. `DICOMSliceRuntime` stores immutable
   references to a lock-protected budget and actor-based cache/scheduler.
-  `DICOMVaultImportSession` carries immutable metadata plus a lock-protected
-  mutation lease that is validated by the `PlaintextVault` actor.
-- **Serial observation queue.** `LANInboxChangeMonitor` installs and owns every
-  Dispatch filesystem source on one private queue; generation reads and stop
-  transitions synchronize on that queue, handlers capture the monitor weakly,
-  and deinitialization only cancels exclusively owned sources.
 - **Structured operation ownership.** `VaultDICOMOperationDescriptorLease` has
   one close owner in the folder scanner. A bounded throwing task group may
   concurrently read its stable descriptor for POSIX operations; child tasks do
@@ -105,7 +99,8 @@ idle task and cancellation/drain identity stay on MainActor.
   Work, source, output and restored-file descriptors have one structured
   owner; mutable counters and close/publication transitions are lock-protected,
   and every read closure finishes before its owner closes the descriptor.
-  Restore root activation additionally holds the shared Vault mutation lease.
+  Restore root activation runs under a per-root in-process gate while the
+  library owner's lock keeps other processes out.
 - **Helper process lifecycle.** `DICOMDecoderProcessLifecycle.lock` protects
   both unsafe static collections for every request/watchdog read and mutation.
   A timeout may terminate the Helper; successful requests leave ordinary XPC
@@ -128,6 +123,6 @@ machine-readable inventory above drifts. New escape hatches therefore require:
 3. a concurrency or lifecycle test that would fail when the invariant breaks;
 4. an updated inventory and audit explanation.
 
-Thread Sanitizer runs for LAN upload, DICOM lifetime and Vault mutation remain
+Thread Sanitizer runs for LAN upload, DICOM lifetime and library mutation remain
 a useful future release gate, but they do not replace these structural
 invariants and are not required for the retained ad-hoc test distribution.

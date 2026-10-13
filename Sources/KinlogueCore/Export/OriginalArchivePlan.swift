@@ -77,21 +77,6 @@ public struct OriginalArchivePlan: Equatable, Sendable {
         self.totalByteCount = totalByteCount
     }
 
-    public static func make(
-        catalog: VaultCatalog,
-        preferredExtensions: [Attachment.ID: String],
-        undatedToken: String
-    ) throws -> Self {
-        try catalog.validate()
-        return try make(members: catalog.members.map { OriginalArchiveMemberProjection(member: $0) }, attachments: catalog.attachments,
-            reports: catalog.records.filter { $0.importState == .confirmed }.map {
-                OriginalArchiveReportProjection(id: $0.id, memberID: $0.memberID, sources: $0.sources, timelineDate: $0.timelineDate)
-            }, studies: try catalog.dicomStudies.filter { $0.state == .confirmed }.map {
-                guard let member = $0.confirmedMemberID, let date = $0.effectiveDate else { throw DomainValidationError.invalidCatalogReference }
-                return OriginalArchiveStudyProjection(id: $0.id, memberID: member, date: date, attachmentIDs: $0.attachmentIDs)
-            }, preferredExtensions: preferredExtensions, undatedToken: undatedToken)
-    }
-
     package static func make(members: [OriginalArchiveMemberProjection], attachments: [Attachment], reports: [OriginalArchiveReportProjection],
                              studies: [OriginalArchiveStudyProjection], preferredExtensions: [Attachment.ID: String], undatedToken: String) throws -> Self {
         guard members.count <= 256, reports.count <= 20_000, studies.count <= 256,

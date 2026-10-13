@@ -776,15 +776,12 @@ private func appModelViewerSession(studyID: DICOMStudy.ID) throws -> DICOMSliceS
         windowCenter: 128,
         windowWidth: 256
     )
-    let revision = try VaultRevision(
-        generation: 1,
-        commitID: UUID(),
-        catalogDigest: Data(repeating: 0x42, count: 32)
-    )
+    let seriesID = UUID()
     return try DICOMSliceSeriesSession(
-        token: DICOMVaultSessionToken(vaultID: UUID(), revision: revision),
+        token: DICOMVaultSessionToken(libraryID: UUID(), epoch: UUID(), studyID: studyID, contentRevision: 1,
+                                      seriesID: seriesID, seriesHash: Data(repeating: 0x42, count: 32)),
         studyID: studyID,
-        seriesID: UUID(),
+        seriesID: seriesID,
         orderingProvenance: .geometryProjection,
         instances: [try DICOMSliceInstanceDescriptor(
             id: UUID(),

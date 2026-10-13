@@ -657,3 +657,69 @@ func sqliteTextFidelityOriginalMetadataPreservesAllUTF8Bytes() throws {
     defer { try? reopened.close() }
     #expect(try reopened.read { try SQLiteOriginal.read(id, from: $0).contentType } == type)
 }
+
+// The owner lock is named from the root's resolved identity, so every way of reaching one
+// library contends for the same lock.
+
+@Test
+func sqliteOwnerReachedThroughASymlinkedParentIsTheSameOwner() throws {
+    let root = try sqliteTestRoot()
+    let parent = root.deletingLastPathComponent()
+    let alias = parent.deletingLastPathComponent().appendingPathComponent("kinlogue-sqlite-alias-\(UUID().uuidString)")
+    defer {
+        try? FileManager.default.removeItem(at: alias)
+        try? FileManager.default.removeItem(at: parent)
+    }
+    try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: parent)
+
+    let owner = try SQLiteLibraryOwner(rootURL: root)
+    #expect(throws: SQLiteLibraryError.occupied) {
+        _ = try SQLiteLibraryOwner(rootURL: alias.appendingPathComponent("Vault", isDirectory: true))
+    }
+    // Still held: the refusal above came from this owner, not from one that was already gone.
+    try owner.validate()
+}
+
+@Test(.enabled(if: sqliteTestVolumeIsCaseInsensitive, "Requires a case-insensitive filesystem"))
+func differentlyCasedLibraryAliasesContendForOneOwner() throws {
+    let parent = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+        .appendingPathComponent("kinlogue-sqlite-case-alias-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: parent) }
+    try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+
+    // An existing root and a root that has not been created yet are both named consistently.
+    let existing = parent.appendingPathComponent("Kinlogue", isDirectory: true)
+    try FileManager.default.createDirectory(at: existing, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    for (canonical, cased) in [
+        (existing, parent.appendingPathComponent("kinlogue", isDirectory: true)),
+        (parent.appendingPathComponent("SourceVault", isDirectory: true), parent.appendingPathComponent("sourcevault", isDirectory: true)),
+    ] {
+        let owner = try SQLiteLibraryOwner(rootURL: canonical)
+        #expect(throws: SQLiteLibraryError.occupied) { _ = try SQLiteLibraryOwner(rootURL: cased) }
+        try owner.validate()
+    }
+}
+
+@Test
+func sqliteOwnerLockPathSubstitutionFailsClosed() throws {
+    let root = try sqliteTestRoot()
+    let parent = root.deletingLastPathComponent()
+    defer { try? FileManager.default.removeItem(at: parent) }
+    let outside = parent.appendingPathComponent("outside")
+    #expect(FileManager.default.createFile(atPath: outside.path, contents: Data()))
+    for name in SQLiteLibraryOwner.lockFilenames(rootURL: root) {
+        try FileManager.default.createSymbolicLink(at: parent.appendingPathComponent(name), withDestinationURL: outside)
+    }
+
+    #expect(throws: VaultError.invalidPath) { _ = try SQLiteLibraryOwner(rootURL: root) }
+    #expect(try Data(contentsOf: outside).isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: root.path))
+}
+
+private let sqliteTestVolumeIsCaseInsensitive: Bool = {
+    let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+    let descriptor = Darwin.open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+    guard descriptor >= 0 else { return false }
+    defer { Darwin.close(descriptor) }
+    return fpathconf(descriptor, _PC_CASE_SENSITIVE) == 0
+}()

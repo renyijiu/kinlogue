@@ -68,9 +68,10 @@ struct SQLiteDICOMSliceSource: DICOMVerifiedSliceSource {
 
     private func validateTarget(_ requested: DICOMSliceInstanceDescriptor, _ session: DICOMSliceSeriesSession) throws -> SQLiteOriginal {
         try repository.store.read(epoch: repository.epoch) { db in
-            guard case let .sqlite(libraryID, epoch, studyID, revision, seriesID, seriesHash) = session.token.identity,
-                  epoch == repository.epoch, studyID == session.studyID, seriesID == session.seriesID,
-                  try SQLiteLibraryState.read(from: db).libraryID == libraryID else { throw DICOMSliceServiceError.staleSession }
+            let token = session.token
+            let studyID = token.studyID, revision = token.contentRevision, seriesHash = token.seriesHash
+            guard token.epoch == repository.epoch, studyID == session.studyID, token.seriesID == session.seriesID,
+                  try SQLiteLibraryState.read(from: db).libraryID == token.libraryID else { throw DICOMSliceServiceError.staleSession }
             try repository.store.requireUnquarantined(.study, studyID)
             let study = try SQLiteDICOMRows.summary(SQLiteDICOMRows.studyRow(studyID, db))
             guard study.contentRevision == revision else { throw DICOMSliceServiceError.staleSession }

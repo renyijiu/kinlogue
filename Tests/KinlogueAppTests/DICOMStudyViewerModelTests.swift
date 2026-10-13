@@ -981,13 +981,9 @@ private func viewerSession(
         windowCenter: 128,
         windowWidth: 256
     )
-    let revision = try VaultRevision(
-        generation: 4,
-        commitID: UUID(),
-        catalogDigest: Data(repeating: 0x42, count: 32)
-    )
     return try DICOMSliceSeriesSession(
-        token: DICOMVaultSessionToken(vaultID: UUID(), revision: revision),
+        token: DICOMVaultSessionToken(libraryID: UUID(), epoch: UUID(), studyID: studyID, contentRevision: 4,
+                                      seriesID: seriesID, seriesHash: Data(repeating: 0x42, count: 32)),
         studyID: studyID,
         seriesID: seriesID,
         orderingProvenance: ordering,

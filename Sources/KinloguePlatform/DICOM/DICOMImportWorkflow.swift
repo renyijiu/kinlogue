@@ -25,24 +25,6 @@ public actor DICOMImportWorkflow {
     private var currentTask: Task<DICOMImportResult, Error>?
     private var currentOperationID: UUID?
 
-    public init(
-        rootURL: URL,
-        vault: PlaintextVault,
-        decoder: any DICOMFrameDecoding = DICOMDecoderAdapter(),
-        policy: DICOMImportPolicy = .default,
-        metrics: DICOMImportMetricsRecorder? = nil
-    ) throws {
-        try self.init(
-            rootURL: rootURL,
-            vault: vault,
-            decoder: decoder,
-            policy: policy,
-            metrics: metrics,
-            scannerControl: nil,
-            availableCapacityProvider: VaultDICOMStudyStaging.systemAvailableCapacity
-        )
-    }
-
     init(
         rootURL: URL,
         vault: any DICOMImportStoring,
@@ -211,7 +193,7 @@ public actor DICOMImportWorkflow {
                 operationID: operationID,
                 securityScope: securityScope,
                 staging: staging,
-                ownership: session.stagingOwnership,
+                ownership: session.ownership,
                 willBeginStaging: { await reportPhase(.staging) }
             )
             if Task.isCancelled { throw DICOMImportError.cancelled }
@@ -222,7 +204,7 @@ public actor DICOMImportWorkflow {
                 metrics: metrics
             ).index(
                 stagedObjects: scan.stagedObjects,
-                vaultID: session.vaultID,
+                vaultID: session.libraryID,
                 staging: staging
             )
             let proposedResult = DICOMImportResult(
@@ -302,13 +284,4 @@ public actor DICOMImportWorkflow {
         }
     }
 
-    nonisolated static func matchesCommittedGraph(
-        _ committed: DICOMStudy,
-        proposal: DICOMStudy
-    ) -> Bool {
-        committed.id == proposal.id
-            && committed.fingerprint == proposal.fingerprint
-            && committed.indexObjectID == proposal.indexObjectID
-            && committed.attachmentIDs == proposal.attachmentIDs
-    }
 }

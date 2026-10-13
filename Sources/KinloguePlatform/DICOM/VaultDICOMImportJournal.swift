@@ -62,23 +62,6 @@ public struct VaultDICOMImportJournal: Sendable {
         }
     }
 
-    func recordPromotions(
-        _ references: [VaultObjectReference],
-        operationID: UUID
-    ) throws {
-        guard Set(references).count == references.count,
-              references.allSatisfy({
-                  $0.kind == .attachment || $0.kind == .record
-              }) else {
-            throw DICOMImportError.integrityFailure
-        }
-        var receipt = try read(operationID: operationID)
-        receipt.promotedReferences = Array(
-            Set(receipt.promotedReferences).union(references)
-        ).sorted(by: referencePrecedes)
-        try write(receipt)
-    }
-
     @discardableResult
     func reconcile(
         vaultID: UUID,
@@ -176,11 +159,6 @@ public struct VaultDICOMImportJournal: Sendable {
         let prefix = "\(layout.dicomImportJournalDirectoryPath)/", suffix = ".json"
         guard path.hasPrefix(prefix), path.hasSuffix(suffix) else { return nil }
         return UUID(uuidString: String(path.dropFirst(prefix.count).dropLast(suffix.count)))
-    }
-
-    private func referencePrecedes(_ lhs: VaultObjectReference, _ rhs: VaultObjectReference) -> Bool {
-        if lhs.kind.rawValue != rhs.kind.rawValue { return lhs.kind.rawValue < rhs.kind.rawValue }
-        return lhs.id.uuidString.lowercased() < rhs.id.uuidString.lowercased()
     }
 
     private struct Receipt: Codable, Sendable {

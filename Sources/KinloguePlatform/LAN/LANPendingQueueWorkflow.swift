@@ -17,16 +17,6 @@ public actor LANPendingQueueWorkflow {
     private let preprocessor: LANItemPreprocessor
     private let archiveCoordinator: LANReportArchiveCoordinator
 
-    public init(
-        inbox: PlaintextLANInboxStore,
-        preprocessor: LANItemPreprocessor,
-        archiveCoordinator: LANReportArchiveCoordinator
-    ) {
-        self.inbox = inbox
-        self.preprocessor = preprocessor
-        self.archiveCoordinator = archiveCoordinator
-    }
-
     package init(inbox: any LANPendingItemStoring, preprocessor: LANItemPreprocessor, archiveCoordinator: LANReportArchiveCoordinator) {
         self.inbox = inbox; self.preprocessor = preprocessor; self.archiveCoordinator = archiveCoordinator
     }
@@ -71,20 +61,6 @@ public actor LANPendingQueueWorkflow {
             return LANInboxPreviewPayload(
                 data: validated.data,
                 contentTypeIdentifier: validated.contentTypeIdentifier
-            )
-        }
-    }
-
-    /// Re-enters durable archive intents. Stored items are scheduled by the
-    /// App processing coordinator so startup is not blocked by a large OCR backlog.
-    public func resumeInterruptedWork() async {
-        guard let snapshot = try? await inbox.archiveRecoverySnapshot() else { return }
-        await archiveCoordinator.reconcileTerminalStaging(in: snapshot)
-        for intent in snapshot.archiveIntents {
-            _ = try? await archiveCoordinator.archive(
-                itemIDs: intent.orderedSources.map(\.itemID),
-                memberID: intent.memberID,
-                canonicalReportDate: intent.canonicalReportDate
             )
         }
     }

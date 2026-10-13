@@ -6,11 +6,11 @@ import Testing
 
 @Suite("LAN receiver file lifecycle", .serialized)
 struct LANReceiverFileLifecycleTests {
-    @Test(arguments: [false, true])
-    func interruptionRetrySaveReplayAndReservedCancellationStayFileScoped(sqlite: Bool) async throws {
-        let fixture = try await LANReceiverBackendFixture.make(sqlite: sqlite)
+    @Test
+    func interruptionRetrySaveReplayAndReservedCancellationStayFileScoped() async throws {
+        let fixture = try await LANInboxStoreTestFixture.make()
         defer { fixture.destroy() }
-        let receiver = LANReceiver(rootURL: fixture.rootURL, session: LANSession(), store: fixture.injectedStore)
+        let receiver = LANReceiver(store: fixture.store, session: LANSession())
         defer { Task { await receiver.stop() } }
         let (_, authorization) = try await startAndAuthorize(receiver)
         let bytes = Data("synthetic receiver lifecycle".utf8)
@@ -94,16 +94,15 @@ struct LANReceiverFileLifecycleTests {
         #expect(!(await receiver.isActive))
     }
 
-    @Test(arguments: [false, true])
-    func cancellationAfterDurablePublicationReportsConflictAndProjectsSaved(sqlite: Bool) async throws {
-        let fixture = try await LANReceiverBackendFixture.make(sqlite: sqlite)
+    @Test
+    func cancellationAfterDurablePublicationReportsConflictAndProjectsSaved() async throws {
+        let fixture = try await LANInboxStoreTestFixture.make()
         defer { fixture.destroy() }
         let gate = FilePublicationGate()
         let receiver = LANReceiver(
-            rootURL: fixture.rootURL,
+            store: fixture.store,
             session: LANSession(),
-            fileUploadPublishedHook: { await gate.arriveAndWaitForRelease() },
-            store: fixture.injectedStore
+            fileUploadPublishedHook: { await gate.arriveAndWaitForRelease() }
         )
         defer { Task { await receiver.stop() } }
         let (_, authorization) = try await startAndAuthorize(receiver)
@@ -145,7 +144,8 @@ struct LANReceiverFileLifecycleTests {
     func concurrentReservationsCountPendingAdmissionsTowardTheSessionLimit() async throws {
         let fixture = try await LANInboxStoreTestFixture.make()
         defer { fixture.destroy() }
-        let receiver = LANReceiver(rootURL: fixture.rootURL, session: LANSession())
+        let admission = AdmissionGate()
+        let receiver = LANReceiver(store: GatedUploadStore(base: fixture.store, gate: admission), session: LANSession())
         defer { Task { await receiver.stop() } }
         let (credentials, authorization) = try await startAndAuthorize(receiver)
         let bytes = Data([0])
@@ -156,30 +156,29 @@ struct LANReceiverFileLifecycleTests {
             )
         }
 
-        let coordinator = VaultMutationCoordinator.shared(for: fixture.rootURL)
-        let lease = try await coordinator.acquire()
-        defer { lease.release() }
+        await admission.arm()
         let lastRequest = try request(remoteFileID: UUID(), bytes: bytes, revision: 0)
         let last = Task {
             try await receiver.reserveFile(lastRequest, authorizedBy: authorization)
         }
         defer { last.cancel() }
-        for _ in 0..<10_000 where coordinator.waitingCountForTesting == 0 {
+        for _ in 0..<10_000 where await admission.waitingCount == 0 {
             await Task.yield()
         }
-        #expect(coordinator.waitingCountForTesting == 1)
+        #expect(await admission.waitingCount == 1)
 
         let excessRequest = try request(remoteFileID: UUID(), bytes: bytes, revision: 0)
         let excess = Task {
             try await receiver.reserveFile(excessRequest, authorizedBy: authorization)
         }
         defer { excess.cancel() }
-        // The held real storage lease exposes actor reentrancy without adding
-        // a receiver hook. A correct rejection never joins the storage queue.
-        for _ in 0..<10_000 where coordinator.waitingCountForTesting < 2 {
+        // The reservation waiting on storage exposes actor reentrancy without adding a receiver
+        // hook. A correct rejection never reaches storage.
+        for _ in 0..<10_000 where await admission.waitingCount < 2 {
             await Task.yield()
         }
-        lease.release()
+        #expect(await admission.waitingCount == 1)
+        await admission.release()
 
         #expect(try await last.value.file.remoteFileID == lastRequest.remoteFileID)
         await #expect(throws: LANReceiverError.retryLater) {
@@ -290,4 +289,54 @@ private actor FilePublicationGate {
         releaseWaiters.removeAll()
         for waiter in waiters { waiter.resume() }
     }
+}
+
+/// Once armed, admission-generation reads wait here until released.
+private actor AdmissionGate {
+    private var armed = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    var waitingCount: Int { waiters.count }
+
+    func arm() { armed = true }
+
+    func pass() async {
+        guard armed else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        armed = false
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}
+
+/// The real inbox store behind a gate on the one call a reservation waits for.
+private struct GatedUploadStore: LANUploadStoring {
+    let base: SQLiteLANInboxStore
+    let gate: AdmissionGate
+
+    func initialize() async throws -> LANInboxSnapshot { try await base.initialize() }
+    func prepare() async throws { try await base.prepare() }
+    func publicationGuard() async throws -> LANInboxPublicationGuard { try await base.publicationGuard() }
+    func revokePublications(guardedBy guardValue: LANInboxPublicationGuard) async throws {
+        try await base.revokePublications(guardedBy: guardValue)
+    }
+    func itemAdmissionGeneration() async throws -> UInt64 {
+        await gate.pass()
+        return try await base.itemAdmissionGeneration()
+    }
+    func startItemUpload(transport: LANInboxTransportIdentity, metadata: LANInboxTransportMetadata,
+                         attemptRevision: UInt64, admissionGeneration: UInt64?,
+                         publicationGuard: LANInboxPublicationGuard?) async throws -> LANItemUploadStartOutcome {
+        try await base.startItemUpload(transport: transport, metadata: metadata, attemptRevision: attemptRevision,
+                                       admissionGeneration: admissionGeneration, publicationGuard: publicationGuard)
+    }
+    func recordItemUploadCancellation(transport: LANInboxTransportIdentity, metadata: LANInboxTransportMetadata,
+                                     attemptRevision: UInt64) async throws -> LANInboxTransportReceipt {
+        try await base.recordItemUploadCancellation(transport: transport, metadata: metadata, attemptRevision: attemptRevision)
+    }
+    func endItemSession(sessionID: UUID) async throws { try await base.endItemSession(sessionID: sessionID) }
 }

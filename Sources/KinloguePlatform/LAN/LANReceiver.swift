@@ -336,8 +336,7 @@ public actor LANReceiver {
         case stopping(UUID)
     }
 
-    private let rootURL: URL?
-    private let injectedStore: (any LANUploadStoring)?
+    private let uploadStore: any LANUploadStoring
     private let session: LANSession
     private let idleDuration: Duration
     private let storeObserver: StoreObserver
@@ -349,21 +348,8 @@ public actor LANReceiver {
     private var phase: Phase = .inactive
     private var startStopWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
 
-    public init(rootURL: URL) {
-        self.rootURL = rootURL
-        self.injectedStore = nil
-        session = LANSession()
-        idleDuration = .seconds(15 * 60)
-        storeObserver = { _ in }
-        postBindHook = { _, _ in }
-        storeInitializationHook = {}
-        preActivationHook = { _ in }
-        publicationRevocationHook = {}
-        fileUploadPublishedHook = {}
-    }
-
     init(
-        rootURL: URL,
+        store: any LANUploadStoring,
         session: LANSession,
         idleDuration: Duration = .seconds(15 * 60),
         storeObserver: @escaping StoreObserver = { _ in },
@@ -371,11 +357,9 @@ public actor LANReceiver {
         storeInitializationHook: @escaping StoreInitializationHook = {},
         preActivationHook: @escaping PreActivationHook = { _ in },
         publicationRevocationHook: @escaping PublicationRevocationHook = {},
-        fileUploadPublishedHook: @escaping FileUploadPublishedHook = {},
-        store: (any LANUploadStoring)? = nil
+        fileUploadPublishedHook: @escaping FileUploadPublishedHook = {}
     ) {
-        self.rootURL = rootURL
-        self.injectedStore = store
+        uploadStore = store
         self.session = session
         self.idleDuration = idleDuration
         self.storeObserver = storeObserver
@@ -387,8 +371,7 @@ public actor LANReceiver {
     }
 
     package init(store: any LANUploadStoring) {
-        rootURL = nil
-        injectedStore = store
+        uploadStore = store
         session = LANSession()
         idleDuration = .seconds(15 * 60)
         storeObserver = { _ in }; postBindHook = { _, _ in }; storeInitializationHook = {}
@@ -481,8 +464,7 @@ public actor LANReceiver {
         let guardValue: LANInboxPublicationGuard
         do {
             pairing = try await session.startNewSession()
-            if let injectedStore { store = injectedStore }
-            else { guard let rootURL else { throw LANReceiverError.storageUnavailable }; store = try PlaintextLANInboxStore(rootURL: rootURL, runtimeGeneration: UUID()) }
+            store = uploadStore
             try await storeInitializationHook()
             storeObserver(.initialize)
             try await store.prepare()

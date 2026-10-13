@@ -205,84 +205,7 @@ struct LANInboxAdmissionPolicyTests {
     }
 }
 
-struct LANInboxLayoutTests {
-    @Test
-    func initializerValidatesAnExistingRootWithoutCreatingAnything() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        let layout = try LANInboxLayout(rootURL: root)
-
-        #expect(
-            layout.rootURL
-                == root.resolvingSymlinksInPath().standardizedFileURL
-        )
-        #expect(layout.inboxDirectoryPath == "lan-inbox")
-        #expect(layout.manifestPath == "lan-inbox/inbox.json")
-        #expect(layout.blobsDirectoryPath == "lan-inbox/blobs")
-        #expect(layout.partialsDirectoryPath == "lan-inbox/partials")
-        #expect(layout.derivedDirectoryPath == "lan-inbox/derived")
-        #expect(!FileManager.default.fileExists(
-            atPath: layout.inboxDirectoryURL.path
-        ))
-    }
-
-    @Test
-    func initializerRejectsMissingAndSymlinkRoots() throws {
-        let parent = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: parent) }
-        let missing = parent.appendingPathComponent("missing", isDirectory: true)
-        #expect(throws: VaultError.vaultMissing) {
-            try LANInboxLayout(rootURL: missing)
-        }
-
-        let real = parent.appendingPathComponent("real", isDirectory: true)
-        let link = parent.appendingPathComponent("link", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: real,
-            withIntermediateDirectories: false
-        )
-        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
-        #expect(throws: VaultError.invalidPath) {
-            try LANInboxLayout(rootURL: link)
-        }
-
-        let regularFile = parent.appendingPathComponent("regular-file")
-        try Data("synthetic".utf8).write(to: regularFile)
-        #expect(throws: VaultError.invalidPath) {
-            try LANInboxLayout(rootURL: regularFile)
-        }
-    }
-
-    @Test
-    func opaquePathsAndRecognizersRequireExactCanonicalRoundTrips() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let layout = try LANInboxLayout(rootURL: root)
-        let id = try #require(UUID(uuidString: "01234567-89AB-CDEF-8123-456789ABCDEF"))
-        let lowercase = "01234567-89ab-cdef-8123-456789abcdef"
-
-        #expect(layout.blobPath(id) == "lan-inbox/blobs/\(lowercase).blob")
-        #expect(layout.partialPath(id) == "lan-inbox/partials/\(lowercase).partial")
-        #expect(layout.derivedPath(id) == "lan-inbox/derived/\(lowercase).data")
-        #expect(layout.blobID(at: layout.blobPath(id)) == id)
-        #expect(layout.partialID(at: layout.partialPath(id)) == id)
-        #expect(layout.derivedID(at: layout.derivedPath(id)) == id)
-
-        let rejected = [
-            "lan-inbox/blobs/01234567-89AB-CDEF-8123-456789ABCDEF.blob",
-            "lan-inbox/Blobs/\(lowercase).blob",
-            "lan-inbox/blobs/\(lowercase).BLOB",
-            "/lan-inbox/blobs/\(lowercase).blob",
-            "lan-inbox//blobs/\(lowercase).blob",
-            "lan-inbox/blobs/../\(lowercase).blob",
-            "lan-inbox/blobs/\(lowercase).blob/extra",
-            "lan-inbox/blobs/report.blob",
-        ]
-        for path in rejected {
-            #expect(layout.blobID(at: path) == nil)
-        }
-    }
+struct LANInboxDisplayMetadataSanitizerTests {
 
     @Test
     func displayMetadataIsCanonicalVisibleTrimmedAndPathIndependent() throws {
@@ -330,17 +253,6 @@ struct LANInboxLayoutTests {
         }
     }
 
-    private func makeTemporaryDirectory() throws -> URL {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "kinlogue-lan-layout-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        try FileManager.default.createDirectory(
-            at: root,
-            withIntermediateDirectories: false
-        )
-        return root
-    }
 }
 
 private final class UploadPermitResults: @unchecked Sendable {

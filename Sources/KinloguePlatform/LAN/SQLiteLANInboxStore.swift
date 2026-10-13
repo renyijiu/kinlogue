@@ -42,7 +42,6 @@ package final class SQLiteLANInboxStore: LANPendingItemStoring, Sendable {
         }
     }
 
-    package func archiveRecoverySnapshot() async throws -> LANInboxSnapshot? { nil }
 
     @concurrent
     package func prepare() async throws {

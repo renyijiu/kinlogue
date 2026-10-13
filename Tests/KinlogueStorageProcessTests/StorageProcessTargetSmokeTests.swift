@@ -6,11 +6,12 @@ func storageProcessFixtureTargetIsAvailableToTheTestGraph() async throws {
     try await withOwnedVaultFixture { fixture in
         try await withStorageProcessFixture(processCount: 1) { processes in
             try processes[0].send(.init(
-                operation: "initialize",
+                operation: "openSQLite",
                 rootURL: fixture.rootURL
             ))
-            let response = try await processes[0].nextResponse()
-            #expect(response.event == "initialized")
+            #expect(try await processes[0].nextResponse().event == "sqliteOpened")
+            try processes[0].send(.init(operation: "closeSQLite"))
+            #expect(try await processes[0].nextResponse().event == "sqliteClosed")
         }
     }
 }

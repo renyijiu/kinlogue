@@ -45,17 +45,11 @@ enum KinlogueStorageProcessFixture {
 }
 
 private final class FixtureRuntime {
-    private struct LoadedCatalog {
-        let rootURL: URL
-        let catalog: VaultCatalog
-    }
-
     enum Action {
         case keepRunning
         case exit
     }
 
-    private var loadedCatalog: LoadedCatalog?
     private var sqliteStore: SQLiteLibraryStore?
 
     func handle(_ command: FixtureCommand) async throws -> Action {
@@ -194,106 +188,6 @@ private final class FixtureRuntime {
             try store.publishOriginal(id, operationID: operation)
             try store.deleteOriginal(id)
             throw FixtureError.invalidCommand
-        case .initialize:
-            let rootURL = try FixtureRoot.validate(command.rootPath)
-            let catalog = try await PlaintextVault(rootURL: rootURL).initialize()
-            FixtureProtocol.write(.init(
-                event: .initialized,
-                ok: true,
-                generation: catalog.generation
-            ))
-        case .loadCatalog:
-            let rootURL = try FixtureRoot.validate(command.rootPath)
-            let catalog = try await PlaintextVault(rootURL: rootURL).loadCatalog()
-            loadedCatalog = LoadedCatalog(rootURL: rootURL, catalog: catalog)
-            FixtureProtocol.write(.init(
-                event: .catalogLoaded,
-                ok: true,
-                generation: catalog.generation
-            ))
-        case .commitLoadedCatalog:
-            let committed = try await commitLoadedCatalog(variant: command.variant)
-            FixtureProtocol.write(.init(
-                event: .catalogCommitted,
-                ok: true,
-                variant: command.variant,
-                generation: committed.generation
-            ))
-        case .barrierCommitLoadedCatalog:
-            FixtureProtocol.write(.init(event: .catalogCommitAttempting, ok: true))
-            let committed = try await commitLoadedCatalog(variant: command.variant)
-            FixtureProtocol.write(.init(
-                event: .catalogCommitted,
-                ok: true,
-                variant: command.variant,
-                generation: committed.generation
-            ))
-        case .holdCatalogCommit:
-            let loaded = try requireLoadedCatalog()
-            let vault = try PlaintextVault(
-                rootURL: loaded.rootURL,
-                transactionFailureInjector: { point in
-                    guard point == .afterObjects else { return false }
-                    FixtureProtocol.write(.init(event: .leaseHeld, ok: true))
-                    guard let releaseLine = readLine(strippingNewline: true),
-                          releaseLine.utf8.count <= FixtureProtocol.maximumLineByteCount,
-                          let releaseData = releaseLine.data(using: .utf8),
-                          let release = try? JSONDecoder().decode(
-                            FixtureCommand.self,
-                            from: releaseData
-                          ),
-                          release.operation == .release else {
-                        return true
-                    }
-                    return false
-                }
-            )
-            let committed = try await vault.commit(try nextCommit(
-                loaded: loaded,
-                variant: command.variant
-            ))
-            loadedCatalog = LoadedCatalog(rootURL: loaded.rootURL, catalog: committed)
-            FixtureProtocol.write(.init(
-                event: .catalogCommitted,
-                ok: true,
-                variant: command.variant,
-                generation: committed.generation
-            ))
-        case .rejectOversizedDICOMProposal:
-            let loaded = try requireLoadedCatalog()
-            do {
-                _ = try oversizedDICOMCatalog(from: loaded.catalog)
-                throw FixtureError.invalidCommand
-            } catch DomainValidationError.invalidCatalogReference {
-                FixtureProtocol.write(.init(
-                    event: .operationFailed,
-                    ok: false,
-                    code: .resourceLimitExceeded
-                ))
-            }
-        case .holdDICOMImport:
-            let rootURL = try FixtureRoot.validate(command.rootPath)
-            let sourceURL = rootURL.deletingLastPathComponent().appendingPathComponent(
-                "DICOMSource",
-                isDirectory: true
-            )
-            let sourceDescriptor = Darwin.open(
-                sourceURL.path,
-                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
-            )
-            guard sourceDescriptor >= 0 else { throw FixtureError.invalidRoot }
-            Darwin.close(sourceDescriptor)
-            let vault = try PlaintextVault(rootURL: rootURL)
-            let workflow = try DICOMImportWorkflow(
-                rootURL: rootURL,
-                vault: vault,
-                decoder: BlockingProcessDICOMDecoder()
-            )
-            _ = try await workflow.importDirectory(
-                sourceURL,
-                securityScope: .notRequiredForTesting
-            )
-            FixtureProtocol.write(.init(event: .dicomImported, ok: true))
         case .barrierPublishBackup:
             let rootURL = try FixtureRoot.validate(command.rootPath)
             let base = rootURL.deletingLastPathComponent()
@@ -307,12 +201,16 @@ private final class FixtureRuntime {
                   configuration.phase == .enabled else {
                 throw FixtureError.invalidCommand
             }
-            let vault = try PlaintextVault(rootURL: rootURL)
-            let inbox = try PlaintextLANInboxStore(rootURL: rootURL)
-            let source = try PlaintextLibraryBackupSource(
-                vault: vault,
-                inboxStore: inbox
-            )
+            // One library has one owner, so each publishing process brings its own.
+            guard let variant = command.variant, (1...2).contains(variant) else {
+                throw FixtureError.invalidCommand
+            }
+            let store = try SQLiteLibraryStore(rootURL: base.appendingPathComponent(
+                "PublicationSource-\(variant)",
+                isDirectory: true
+            ))
+            defer { try? store.close() }
+            let source = SQLiteLogicalBackupSource(store: store)
             let repositoryURL = base
                 .appendingPathComponent("selected", isDirectory: true)
                 .appendingPathComponent(
@@ -359,21 +257,6 @@ private final class FixtureRuntime {
                 ok: true,
                 generation: published.witness.sequence
             ))
-        case .barrierDestroy:
-            FixtureProtocol.write(.init(event: .destroyAttempting, ok: true))
-            let rootURL = try FixtureRoot.validate(command.rootPath)
-            try await PlaintextVault(rootURL: rootURL).destroy()
-            FixtureProtocol.write(.init(event: .destroyed, ok: true))
-        case .destroyAndInitialize:
-            let rootURL = try FixtureRoot.validate(command.rootPath)
-            try await PlaintextVault(rootURL: rootURL).destroy()
-            let catalog = try await PlaintextVault(rootURL: rootURL).initialize()
-            loadedCatalog = nil
-            FixtureProtocol.write(.init(
-                event: .reinitialized,
-                ok: true,
-                generation: catalog.generation
-            ))
         case .release:
             throw FixtureError.invalidCommand
         case .exit:
@@ -383,120 +266,6 @@ private final class FixtureRuntime {
         return .keepRunning
     }
 
-    private func commitLoadedCatalog(variant: Int?) async throws -> VaultCatalog {
-        let loaded = try requireLoadedCatalog()
-        let committed = try await PlaintextVault(rootURL: loaded.rootURL).commit(
-            try nextCommit(loaded: loaded, variant: variant)
-        )
-        loadedCatalog = LoadedCatalog(rootURL: loaded.rootURL, catalog: committed)
-        return committed
-    }
-
-    private func nextCommit(
-        loaded: LoadedCatalog,
-        variant: Int?
-    ) throws -> VaultCommitRequest {
-        let variant = try FixtureVariant(rawValue: variant)
-        let member = try FamilyMember(
-            id: variant.memberID,
-            displayName: variant.displayName
-        )
-        let catalog = loaded.catalog
-        return try VaultCommitRequest(
-            expectedGeneration: catalog.generation,
-            catalog: VaultCatalog(
-                vaultID: catalog.vaultID,
-                generation: try VaultGeneration.successor(of: catalog.generation),
-                members: catalog.members + [member],
-                records: catalog.records,
-                attachments: catalog.attachments,
-                importDrafts: catalog.importDrafts,
-                dicomStudies: catalog.dicomStudies
-            ),
-            writes: []
-        )
-    }
-
-    private func requireLoadedCatalog() throws -> LoadedCatalog {
-        guard let loadedCatalog else { throw FixtureError.catalogNotLoaded }
-        return loadedCatalog
-    }
-
-    private func oversizedDICOMCatalog(from catalog: VaultCatalog) throws -> VaultCatalog {
-        var attachments: [Attachment] = []
-        var studies: [DICOMStudy] = []
-        attachments.reserveCapacity(VaultCatalog.maximumRetainedDICOMObjectCount + 1)
-        studies.reserveCapacity(6)
-        var ordinal = 0
-        for objectCount in [2_000, 2_000, 2_000, 2_000, 2_000, 1] {
-            var owned: [Attachment] = []
-            owned.reserveCapacity(objectCount)
-            for _ in 0..<objectCount {
-                let attachment = try Attachment(
-                    contentTypeIdentifier: "application/dicom",
-                    byteCount: 1,
-                    sha256Digest: Self.syntheticDigest(ordinal)
-                )
-                ordinal += 1
-                owned.append(attachment)
-            }
-            let fingerprint = try DICOMStudyFingerprint(objects: owned.map {
-                try DICOMStudyFingerprint.ObjectDigest(
-                    sha256Digest: $0.sha256Digest,
-                    byteCount: $0.byteCount
-                )
-            })
-            studies.append(try DICOMStudy(
-                state: .needsReview,
-                fingerprint: fingerprint,
-                indexObjectID: UUID(),
-                attachmentIDs: owned.map(\.id)
-            ))
-            attachments.append(contentsOf: owned)
-        }
-        return try VaultCatalog(
-            vaultID: catalog.vaultID,
-            generation: try VaultGeneration.successor(of: catalog.generation),
-            members: catalog.members,
-            records: catalog.records,
-            attachments: catalog.attachments + attachments,
-            importDrafts: catalog.importDrafts,
-            dicomStudies: catalog.dicomStudies + studies
-        )
-    }
-
-    private static func syntheticDigest(_ ordinal: Int) -> Data {
-        var digest = Data(repeating: 0, count: 32)
-        var value = UInt64(ordinal).bigEndian
-        withUnsafeBytes(of: &value) { digest.replaceSubrange(24..<32, with: $0) }
-        return digest
-    }
-}
-
-private enum FixtureVariant: Int {
-    case first = 1
-    case second = 2
-
-    init(rawValue: Int?) throws {
-        guard let rawValue, let value = Self(rawValue: rawValue) else {
-            throw FixtureError.invalidCommand
-        }
-        self = value
-    }
-
-    var memberID: UUID {
-        switch self {
-        case .first: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
-        case .second: UUID(uuidString: "10000000-0000-0000-0000-000000000002")!
-        }
-    }
-
-    var displayName: String {
-        switch self {
-        case .first: "Synthetic Process One"
-        case .second: "Synthetic Process Two"
-        }
-    }
 }
 
 private enum FixtureRoot {
@@ -575,18 +344,9 @@ private enum FixtureRoot {
 
 private enum FixtureOperation: String, Codable {
     case handshake
-    case initialize
     case openSQLite, suspendSQLite, closeSQLite, holdSQLiteOriginal, holdSQLiteInitialization, holdSQLiteLANUpload, holdSQLiteDICOMImport, holdSQLiteLogicalRestore, holdSQLiteLogicalCapture
-    case loadCatalog
-    case commitLoadedCatalog
-    case barrierCommitLoadedCatalog
-    case holdCatalogCommit
-    case rejectOversizedDICOMProposal
-    case holdDICOMImport
     case barrierPublishBackup
     case release
-    case barrierDestroy
-    case destroyAndInitialize
     case exit
 }
 
@@ -599,18 +359,10 @@ private struct FixtureCommand: Codable {
 
 private enum FixtureEvent: String, Codable {
     case handshake
-    case initialized
     case sqliteOpened, sqliteSuspended, sqliteClosed
-    case catalogLoaded
-    case catalogCommitted
-    case catalogCommitAttempting
-    case dicomImported
     case backupPublicationCriticalSectionEntered
     case backupPublished
     case leaseHeld
-    case destroyed
-    case destroyAttempting
-    case reinitialized
     case operationFailed
     case rejected
     case exiting
@@ -666,12 +418,6 @@ private actor BlockingProcessDICOMDecoder: DICOMFrameDecoding {
 private enum FixtureFailureCode: String, Codable {
     case invalidCommand
     case invalidRoot
-    case catalogNotLoaded
-    case staleRevision
-    case vaultMissing
-    case rootReplaced
-    case injectedFailure
-    case resourceLimitExceeded
     case storageFailure
     case occupied
 
@@ -680,11 +426,6 @@ private enum FixtureFailureCode: String, Codable {
         case SQLiteLibraryError.occupied: self = .occupied
         case FixtureError.invalidCommand: self = .invalidCommand
         case FixtureError.invalidRoot: self = .invalidRoot
-        case FixtureError.catalogNotLoaded: self = .catalogNotLoaded
-        case VaultError.mutationConflict: self = .staleRevision
-        case VaultError.vaultMissing: self = .vaultMissing
-        case VaultError.vaultIDMismatch: self = .rootReplaced
-        case VaultError.injectedFailure: self = .injectedFailure
         default: self = .storageFailure
         }
     }
@@ -734,5 +475,4 @@ private enum FixtureProtocol {
 private enum FixtureError: Error {
     case invalidCommand
     case invalidRoot
-    case catalogNotLoaded
 }

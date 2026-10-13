@@ -19,7 +19,7 @@ public struct ImportProcessingLease: Equatable, Sendable {
 }
 
 /// The coherent data needed to present one import draft for review.
-/// All fields originate from the same persisted catalog generation.
+/// All fields originate from the same committed library revision.
 public struct ImportDraftReviewSnapshot: Equatable, Sendable {
     public let draft: ImportDraft
     public let document: ImportDraftDocument

@@ -14,8 +14,6 @@ public struct PlaintextVaultLayout: Sendable {
         self.rootURL = standardized
     }
 
-    public var manifestPath: String { "library.json" }
-    public var legacyEncryptedMarkerPath: String { "vault.marker" }
     public static let dicomImportStagingDirectoryPath = "dicom-import-staging"
     public static let dicomImportJournalDirectoryPath = "dicom-import-journals"
 
@@ -39,17 +37,6 @@ public struct PlaintextVaultLayout: Sendable {
         "\(dicomImportJournalDirectoryPath)/\(operationID.uuidString.lowercased()).json"
     }
 
-    var initializationReceiptURL: URL {
-        rootURL.deletingLastPathComponent().appendingPathComponent(
-            ".kinlogue-vault-initialization-\(transactionPathDigest).json",
-            isDirectory: false
-        )
-    }
-
-    var transactionCanonicalRootPath: String {
-        rootURL.path.precomposedStringWithCanonicalMapping
-    }
-
     static func isAtomicTemporaryFilename(_ name: String) -> Bool {
         let prefix = ".kinlogue-"
         let suffix = ".tmp"
@@ -67,30 +54,6 @@ public struct PlaintextVaultLayout: Sendable {
         let fileExtension = reference.kind == .ocr ? "json" : "data"
         return "objects/\(reference.kind.storageComponent)/"
             + "\(reference.id.uuidString.lowercased()).\(fileExtension)"
-    }
-
-    func objectReference(at relativePath: String) -> VaultObjectReference? {
-        let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
-        guard components.count == 3,
-              components[0] == "objects",
-              let kind = VaultObjectKind.allCases.first(where: {
-                  $0.storageComponent == components[1]
-              }) else { return nil }
-
-        let fileExtension = kind == .ocr ? ".json" : ".data"
-        let filename = String(components[2])
-        guard filename.hasSuffix(fileExtension),
-              let id = UUID(uuidString: String(filename.dropLast(fileExtension.count))) else {
-            return nil
-        }
-        let reference = VaultObjectReference(id: id, kind: kind)
-        return objectPath(reference) == relativePath ? reference : nil
-    }
-
-    private var transactionPathDigest: String {
-        ContentDigest.sha256(Data(transactionCanonicalRootPath.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
     }
 }
 

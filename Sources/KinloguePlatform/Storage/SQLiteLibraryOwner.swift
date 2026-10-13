@@ -13,7 +13,7 @@ package final class SQLiteLibraryOwner: @unchecked Sendable {
     package init(rootURL: URL) throws {
         self.rootURL = try VaultCanonicalRootPath.rootURL(for: rootURL, allowMissing: true)
         parentIdentity = try SQLiteFileIdentity.directory(at: self.rootURL.deletingLastPathComponent(), privateMode: false)
-        // Lifetime ownership uses separate flock inodes from the legacy fcntl lease.
+        // Ownership lasts as long as these descriptors: the kernel drops the flock when the process dies.
         let lock = Self.processLock(rootURL: self.rootURL)
         var acquired: [(url: URL, descriptor: Int32)] = []
         do {

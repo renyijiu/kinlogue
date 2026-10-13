@@ -181,7 +181,10 @@ struct LANPendingItemStoreTests {
             displayName: "recovered.bin"
         )
 
-        let recoveredStore = try PlaintextLANInboxStore(rootURL: fixture.rootURL)
+        try fixture.kernel.close()
+        let reopened = try SQLiteLibraryStore(rootURL: fixture.rootURL)
+        defer { try? reopened.close() }
+        let recoveredStore = try SQLiteLANInboxStore(store: reopened)
         let recovered = try await recoveredStore.initialize()
         let item = try #require(recovered.items.first)
         let deleted = try await recoveredStore.deleteItem(
@@ -195,117 +198,9 @@ struct LANPendingItemStoreTests {
         #expect(deleted.blobs.isEmpty)
     }
 
-    @Test
-    func screenProjectionReusesStableInventoryAndTracksExternalPartials() async throws {
-        let rebuilds = LockedCounter()
-        let fixture = try await LANInboxStoreTestFixture.make(
-            screenProjectionWillRebuild: { rebuilds.increment() }
-        )
-        defer { fixture.destroy() }
-
-        _ = try await fixture.store.snapshotAndStorageSummary()
-        _ = try await fixture.store.snapshotAndStorageSummary()
-        #expect(rebuilds.value == 1)
-
-        let writer = try PlaintextLANInboxStore(rootURL: fixture.rootURL)
-        _ = try await writer.initialize()
-        let admission = try await writer.itemAdmissionGeneration()
-        let sink = try await start(
-            store: writer,
-            sessionID: UUID(),
-            remoteFileID: UUID(),
-            displayName: "interrupted.bin",
-            byteCount: 32,
-            admissionGeneration: admission
-        )
-        try await sink.write(Data(repeating: 0x31, count: 7)).value
-        let receiving = try await fixture.store.snapshotAndStorageSummary()
-        #expect(receiving.storage.partialObjectCount == 1)
-        #expect(receiving.storage.partialByteCount == 7)
-        #expect(rebuilds.value == 2)
-
-        try await sink.write(Data(repeating: 0x32, count: 4)).value
-        let progressed = try await fixture.store.snapshotAndStorageSummary()
-        #expect(progressed.storage.partialObjectCount == 1)
-        #expect(progressed.storage.partialByteCount == 11)
-        #expect(rebuilds.value == 3)
-
-        await sink.cancel()
-        let interrupted = try await fixture.store.snapshotAndStorageSummary()
-        #expect(interrupted.storage.partialObjectCount == 0)
-        #expect(interrupted.storage.partialByteCount == 0)
-        #expect(rebuilds.value == 4)
-
-        try await upload(
-            Data("synthetic cache invalidation".utf8),
-            store: writer,
-            sessionID: UUID(),
-            remoteFileID: UUID(),
-            displayName: "changed.bin"
-        )
-        _ = try await fixture.store.snapshotAndStorageSummary()
-        #expect(rebuilds.value == 5)
-    }
-
-    @Test
-    func unpublishedLegacyManifestFailsClosedWithoutMutation() async throws {
-        let fixture = try await LANInboxStoreTestFixture.make()
-        defer { fixture.destroy() }
-        let manifestURL = fixture.rootURL
-            .appendingPathComponent("lan-inbox/inbox.json")
-        let currentData = try Data(contentsOf: manifestURL)
-        var wire = try #require(
-            JSONSerialization.jsonObject(with: currentData) as? [String: Any]
-        )
-        wire["magic"] = "KLGINBOX1"
-        wire["schemaVersion"] = 2
-        let legacyData = try JSONSerialization.data(
-            withJSONObject: wire,
-            options: [.sortedKeys]
-        )
-        try legacyData.write(to: manifestURL)
-        let ownedEntriesBefore = try ownedEntries(rootURL: fixture.rootURL)
-
-        #expect(await fixture.store.inspect() == .unsupportedVersion)
-        await #expect(throws: LANInboxError.unsupportedVersion) {
-            _ = try await fixture.store.loadSnapshot()
-        }
-
-        #expect(try Data(contentsOf: manifestURL) == legacyData)
-        #expect(try ownedEntries(rootURL: fixture.rootURL) == ownedEntriesBefore)
-    }
-
-    @Test
-    func unknownManifestMagicIsDamageRatherThanAVersionSignal() async throws {
-        let fixture = try await LANInboxStoreTestFixture.make()
-        defer { fixture.destroy() }
-        let manifestURL = fixture.rootURL
-            .appendingPathComponent("lan-inbox/inbox.json")
-        let currentData = try Data(contentsOf: manifestURL)
-        var wire = try #require(
-            JSONSerialization.jsonObject(with: currentData) as? [String: Any]
-        )
-        wire["magic"] = "UNKNOWN"
-        wire["schemaVersion"] = 99
-        let damagedData = try JSONSerialization.data(
-            withJSONObject: wire,
-            options: [.sortedKeys]
-        )
-        try damagedData.write(to: manifestURL)
-        let ownedEntriesBefore = try ownedEntries(rootURL: fixture.rootURL)
-
-        #expect(await fixture.store.inspect() == .damaged)
-        await #expect(throws: LANInboxError.storageFailure) {
-            _ = try await fixture.store.loadSnapshot()
-        }
-
-        #expect(try Data(contentsOf: manifestURL) == damagedData)
-        #expect(try ownedEntries(rootURL: fixture.rootURL) == ownedEntriesBefore)
-    }
-
     private func upload(
         _ bytes: Data,
-        store: PlaintextLANInboxStore,
+        store: SQLiteLANInboxStore,
         sessionID: UUID,
         remoteFileID: UUID,
         displayName: String
@@ -324,7 +219,7 @@ struct LANPendingItemStoreTests {
     }
 
     private func start(
-        store: PlaintextLANInboxStore,
+        store: SQLiteLANInboxStore,
         sessionID: UUID,
         remoteFileID: UUID,
         displayName: String,
@@ -353,29 +248,4 @@ struct LANPendingItemStoreTests {
         return sink
     }
 
-    private func ownedEntries(rootURL: URL) throws -> [String] {
-        let inboxURL = rootURL.appendingPathComponent("lan-inbox", isDirectory: true)
-        let prefix = inboxURL.path + "/"
-        guard let enumerator = FileManager.default.enumerator(
-            at: inboxURL,
-            includingPropertiesForKeys: nil
-        ) else {
-            throw LANInboxError.storageFailure
-        }
-        return enumerator.compactMap { value -> String? in
-            guard let url = value as? URL, url.path.hasPrefix(prefix) else { return nil }
-            return String(url.path.dropFirst(prefix.count))
-        }.sorted()
-    }
-}
-
-private final class LockedCounter: @unchecked Sendable {
-    private let lock = NSLock()
-    private var count = 0
-
-    var value: Int { lock.withLock { count } }
-
-    func increment() {
-        lock.withLock { count += 1 }
-    }
 }

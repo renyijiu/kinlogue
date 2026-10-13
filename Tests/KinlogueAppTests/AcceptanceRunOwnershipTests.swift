@@ -19,30 +19,25 @@ struct AcceptanceRunOwnershipTests {
     }
 
     @Test
-    func releaseRecognizesStableAndLegacyVaultLockFiles() async throws {
+    func releaseRefusesALockFileThatIsNotTheLibraryOwners() throws {
         let fixture = try AcceptanceOwnershipFixture()
         defer { fixture.remove() }
         let ownership = try fixture.claim()
-        let sourceVault = fixture.runRoot.appendingPathComponent(
-            "SourceVault",
-            isDirectory: true
-        )
-        let vault = try PlaintextVault(rootURL: sourceVault)
-        _ = try await vault.initialize()
-        try await vault.destroy()
+        // Named like a lock, but not one of the names the library's owner uses for this root.
+        let stray = fixture.runRoot.appendingPathComponent(VaultMutationLockNaming.filename(
+            forCanonicalRootPath: fixture.runRoot.appendingPathComponent("SourceVault").path
+        ))
+        #expect(FileManager.default.createFile(
+            atPath: stray.path,
+            contents: Data(),
+            attributes: [.posixPermissions: 0o600]
+        ))
 
-        let expectedLockNames = VaultMutationLockNaming.filenames(
-            forRootURL: sourceVault
-        )
-        let namesBeforeRelease = Set(
-            try FileManager.default.contentsOfDirectory(
-                atPath: fixture.runRoot.path
-            )
-        )
-        #expect(expectedLockNames.isSubset(of: namesBeforeRelease))
-
-        try ownership.releaseAfterVaultRemoval()
-        #expect(!FileManager.default.fileExists(atPath: fixture.runRoot.path))
+        #expect(throws: SyntheticAcceptanceError.unsafeCleanupTarget) {
+            try ownership.releaseAfterVaultRemoval()
+        }
+        #expect(FileManager.default.fileExists(atPath: stray.path))
+        #expect(FileManager.default.fileExists(atPath: fixture.receiptURL.path))
     }
 
     @Test
