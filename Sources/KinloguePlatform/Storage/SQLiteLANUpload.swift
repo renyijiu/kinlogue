@@ -115,7 +115,7 @@ extension SQLiteLibraryStore {
             // A lost publication response cannot authorize deleting the live original.
             guard try queue.read({ try Int.fetchOne($0, sql: "SELECT count(*) FROM inbox_uploads WHERE id = ?", arguments: [upload.id.sqliteBytes]) }) == 1 else { return }
             guard try queue.read({ try SQLiteLANUpload.read(upload.id, $0).contentHash }) == upload.contentHash else { throw SQLiteLibraryError.damaged }
-            if let descriptor { guard try SQLiteFileIdentity.regular(descriptor: descriptor) == upload.identity else { throw SQLiteLibraryError.invalidOriginal } }
+            if let descriptor { guard try SQLiteFileIdentity.regular(descriptor: descriptor).isFile(recordedAs: upload.identity) else { throw SQLiteLibraryError.invalidOriginal } }
             guard try queue.read({ try Int.fetchOne($0, sql: "SELECT count(*) FROM originals WHERE id = ?", arguments: [upload.id.sqliteBytes]) }) == 0 else { throw SQLiteLibraryError.invalidOriginal }
             let directory = try originalDirectoryDescriptor()
             defer { Darwin.close(directory) }
@@ -150,6 +150,6 @@ extension SQLiteLibraryStore {
         let fd = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         guard fd >= 0 else { throw SQLiteLibraryError.invalidOriginal }
         defer { Darwin.close(fd) }
-        guard try SQLiteFileIdentity.regular(descriptor: fd) == upload.identity else { throw SQLiteLibraryError.invalidOriginal }
+        guard try SQLiteFileIdentity.regular(descriptor: fd).isFile(recordedAs: upload.identity) else { throw SQLiteLibraryError.invalidOriginal }
     }
 }

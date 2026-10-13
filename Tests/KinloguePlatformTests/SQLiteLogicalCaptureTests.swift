@@ -47,6 +47,41 @@ func sqliteLogicalCaptureAllowsCommitsDuringFrozenValidationAndPinsDeletedOrigin
 }
 
 @Test
+func sqliteLogicalCaptureReadsOriginalsAfterTheVolumeIsRenumbered() async throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let store = try SQLiteLibraryStore(rootURL: root)
+    let bytes = Data("Synthetic original on a renumbered volume".utf8)
+    let outcome = try await SQLiteReportRepository(store: store).stage(ValidatedImportedFile(
+        data: bytes, kind: .image, contentTypeIdentifier: "public.png", sha256Digest: ContentDigest.sha256(bytes)))
+    guard case let .created(draftID) = outcome else { Issue.record("Missing synthetic draft"); return }
+    // Every row keeps the device number the volume had before a restart gave it another one.
+    try store.write { db in
+        for row in try SQLiteRows.fetchAll(db, sql: "SELECT * FROM originals") {
+            var original = try SQLiteOriginal.decode(row)
+            let recorded = try #require(original.identity)
+            original.identity = SQLiteFileIdentity(device: recorded.device + 3, inode: recorded.inode)
+            try original.save(in: db)
+        }
+    }
+    try store.close()
+
+    let reopened = try SQLiteLibraryStore(rootURL: root)
+    defer { try? reopened.close() }
+    let snapshot = try await SQLiteLogicalBackupSource(store: reopened).prepare()
+    #expect(snapshot.pins.originals.count == 1)
+    for id in snapshot.pins.originals.keys {
+        let reader = try snapshot.pins.open(id); defer { reader.close() }
+        #expect(try reader.read(offset: 0, maximumByteCount: 64 * 1_024) == bytes)
+    }
+    snapshot.release()
+
+    let reports = SQLiteReportRepository(store: reopened)
+    try await reports.discard(draftID: draftID, expectedRevision: try await reports.draft(draftID).revision)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("originals").path).isEmpty)
+}
+
+@Test
 func sqliteLogicalNativeCopyCancellationUninstallsResources() async throws {
     let root = try sqliteTestRoot()
     defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }

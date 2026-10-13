@@ -34,6 +34,8 @@ stage、报告/LAN 发布与 DICOM 发布共用原件 stat snapshot：既有完�
 
 运行期失败或完成清理按确切 operation ID 选择非 live 原件；DICOM 收尾不扫描其他报告的 staged→publish 间隙。活动、被 pin、被引用或未知 inode 保留并返回未回收 ID，调用方不能把未回收当成功。仅启动恢复使用全库扫描。
 
+原件行和进行中的上传行记录文件登记时的设备号与 inode，核对“这是不是当初登记的那个文件”时只比较 inode（[`SQLiteFileIdentity.isFile(recordedAs:)`](../Sources/KinloguePlatform/Storage/SQLiteLibraryOwner.swift)）。macOS 可能在重启或系统更新之后给同一个卷分配另一个设备号，按设备号比较会让一个完好资料库的全部原件被判为无效；原件始终从已固定身份的原件目录里按名字、以 no-follow 方式打开，不可能位于别的卷。登记时的设备号仍留在行和行摘要里，不参与判断。同一进程内刚取得的身份之间（根目录、数据库文件、原件目录、stat snapshot）仍比较设备号。[内核回归](../Tests/KinloguePlatformTests/SQLiteLibraryStoreTests.swift)和[逻辑捕获回归](../Tests/KinloguePlatformTests/SQLiteLogicalCaptureTests.swift)把行里的设备号改成另一个值后重新打开资料库，核对读取、备份捕获、删除回收和中断导入的清理。
+
 pin 固定 descriptor 和文件身份，不在快照捕获时读取全部原件。实际 `withVerifiedDescriptor` 消费前后执行内容与身份验证；pin 释放前阻止物理回收和 owner 关闭。数据库/目录/owner inode 在访问边界复核，根被替换后旧句柄失败关闭。每次成功打开数据库生成新的运行 epoch，跨长 I/O 的目标读取与分页游标绑定该 epoch；即使同一个库、同一提交重新打开，旧请求也被拒绝。
 
 ## 启动与空闲完整性巡检

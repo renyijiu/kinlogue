@@ -110,7 +110,7 @@ struct SQLiteLogicalFileToken: Equatable, Sendable {
     init(_ fd: Int32, original: SQLiteOriginal) throws {
         identity = try SQLiteFileIdentity.regular(descriptor: fd)
         var value = stat()
-        guard fstat(fd, &value) == 0, identity == original.identity, value.st_size == original.byteCount else { throw SQLiteLogicalBackupError.sourceChanged }
+        guard fstat(fd, &value) == 0, identity.isFile(recordedAs: original.identity), value.st_size == original.byteCount else { throw SQLiteLogicalBackupError.sourceChanged }
         byteCount = value.st_size; modifiedSeconds = value.st_mtimespec.tv_sec; modifiedNanos = value.st_mtimespec.tv_nsec
         changedSeconds = value.st_ctimespec.tv_sec; changedNanos = value.st_ctimespec.tv_nsec
     }

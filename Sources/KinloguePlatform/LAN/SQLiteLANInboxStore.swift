@@ -386,7 +386,7 @@ package final class SQLiteLANInboxStore: LANUploadStoring, Sendable {
                     let fd = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
                     guard fd >= 0 else { continue }
                     defer { Darwin.close(fd) }
-                    guard try SQLiteFileIdentity.regular(descriptor: fd) == upload.identity else { throw LANInboxError.integrityCheckFailed }
+                    guard try SQLiteFileIdentity.regular(descriptor: fd).isFile(recordedAs: upload.identity) else { throw LANInboxError.integrityCheckFailed }
                     var info = stat()
                     guard fstat(fd, &info) == 0, let size = Int(exactly: info.st_size) else { throw LANInboxError.storageFailure }
                     let next = bytes.addingReportingOverflow(size)

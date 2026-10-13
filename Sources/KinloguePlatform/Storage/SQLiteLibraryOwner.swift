@@ -83,6 +83,17 @@ struct SQLiteFileIdentity: Equatable, Sendable {
     let device: Int64
     let inode: Int64
 
+    /// Whether this is the file a row recorded.
+    ///
+    /// A row keeps the device number its volume had when the file was registered, and macOS can
+    /// give the same volume another number after a restart or a system update. Comparing that
+    /// number would turn every original of an intact library into an invalid one, so only the
+    /// inode is compared. The file is reached by name inside the originals directory, whose own
+    /// identity is pinned while the library is open, so it is always on the library's volume.
+    func isFile(recordedAs recorded: SQLiteFileIdentity?) -> Bool {
+        recorded?.inode == inode
+    }
+
     static func directory(at url: URL, privateMode: Bool = true) throws -> Self {
         let descriptor = Darwin.open(url.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard descriptor >= 0 else { throw SQLiteLibraryError.invalidPath }

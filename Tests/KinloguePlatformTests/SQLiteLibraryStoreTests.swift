@@ -285,6 +285,54 @@ func sqliteKernelPinsPreventDeletionAndDatabaseOwnerRelease() throws {
 }
 
 @Test
+func sqliteKernelKeepsOriginalsUsableAfterTheVolumeIsRenumbered() throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let store = try SQLiteLibraryStore(rootURL: root)
+    let keptBytes = Data("synthetic original that outlives a renumbered volume".utf8)
+    func publish(_ bytes: Data) throws -> UUID {
+        let operation = UUID()
+        let id = try sqliteStage(bytes, in: store, operationID: operation)
+        try store.publishOriginal(id, operationID: operation)
+        return id
+    }
+    let kept = try publish(keptBytes)
+    let deleted = try publish(Data("synthetic original deleted after the renumbering".utf8))
+    // An import that was interrupted before the restart; the next open has to reclaim its file.
+    _ = try sqliteStage(Data("synthetic staged bytes".utf8), in: store, operationID: UUID())
+    // macOS may give a volume another device number after a restart or an update. Every row then
+    // still records the old number, which is what this rewrite leaves behind.
+    try store.write { db in
+        for row in try SQLiteRows.fetchAll(db, sql: "SELECT * FROM originals") {
+            var original = try SQLiteOriginal.decode(row)
+            let recorded = try #require(original.identity)
+            original.identity = SQLiteFileIdentity(device: recorded.device + 3, inode: recorded.inode)
+            try original.save(in: db)
+        }
+    }
+    try store.close()
+
+    let reopened = try SQLiteLibraryStore(rootURL: root)
+    defer { try? reopened.close() }
+    let originals = root.appendingPathComponent("originals")
+    #expect(try reopened.read { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM originals") } == 2)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: originals.path).count == 2)
+
+    let pin = try reopened.pinOriginal(kept)
+    let read = try pin.withVerifiedDescriptor { descriptor -> Data in
+        var bytes = Data(count: keptBytes.count)
+        let count = bytes.withUnsafeMutableBytes { pread(descriptor, $0.baseAddress, $0.count, 0) }
+        return bytes.prefix(max(count, 0))
+    }
+    pin.release()
+    #expect(read == keptBytes)
+
+    try reopened.deleteOriginal(deleted)
+    #expect(try reopened.read { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM originals") } == 1)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: originals.path) == ["\(kept.uuidString.lowercased()).data"])
+}
+
+@Test
 func sqliteKernelDoesNotReclaimReplacedStagedFiles() throws {
     let root = try sqliteTestRoot()
     defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }

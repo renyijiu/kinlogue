@@ -420,7 +420,7 @@ extension SQLiteLibraryStore {
         let identity: SQLiteFileIdentity
         do { identity = try SQLiteFileIdentity.regular(descriptor: descriptor) }
         catch SQLiteLibraryError.invalidPath { throw SQLiteLibraryError.invalidOriginal }
-        guard identity == original.identity else { throw SQLiteLibraryError.invalidOriginal }
+        guard identity.isFile(recordedAs: original.identity) else { throw SQLiteLibraryError.invalidOriginal }
         let before = try SQLiteOriginalSnapshot(descriptor)
         guard before.size == original.byteCount else { throw SQLiteLibraryError.invalidOriginal }
         guard hashBytes else { return before }
@@ -440,7 +440,7 @@ extension SQLiteLibraryStore {
         }
         guard Data(hasher.finalize()) == original.sha256,
               try SQLiteOriginalSnapshot(descriptor) == before,
-              try SQLiteFileIdentity.regular(descriptor: descriptor) == original.identity else {
+              try SQLiteFileIdentity.regular(descriptor: descriptor).isFile(recordedAs: original.identity) else {
             throw SQLiteLibraryError.invalidOriginal
         }
         return before
@@ -460,7 +460,7 @@ extension SQLiteLibraryStore {
             }
             guard let identity = original.identity,
                   metadata.st_mode & S_IFMT == S_IFREG, metadata.st_uid == geteuid(), metadata.st_nlink == 1,
-                  Int64(exactly: metadata.st_dev) == identity.device,
+                  // The inode alone, for the reason `SQLiteFileIdentity.isFile(recordedAs:)` gives.
                   Int64(exactly: metadata.st_ino) == identity.inode else { throw SQLiteLibraryError.invalidOriginal }
             try validateRoot()
             guard unlinkat(directory, name, 0) == 0 else { throw SQLiteLibraryError.ioFailure(errno) }
