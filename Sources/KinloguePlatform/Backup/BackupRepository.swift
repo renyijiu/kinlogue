@@ -618,10 +618,7 @@ public final class BackupRepository: @unchecked Sendable {
                 leafName: name,
                 verification: .verified(verified.checkpoint),
                 fileIdentity: identity,
-                repositoryIdentityDigest: Self.identityDigest(
-                    repository: expectedIdentity,
-                    file: identity
-                )
+                repositoryIdentityDigest: expectedIdentity.leafIdentityDigest(file: identity)
             )
         } catch let error as BackupContainerError {
             return rejected(name, Self.rejection(for: error))
@@ -769,18 +766,6 @@ public final class BackupRepository: @unchecked Sendable {
         guard readCount >= 0 else { throw BackupRepositoryError.ioFailure(errno) }
         bytes.count = readCount
         return bytes
-    }
-
-    private static func identityDigest(
-        repository: BackupFilesystemIdentity,
-        file: BackupPublishedFileIdentity
-    ) -> Data {
-        var input = Data("com.kinlogue.backup/repository-leaf-identity/v1".utf8)
-        for value in [repository.device, repository.inode, file.device, file.inode, file.byteCount] {
-            var bigEndian = value.bigEndian
-            withUnsafeBytes(of: &bigEndian) { input.append(contentsOf: $0) }
-        }
-        return Data(SHA256.hash(data: input))
     }
 
 }

@@ -12,6 +12,15 @@ public enum BackupLocalConfigurationStoreError: Error, Equatable, Sendable {
     case ioFailure
 }
 
+/// Which directory a profile, a lease or a repository refers to.
+///
+/// Two identities are the same directory when their inodes agree. The device number is kept as
+/// it was recorded and is not compared: a profile outlives restarts, and macOS can give the same
+/// volume another device number after a restart or a system update, which would make an
+/// untouched profile reject its own directory and its backup directory. A directory is reached
+/// through a pinned parent or a resolved bookmark, so the inode is what tells a replaced
+/// directory from the original. Code that needs two directories on one volume compares the
+/// device numbers of identities taken in the same run, explicitly.
 public struct BackupFilesystemIdentity: Codable, Hashable, Sendable {
     public let device: UInt64
     public let inode: UInt64
@@ -19,6 +28,25 @@ public struct BackupFilesystemIdentity: Codable, Hashable, Sendable {
     public init(device: UInt64, inode: UInt64) {
         self.device = device
         self.inode = inode
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool { lhs.inode == rhs.inode }
+
+    public func hash(into hasher: inout Hasher) { hasher.combine(inode) }
+
+    /// What a verification witness keeps for one restore point file in this repository, where
+    /// `self` is the repository as the profile recorded it.
+    ///
+    /// The recorded device number stands in for the file's as well. The file lies directly in
+    /// the repository, so the two were equal when the profile was written, and using the
+    /// recorded number keeps every witness valid after the volume is renumbered.
+    func leafIdentityDigest(file: BackupPublishedFileIdentity) -> Data {
+        var input = Data("com.kinlogue.backup/repository-leaf-identity/v1".utf8)
+        for value in [device, inode, device, file.inode, file.byteCount] {
+            var bigEndian = value.bigEndian
+            withUnsafeBytes(of: &bigEndian) { input.append(contentsOf: $0) }
+        }
+        return ContentDigest.sha256(input)
     }
 }
 

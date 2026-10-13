@@ -41,7 +41,10 @@ struct SQLiteLibraryInitialization: Codable {
         var bytes = [UInt8](repeating: 0, count: Int(metadata.st_size))
         guard pread(descriptor, &bytes, bytes.count, 0) == bytes.count else { throw SQLiteLibraryError.unsupportedFormat }
         let receipt = try CanonicalVaultJSON.decode(Self.self, from: Data(bytes))
-        guard receipt.rootDevice == rootIdentity.device, receipt.rootInode == rootIdentity.inode,
+        // The device number is part of the receipt's own hash but is not compared with the
+        // root's: the launch that finishes an interrupted initialization may find the volume
+        // renumbered.
+        guard receipt.rootInode == rootIdentity.inode,
               receipt.schemaIdentity == SQLiteLibrarySchema.identity,
               receipt.contentHash == hash(receipt.operationID, receipt.rootDevice, receipt.rootInode, receipt.schemaIdentity) else {
             throw SQLiteLibraryError.unsupportedFormat

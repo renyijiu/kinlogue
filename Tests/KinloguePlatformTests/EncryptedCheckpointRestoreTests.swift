@@ -103,8 +103,10 @@ struct EncryptedCheckpointRestoreTests {
         }
     }
 
-    @Test
-    func interruptionAfterTheOldRootMoveReconcilesToTheCompleteOldRoot() async throws {
+    /// The second case rewrites the device numbers the receipts recorded before the next launch
+    /// reads them, which is what a restart that renumbers the volume leaves behind.
+    @Test(arguments: [false, true])
+    func interruptionAfterTheOldRootMoveReconcilesToTheCompleteOldRoot(afterTheVolumeWasRenumbered: Bool) async throws {
         try await withRestoreFixture { fixture in
             let root = try fixture.destinationRoot("rollback")
             let owner = try SQLiteLibraryOwner(rootURL: root)
@@ -122,12 +124,43 @@ struct EncryptedCheckpointRestoreTests {
             await #expect(throws: BackupRestoreError.injectedFailure) {
                 _ = try await interrupted.activate(prepared: prepared, resetWriter: {})
             }
+            if afterTheVolumeWasRenumbered { try renumberRecordedDevices(inReceiptsOf: root) }
 
             #expect(try await BackupRestoreTransaction(owner: owner).reconcile() == .rolledBack)
+            #expect(try restoreArtifacts(in: root.deletingLastPathComponent()).isEmpty)
             #expect(try restoreTreeSnapshot(at: root) == before)
             let reopened = try SQLiteLibraryStore(owner: owner, mode: .strictExisting)
             defer { try? reopened.close() }
             #expect(try await SQLiteReportRepository(store: reopened).members() == [oldMember])
+        }
+    }
+
+    @Test
+    func aRestoreInterruptedAfterActivationCommitsOnceTheVolumeHasBeenRenumbered() async throws {
+        try await withRestoreFixture { fixture in
+            let root = try fixture.destinationRoot("renumbered-forward")
+            let owner = try SQLiteLibraryOwner(rootURL: root)
+            _ = try await seedClosedLibrary(owner: owner)
+            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(
+                checkpointURL: fixture.checkpointURL,
+                recoveryCode: fixture.recoveryCode
+            )
+            let interrupted = try BackupRestoreTransaction(
+                owner: owner,
+                failureInjector: { $0 == .afterNewRootActivation }
+            )
+            await #expect(throws: BackupRestoreError.injectedFailure) {
+                _ = try await interrupted.activate(prepared: prepared, resetWriter: {})
+            }
+            try renumberRecordedDevices(inReceiptsOf: root)
+
+            // The new root is in place and the old one set aside; the receipt has to recognize
+            // both by inode to finish the restore instead of refusing to converge.
+            #expect(try await BackupRestoreTransaction(owner: owner).reconcile() == .committed)
+            #expect(try restoreArtifacts(in: root.deletingLastPathComponent()).isEmpty)
+            let restored = try SQLiteLibraryStore(owner: owner, mode: .strictExisting)
+            defer { try? restored.close() }
+            #expect(try await SQLiteReportRepository(store: restored).members() == [fixture.sourceMember])
         }
     }
 
@@ -166,8 +199,8 @@ struct EncryptedCheckpointRestoreTests {
         }
     }
 
-    @Test
-    func abandonedPreflightReconciliationRemovesOnlyReceiptBoundStaging() async throws {
+    @Test(arguments: [false, true])
+    func abandonedPreflightReconciliationRemovesOnlyReceiptBoundStaging(afterTheVolumeWasRenumbered: Bool) async throws {
         try await withRestoreFixture { fixture in
             let root = try fixture.destinationRoot("abandoned-preflight")
             let parent = root.deletingLastPathComponent()
@@ -184,6 +217,7 @@ struct EncryptedCheckpointRestoreTests {
             )
             try makePrivateDirectory(unowned)
             try Data("synthetic unowned file".utf8).write(to: unowned.appendingPathComponent("kept.bin"))
+            if afterTheVolumeWasRenumbered { try renumberRecordedDevices(inReceiptsOf: root) }
 
             try BackupRestoreVerifier(owner: owner).reconcileAbandonedPreflights()
 
@@ -375,6 +409,29 @@ private func makePrivateDirectory(_ url: URL) throws {
         attributes: [.posixPermissions: 0o700]
     )
     guard chmod(url.path, 0o700) == 0 else { throw CocoaError(.fileWriteUnknown) }
+}
+
+/// Adds three to every device number recorded in the restore receipts beside `root`, leaving the
+/// inodes alone: the directories are the same ones, named by a number the volume no longer has.
+private func renumberRecordedDevices(inReceiptsOf root: URL) throws {
+    let parent = root.deletingLastPathComponent()
+    let receipts = try restoreArtifacts(in: parent).filter { $0.hasSuffix(".json") }
+    #expect(!receipts.isEmpty)
+    let pattern = try NSRegularExpression(pattern: #""device":(\d+)"#)
+    for name in receipts {
+        let url = parent.appendingPathComponent(name)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        var renumbered = text
+        for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            let digits = try #require(Range(match.range(at: 1), in: renumbered))
+            renumbered.replaceSubrange(digits, with: String(try #require(Int(renumbered[digits])) + 3))
+        }
+        #expect(renumbered != text)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: 0)
+        try handle.write(contentsOf: Data(renumbered.utf8))
+        try handle.close()
+    }
 }
 
 private func restoreArtifacts(in parent: URL) throws -> [String] {

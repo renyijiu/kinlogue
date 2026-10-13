@@ -14,7 +14,7 @@
 
 专用 repository 的名称以 `.` 开头，Finder 默认不会在父目录列表中显示它。设置页提供“在访达中显示”，直接打开实际保存 `.kinloguebackup` 文件的 repository；手动备份运行期间显示明确的创建中状态，完成后才刷新“最近本地验证”。
 
-已配置目录的授权失效时，可在设置页选择“重新授权原备份目录…”，重新选择原父目录。该操作核对父目录与 repository 的原设备/inode 身份，只更新持久 bookmark，不创建目录、不生成恢复码、不更换 writer，也不修改既有恢复点；选错目录或原 repository 已被替换时拒绝授权。手动备份运行期间，设置控件保持禁用；激活事件和状态刷新不会提前结束创建中状态或允许重复提交。
+已配置目录的授权失效时，可在设置页选择“重新授权原备份目录…”，重新选择原父目录。该操作核对父目录与 repository 的原 inode 身份（设备号不参与比较，见下文“目录身份与设备号”），只更新持久 bookmark，不创建目录、不生成恢复码、不更换 writer，也不修改既有恢复点；选错目录或原 repository 已被替换时拒绝授权。手动备份运行期间，设置控件保持禁用；激活事件和状态刷新不会提前结束创建中状态或允许重复提交。
 
 恢复码及其恢复私钥不会写入 Keychain、UserDefaults、配置文件或 repository。本机只保存不能解密恢复点的加密公钥和设备签名身份；遗失恢复码时续页无法找回或解密既有恢复点。
 
@@ -44,7 +44,15 @@
 4. 用户再次确认后，恢复会替换而不是合并当前资料库；durable receipt 保护 whole-root 切换、回滚和下次启动收敛。
 5. 成功后必须退出并重新打开 App。本机备份配置会移除，外部恢复点保持不变，也不会被自动采用为新的备份目标。
 
-移除本机备份配置时不读取也不校验配置的内容，只确认那个名字下是当前用户私有的普通文件，因此一份已经通不过校验的配置不会挡住恢复。这种配置在没有被改动的情况下也会出现：配置记录用设备号加 inode 标识自己所在的目录，macOS 可能在重启或系统更新之后给同一个卷分配另一个设备号，此后读取这份记录会被判为无效。[存储回归](../Tests/KinloguePlatformTests/BackupLocalConfigurationStoreTests.swift)和[启动测试](../Tests/KinlogueAppTests/SQLiteAppStartupTests.swift)覆盖带着这样一份配置的恢复，以及同名位置不是私有普通文件时仍然拒绝。备份配置自身对设备号的依赖没有改：卷被重新编号后，设置页如何呈现失效的配置、能否原地重新设置，待核实。
+移除本机备份配置时不读取也不校验配置的内容，只确认那个名字下是当前用户私有的普通文件，因此一份已经通不过校验的配置不会挡住恢复。[存储回归](../Tests/KinloguePlatformTests/BackupLocalConfigurationStoreTests.swift)和[启动测试](../Tests/KinlogueAppTests/SQLiteAppStartupTests.swift)覆盖带着一份读不出来的配置做恢复，以及同名位置不是私有普通文件时仍然拒绝。
+
+#### 目录身份与设备号
+
+备份配置记录用设备号加 inode 标识三个目录：配置自己所在的目录、用户选择的父目录和其中的 repository。macOS 不保证同一个卷的设备号跨重启或系统更新保持不变。早先这些身份连设备号一起比较，卷被重新编号后配置读取即被判为无效：状态页进入失败状态，自动备份停止，重新设置也因为读不出现有配置而无法开始，只剩恢复或删除资料库两条出路（这是按代码路径确认的，没有在界面上复现）。
+
+现在 [`BackupFilesystemIdentity`](../Sources/KinloguePlatform/Backup/BackupLocalConfigurationStore.swift) 只按 inode 判断是不是同一个目录，设备号照原样记录、不参与比较，也不会被改写成当前值。目录总是经由固定的父目录或解析出的 bookmark 到达，被替换的目录 inode 不同，仍然被拒绝；需要两个目录在同一个卷上的地方（首次设置时父目录与 repository）仍显式比较同一次取得的设备号。验证记录（witness）里绑定 repository 与恢复点文件的摘要改为取配置里登记的设备号，而不是文件当前的设备号：文件就在 repository 目录里，登记时两者相同，所以已有的验证记录不变，卷被重新编号之后也继续匹配，保留策略不会因此停摆。记录格式和摘要的 `v1` 域都没有变。
+
+恢复事务和废弃预检的收据（[`BackupRestoreDirectoryIdentity`](../Sources/KinloguePlatform/Backup/EncryptedCheckpointRestore.swift)）同样只比较 inode：收据由中断之后的下一次启动读取，中间卷可能已被重新编号，而连设备号一起比较会让那次启动以“收据无效”失败，资料库停在替换的中途。[配置回归](../Tests/KinloguePlatformTests/BackupLocalConfigurationStoreTests.swift)、[备份服务回归](../Tests/KinlogueAppTests/LiveBackupServiceTests.swift)和[恢复回归](../Tests/KinloguePlatformTests/EncryptedCheckpointRestoreTests.swift)把记录里的设备号改成另一个值，核对配置读取与更新、完整的两次备份及其验证记录、旧根移走后的回滚、新根就位后的提交和废弃预检的清理；目录被换成另一个时仍然拒绝。
 
 恢复成功或替换未完成时，界面只留下“退出续页”。这两种状态下恢复面板不允许关闭，而 AppKit 在有模态面板时会直接拒绝退出、不询问任何代理，按钮因此曾经不起作用。按钮现在先解除窗口对退出的拦截再走正常的终止流程（[`RestartRequiredQuit`](../Sources/KinlogueApp/App/RestartRequiredQuit.swift)）；终止仍被拒绝时直接结束进程，此时资料库的服务已经撤销，磁盘上的状态由下一次启动收敛。
 

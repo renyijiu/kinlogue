@@ -36,6 +36,8 @@ stage、报告/LAN 发布与 DICOM 发布共用原件 stat snapshot：既有完�
 
 原件行和进行中的上传行记录文件登记时的设备号与 inode，核对“这是不是当初登记的那个文件”时只比较 inode（[`SQLiteFileIdentity.isFile(recordedAs:)`](../Sources/KinloguePlatform/Storage/SQLiteLibraryOwner.swift)）。macOS 可能在重启或系统更新之后给同一个卷分配另一个设备号，按设备号比较会让一个完好资料库的全部原件被判为无效；原件始终从已固定身份的原件目录里按名字、以 no-follow 方式打开，不可能位于别的卷。登记时的设备号仍留在行和行摘要里，不参与判断。同一进程内刚取得的身份之间（根目录、数据库文件、原件目录、stat snapshot）仍比较设备号。[内核回归](../Tests/KinloguePlatformTests/SQLiteLibraryStoreTests.swift)和[逻辑捕获回归](../Tests/KinloguePlatformTests/SQLiteLogicalCaptureTests.swift)把行里的设备号改成另一个值后重新打开资料库，核对读取、备份捕获、删除回收和中断导入的清理。
 
+中断之后由下一次启动读取的收据和日志遵循同一条规则：初始化收据、整库删除收据、备份捕获的归属收据和 DICOM 导入日志里记录的目录或文件身份都只比较 inode。它们连设备号一起比较时，一次中断加上一次卷重新编号会让下一次启动分别停在“格式不受支持”、删除无法收敛、捕获残留永不清理和影像仓库无法打开；对应回归见 [内核](../Tests/KinloguePlatformTests/SQLiteLibraryStoreTests.swift)、[启动](../Tests/KinlogueAppTests/SQLiteAppStartupTests.swift)、[逻辑捕获](../Tests/KinloguePlatformTests/SQLiteLogicalCaptureTests.swift)和 [DICOM](../Tests/KinloguePlatformTests/SQLiteDICOMTests.swift) 测试。owner 锁文件的名字由资料库父目录的身份派生，其中含设备号：卷被重新编号后会改用一个新名字的锁文件，所有进程算出的名字一致，互斥不受影响，旧名字的空锁文件留在原地。
+
 pin 固定 descriptor 和文件身份，不在快照捕获时读取全部原件。实际 `withVerifiedDescriptor` 消费前后执行内容与身份验证；pin 释放前阻止物理回收和 owner 关闭。数据库/目录/owner inode 在访问边界复核，根被替换后旧句柄失败关闭。每次成功打开数据库生成新的运行 epoch，跨长 I/O 的目标读取与分页游标绑定该 epoch；即使同一个库、同一提交重新打开，旧请求也被拒绝。
 
 ## 启动与空闲完整性巡检

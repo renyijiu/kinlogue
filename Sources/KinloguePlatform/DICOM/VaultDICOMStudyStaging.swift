@@ -14,8 +14,10 @@ public struct VaultDICOMStagingOwnership: Codable, Equatable, Sendable {
         inode = UInt64(metadata.st_ino)
     }
 
+    /// The inode alone: the launch that cleans up after an interrupted import may find the
+    /// volume under another device number than the one recorded here.
     fileprivate func matches(_ metadata: stat) -> Bool {
-        device == UInt64(metadata.st_dev) && inode == UInt64(metadata.st_ino)
+        inode == UInt64(metadata.st_ino)
             && (metadata.st_mode & S_IFMT) == S_IFDIR
             && metadata.st_uid == geteuid()
     }

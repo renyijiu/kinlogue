@@ -59,9 +59,17 @@ public struct BackupPreparedRestore: Sendable {
     let activeRootName: String
 }
 
+/// A directory beside the library, as a restore or capture receipt recorded it.
+///
+/// Receipts are read again by the launch after an interrupted operation, and macOS can give the
+/// volume another device number in between. The device number is therefore kept but not
+/// compared: the directories a receipt names are found by a fixed name under the library's
+/// pinned parent, so the inode is what tells the recorded directory from a replacement.
 struct BackupRestoreDirectoryIdentity: Codable, Equatable, Sendable {
     let device: UInt64
     let inode: UInt64
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.inode == rhs.inode }
 
     init(_ metadata: stat) throws {
         guard (metadata.st_mode & S_IFMT) == S_IFDIR,
@@ -78,8 +86,7 @@ struct BackupRestoreDirectoryIdentity: Codable, Equatable, Sendable {
     }
 
     func matches(_ metadata: stat) -> Bool {
-        device == UInt64(metadata.st_dev)
-            && inode == UInt64(metadata.st_ino)
+        inode == UInt64(metadata.st_ino)
             && (metadata.st_mode & S_IFMT) == S_IFDIR
             && metadata.st_uid == geteuid()
             && (metadata.st_mode & 0o777) == S_IRWXU

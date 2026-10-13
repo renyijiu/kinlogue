@@ -385,6 +385,22 @@ func sqliteKernelRecoversOwnedPartialInitialization(point: SQLiteInitializationF
 }
 
 @Test
+func sqliteKernelFinishesAnInitializationInterruptedBeforeTheVolumeWasRenumbered() throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    // The receipt an interrupted first launch leaves, naming the root by the device number the
+    // volume had then. Its own hash covers that number, so it is written rather than edited.
+    let live = try SQLiteFileIdentity.directory(at: root)
+    try SQLiteLibraryInitialization(rootIdentity: SQLiteFileIdentity(device: live.device + 3, inode: live.inode)).write(to: root)
+
+    let store = try SQLiteLibraryStore(rootURL: root)
+    defer { try? store.close() }
+    #expect(try store.state().generation == 0)
+    #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(SQLiteLibraryInitialization.filename).path))
+}
+
+@Test
 func sqliteKernelRejectsInitializationReceiptFromAnotherRoot() throws {
     let root = try sqliteTestRoot()
     defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }

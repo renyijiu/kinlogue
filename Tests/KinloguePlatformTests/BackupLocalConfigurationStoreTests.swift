@@ -294,29 +294,101 @@ func destructiveResetRemovesTheLocalWriterProfileAndIsIdempotentWhenUnconfigured
     }
 }
 
+/// Rewrites every device number the record keeps, leaving the inodes alone. That is what a
+/// restart which renumbers the volume leaves behind: the directories are the same ones, and the
+/// record still names them by the number the volume used to have.
+private func renumberRecordedDevices(in record: URL, by offset: Int = 3) throws {
+    let text = try String(contentsOf: record, encoding: .utf8)
+    let pattern = try NSRegularExpression(pattern: #""device":(\d+)"#)
+    var renumbered = text
+    for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+        let digits = try #require(Range(match.range(at: 1), in: renumbered))
+        renumbered.replaceSubrange(digits, with: String(try #require(Int(renumbered[digits])) + offset))
+    }
+    #expect(renumbered != text)
+    let handle = try FileHandle(forWritingTo: record)
+    try handle.truncate(atOffset: 0)
+    try handle.write(contentsOf: Data(renumbered.utf8))
+    try handle.close()
+}
+
 @Test
-func destructiveResetRemovesARecordThatNoLongerValidatesBecauseItsVolumeWasRenumbered() async throws {
+func aProfileStillLoadsAndUpdatesAfterItsVolumeIsRenumbered() async throws {
+    try await withBackupStoreFixture { fixture in
+        let created = try await fixture.store.createPending(try fixture.pending())
+        let enabled = try await fixture.store.promotePending(
+            enrollmentEpoch: created.enrollmentEpoch,
+            expectedRevision: created.revision
+        )
+        let record = fixture.root.appendingPathComponent("configuration.json")
+        try renumberRecordedDevices(in: record)
+
+        // A second store stands for the next launch, which has pinned nothing yet.
+        let relaunched = BackupLocalConfigurationStore(rootURL: fixture.root)
+        let loaded = try #require(try await relaunched.load())
+        #expect(loaded.configurationRootIdentity.device == enabled.configurationRootIdentity.device + 3)
+        #expect(loaded.configurationRootIdentity.inode == enabled.configurationRootIdentity.inode)
+        #expect(loaded.writerIdentity == enabled.writerIdentity)
+
+        let updated = try await relaunched.updateAutomation(
+            isAutomaticBackupEnabled: true,
+            expectedRevision: loaded.revision
+        )
+        // The numbers are kept as recorded; nothing rewrites them to the current ones.
+        #expect(updated.configurationRootIdentity.device == loaded.configurationRootIdentity.device)
+        #expect(try await BackupLocalConfigurationStore(rootURL: fixture.root).load() == updated)
+    }
+}
+
+@Test
+func aProfileWhoseDirectoryWasReplacedIsStillRejected() async throws {
+    try await withBackupStoreFixture { fixture in
+        _ = try await fixture.store.createPending(try fixture.pending())
+        // Another directory under the same name, holding a copy of the record.
+        let parked = fixture.base.appendingPathComponent("parked", isDirectory: true)
+        try FileManager.default.moveItem(at: fixture.root, to: parked)
+        try FileManager.default.createDirectory(at: fixture.root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let record = fixture.root.appendingPathComponent("configuration.json")
+        try FileManager.default.copyItem(at: parked.appendingPathComponent("configuration.json"), to: record)
+        #expect(chmod(record.path, 0o600) == 0)
+
+        await #expect(throws: BackupLocalConfigurationStoreError.invalidRecord) {
+            _ = try await BackupLocalConfigurationStore(rootURL: fixture.root).load()
+        }
+    }
+}
+
+@Test
+func witnessDigestsDoNotChangeWhenTheVolumeIsRenumbered() {
+    let recorded = BackupFilesystemIdentity(device: 16_777_234, inode: 4_242)
+    func file(device: UInt64) -> BackupPublishedFileIdentity {
+        .init(device: device, inode: 9_001, byteCount: 12_345)
+    }
+    // What the first version of this digest hashed while the volume still had the recorded number.
+    var input = Data("com.kinlogue.backup/repository-leaf-identity/v1".utf8)
+    for value: UInt64 in [16_777_234, 4_242, 16_777_234, 9_001, 12_345] {
+        var bigEndian = value.bigEndian
+        withUnsafeBytes(of: &bigEndian) { input.append(contentsOf: $0) }
+    }
+
+    #expect(recorded.leafIdentityDigest(file: file(device: 16_777_234)) == ContentDigest.sha256(input))
+    #expect(recorded.leafIdentityDigest(file: file(device: 16_777_231)) == ContentDigest.sha256(input))
+    #expect(BackupFilesystemIdentity(device: 16_777_231, inode: 4_242) == recorded)
+    #expect(BackupFilesystemIdentity(device: 16_777_234, inode: 4_243) != recorded)
+    #expect(Set([recorded, BackupFilesystemIdentity(device: 1, inode: 4_242)]).count == 1)
+}
+
+@Test
+func destructiveResetRemovesARecordThatCannotBeRead() async throws {
     try await withBackupStoreFixture { fixture in
         let created = try await fixture.store.createPending(try fixture.pending())
         _ = try await fixture.store.promotePending(
             enrollmentEpoch: created.enrollmentEpoch,
             expectedRevision: created.revision
         )
-        // The record names its own directory by device number and inode. Rewriting the device
-        // number leaves exactly what a restart that renumbers the volume leaves behind.
         let record = fixture.root.appendingPathComponent("configuration.json")
-        var directory = stat()
-        #expect(lstat(fixture.root.path, &directory) == 0)
-        let text = try String(contentsOf: record, encoding: .utf8)
-        let recorded = "\"device\":\(directory.st_dev),\"inode\":\(directory.st_ino)"
-        #expect(text.components(separatedBy: recorded).count == 2)
-        let renumbered = text.replacingOccurrences(
-            of: recorded,
-            with: "\"device\":\(Int(directory.st_dev) + 3),\"inode\":\(directory.st_ino)"
-        )
         let handle = try FileHandle(forWritingTo: record)
-        try handle.truncate(atOffset: 0)
-        try handle.write(contentsOf: Data(renumbered.utf8))
+        try handle.truncate(atOffset: 40)
         try handle.close()
         await #expect(throws: BackupLocalConfigurationStoreError.invalidRecord) {
             _ = try await fixture.store.load()

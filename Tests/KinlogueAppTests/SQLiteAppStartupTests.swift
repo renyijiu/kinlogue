@@ -129,19 +129,36 @@ struct SQLiteAppStartupTests {
         await startup.shutdown()
     }
 
-    @Test
-    func ownedDeletionReceiptConvergesBeforeAnEmptyLibraryIsOpened() async throws {
+    /// The deletion is interrupted either right after its receipt was written or after the library
+    /// was moved aside, and in the renumbered cases the launch that finishes it finds the volume
+    /// under another device number than the receipt recorded.
+    @Test(arguments: [PlaintextVaultTransactionFault.afterDeletionReceipt, .afterDeletionRename], [false, true])
+    func ownedDeletionReceiptConvergesBeforeAnEmptyLibraryIsOpened(
+        interruptedAt fault: PlaintextVaultTransactionFault, afterTheVolumeWasRenumbered: Bool
+    ) async throws {
         let fixture = try SQLStartupFixture()
         defer { fixture.remove() }
         let root = fixture.identity.sourceVault.rootURL
         try VaultParentDirectoryPreparation.ensureParentDirectory(for: root)
         let store = try SQLiteLibraryStore(rootURL: root)
+        try await SQLiteReportRepository(store: store).saveMember(try FamilyMember(displayName: "Synthetic member to delete"), replacing: nil)
         try store.close()
-        let transaction = try PlaintextVaultDeletionTransaction(rootURL: root, failureInjector: { $0 == .afterDeletionReceipt }, strictReceipt: true)
+        let transaction = try PlaintextVaultDeletionTransaction(rootURL: root, failureInjector: { $0 == fault }, strictReceipt: true)
         #expect(throws: (any Error).self) { try transaction.begin() }
+        if afterTheVolumeWasRenumbered {
+            let text = try String(contentsOf: transaction.receiptURL, encoding: .utf8)
+            let pattern = try NSRegularExpression(pattern: #""device":(\d+)"#)
+            let match = try #require(pattern.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)))
+            let digits = try #require(Range(match.range(at: 1), in: text))
+            let handle = try FileHandle(forWritingTo: transaction.receiptURL)
+            try handle.truncate(atOffset: 0)
+            try handle.write(contentsOf: Data(text.replacingCharacters(in: digits, with: String(try #require(Int(text[digits])) + 3)).utf8))
+            try handle.close()
+        }
         let startup = LibraryLaunchCoordinator(identity: fixture.identity)
         startup.acknowledgeStorageDisclosure()
-        #expect(try await startup.openEnvironment().dataService.bootstrap().reportCount == 0)
+        let snapshot = try await startup.openEnvironment().dataService.bootstrap()
+        #expect(snapshot.members.isEmpty && snapshot.reportCount == 0)
         #expect(!FileManager.default.fileExists(atPath: transaction.receiptURL.path))
         await startup.shutdown()
     }
@@ -209,16 +226,16 @@ struct SQLiteAppStartupTests {
 
     enum OldLibraryCircumstance: Sendable {
         case nothingElse
-        /// What an upgrade on a long-used Mac looks like: the old App left a backup profile, and
-        /// the volume has been given another device number since it was written, so the profile
-        /// no longer validates. The restore has to clear it instead of stopping on it.
-        case aStaleBackupProfile
+        /// The old App left a backup profile that can no longer be read. The restore has to clear
+        /// it instead of stopping on it. A real migration stopped here: at the time a profile
+        /// stopped validating once its volume had been given another device number.
+        case anUnreadableBackupProfile
         /// An earlier restore over the same library stopped right after recording its intent.
         /// The launch has to undo it and leave the old library in place for another attempt.
         case anInterruptedEarlierRestore
     }
 
-    @Test(arguments: [OldLibraryCircumstance.nothingElse, .aStaleBackupProfile, .anInterruptedEarlierRestore])
+    @Test(arguments: [OldLibraryCircumstance.nothingElse, .anUnreadableBackupProfile, .anInterruptedEarlierRestore])
     func restoringOverAnOldFormatLibraryReplacesItAndTheNextLaunchOpensTheRestoredOne(
         with circumstance: OldLibraryCircumstance
     ) async throws {
@@ -251,7 +268,7 @@ struct SQLiteAppStartupTests {
         try Data("synthetic old object".utf8).write(to: root.appendingPathComponent("objects/synthetic.bin"))
         let profileRoot = fixture.identity.backupIdentity.rootURL
         let profileRecord = profileRoot.appendingPathComponent("configuration.json")
-        if circumstance == .aStaleBackupProfile {
+        if circumstance == .anUnreadableBackupProfile {
             let profile = BackupLocalConfigurationStore(rootURL: profileRoot)
             let material = try BackupKeyHierarchy.makeEnrollment()
             let created = try await profile.createPending(try BackupPendingEnrollment(
@@ -261,19 +278,11 @@ struct SQLiteAppStartupTests {
                 descriptor: material.descriptor, authorization: material.authorization,
                 deviceSigningSeed: material.deviceSigningSeed, writerEpoch: material.writerEpoch))
             _ = try await profile.promotePending(enrollmentEpoch: created.enrollmentEpoch, expectedRevision: created.revision)
-            var directory = stat()
-            #expect(lstat(profileRoot.path, &directory) == 0)
-            let text = try String(contentsOf: profileRecord, encoding: .utf8)
-            let recorded = "\"device\":\(directory.st_dev),\"inode\":\(directory.st_ino)"
-            #expect(text.components(separatedBy: recorded).count == 2)
             let handle = try FileHandle(forWritingTo: profileRecord)
-            try handle.truncate(atOffset: 0)
-            try handle.write(contentsOf: Data(text.replacingOccurrences(
-                of: recorded, with: "\"device\":\(Int(directory.st_dev) + 3),\"inode\":\(directory.st_ino)").utf8))
+            try handle.truncate(atOffset: 40)
             try handle.close()
             await #expect(throws: BackupLocalConfigurationStoreError.invalidRecord) { _ = try await profile.load() }
         }
-
         func restoreLeftovers() throws -> [String] {
             try FileManager.default.contentsOfDirectory(atPath: root.deletingLastPathComponent().path)
                 .filter { $0.hasPrefix(".kinlogue-restore-") }

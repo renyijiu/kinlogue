@@ -65,6 +65,78 @@ func reauthorizingTheOriginalFolderPreservesWriterAndRejectsOtherDirectories() a
 }
 
 @Test
+func backupsKeepWorkingAfterTheVolumesOfTheProfileAndTheBackupFolderAreRenumbered() async throws {
+    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+        .appendingPathComponent("KinlogueRenumbered-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    let selected = base.appendingPathComponent("selected", isDirectory: true)
+    try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
+    let database = try SQLiteLibraryStore(rootURL: base.appendingPathComponent("Vault"))
+    defer { try? database.close() }
+    let repository = SQLiteReportRepository(store: database)
+    let member = try FamilyMember(displayName: "Synthetic member before the renumbering")
+    try await repository.saveMember(member, replacing: nil)
+    let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
+    let profileRoot = base.appendingPathComponent("BackupIdentity")
+    func makeService() -> LiveBackupService {
+        LiveBackupService(store: database, configurationStore: BackupLocalConfigurationStore(rootURL: profileRoot),
+            requiresSelectedDirectoryScope: true, destinationAuthority: BackupDestinationAuthority(bookmarks: bookmarks),
+            selectedDirectoryScope: bookmarks)
+    }
+    let setup = makeService()
+    let recoveryCode = try await setup.beginSetup(selectedParent: selected)
+    try await setup.completeSetup(recoveryCodeReentry: recoveryCode, independentlySaved: true)
+
+    // macOS may give a volume another device number after a restart or an update. The profile
+    // then still names its own directory, the chosen folder and the repository by the old
+    // number. Rewriting the recorded numbers before any restore point exists leaves that state.
+    let record = profileRoot.appendingPathComponent("configuration.json")
+    let text = try String(contentsOf: record, encoding: .utf8)
+    var directory = stat()
+    #expect(lstat(selected.path, &directory) == 0)
+    let live = "\"device\":\(directory.st_dev),"
+    #expect(text.components(separatedBy: live).count == 4)
+    let handle = try FileHandle(forWritingTo: record)
+    try handle.truncate(atOffset: 0)
+    try handle.write(contentsOf: Data(text.replacingOccurrences(of: live, with: "\"device\":\(Int(directory.st_dev) + 3),").utf8))
+    try handle.close()
+
+    // A new service stands for the launch after the restart.
+    let backup = makeService()
+    let profile = BackupLocalConfigurationStore(rootURL: profileRoot)
+    let recorded = try #require(await profile.load())
+    #expect(recorded.repositoryDirectoryIdentity.device == UInt64(directory.st_dev) + 3)
+    #expect(try await backup.loadStatus().lastFailure == nil)
+
+    _ = try await backup.backUpNow()
+    let later: FamilyMember = { var value = member; value.displayName = "Synthetic member after the renumbering"; return value }()
+    try await repository.saveMember(later, replacing: member)
+    _ = try await backup.backUpNow()
+
+    let destination = selected.appendingPathComponent(BackupDestinationAuthority.repositoryDirectoryName)
+    let restorePoints = try FileManager.default.contentsOfDirectory(at: destination, includingPropertiesForKeys: nil)
+        .filter { $0.pathExtension == "kinloguebackup" }
+    let current = try #require(await profile.load())
+    #expect(restorePoints.count == 2)
+    #expect(current.verificationWitnesses.count == 2)
+    #expect(current.repositoryDirectoryIdentity.device == recorded.repositoryDirectoryIdentity.device)
+    // Retention matches a restore point to its witness by this digest. It is taken from the
+    // repository as recorded, so it is the same value before and after a renumbering.
+    let digests = restorePoints.map { url -> Data in
+        var file = stat()
+        #expect(lstat(url.path, &file) == 0)
+        return current.repositoryDirectoryIdentity.leafIdentityDigest(file: .init(
+            device: UInt64(file.st_dev), inode: UInt64(file.st_ino), byteCount: UInt64(file.st_size)))
+    }
+    #expect(Set(digests) == Set(current.verificationWitnesses.map(\.repositoryIdentityDigest)))
+    let status = try await backup.loadStatus()
+    #expect(status.lastFailure == nil)
+    #expect(status.localCheckpointState == .verified)
+    #expect(bookmarks.startCount == bookmarks.stopCount)
+}
+
+@Test
 func loadingBackupStatusNeverReadsTheLibrarySource() async throws {
     let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
         .appendingPathComponent("KinlogueLiveBackupStatusCost-\(UUID().uuidString)", isDirectory: true)

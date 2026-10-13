@@ -145,6 +145,41 @@ func sqliteCaptureCleanupPreservesUnknownChildOrReplacedDatabase(replace: Bool) 
     #expect(try Data(contentsOf: marker) == bytes)
 }
 
+/// A capture that never got to clean up after itself, as after a crash. In the second case the
+/// launch that removes it finds the volume under another device number than its receipt recorded.
+@Test(arguments: [false, true])
+func sqliteCaptureLeftBehindIsRemovedAtTheNextLaunch(afterTheVolumeWasRenumbered: Bool) throws {
+    let root = try sqliteTestRoot(), parent = root.deletingLastPathComponent()
+    defer { try? FileManager.default.removeItem(at: parent) }
+    let capture = try SQLiteLogicalCaptureDatabase(rootURL: root)
+    try capture.queue.close()
+    let left = try FileManager.default.contentsOfDirectory(atPath: parent.path)
+    #expect(left.contains { $0.hasSuffix(".staging") } && left.contains { $0.hasSuffix(".receipt.json") })
+    if afterTheVolumeWasRenumbered {
+        let receipt = parent.appendingPathComponent(try #require(left.first { $0.hasSuffix(".receipt.json") }))
+        let text = try String(contentsOf: receipt, encoding: .utf8)
+        let pattern = try NSRegularExpression(pattern: #""(?:device|databaseDevice)":(\d+)"#)
+        var renumbered = text
+        let matches = pattern.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        #expect(matches.count == 2)
+        for match in matches.reversed() {
+            let digits = try #require(Range(match.range(at: 1), in: renumbered))
+            renumbered.replaceSubrange(digits, with: String(try #require(Int(renumbered[digits])) + 3))
+        }
+        let handle = try FileHandle(forWritingTo: receipt)
+        try handle.truncate(atOffset: 0)
+        try handle.write(contentsOf: Data(renumbered.utf8))
+        try handle.close()
+    }
+
+    let owner = try SQLiteLibraryOwner(rootURL: root)
+    try SQLiteLogicalBackupSource.reconcileTemporaryCaptures(owner: owner)
+
+    #expect(try FileManager.default.contentsOfDirectory(atPath: parent.path)
+        .allSatisfy { !$0.hasSuffix(".staging") && !$0.hasSuffix(".receipt.json") })
+    withExtendedLifetime(capture) {}
+}
+
 @Test
 func sqliteCaptureUnreceiptedEmptyDirectoryDoesNotBlockLibraryStartup() throws {
     let root = try sqliteTestRoot(), parent = root.deletingLastPathComponent()

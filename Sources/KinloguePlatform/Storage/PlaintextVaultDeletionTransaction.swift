@@ -21,13 +21,17 @@ struct PlaintextVaultDeletionTransaction: Sendable {
         let inode: UInt64
     }
 
+    /// The receipt is read again by the launch after an interrupted deletion, and macOS can give
+    /// the volume another device number in between, so only the inode is compared. The directory
+    /// is found by a fixed name beside the library, never on another volume.
     private struct DirectoryIdentity: Equatable {
         let device: UInt64
         let inode: UInt64
 
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.inode == rhs.inode }
+
         func matches(_ metadata: stat) -> Bool {
-            device == UInt64(metadata.st_dev)
-                && inode == UInt64(metadata.st_ino)
+            inode == UInt64(metadata.st_ino)
                 && (metadata.st_mode & S_IFMT) == S_IFDIR
                 && metadata.st_uid == geteuid()
         }

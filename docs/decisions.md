@@ -75,11 +75,29 @@
 
 **影响的代码/文档**：[`SQLiteLibraryOwner.swift`](../Sources/KinloguePlatform/Storage/SQLiteLibraryOwner.swift) 的 `isFile(recordedAs:)` 及其在原件生命周期、LAN 上传和逻辑备份来源中的调用点；[`BackupLocalConfigurationStore`](../Sources/KinloguePlatform/Backup/BackupLocalConfigurationStore.swift) 的 `removeForDestructiveReset`；[`sqlite-storage.md`](sqlite-storage.md)、[`backup-and-restore.md`](backup-and-restore.md)。
 
-**没有处理的同类依赖**：备份配置记录自身、备份目标目录的身份、恢复事务和整库删除的收据仍然记录并比较设备号。前两者在卷被重新编号后使备份需要重新设置；后两者只在一次操作中断、且恰好在下次启动前卷被重新编号时才会无法收敛。这些没有改动，也没有验证过界面在这些情况下的表现。
+**当时没有处理的同类依赖**（已由下一条决策处理）：备份配置记录自身、备份目标目录的身份、恢复事务和整库删除的收据仍然记录并比较设备号。前两者在卷被重新编号后使备份需要重新设置；后两者只在一次操作中断、且恰好在下次启动前卷被重新编号时才会无法收敛。这些没有改动，也没有验证过界面在这些情况下的表现。
 
 **迁移/回滚要求**：没有迁移，已有的行不用改写。回滚即还原比较方式。
 
 **验证门禁**：自动化结果见 [`log.md`](log.md)；真实的卷重新编号只能通过改写行里记录的设备号来模拟，没有在重启前后实测。
+
+## [2026-10-13] 备份配置、备份目录和各类收据里记录的身份同样不比较设备号
+
+**问题**：上一条只处理了原件行。备份配置记录用设备号加 inode 标识自己的目录、用户选择的父目录和 repository；验证记录里的摘要把 repository 和恢复点文件的设备号都算了进去；恢复、整库删除、初始化、备份捕获的收据和 DICOM 导入日志也记录设备号。卷被重新编号后，备份配置读取失败且无法重新设置；一次中断的恢复、删除、初始化或影像导入则让之后的每次启动失败或留下永不清理的残留。反向验证逐项复现了这些失败。
+
+**选择**：这些记录下来的身份一律只比较 inode，设备号照原样保留、不改写。备份这一侧通过 `BackupFilesystemIdentity` 和 `BackupRestoreDirectoryIdentity` 的相等性统一实现，而不是逐个调用点改写：比较点有三十多处，漏掉任何一处的后果都要等到卷被重新编号才显现。验证记录的摘要改用配置里登记的设备号代替文件当前的设备号，使已有的验证记录在重新编号前后算出同一个值。
+
+**未选择的替代方案**：发现设备号变化时把配置改写成当前值——验证记录的摘要也得跟着重算，需要访问 repository 并且要能从中断中恢复，而且外接卷每次挂载都可能触发；给摘要换一个不含设备号的新版本——已有的验证记录全部失配，保留策略要等新的备份逐个补齐才能恢复；逐个调用点区分“记录的”和“当前的”身份——更精确，但两种身份是同一个类型，分类错一处就是一个潜伏的故障。
+
+**代价**：同一次运行里取得的两个身份之间也不再比较设备号。需要“在同一个卷上”的地方保留了显式的设备号比较；其余比较的双方本来就在同一个父目录之下。一个不同的卷上恰好有相同 inode 的目录，并且经同一个 bookmark 解析到、里面还有同一个备份集的有效内容，才会被当成同一个 repository，这种情况实际上只有整盘克隆会出现。
+
+**影响的代码/文档**：[`BackupLocalConfigurationStore.swift`](../Sources/KinloguePlatform/Backup/BackupLocalConfigurationStore.swift)、[`EncryptedCheckpointRestore.swift`](../Sources/KinloguePlatform/Backup/EncryptedCheckpointRestore.swift)、[`BackupRepository.swift`](../Sources/KinloguePlatform/Backup/BackupRepository.swift)、[`EncryptedCheckpointWriter.swift`](../Sources/KinloguePlatform/Backup/EncryptedCheckpointWriter.swift)、整库删除事务、初始化收据、捕获收据和 DICOM 暂存归属；[`backup-and-restore.md`](backup-and-restore.md)、[`sqlite-storage.md`](sqlite-storage.md)。
+
+**仍然含设备号、没有改动的地方**：owner 锁文件的命名（重新编号后改用新名字，不影响互斥）、安装验收运行的归属收据（只在一次验收运行内有效）以及各处同一次运行内的身份比较。
+
+**迁移/回滚要求**：没有迁移，记录格式不变。回滚即还原相等性和摘要的取值方式；回滚后在重新编号之后新写入的验证记录会与旧算法失配。
+
+**验证门禁**：自动化结果见 [`log.md`](log.md)；卷重新编号仍然只通过改写记录里的设备号模拟，没有在重启前后实测，外接卷和网盘目录上的备份目录也没有实测。
 
 ## 已被 supersede 的早期决策
 

@@ -148,10 +148,12 @@ final class SQLiteLogicalCaptureDatabase {
         }
         return fd
     }
+    /// `identity` may come from a receipt written before a restart, so only its inode is compared;
+    /// the file is looked up by name under a descriptor this process holds.
     private static func requireOwnedFile(_ name: String, identity: SQLiteFileIdentity, parent: Int32) throws {
         var value = stat()
         guard fstatat(parent, name, &value, AT_SYMLINK_NOFOLLOW) == 0,
-              Int64(value.st_dev) == identity.device, Int64(value.st_ino) == identity.inode,
+              Int64(value.st_ino) == identity.inode,
               value.st_mode & S_IFMT == S_IFREG, value.st_uid == geteuid(), value.st_nlink == 1,
               value.st_mode & 0o7777 == 0o600 else { throw SQLiteLogicalBackupError.sourceChanged }
     }

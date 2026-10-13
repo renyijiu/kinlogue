@@ -478,10 +478,10 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
             let witness = try BackupDurableFullReaderWitness(
                 checkpoint: checkpoint,
                 writerEpoch: configuration.writerEpoch,
-                repositoryIdentityDigest: Self.repositoryIdentityDigest(
-                    repository: repositoryIdentity,
-                    file: publication.identity
-                ),
+                // The repository as the profile recorded it, so the witness stays valid when the
+                // volume is renumbered.
+                repositoryIdentityDigest: configuration.repositoryDirectoryIdentity
+                    .leafIdentityDigest(file: publication.identity),
                 continuousObservationStartedAt: observedAt,
                 lastObservedAt: observedAt
             )
@@ -637,15 +637,4 @@ public final class EncryptedCheckpointWriter: @unchecked Sendable {
         }
     }
 
-    private static func repositoryIdentityDigest(
-        repository: BackupFilesystemIdentity,
-        file: BackupPublishedFileIdentity
-    ) -> Data {
-        var input = Data("com.kinlogue.backup/repository-leaf-identity/v1".utf8)
-        for value in [repository.device, repository.inode, file.device, file.inode, file.byteCount] {
-            var bigEndian = value.bigEndian
-            withUnsafeBytes(of: &bigEndian) { input.append(contentsOf: $0) }
-        }
-        return Data(SHA256.hash(data: input))
-    }
 }

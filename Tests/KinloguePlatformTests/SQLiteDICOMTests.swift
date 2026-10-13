@@ -430,6 +430,53 @@ func sqliteDICOMStagedFIFOIsRejectedWithoutBlockingAdoption() async throws {
     try await repository.abortImport(session)
 }
 
+/// What an import leaves when the process dies while copying: a journal entry bound to a staging
+/// directory with a file in it. Opening the repository is what the next launch does, and a
+/// journal entry it cannot settle stops it. In the second case that launch finds the volume under
+/// another device number than the journal recorded.
+@Test(arguments: [false, true])
+func sqliteDICOMImportLeftBehindIsReclaimedWhenTheRepositoryOpens(afterTheVolumeWasRenumbered: Bool) throws {
+    let fixture = try SQLiteDICOMFixture()
+    defer { fixture.cleanup() }
+    let root = fixture.store.rootURL
+    let staging = try VaultDICOMStudyStaging(rootURL: root)
+    let journal = try VaultDICOMImportJournal(rootURL: root)
+    let operationID = UUID()
+    try journal.begin(operationID: operationID, vaultID: try fixture.store.state().libraryID)
+    let ownership = try staging.prepare(operationID: operationID)
+    try journal.bindStagingOwnership(ownership, operationID: operationID)
+    let source = fixture.source.appendingPathComponent("synthetic.dcm")
+    let descriptor = open(source.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    #expect(descriptor >= 0)
+    defer { Darwin.close(descriptor) }
+    var metadata = stat()
+    #expect(fstat(descriptor, &metadata) == 0)
+    _ = try staging.stage(sourceDescriptor: descriptor, declaredByteCount: Int(metadata.st_size),
+                          ownership: ownership, stagedByteCountBeforeCopy: 0)
+    #expect(try journal.pendingOperationCount() == 1)
+    func leftovers() throws -> [String] {
+        let enumerator = try #require(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
+        return enumerator.compactMap { ($0 as? URL)?.path }.filter { $0.contains(operationID.uuidString) || $0.contains(operationID.uuidString.lowercased()) }
+    }
+    #expect(try !leftovers().isEmpty)
+    if afterTheVolumeWasRenumbered {
+        let record = URL(fileURLWithPath: try #require(try leftovers().first { $0.hasSuffix(".json") }))
+        let text = try String(contentsOf: record, encoding: .utf8)
+        let pattern = try NSRegularExpression(pattern: #""device":(\d+)"#)
+        let match = try #require(pattern.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)))
+        let digits = try #require(Range(match.range(at: 1), in: text))
+        let handle = try FileHandle(forWritingTo: record)
+        try handle.truncate(atOffset: 0)
+        try handle.write(contentsOf: Data(text.replacingCharacters(in: digits, with: String(try #require(Int(text[digits])) + 3)).utf8))
+        try handle.close()
+    }
+
+    _ = try SQLiteDICOMRepository(store: fixture.store)
+
+    #expect(try journal.pendingOperationCount() == 0)
+    #expect(try leftovers().isEmpty)
+}
+
 @Test(arguments: [false, true])
 func sqliteDICOMAdoptionGapProtectsOwnedBytesAndPreservesReplacedInode(replaced: Bool) async throws {
     let fixture = try SQLiteDICOMFixture()
