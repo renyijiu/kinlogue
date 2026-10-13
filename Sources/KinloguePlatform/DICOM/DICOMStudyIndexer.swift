@@ -14,7 +14,7 @@ public protocol DICOMFrameDecoding: Sendable {
 extension DICOMDecoderAdapter: DICOMFrameDecoding {}
 
 public struct DICOMIndexedObject: Equatable, Sendable {
-    public let staged: VaultDICOMStagedObject
+    public let staged: DICOMStagedObject
     public let attachment: Attachment
 }
 
@@ -50,9 +50,9 @@ public struct DICOMStudyIndexer: Sendable {
     }
 
     public func index(
-        stagedObjects: [VaultDICOMStagedObject],
+        stagedObjects: [DICOMStagedObject],
         vaultID: UUID,
-        staging: VaultDICOMStudyStaging
+        staging: DICOMStudyStaging
     ) async throws -> DICOMIndexedStudyProposal {
         do { try policy.validateDICOMObjectCount(stagedObjects.count) }
         catch { throw DICOMImportError.resourceLimit }
@@ -294,7 +294,7 @@ public struct DICOMStudyIndexer: Sendable {
 }
 
 private struct Candidate: Sendable {
-    let staged: VaultDICOMStagedObject
+    let staged: DICOMStagedObject
     let metadata: DICOMAllowlistMetadata
     let imageAttributes: DICOMStudyIndex.ImageAttributes?
     let instanceNumber: Int?
@@ -604,7 +604,7 @@ private func require<T>(_ value: T?) throws -> T {
     return value
 }
 
-private func stableContentIdentity(_ staged: VaultDICOMStagedObject) -> Data {
+private func stableContentIdentity(_ staged: DICOMStagedObject) -> Data {
     var data = staged.sha256Digest
     var byteCount = UInt64(staged.byteCount).bigEndian
     withUnsafeBytes(of: &byteCount) { data.append(contentsOf: $0) }

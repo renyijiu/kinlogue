@@ -62,7 +62,7 @@ final class DICOMStudyViewerModel: ObservableObject {
     }
 
     private struct PrefetchRequest: Equatable, Sendable {
-        let token: DICOMVaultSessionToken
+        let token: DICOMLibrarySessionToken
         let seriesID: DICOMStudyIndex.Series.ID
         let instanceID: DICOMStudyIndex.Instance.ID
     }

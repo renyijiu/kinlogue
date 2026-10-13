@@ -21,7 +21,7 @@ public actor DICOMImportWorkflow {
     private let policy: DICOMImportPolicy
     private let metrics: DICOMImportMetricsRecorder?
     private let scannerControl: (any DICOMFolderScannerControl)?
-    private let availableCapacityProvider: VaultDICOMStudyStaging.AvailableCapacityProvider
+    private let availableCapacityProvider: DICOMStudyStaging.AvailableCapacityProvider
     private var currentTask: Task<DICOMImportResult, Error>?
     private var currentOperationID: UUID?
 
@@ -32,10 +32,10 @@ public actor DICOMImportWorkflow {
         policy: DICOMImportPolicy = .default,
         metrics: DICOMImportMetricsRecorder?,
         scannerControl: (any DICOMFolderScannerControl)?,
-        availableCapacityProvider: @escaping VaultDICOMStudyStaging.AvailableCapacityProvider =
-            VaultDICOMStudyStaging.systemAvailableCapacity
+        availableCapacityProvider: @escaping DICOMStudyStaging.AvailableCapacityProvider =
+            DICOMStudyStaging.systemAvailableCapacity
     ) throws {
-        self.rootURL = try PlaintextVaultLayout(rootURL: rootURL).rootURL
+        self.rootURL = try DICOMImportLayout(rootURL: rootURL).rootURL
         self.vault = vault
         self.decoder = decoder
         self.policy = policy
@@ -164,10 +164,10 @@ public actor DICOMImportWorkflow {
         policy: DICOMImportPolicy,
         metrics: DICOMImportMetricsRecorder?,
         scannerControl: (any DICOMFolderScannerControl)?,
-        availableCapacityProvider: @escaping VaultDICOMStudyStaging.AvailableCapacityProvider,
+        availableCapacityProvider: @escaping DICOMStudyStaging.AvailableCapacityProvider,
         reportPhase: @escaping @Sendable (DICOMImportState) async -> Void
     ) async throws -> DICOMImportResult {
-        let staging = try VaultDICOMStudyStaging(
+        let staging = try DICOMStudyStaging(
             rootURL: rootURL,
             policy: policy,
             availableCapacityProvider: availableCapacityProvider

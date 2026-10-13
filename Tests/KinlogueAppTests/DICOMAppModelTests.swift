@@ -778,7 +778,7 @@ private func appModelViewerSession(studyID: DICOMStudy.ID) throws -> DICOMSliceS
     )
     let seriesID = UUID()
     return try DICOMSliceSeriesSession(
-        token: DICOMVaultSessionToken(libraryID: UUID(), epoch: UUID(), studyID: studyID, contentRevision: 1,
+        token: DICOMLibrarySessionToken(libraryID: UUID(), epoch: UUID(), studyID: studyID, contentRevision: 1,
                                       seriesID: seriesID, seriesHash: Data(repeating: 0x42, count: 32)),
         studyID: studyID,
         seriesID: seriesID,

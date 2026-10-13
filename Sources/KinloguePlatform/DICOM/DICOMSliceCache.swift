@@ -215,7 +215,7 @@ actor DICOMSliceCache {
     static let defaultMaximumBytes = 192 * 1_024 * 1_024
 
     struct Key: Hashable, Sendable {
-        let token: DICOMVaultSessionToken
+        let token: DICOMLibrarySessionToken
         let contentDigest: Data
         let byteCount: Int
     }
@@ -318,7 +318,7 @@ actor DICOMSliceCache {
         _ = budget.setCacheBytes(0)
     }
 
-    func removeAll(for token: DICOMVaultSessionToken) {
+    func removeAll(for token: DICOMLibrarySessionToken) {
         for key in Array(entries.keys.filter { $0.token == token }) {
             evict(key)
         }

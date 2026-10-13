@@ -73,13 +73,13 @@ package actor SQLiteReportRepository: ImportDraftStore {
     @concurrent
     package nonisolated func records(_ ids: [UUID]) async throws -> [HealthRecord] {
         try await LibraryStorageExecutor.run {
-            guard ids.count <= VaultReadSnapshotPolicy.maximumObjectCount, Set(ids).count == ids.count else { throw LibraryReportError.resourceLimit }
+            guard ids.count <= LibraryReadSnapshotPolicy.maximumObjectCount, Set(ids).count == ids.count else { throw LibraryReportError.resourceLimit }
             return try store.read { db in
                 var count = 0
                 return try ids.map { id in
                     let size = try Int.fetchOne(db, sql: "SELECT length(payload) FROM report_details WHERE record_id = ?", arguments: [id.sqliteBytes]) ?? 0
                     count += size
-                    guard count <= VaultReadSnapshotPolicy.maximumRetainedByteCount else { throw LibraryReportError.resourceLimit }
+                    guard count <= LibraryReadSnapshotPolicy.maximumRetainedByteCount else { throw LibraryReportError.resourceLimit }
                     return try usableRecord(id, db)
                 }
             }

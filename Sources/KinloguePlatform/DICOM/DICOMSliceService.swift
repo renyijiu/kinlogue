@@ -15,7 +15,7 @@ public enum DICOMSliceServiceError: Error, Equatable, Sendable {
 }
 
 /// Identifies one series as one open library saw it; decoded slices are cached under it.
-public struct DICOMVaultSessionToken: Hashable, Sendable {
+public struct DICOMLibrarySessionToken: Hashable, Sendable {
     let libraryID: UUID
     let epoch: UUID
     let studyID: UUID
@@ -50,14 +50,14 @@ public struct DICOMSliceInstanceDescriptor: Equatable, Sendable {
 }
 
 public struct DICOMSliceSeriesSession: Equatable, Sendable {
-    public let token: DICOMVaultSessionToken
+    public let token: DICOMLibrarySessionToken
     public let studyID: DICOMStudy.ID
     public let seriesID: DICOMStudyIndex.Series.ID
     public let orderingProvenance: DICOMStudyIndex.OrderingProvenance
     public let instances: [DICOMSliceInstanceDescriptor]
 
     public init(
-        token: DICOMVaultSessionToken,
+        token: DICOMLibrarySessionToken,
         studyID: DICOMStudy.ID,
         seriesID: DICOMStudyIndex.Series.ID,
         orderingProvenance: DICOMStudyIndex.OrderingProvenance,

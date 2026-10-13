@@ -66,7 +66,7 @@ idle task and cancellation/drain identity stay on MainActor.
 - **Actor confinement.** `LANReceiver.Runtime` is created, read and mutated only
   by the enclosing `LANReceiver` actor. `DICOMSliceRuntime` stores immutable
   references to a lock-protected budget and actor-based cache/scheduler.
-- **Structured operation ownership.** `VaultDICOMOperationDescriptorLease` has
+- **Structured operation ownership.** `DICOMOperationDescriptorLease` has
   one close owner in the folder scanner. A bounded throwing task group may
   concurrently read its stable descriptor for POSIX operations; child tasks do
   not mutate or close the lease, and the group joins before the scanner closes
@@ -82,7 +82,7 @@ idle task and cancellation/drain identity stay on MainActor.
 - **Original export orchestration.** `OriginalExportCancellationGate` and
   `OriginalExportProgressRelay` keep their cancellation phase and coalesced
   progress state behind private locks; accepted progress is delivered on the
-  main actor. `PlaintextOriginalArchiveSource` has immutable descriptor
+  main actor. `OriginalArchiveSource` has immutable descriptor
   metadata, an idempotent lock-protected `close`, and a structured exporter
   lifetime in which actor-confined reads finish before the source is closed.
 - **Writer probe metrics.** `WorkerState`, `IntegerMaximum`, and

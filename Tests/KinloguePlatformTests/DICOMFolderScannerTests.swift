@@ -29,7 +29,7 @@ struct DICOMFolderScannerTests {
             maximumSourceAndStagingDescriptors: 8,
             requiredFreeSpaceHeadroom: headroom
         )
-        let exactBoundary = try VaultDICOMStudyStaging(
+        let exactBoundary = try DICOMStudyStaging(
             rootURL: base,
             policy: policy,
             availableCapacityProvider: { _ in Int64(stagedBytes + headroom) }
@@ -37,7 +37,7 @@ struct DICOMFolderScannerTests {
 
         try exactBoundary.validateCapacity(uniqueStagedBytes: stagedBytes)
 
-        let belowBoundary = try VaultDICOMStudyStaging(
+        let belowBoundary = try DICOMStudyStaging(
             rootURL: base,
             policy: policy,
             availableCapacityProvider: { _ in Int64(stagedBytes + headroom - 1) }
@@ -393,8 +393,8 @@ private struct ScannerFixture {
     let source: URL
     let vault: URL
     let operationID = UUID()
-    let staging: VaultDICOMStudyStaging
-    let ownership: VaultDICOMStagingOwnership
+    let staging: DICOMStudyStaging
+    let ownership: DICOMStagingOwnership
     let scanner: DICOMFolderScanner
 
     init(
@@ -408,7 +408,7 @@ private struct ScannerFixture {
         vault = base.appendingPathComponent("vault", isDirectory: true)
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
-        staging = try VaultDICOMStudyStaging(rootURL: vault, policy: policy)
+        staging = try DICOMStudyStaging(rootURL: vault, policy: policy)
         ownership = try staging.prepare(operationID: operationID)
         scanner = DICOMFolderScanner(
             policy: policy,

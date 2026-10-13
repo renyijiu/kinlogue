@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import KinlogueCore
 
-public enum VaultMutationLockNaming {
+public enum LibraryLockNaming {
     public static func filename(forCanonicalRootPath path: String) -> String {
         let digest = ContentDigest.sha256(Data(path.utf8))
             .map { String(format: "%02x", $0) }
@@ -11,7 +11,7 @@ public enum VaultMutationLockNaming {
     }
 }
 
-struct VaultProcessLockLocation: Hashable, Sendable {
+struct LibraryProcessLockLocation: Hashable, Sendable {
     let parentURL: URL
     let namingKey: String
 }
@@ -20,14 +20,14 @@ struct VaultProcessLockLocation: Hashable, Sendable {
 /// The files are intentionally never unlinked while in use: removing one that another process
 /// has open could create two lock inodes. Names are deduplicated and kept in one global path
 /// order so that overlapping lock sets cannot deadlock.
-struct VaultProcessLock: Sendable {
+struct LibraryProcessLock: Sendable {
     let lockURLs: [URL]
 
-    init(locations: [VaultProcessLockLocation]) {
+    init(locations: [LibraryProcessLockLocation]) {
         precondition(!locations.isEmpty)
         lockURLs = Array(Set(locations.map { location in
             location.parentURL.standardizedFileURL.appendingPathComponent(
-                VaultMutationLockNaming.filename(
+                LibraryLockNaming.filename(
                     forCanonicalRootPath: location.namingKey
                 ),
                 isDirectory: false

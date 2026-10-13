@@ -112,9 +112,9 @@ enum SQLiteReportRows {
 
     static func members(_ db: Database) throws -> [FamilyMember] {
         let rawBytes = try Int.fetchOne(db, sql: "SELECT coalesce(sum(\(memberTextBytesSQL)),0) FROM members")!
-        guard rawBytes <= VaultReadSnapshotPolicy.maximumRetainedByteCount else { throw LibraryReportError.resourceLimit }
+        guard rawBytes <= LibraryReadSnapshotPolicy.maximumRetainedByteCount else { throw LibraryReportError.resourceLimit }
         var result: [FamilyMember] = []
-        var remaining = VaultReadSnapshotPolicy.maximumRetainedByteCount
+        var remaining = LibraryReadSnapshotPolicy.maximumRetainedByteCount
         try visitMembers(db) { member in
             let count = try SQLiteEntityBudget.memberData(member).count
             guard count <= remaining else { throw LibraryReportError.resourceLimit }

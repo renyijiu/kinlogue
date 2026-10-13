@@ -5,7 +5,7 @@ import KinlogueCore
 /// Creates only the app-owned parent of an active vault root. Every existing
 /// component is required to resolve without symlinks; the active root itself
 /// is deliberately left absent for first-run state detection.
-public enum VaultParentDirectoryPreparation {
+public enum LibraryParentDirectoryPreparation {
     @discardableResult
     public static func ensureParentDirectory(for activeVaultURL: URL) throws -> URL {
         let active = activeVaultURL.standardizedFileURL

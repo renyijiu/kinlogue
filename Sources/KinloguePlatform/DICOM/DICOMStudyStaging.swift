@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import KinlogueCore
 
-public struct VaultDICOMStagingOwnership: Codable, Equatable, Sendable {
+public struct DICOMStagingOwnership: Codable, Equatable, Sendable {
     public let operationID: UUID
     let device: UInt64
     let inode: UInt64
@@ -23,15 +23,15 @@ public struct VaultDICOMStagingOwnership: Codable, Equatable, Sendable {
     }
 }
 
-public struct VaultDICOMStagedObject: Equatable, Sendable {
-    public let ownership: VaultDICOMStagingOwnership
+public struct DICOMStagedObject: Equatable, Sendable {
+    public let ownership: DICOMStagingOwnership
     public let stagingID: UUID
     public let relativePath: String
     public let byteCount: Int
     public let sha256Digest: Data
 
     public init(
-        ownership: VaultDICOMStagingOwnership,
+        ownership: DICOMStagingOwnership,
         stagingID: UUID,
         relativePath: String,
         byteCount: Int,
@@ -54,7 +54,7 @@ public struct VaultDICOMStagedObject: Equatable, Sendable {
     public var operationID: UUID { ownership.operationID }
 
     public static func path(operationID: UUID, stagingID: UUID) -> String {
-        "\(PlaintextVaultLayout.dicomImportStagingDirectoryPath(operationID: operationID))/"
+        "\(DICOMImportLayout.dicomImportStagingDirectoryPath(operationID: operationID))/"
             + "\(stagingID.uuidString.lowercased()).data"
     }
 }
@@ -62,11 +62,11 @@ public struct VaultDICOMStagedObject: Equatable, Sendable {
 // SAFETY: The scanner is the only close owner. Its structured child tasks may
 // concurrently read rawValue for POSIX operations, but never mutate or close
 // the lease; withThrowingTaskGroup joins before the scanner calls close().
-final class VaultDICOMOperationDescriptorLease: @unchecked Sendable {
-    let ownership: VaultDICOMStagingOwnership
+final class DICOMOperationDescriptorLease: @unchecked Sendable {
+    let ownership: DICOMStagingOwnership
     private(set) var rawValue: Int32
 
-    init(ownership: VaultDICOMStagingOwnership, rawValue: Int32) {
+    init(ownership: DICOMStagingOwnership, rawValue: Int32) {
         self.ownership = ownership
         self.rawValue = rawValue
     }
@@ -82,11 +82,11 @@ final class VaultDICOMOperationDescriptorLease: @unchecked Sendable {
 
 /// Same-volume, opaque, immutable staging owned by the Vault root. Source
 /// display names never participate in managed paths.
-public struct VaultDICOMStudyStaging: Sendable {
+public struct DICOMStudyStaging: Sendable {
     typealias AvailableCapacityProvider = @Sendable (URL) throws -> Int64
 
     private let rootURL: URL
-    private let layout: PlaintextVaultLayout
+    private let layout: DICOMImportLayout
     private let policy: DICOMImportPolicy
     private let availableCapacityProvider: AvailableCapacityProvider
 
@@ -103,7 +103,7 @@ public struct VaultDICOMStudyStaging: Sendable {
         policy: DICOMImportPolicy = .default,
         availableCapacityProvider: @escaping AvailableCapacityProvider
     ) throws {
-        let layout = try PlaintextVaultLayout(rootURL: rootURL)
+        let layout = try DICOMImportLayout(rootURL: rootURL)
         self.layout = layout
         self.rootURL = layout.rootURL
         self.policy = policy
@@ -112,7 +112,7 @@ public struct VaultDICOMStudyStaging: Sendable {
 
     @discardableResult
     public func prepare(operationID: UUID) throws
-        -> VaultDICOMStagingOwnership {
+        -> DICOMStagingOwnership {
         let operationDescriptor = try openOrCreateOperationDirectory(operationID: operationID)
         defer { Darwin.close(operationDescriptor) }
         var metadata = stat()
@@ -127,15 +127,15 @@ public struct VaultDICOMStudyStaging: Sendable {
         )
         var mutableRoot = root
         try? mutableRoot.setResourceValues(values)
-        return VaultDICOMStagingOwnership(operationID: operationID, metadata: metadata)
+        return DICOMStagingOwnership(operationID: operationID, metadata: metadata)
     }
 
     public func stage(
         sourceDescriptor: Int32,
         declaredByteCount: Int,
-        ownership: VaultDICOMStagingOwnership,
+        ownership: DICOMStagingOwnership,
         stagedByteCountBeforeCopy: Int
-    ) throws -> VaultDICOMStagedObject {
+    ) throws -> DICOMStagedObject {
         try stage(
             sourceDescriptor: sourceDescriptor,
             declaredByteCount: declaredByteCount,
@@ -148,10 +148,10 @@ public struct VaultDICOMStudyStaging: Sendable {
     func stageDeduplicationCandidate(
         sourceDescriptor: Int32,
         declaredByteCount: Int,
-        ownership: VaultDICOMStagingOwnership,
+        ownership: DICOMStagingOwnership,
         stagedByteCountBeforeCopy: Int,
-        operationLease: VaultDICOMOperationDescriptorLease
-    ) throws -> VaultDICOMStagedObject {
+        operationLease: DICOMOperationDescriptorLease
+    ) throws -> DICOMStagedObject {
         try stage(
             sourceDescriptor: sourceDescriptor,
             declaredByteCount: declaredByteCount,
@@ -165,11 +165,11 @@ public struct VaultDICOMStudyStaging: Sendable {
     private func stage(
         sourceDescriptor: Int32,
         declaredByteCount: Int,
-        ownership: VaultDICOMStagingOwnership,
+        ownership: DICOMStagingOwnership,
         stagedByteCountBeforeCopy: Int,
         permitsTemporaryDeduplicationCandidate: Bool,
-        operationLease: VaultDICOMOperationDescriptorLease? = nil
-    ) throws -> VaultDICOMStagedObject {
+        operationLease: DICOMOperationDescriptorLease? = nil
+    ) throws -> DICOMStagedObject {
         guard declaredByteCount > 0, declaredByteCount <= policy.maximumObjectBytes else {
             throw DICOMImportError.resourceLimit
         }
@@ -199,7 +199,7 @@ public struct VaultDICOMStudyStaging: Sendable {
         }
 
         let stagingID = UUID()
-        let relativePath = VaultDICOMStagedObject.path(
+        let relativePath = DICOMStagedObject.path(
             operationID: operationID,
             stagingID: stagingID
         )
@@ -269,7 +269,7 @@ public struct VaultDICOMStudyStaging: Sendable {
         targetOpen = false
         try syncDescriptor(operationDescriptor)
         succeeded = true
-        return try VaultDICOMStagedObject(
+        return try DICOMStagedObject(
             ownership: ownership,
             stagingID: stagingID,
             relativePath: relativePath,
@@ -282,8 +282,8 @@ public struct VaultDICOMStudyStaging: Sendable {
     /// a filesystem path. Both the opened inode and its content identity must
     /// still match the scanner-owned object before unlink.
     func remove(
-        _ object: VaultDICOMStagedObject,
-        operationLease: VaultDICOMOperationDescriptorLease
+        _ object: DICOMStagedObject,
+        operationLease: DICOMOperationDescriptorLease
     ) throws {
         guard operationLease.ownership == object.ownership,
               operationLease.rawValue >= 0 else {
@@ -291,7 +291,7 @@ public struct VaultDICOMStudyStaging: Sendable {
         }
         let operationDescriptor = operationLease.rawValue
         let filename = "\(object.stagingID.uuidString.lowercased()).data"
-        guard object.relativePath == VaultDICOMStagedObject.path(
+        guard object.relativePath == DICOMStagedObject.path(
             operationID: object.operationID,
             stagingID: object.stagingID
         ) else { throw DICOMImportError.integrityFailure }
@@ -329,7 +329,7 @@ public struct VaultDICOMStudyStaging: Sendable {
     }
 
     public func withDescriptor<T>(
-        _ object: VaultDICOMStagedObject,
+        _ object: DICOMStagedObject,
         _ body: (FileHandle) async throws -> T
     ) async throws -> T {
         let operationDescriptor = try openOperationDirectory(ownership: object.ownership)
@@ -348,7 +348,7 @@ public struct VaultDICOMStudyStaging: Sendable {
     }
 
     func withRawDescriptor<T>(
-        _ object: VaultDICOMStagedObject,
+        _ object: DICOMStagedObject,
         _ body: (Int32) throws -> T
     ) throws -> T {
         let operationDescriptor = try openOperationDirectory(ownership: object.ownership)
@@ -366,7 +366,7 @@ public struct VaultDICOMStudyStaging: Sendable {
     }
 
     /// The caller may transfer this exact inode; source directory ownership remains verified.
-    func withOwnedStagedDescriptor<T>(_ object: VaultDICOMStagedObject,
+    func withOwnedStagedDescriptor<T>(_ object: DICOMStagedObject,
                                       _ body: (Int32, Int32, String) throws -> T) throws -> T {
         let operation = try openOperationDirectory(ownership: object.ownership)
         defer { Darwin.close(operation) }
@@ -389,22 +389,22 @@ public struct VaultDICOMStudyStaging: Sendable {
     }
 
     func openOperationDescriptorLease(
-        ownership: VaultDICOMStagingOwnership
-    ) throws -> VaultDICOMOperationDescriptorLease {
+        ownership: DICOMStagingOwnership
+    ) throws -> DICOMOperationDescriptorLease {
         .init(
             ownership: ownership,
             rawValue: try openOperationDirectory(ownership: ownership)
         )
     }
 
-    public func read(_ object: VaultDICOMStagedObject) throws -> Data {
+    public func read(_ object: DICOMStagedObject) throws -> Data {
         try withRawDescriptor(object) {
             try readDescriptor($0, expectedByteCount: object.byteCount)
         }
     }
 
-    public func list(ownership: VaultDICOMStagingOwnership) throws
-        -> [VaultDICOMStagedObject] {
+    public func list(ownership: DICOMStagingOwnership) throws
+        -> [DICOMStagedObject] {
         let operationID = ownership.operationID
         let operationURL = rootURL.appendingPathComponent(
             layout.dicomImportStagingDirectoryPath(operationID: operationID),
@@ -417,7 +417,7 @@ public struct VaultDICOMStudyStaging: Sendable {
         return try names.sorted().compactMap { name in
             guard name.hasSuffix(".data"),
                   let stagingID = UUID(uuidString: String(name.dropLast(5))) else { return nil }
-            let relativePath = VaultDICOMStagedObject.path(
+            let relativePath = DICOMStagedObject.path(
                 operationID: operationID,
                 stagingID: stagingID
             )
@@ -433,7 +433,7 @@ public struct VaultDICOMStudyStaging: Sendable {
                   metadata.st_size <= policy.maximumObjectBytes else {
                 throw DICOMImportError.integrityFailure
             }
-            return try VaultDICOMStagedObject(
+            return try DICOMStagedObject(
                 ownership: ownership,
                 stagingID: stagingID,
                 relativePath: relativePath,
@@ -446,12 +446,12 @@ public struct VaultDICOMStudyStaging: Sendable {
         }
     }
 
-    public func cleanup(ownership: VaultDICOMStagingOwnership) throws {
+    public func cleanup(ownership: DICOMStagingOwnership) throws {
         try removeOwnedOperation(ownership: ownership, allowMissing: true)
     }
 
     func removeOwnedOperation(
-        ownership: VaultDICOMStagingOwnership,
+        ownership: DICOMStagingOwnership,
         allowMissing: Bool
     ) throws {
         let hierarchy: (root: Int32, staging: Int32)
@@ -664,7 +664,7 @@ public struct VaultDICOMStudyStaging: Sendable {
         return (rootDescriptor, stagingDescriptor)
     }
 
-    private func openOperationDirectory(ownership: VaultDICOMStagingOwnership) throws -> Int32 {
+    private func openOperationDirectory(ownership: DICOMStagingOwnership) throws -> Int32 {
         let hierarchy = try openStagingHierarchy()
         defer {
             Darwin.close(hierarchy.staging)
@@ -683,11 +683,11 @@ public struct VaultDICOMStudyStaging: Sendable {
     }
 
     private func openStagedFile(
-        _ object: VaultDICOMStagedObject,
+        _ object: DICOMStagedObject,
         operationDescriptor: Int32
     ) throws -> Int32 {
         let filename = "\(object.stagingID.uuidString.lowercased()).data"
-        guard object.relativePath == VaultDICOMStagedObject.path(
+        guard object.relativePath == DICOMStagedObject.path(
             operationID: object.operationID,
             stagingID: object.stagingID
         ) else { throw DICOMImportError.integrityFailure }

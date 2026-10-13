@@ -3,7 +3,7 @@ import Foundation
 import KinlogueCore
 
 /// The points at which a test can interrupt a whole-library deletion.
-public enum PlaintextVaultTransactionFault: Equatable, Sendable {
+public enum LibraryDeletionFault: Equatable, Sendable {
     case afterDeletionReceipt
     case afterDeletionRename
     case afterDeletionQuarantineRemoval
@@ -12,7 +12,7 @@ public enum PlaintextVaultTransactionFault: Equatable, Sendable {
 /// A filesystem-only destruction transaction. The sibling receipt survives a
 /// partial recursive removal, so a later process can finish deleting the exact
 /// inode that was validated before the active vault was quarantined.
-struct PlaintextVaultDeletionTransaction: Sendable {
+struct LibraryDeletionTransaction: Sendable {
     private struct Receipt: Codable, Equatable {
         let magic: String
         let formatVersion: Int
@@ -45,16 +45,16 @@ struct PlaintextVaultDeletionTransaction: Sendable {
     let receiptURL: URL
     let quarantineURL: URL
 
-    private let failureInjector: (@Sendable (PlaintextVaultTransactionFault) -> Bool)?
+    private let failureInjector: (@Sendable (LibraryDeletionFault) -> Bool)?
     private let strictReceipt: Bool
     private let canonicalRootPath: String
 
     init(
         rootURL: URL,
-        failureInjector: (@Sendable (PlaintextVaultTransactionFault) -> Bool)? = nil,
+        failureInjector: (@Sendable (LibraryDeletionFault) -> Bool)? = nil,
         strictReceipt: Bool = false
     ) throws {
-        let root = try PlaintextVaultLayout(rootURL: rootURL).rootURL
+        let root = try DICOMImportLayout(rootURL: rootURL).rootURL
         let canonicalPath = root.resolvingSymlinksInPath().standardizedFileURL
             .path.precomposedStringWithCanonicalMapping
         let suffix = ContentDigest.sha256(Data(canonicalPath.utf8))
@@ -459,7 +459,7 @@ struct PlaintextVaultDeletionTransaction: Sendable {
         }
     }
 
-    private func failIfRequested(_ point: PlaintextVaultTransactionFault) throws {
+    private func failIfRequested(_ point: LibraryDeletionFault) throws {
         if failureInjector?(point) == true { throw VaultError.injectedFailure }
     }
 }

@@ -7,9 +7,9 @@ typealias DICOMImportSession = SQLiteDICOMImportSession
 enum DICOMImportCommit: Sendable { case accepted(UUID), duplicateExisting(UUID) }
 
 protocol DICOMImportStoring: Sendable {
-    func beginImport(operationID: UUID, staging: VaultDICOMStudyStaging) async throws -> DICOMImportSession
+    func beginImport(operationID: UUID, staging: DICOMStudyStaging) async throws -> DICOMImportSession
     func commitImport(_ proposal: DICOMIndexedStudyProposal, session: DICOMImportSession,
-                      staging: VaultDICOMStudyStaging, metrics: DICOMImportMetricsRecorder?) async throws -> DICOMImportCommit
+                      staging: DICOMStudyStaging, metrics: DICOMImportMetricsRecorder?) async throws -> DICOMImportCommit
     func abortImport(_ session: DICOMImportSession) async throws
     func committedImport(_ proposal: DICOMIndexedStudyProposal, session: DICOMImportSession) async throws -> DICOMImportCommit?
 }

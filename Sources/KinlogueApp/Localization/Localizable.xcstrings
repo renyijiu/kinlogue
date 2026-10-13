@@ -1921,16 +1921,6 @@
         }
       }
     },
-    "导出期间资料库发生变化，未生成不完整的压缩包。请重试。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The library changed during export. No incomplete ZIP was published. Try again."
-          }
-        }
-      }
-    },
     "导出未完成": {
       "localizations": {
         "en": {

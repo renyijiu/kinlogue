@@ -124,97 +124,10 @@ public enum DICOMStudyState: String, Codable, Hashable, Sendable {
     case confirmed
 }
 
-/// One catalog-owned DICOM graph. The `.record` object named by
-/// `indexObjectID` is a self-describing `DICOMStudyIndex`; attachments are
-/// immutable originals. Only confirmation metadata can change after publish.
-public struct DICOMStudy: Codable, Identifiable, Hashable, Sendable {
+/// Names a DICOM study and holds the limit both the fingerprint and the import policy use.
+/// What a study consists of lives in `DICOMStudyHeader` and `DICOMStudyIndex`.
+public enum DICOMStudy {
+    public typealias ID = UUID
+
     public static let maximumAttachmentCount = DICOMStudyFingerprint.maximumObjectCount
-
-    public let id: UUID
-    public let state: DICOMStudyState
-    public let fingerprint: DICOMStudyFingerprint
-    public let indexObjectID: UUID
-    public let attachmentIDs: [Attachment.ID]
-    public let confirmedMemberID: FamilyMember.ID?
-    public let effectiveDate: Date?
-
-    public init(
-        id: UUID = UUID(),
-        state: DICOMStudyState,
-        fingerprint: DICOMStudyFingerprint,
-        indexObjectID: UUID,
-        attachmentIDs: [Attachment.ID],
-        confirmedMemberID: FamilyMember.ID? = nil,
-        effectiveDate: Date? = nil
-    ) throws {
-        guard !attachmentIDs.isEmpty,
-              attachmentIDs.count <= Self.maximumAttachmentCount,
-              Set(attachmentIDs).count == attachmentIDs.count,
-              attachmentIDs.count == fingerprint.objects.count else {
-            throw DomainValidationError.invalidCatalogReference
-        }
-        let confirmationIsPresent = confirmedMemberID != nil || effectiveDate != nil
-        switch state {
-        case .needsReview:
-            guard !confirmationIsPresent else {
-                throw DomainValidationError.invalidStateTransition
-            }
-        case .confirmed:
-            guard let effectiveDate,
-                  confirmedMemberID != nil,
-                  effectiveDate.timeIntervalSinceReferenceDate.isFinite else {
-                throw DomainValidationError.invalidStateTransition
-            }
-        }
-        self.id = id
-        self.state = state
-        self.fingerprint = fingerprint
-        self.indexObjectID = indexObjectID
-        self.attachmentIDs = attachmentIDs.sorted(by: Self.uuidPrecedes)
-        self.confirmedMemberID = confirmedMemberID
-        self.effectiveDate = effectiveDate
-    }
-
-    public func confirmed(memberID: FamilyMember.ID, effectiveDate: Date) throws -> Self {
-        try Self(
-            id: id,
-            state: .confirmed,
-            fingerprint: fingerprint,
-            indexObjectID: indexObjectID,
-            attachmentIDs: attachmentIDs,
-            confirmedMemberID: memberID,
-            effectiveDate: effectiveDate
-        )
-    }
-
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        try decoder.rejectUnknownKeys([
-            "id", "state", "fingerprint", "indexObjectID", "attachmentIDs", "confirmedMemberID", "effectiveDate",
-        ])
-        do {
-            try self.init(
-                id: container.decode(UUID.self, forKey: .id),
-                state: container.decode(DICOMStudyState.self, forKey: .state),
-                fingerprint: container.decode(DICOMStudyFingerprint.self, forKey: .fingerprint),
-                indexObjectID: container.decode(UUID.self, forKey: .indexObjectID),
-                attachmentIDs: container.decodeBoundedArray(
-                    UUID.self,
-                    forKey: .attachmentIDs,
-                    maximumCount: Self.maximumAttachmentCount
-                ),
-                confirmedMemberID: container.decodeIfPresent(UUID.self, forKey: .confirmedMemberID),
-                effectiveDate: container.decodeIfPresent(Date.self, forKey: .effectiveDate)
-            )
-        } catch {
-            throw DecodingError.dataCorrupted(.init(
-                codingPath: decoder.codingPath,
-                debugDescription: "Invalid DICOM study"
-            ))
-        }
-    }
-
-    private static func uuidPrecedes(_ lhs: UUID, _ rhs: UUID) -> Bool {
-        lhs.uuidString.lowercased() < rhs.uuidString.lowercased()
-    }
 }

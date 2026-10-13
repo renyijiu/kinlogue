@@ -6,7 +6,7 @@ struct SQLiteDICOMImportSession: Sendable {
     let operationID: UUID
     let libraryID: UUID
     let epoch: UUID
-    let ownership: VaultDICOMStagingOwnership
+    let ownership: DICOMStagingOwnership
 }
 
 package final class SQLiteDICOMRepository: Sendable, DICOMImportStoring {
@@ -98,7 +98,7 @@ package final class SQLiteDICOMRepository: Sendable, DICOMImportStoring {
     }
 
     @concurrent
-    func beginImport(operationID: UUID, staging: VaultDICOMStudyStaging) async throws -> DICOMImportSession {
+    func beginImport(operationID: UUID, staging: DICOMStudyStaging) async throws -> DICOMImportSession {
         try await LibraryStorageExecutor.run {
             try store.admission.withLock {
                 try Task.checkCancellation()
@@ -107,7 +107,7 @@ package final class SQLiteDICOMRepository: Sendable, DICOMImportStoring {
                 let state = try queue.read(SQLiteLibraryState.read)
                 try recoverImportsLocked(libraryID: state.libraryID)
                 store.activeDICOMImports.insert(operationID)
-                let journal = try VaultDICOMImportJournal(rootURL: store.rootURL)
+                let journal = try DICOMImportJournal(rootURL: store.rootURL)
                 do {
                     try journal.begin(operationID: operationID, vaultID: state.libraryID)
                     let ownership = try staging.prepare(operationID: operationID)
@@ -126,7 +126,7 @@ package final class SQLiteDICOMRepository: Sendable, DICOMImportStoring {
 
     @concurrent
     func commitImport(_ proposal: DICOMIndexedStudyProposal, session: DICOMImportSession,
-                      staging: VaultDICOMStudyStaging, metrics: DICOMImportMetricsRecorder?) async throws -> DICOMImportCommit {
+                      staging: DICOMStudyStaging, metrics: DICOMImportMetricsRecorder?) async throws -> DICOMImportCommit {
         try await LibraryStorageExecutor.run {
             do { return try await commitNewImport(proposal, session: session, staging: staging, metrics: metrics) }
             catch DICOMImportError.publicationConflict {
@@ -139,7 +139,7 @@ package final class SQLiteDICOMRepository: Sendable, DICOMImportStoring {
 
     @concurrent
     private func commitNewImport(_ proposal: DICOMIndexedStudyProposal, session: DICOMImportSession,
-                                 staging: VaultDICOMStudyStaging, metrics: DICOMImportMetricsRecorder?) async throws -> DICOMImportCommit {
+                                 staging: DICOMStudyStaging, metrics: DICOMImportMetricsRecorder?) async throws -> DICOMImportCommit {
         try await LibraryStorageExecutor.run {
             let session = try require(session)
             if let existing = try await verifiedDuplicate(proposal.study.fingerprint) {
@@ -158,7 +158,7 @@ package final class SQLiteDICOMRepository: Sendable, DICOMImportStoring {
             }
             try staging.validateCapacity(uniqueStagedBytes: bytes)
             try store.read(epoch: epoch) { db in try validateAdmission(proposal, db) }
-            let journal = try VaultDICOMImportJournal(rootURL: store.rootURL)
+            let journal = try DICOMImportJournal(rootURL: store.rootURL)
             try journal.verifyOwnership(operationID: session.operationID, vaultID: session.libraryID, ownership: session.ownership)
             for object in proposal.objects {
                 try Task.checkCancellation()
@@ -237,7 +237,7 @@ package final class SQLiteDICOMRepository: Sendable, DICOMImportStoring {
         }
     }
     private func recoverImportsLocked(libraryID: UUID) throws {
-        let result = try VaultDICOMImportJournal(rootURL: store.rootURL).reconcile(vaultID: libraryID, retaining: [],
+        let result = try DICOMImportJournal(rootURL: store.rootURL).reconcile(vaultID: libraryID, retaining: [],
             excluding: store.activeDICOMImports, allowsPromotions: false)
         guard result.retryOperationCount == 0 else { throw DICOMImportError.integrityFailure }
     }

@@ -899,7 +899,7 @@ private struct SliceServiceFixture {
         attributes: DICOMStudyIndex.ImageAttributes = try! sliceAttributes()
     ) throws -> DICOMSliceSeriesSession {
         let studyID = UUID(), seriesID = UUID()
-        let token = DICOMVaultSessionToken(
+        let token = DICOMLibrarySessionToken(
             libraryID: UUID(),
             epoch: UUID(),
             studyID: studyID,

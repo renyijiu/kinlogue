@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// Captures confirmed namespace projections and metadata pins, without loading OCR or report detail payloads.
 struct SQLiteOriginalArchiveSource: Sendable {
     let store: SQLiteLibraryStore
-    @concurrent func prepare(undatedToken: String) async throws -> PlaintextOriginalArchiveSnapshot {
+    @concurrent func prepare(undatedToken: String) async throws -> OriginalArchiveSnapshot {
         try await LibraryStorageExecutor.run {
             let cancellation = SQLiteLogicalCancellation()
             return try await withTaskCancellationHandler {
@@ -76,7 +76,7 @@ struct SQLiteOriginalArchiveSource: Sendable {
                     })
                     let plan = try OriginalArchivePlan.make(members: captured.0, attachments: attachments, reports: captured.1,
                         studies: captured.2, preferredExtensions: extensions, undatedToken: undatedToken)
-                    return PlaintextOriginalArchiveSnapshot(plan: plan, pins: pins, rootURL: store.rootURL)
+                    return OriginalArchiveSnapshot(plan: plan, pins: pins, rootURL: store.rootURL)
                 } catch { pins.release(); throw error }
             } onCancel: { cancellation.cancel() }
         }

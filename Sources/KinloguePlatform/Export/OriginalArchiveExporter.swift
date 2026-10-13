@@ -4,12 +4,11 @@ import Foundation
 import KinlogueCore
 import ZIPFoundation
 
-public enum PlaintextOriginalArchiveExportError: Error, Equatable, Sendable {
+public enum OriginalArchiveExportError: Error, Equatable, Sendable {
     case emptyArchive
     case invalidDestination
     case insufficientSpace
     case destinationAccessDenied
-    case vaultChanged
     case sourceIntegrityFailure
     case archiveIntegrityFailure
     case publicationIndeterminate
@@ -49,19 +48,19 @@ public struct OriginalArchiveExportProgress: Equatable, Sendable {
     }
 }
 
-public struct PlaintextOriginalArchivePreparation: Sendable {
+public struct OriginalArchivePreparation: Sendable {
     public var entryCount: Int { snapshot.plan.entries.count }
     public var totalByteCount: Int { snapshot.plan.totalByteCount }
-    let snapshot: PlaintextOriginalArchiveSnapshot
+    let snapshot: OriginalArchiveSnapshot
 }
 
-public struct PlaintextOriginalArchiveExportResult: Equatable, Sendable {
+public struct OriginalArchiveExportResult: Equatable, Sendable {
     public let destinationURL: URL
     public let entryCount: Int
     public let totalByteCount: Int
 }
 
-enum PlaintextOriginalArchiveExporterFault: Equatable, Sendable {
+enum OriginalArchiveExporterFault: Equatable, Sendable {
     case shortSourceRead
     case beforeVerification
     case corruptWorkArchiveBeforeVerification
@@ -71,7 +70,7 @@ enum PlaintextOriginalArchiveExporterFault: Equatable, Sendable {
 }
 
 /// The plan of one export and the pins that keep its originals readable until it ends.
-struct PlaintextOriginalArchiveSnapshot: Sendable {
+struct OriginalArchiveSnapshot: Sendable {
     let plan: OriginalArchivePlan
     let pins: SQLiteLogicalOriginalPins
     let vaultRootURL: URL
@@ -85,7 +84,7 @@ struct PlaintextOriginalArchiveSnapshot: Sendable {
 
 // SAFETY: `lock` serializes the only mutable state and makes closing the reader
 // idempotent. Reads occur only before the actor calls `close()`.
-final class PlaintextOriginalArchiveSource: @unchecked Sendable {
+final class OriginalArchiveSource: @unchecked Sendable {
     let byteCount: Int
     let sha256Digest: Data
     private let lock = NSLock()
@@ -100,7 +99,7 @@ final class PlaintextOriginalArchiveSource: @unchecked Sendable {
 
     func read(offset: Int, count: Int) throws -> Data {
         try lock.withLock {
-            guard !isClosed else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
+            guard !isClosed else { throw OriginalArchiveExportError.sourceIntegrityFailure }
             return try reader.read(offset: UInt64(offset), maximumByteCount: count)
         }
     }
@@ -118,7 +117,7 @@ final class PlaintextOriginalArchiveSource: @unchecked Sendable {
     deinit { close() }
 }
 
-struct PlaintextOriginalArchiveDestinationAccess: Sendable {
+struct OriginalArchiveDestinationAccess: Sendable {
     enum StartResult: Sendable { case notRequired, granted, denied }
     let start: @Sendable (URL) -> StartResult
     let stop: @Sendable (URL) -> Void
@@ -131,16 +130,16 @@ struct PlaintextOriginalArchiveDestinationAccess: Sendable {
 
 /// Creates one plaintext, stored ZIP from the originals a preparation pinned. ZIPFoundation
 /// is confined to this actor and each source is read through the pin that fixed its identity.
-public actor PlaintextOriginalArchiveExporter {
+public actor OriginalArchiveExporter {
     public typealias ProgressHandler = @Sendable (OriginalArchiveExportProgress) -> Void
     private static let bufferSize = 64 * 1_024
     private static let stableModificationDate = Date(timeIntervalSince1970: 315_532_800)
 
     private let store: SQLiteLibraryStore
     private let fileManager: FileManager
-    private let destinationAccess: PlaintextOriginalArchiveDestinationAccess
+    private let destinationAccess: OriginalArchiveDestinationAccess
     private let parentDirectorySync: @Sendable (URL) throws -> Void
-    private let failureInjector: (@Sendable (PlaintextOriginalArchiveExporterFault) -> Bool)?
+    private let failureInjector: (@Sendable (OriginalArchiveExporterFault) -> Bool)?
 
     package init(store: SQLiteLibraryStore) {
         self.init(store: store, fileManager: .default)
@@ -149,10 +148,10 @@ public actor PlaintextOriginalArchiveExporter {
     init(
         store: SQLiteLibraryStore,
         fileManager: FileManager,
-        destinationAccess: PlaintextOriginalArchiveDestinationAccess = .live,
+        destinationAccess: OriginalArchiveDestinationAccess = .live,
         parentDirectorySync: @escaping @Sendable (URL) throws -> Void =
-            PlaintextOriginalArchiveExporter.syncParentDirectory,
-        failureInjector: (@Sendable (PlaintextOriginalArchiveExporterFault) -> Bool)? = nil
+            OriginalArchiveExporter.syncParentDirectory,
+        failureInjector: (@Sendable (OriginalArchiveExporterFault) -> Bool)? = nil
     ) {
         self.store = store
         self.fileManager = fileManager
@@ -163,20 +162,20 @@ public actor PlaintextOriginalArchiveExporter {
 
     /// Pins the originals one export will read. The export that receives the preparation releases
     /// them when it ends, whatever the outcome, so each export needs a preparation of its own.
-    public func prepare(undatedToken: String) async throws -> PlaintextOriginalArchivePreparation {
-        let snapshot: PlaintextOriginalArchiveSnapshot
+    public func prepare(undatedToken: String) async throws -> OriginalArchivePreparation {
+        let snapshot: OriginalArchiveSnapshot
         snapshot = try await SQLiteOriginalArchiveSource(store: store).prepare(undatedToken: undatedToken)
         guard !snapshot.plan.entries.isEmpty else {
-            throw PlaintextOriginalArchiveExportError.emptyArchive
+            throw OriginalArchiveExportError.emptyArchive
         }
-        return PlaintextOriginalArchivePreparation(snapshot: snapshot)
+        return OriginalArchivePreparation(snapshot: snapshot)
     }
 
     public func export(
-        _ preparation: PlaintextOriginalArchivePreparation,
+        _ preparation: OriginalArchivePreparation,
         to selectedDestinationURL: URL,
         progress: @escaping ProgressHandler = { _ in }
-    ) async throws -> PlaintextOriginalArchiveExportResult {
+    ) async throws -> OriginalArchiveExportResult {
         let snapshot = preparation.snapshot
         defer { snapshot.pins.release() }
         try Task.checkCancellation()
@@ -187,7 +186,7 @@ public actor PlaintextOriginalArchiveExporter {
         )
         let accessResult = destinationAccess.start(destinationCandidate)
         guard accessResult != .denied else {
-            throw PlaintextOriginalArchiveExportError.destinationAccessDenied
+            throw OriginalArchiveExportError.destinationAccessDenied
         }
         defer {
             if accessResult == .granted { destinationAccess.stop(destinationCandidate) }
@@ -246,17 +245,17 @@ public actor PlaintextOriginalArchiveExporter {
                 try parentDirectorySync(destination)
             } catch {
                 guard Self.isUnavailableParentDirectorySync(error) else {
-                    throw PlaintextOriginalArchiveExportError.publicationIndeterminate
+                    throw OriginalArchiveExportError.publicationIndeterminate
                 }
             }
-        } catch let error as PlaintextOriginalArchiveExportError {
+        } catch let error as OriginalArchiveExportError {
             throw error
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            throw PlaintextOriginalArchiveExportError.archiveIntegrityFailure
+            throw OriginalArchiveExportError.archiveIntegrityFailure
         }
-        return PlaintextOriginalArchiveExportResult(
+        return OriginalArchiveExportResult(
             destinationURL: destination,
             entryCount: snapshot.plan.entries.count,
             totalByteCount: snapshot.plan.totalByteCount
@@ -264,10 +263,10 @@ public actor PlaintextOriginalArchiveExporter {
     }
 }
 
-private extension PlaintextOriginalArchiveExporter {
+private extension OriginalArchiveExporter {
     static func progress(
         _ phase: OriginalArchiveExportPhase,
-        snapshot: PlaintextOriginalArchiveSnapshot,
+        snapshot: OriginalArchiveSnapshot,
         completedBytes: Int = 0,
         completedEntries: Int = 0,
         isCancellable: Bool = true
@@ -284,7 +283,7 @@ private extension PlaintextOriginalArchiveExporter {
 
     func writeArchive(
         to archiveURL: URL,
-        snapshot: PlaintextOriginalArchiveSnapshot,
+        snapshot: OriginalArchiveSnapshot,
         progress: ProgressHandler
     ) async throws {
         let archive = try Archive(
@@ -297,7 +296,7 @@ private extension PlaintextOriginalArchiveExporter {
         var completedEntries = 0
         for entry in snapshot.plan.entries {
             try Task.checkCancellation()
-            let source = PlaintextOriginalArchiveSource(reader: try snapshot.pins.open(entry.attachmentID),
+            let source = OriginalArchiveSource(reader: try snapshot.pins.open(entry.attachmentID),
                                                         byteCount: entry.byteCount, sha256Digest: entry.sha256Digest)
             defer { source.close() }
             try write(
@@ -323,16 +322,16 @@ private extension PlaintextOriginalArchiveExporter {
 
     func write(
         _ entry: OriginalArchiveEntry,
-        from source: PlaintextOriginalArchiveSource,
+        from source: OriginalArchiveSource,
         to archive: Archive,
         completedBytes: inout Int,
         completedEntries: Int,
-        snapshot: PlaintextOriginalArchiveSnapshot,
+        snapshot: OriginalArchiveSnapshot,
         progress: ProgressHandler
     ) throws {
         guard source.byteCount == entry.byteCount,
               source.sha256Digest == entry.sha256Digest else {
-            throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure
+            throw OriginalArchiveExportError.sourceIntegrityFailure
         }
         var expectedPosition = 0
         var hasher = SHA256()
@@ -350,12 +349,12 @@ private extension PlaintextOriginalArchiveExporter {
                   requestedSize > 0,
                   expectedPosition <= entry.byteCount,
                   requestedSize <= entry.byteCount - expectedPosition else {
-                throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure
+                throw OriginalArchiveExportError.sourceIntegrityFailure
             }
-            if failureInjector?(.shortSourceRead) == true { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
+            if failureInjector?(.shortSourceRead) == true { throw OriginalArchiveExportError.sourceIntegrityFailure }
             let data = try source.read(offset: expectedPosition, count: requestedSize)
             let readCount = data.count
-            guard readCount == requestedSize else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
+            guard readCount == requestedSize else { throw OriginalArchiveExportError.sourceIntegrityFailure }
             hasher.update(data: data)
             expectedPosition += readCount
             completedBytes += readCount
@@ -367,10 +366,10 @@ private extension PlaintextOriginalArchiveExporter {
             ))
             return data
         }
-        guard expectedPosition == entry.byteCount else { throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure }
+        guard expectedPosition == entry.byteCount else { throw OriginalArchiveExportError.sourceIntegrityFailure }
         guard Data(hasher.finalize()) == entry.sha256Digest else {
             source.reportDigestMismatch()
-            throw PlaintextOriginalArchiveExportError.sourceIntegrityFailure
+            throw OriginalArchiveExportError.sourceIntegrityFailure
         }
     }
 
@@ -381,12 +380,12 @@ private extension PlaintextOriginalArchiveExporter {
         for plannedEntry in plan.entries {
             try Task.checkCancellation()
             guard let storedEntry = storedEntries.next() else {
-                throw PlaintextOriginalArchiveExportError.archiveIntegrityFailure
+                throw OriginalArchiveExportError.archiveIntegrityFailure
             }
             guard storedEntry.type == .file,
                   storedEntry.path == plannedEntry.archivePath,
                   storedEntry.uncompressedSize == UInt64(plannedEntry.byteCount) else {
-                throw PlaintextOriginalArchiveExportError.archiveIntegrityFailure
+                throw OriginalArchiveExportError.archiveIntegrityFailure
             }
             var count = 0
             var hasher = SHA256()
@@ -394,18 +393,18 @@ private extension PlaintextOriginalArchiveExporter {
                 try Task.checkCancellation()
                 let next = count.addingReportingOverflow(data.count)
                 guard !next.overflow, next.partialValue <= plannedEntry.byteCount else {
-                    throw PlaintextOriginalArchiveExportError.archiveIntegrityFailure
+                    throw OriginalArchiveExportError.archiveIntegrityFailure
                 }
                 count = next.partialValue
                 hasher.update(data: data)
             }
             guard count == plannedEntry.byteCount,
                   Data(hasher.finalize()) == plannedEntry.sha256Digest else {
-                throw PlaintextOriginalArchiveExportError.archiveIntegrityFailure
+                throw OriginalArchiveExportError.archiveIntegrityFailure
             }
         }
         guard storedEntries.next() == nil else {
-            throw PlaintextOriginalArchiveExportError.archiveIntegrityFailure
+            throw OriginalArchiveExportError.archiveIntegrityFailure
         }
     }
 
@@ -415,12 +414,12 @@ private extension PlaintextOriginalArchiveExporter {
               destination.pathExtension.lowercased() == "zip",
               !destination.lastPathComponent.isEmpty,
               !destination.path.utf8.contains(0) else {
-            throw PlaintextOriginalArchiveExportError.invalidDestination
+            throw OriginalArchiveExportError.invalidDestination
         }
         let standardizedVault = vaultRootURL.standardizedFileURL.path
         guard destination.path != standardizedVault,
               !destination.path.hasPrefix(standardizedVault + "/") else {
-            throw PlaintextOriginalArchiveExportError.invalidDestination
+            throw OriginalArchiveExportError.invalidDestination
         }
         return destination
     }
@@ -430,22 +429,22 @@ private extension PlaintextOriginalArchiveExporter {
         var parentMetadata = stat()
         guard stat(parent.path, &parentMetadata) == 0,
               (parentMetadata.st_mode & S_IFMT) == S_IFDIR else {
-            throw PlaintextOriginalArchiveExportError.invalidDestination
+            throw OriginalArchiveExportError.invalidDestination
         }
         let resolvedParent = parent.resolvingSymlinksInPath().standardizedFileURL
         let resolvedDestination = resolvedParent.appendingPathComponent(destination.lastPathComponent)
         let canonicalVault = vaultRootURL.resolvingSymlinksInPath().standardizedFileURL.path
         guard resolvedDestination.path != canonicalVault,
               !resolvedDestination.path.hasPrefix(canonicalVault + "/") else {
-            throw PlaintextOriginalArchiveExportError.invalidDestination
+            throw OriginalArchiveExportError.invalidDestination
         }
         var targetMetadata = stat()
         if lstat(destination.path, &targetMetadata) == 0 {
             guard (targetMetadata.st_mode & S_IFMT) == S_IFREG else {
-                throw PlaintextOriginalArchiveExportError.invalidDestination
+                throw OriginalArchiveExportError.invalidDestination
             }
         } else if errno != ENOENT {
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
         return destination
     }
@@ -470,25 +469,25 @@ private extension PlaintextOriginalArchiveExporter {
         if lstat(destination.path, &metadata) == 0 {
             guard (metadata.st_mode & S_IFMT) == S_IFREG,
                   metadata.st_size == 0 else {
-                throw PlaintextOriginalArchiveExportError.invalidDestination
+                throw OriginalArchiveExportError.invalidDestination
             }
             try fileManager.removeItem(at: destination)
         } else if errno != ENOENT {
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
     }
 
-    func checkCapacity(for snapshot: PlaintextOriginalArchiveSnapshot, at directory: URL) throws {
+    func checkCapacity(for snapshot: OriginalArchiveSnapshot, at directory: URL) throws {
         let overhead = max(1 * 1_024 * 1_024, snapshot.plan.entries.count * 1_024)
         let required = snapshot.plan.totalByteCount.addingReportingOverflow(overhead)
         guard !required.overflow else {
-            throw PlaintextOriginalArchiveExportError.insufficientSpace
+            throw OriginalArchiveExportError.insufficientSpace
         }
         let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         if let available = values?.volumeAvailableCapacityForImportantUsage,
            available > 0,
            available < Int64(required.partialValue) {
-            throw PlaintextOriginalArchiveExportError.insufficientSpace
+            throw OriginalArchiveExportError.insufficientSpace
         }
     }
 
@@ -496,18 +495,18 @@ private extension PlaintextOriginalArchiveExporter {
         if chmod(url.path, permissions) != 0,
            errno != ENOTSUP,
            errno != EOPNOTSUPP {
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
     }
 
     func fullSyncFile(at url: URL) throws {
         let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
         guard descriptor >= 0 else {
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
         defer { Darwin.close(descriptor) }
         if fcntl(descriptor, F_FULLFSYNC) != 0, fsync(descriptor) != 0 {
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
     }
 
@@ -556,12 +555,12 @@ private extension PlaintextOriginalArchiveExporter {
             }
         }
         if let coordinationError {
-            throw PlaintextOriginalArchiveExportError.ioFailure(
+            throw OriginalArchiveExportError.ioFailure(
                 Int32(clamping: coordinationError.code)
             )
         }
         guard let publicationResult else {
-            throw PlaintextOriginalArchiveExportError.ioFailure(EIO)
+            throw OriginalArchiveExportError.ioFailure(EIO)
         }
         try publicationResult.get()
     }
@@ -574,7 +573,7 @@ private extension PlaintextOriginalArchiveExporter {
         var metadata = stat()
         if lstat(destination.path, &metadata) == 0 {
             guard (metadata.st_mode & S_IFMT) == S_IFREG else {
-                throw PlaintextOriginalArchiveExportError.invalidDestination
+                throw OriginalArchiveExportError.invalidDestination
             }
             _ = try fileManager.replaceItemAt(
                 destination,
@@ -585,7 +584,7 @@ private extension PlaintextOriginalArchiveExporter {
         } else if errno == ENOENT {
             try fileManager.moveItem(at: workURL, to: destination)
         } else {
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
     }
 
@@ -594,19 +593,19 @@ private extension PlaintextOriginalArchiveExporter {
         to destination: URL,
         vaultRootURL: URL,
         destinationInitiallyExisted: Bool,
-        failureInjector: (@Sendable (PlaintextOriginalArchiveExporterFault) -> Bool)?
+        failureInjector: (@Sendable (OriginalArchiveExporterFault) -> Bool)?
     ) throws {
         let destinationParent = destination.deletingLastPathComponent()
         let resolvedParent = destinationParent.resolvingSymlinksInPath().standardizedFileURL
         let destinationName = destination.lastPathComponent
         guard isSinglePathComponent(destinationName) else {
-            throw PlaintextOriginalArchiveExportError.invalidDestination
+            throw OriginalArchiveExportError.invalidDestination
         }
         let resolvedDestination = resolvedParent.appendingPathComponent(destinationName)
         let canonicalVault = vaultRootURL.resolvingSymlinksInPath().standardizedFileURL.path
         guard resolvedDestination.path != canonicalVault,
               !resolvedDestination.path.hasPrefix(canonicalVault + "/") else {
-            throw PlaintextOriginalArchiveExportError.invalidDestination
+            throw OriginalArchiveExportError.invalidDestination
         }
 
         let destinationParentDescriptor = Darwin.open(
@@ -615,15 +614,15 @@ private extension PlaintextOriginalArchiveExporter {
         )
         guard destinationParentDescriptor >= 0 else {
             if errno == EACCES || errno == EPERM {
-                throw PlaintextOriginalArchiveExportError.destinationAccessDenied
+                throw OriginalArchiveExportError.destinationAccessDenied
             }
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
         defer { Darwin.close(destinationParentDescriptor) }
         var boundParentMetadata = stat()
         guard fstat(destinationParentDescriptor, &boundParentMetadata) == 0,
               (boundParentMetadata.st_mode & S_IFMT) == S_IFDIR else {
-            throw PlaintextOriginalArchiveExportError.invalidDestination
+            throw OriginalArchiveExportError.invalidDestination
         }
 
         var targetMetadata = stat()
@@ -637,23 +636,23 @@ private extension PlaintextOriginalArchiveExporter {
         }
         if targetStatus == 0 {
             guard (targetMetadata.st_mode & S_IFMT) == S_IFREG else {
-                throw PlaintextOriginalArchiveExportError.invalidDestination
+                throw OriginalArchiveExportError.invalidDestination
             }
         } else if errno != ENOENT {
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
 
         let workParent = workURL.deletingLastPathComponent().resolvingSymlinksInPath()
         let workName = workURL.lastPathComponent
         guard isSinglePathComponent(workName) else {
-            throw PlaintextOriginalArchiveExportError.archiveIntegrityFailure
+            throw OriginalArchiveExportError.archiveIntegrityFailure
         }
         let workParentDescriptor = Darwin.open(
             workParent.path,
             O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
         )
         guard workParentDescriptor >= 0 else {
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
         defer { Darwin.close(workParentDescriptor) }
         var workMetadata = stat()
@@ -661,7 +660,7 @@ private extension PlaintextOriginalArchiveExporter {
             fstatat(workParentDescriptor, $0, &workMetadata, AT_SYMLINK_NOFOLLOW)
         }) == 0,
               (workMetadata.st_mode & S_IFMT) == S_IFREG else {
-            throw PlaintextOriginalArchiveExportError.archiveIntegrityFailure
+            throw OriginalArchiveExportError.archiveIntegrityFailure
         }
         let workDirectoryName: String? = {
             let parent = workParent.deletingLastPathComponent().standardizedFileURL
@@ -671,7 +670,7 @@ private extension PlaintextOriginalArchiveExporter {
         }()
 
         if failureInjector?(.afterDestinationParentBinding) == true {
-            throw PlaintextOriginalArchiveExportError.injectedFailure
+            throw OriginalArchiveExportError.injectedFailure
         }
         var currentParentMetadata = stat()
         if stat(destinationParent.path, &currentParentMetadata) != 0
@@ -697,9 +696,9 @@ private extension PlaintextOriginalArchiveExporter {
                 }
             }
             guard removedWork, removedPlaceholder else {
-                throw PlaintextOriginalArchiveExportError.publicationIndeterminate
+                throw OriginalArchiveExportError.publicationIndeterminate
             }
-            throw PlaintextOriginalArchiveExportError.invalidDestination
+            throw OriginalArchiveExportError.invalidDestination
         }
 
         let renameStatus = workName.withCString { sourceName in
@@ -714,9 +713,9 @@ private extension PlaintextOriginalArchiveExporter {
         }
         guard renameStatus == 0 else {
             if errno == EISDIR || errno == ENOTDIR || errno == ELOOP {
-                throw PlaintextOriginalArchiveExportError.invalidDestination
+                throw OriginalArchiveExportError.invalidDestination
             }
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
         var publishedMetadata = stat()
         guard destinationName.withCString({
@@ -728,7 +727,7 @@ private extension PlaintextOriginalArchiveExporter {
             )
         }) == 0,
               sameIdentity(workMetadata, publishedMetadata) else {
-            throw PlaintextOriginalArchiveExportError.publicationIndeterminate
+            throw OriginalArchiveExportError.publicationIndeterminate
         }
     }
 
@@ -763,16 +762,16 @@ private extension PlaintextOriginalArchiveExporter {
             O_RDONLY | O_DIRECTORY | O_CLOEXEC
         )
         guard descriptor >= 0 else {
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
         defer { Darwin.close(descriptor) }
         if fsync(descriptor) != 0, errno != EINVAL, errno != ENOTSUP {
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
     }
 
     static func isUnavailableParentDirectorySync(_ error: Error) -> Bool {
-        guard case let PlaintextOriginalArchiveExportError.ioFailure(errorCode) = error else {
+        guard case let OriginalArchiveExportError.ioFailure(errorCode) = error else {
             return false
         }
         // NSSavePanel grants access to the selected file, not necessarily its
@@ -784,7 +783,7 @@ private extension PlaintextOriginalArchiveExporter {
     func corruptPayload(in url: URL) throws {
         let descriptor = Darwin.open(url.path, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
         guard descriptor >= 0 else {
-            throw PlaintextOriginalArchiveExportError.ioFailure(errno)
+            throw OriginalArchiveExportError.ioFailure(errno)
         }
         defer { Darwin.close(descriptor) }
         var metadata = stat()
@@ -792,28 +791,28 @@ private extension PlaintextOriginalArchiveExporter {
         guard fstat(descriptor, &metadata) == 0, metadata.st_size > 30,
               pread(descriptor, &header, header.count, 0) == header.count,
               header[0...3].elementsEqual([0x50, 0x4b, 0x03, 0x04]) else {
-            throw PlaintextOriginalArchiveExportError.ioFailure(EIO)
+            throw OriginalArchiveExportError.ioFailure(EIO)
         }
         let filenameLength = Int(header[26]) | (Int(header[27]) << 8)
         let extraLength = Int(header[28]) | (Int(header[29]) << 8)
         let payloadOffset = 30 + filenameLength + extraLength
         guard payloadOffset < metadata.st_size else {
-            throw PlaintextOriginalArchiveExportError.ioFailure(EIO)
+            throw OriginalArchiveExportError.ioFailure(EIO)
         }
         var byte: UInt8 = 0
         guard pread(descriptor, &byte, 1, off_t(payloadOffset)) == 1 else {
-            throw PlaintextOriginalArchiveExportError.ioFailure(EIO)
+            throw OriginalArchiveExportError.ioFailure(EIO)
         }
         byte ^= 0xff
         guard pwrite(descriptor, &byte, 1, off_t(payloadOffset)) == 1 else {
-            throw PlaintextOriginalArchiveExportError.ioFailure(EIO)
+            throw OriginalArchiveExportError.ioFailure(EIO)
         }
         try fullSyncFile(at: url)
     }
 
-    func failIfRequested(_ fault: PlaintextOriginalArchiveExporterFault) throws {
+    func failIfRequested(_ fault: OriginalArchiveExporterFault) throws {
         if failureInjector?(fault) == true {
-            throw PlaintextOriginalArchiveExportError.injectedFailure
+            throw OriginalArchiveExportError.injectedFailure
         }
     }
 }

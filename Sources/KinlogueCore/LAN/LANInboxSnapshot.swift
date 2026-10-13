@@ -163,8 +163,6 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
     public static let maximumTransportReceiptCount = 5_000
     public static let maximumTransportReceiptsPerSession = 1_000
     public static let maximumContentTerminalCount = 5_000
-    public static let maximumArchiveIntentCount = 5_000
-    public static let maximumArchiveTerminalCount = 5_000
     public static let maximumBlobCount = maximumItemCount
 
     public let formatVersion: Int
@@ -176,8 +174,6 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
     public let items: [LANInboxItem]
     public let transportReceipts: [LANInboxTransportReceipt]
     public let contentTerminals: [LANInboxContentTerminal]
-    public let archiveIntents: [LANArchiveIntent]
-    public let archiveTerminals: [LANArchiveTerminal]
     public let blobs: [LANInboxBlob]
 
     public init(
@@ -189,8 +185,6 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
         items: [LANInboxItem] = [],
         transportReceipts: [LANInboxTransportReceipt] = [],
         contentTerminals: [LANInboxContentTerminal] = [],
-        archiveIntents: [LANArchiveIntent] = [],
-        archiveTerminals: [LANArchiveTerminal] = [],
         blobs: [LANInboxBlob] = []
     ) throws {
         guard formatVersion == Self.currentFormatVersion else {
@@ -201,23 +195,16 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
             items: items,
             transportReceipts: transportReceipts,
             contentTerminals: contentTerminals,
-            archiveIntents: archiveIntents,
-            archiveTerminals: archiveTerminals,
             blobs: blobs
         )
         let sortedItems = items.sorted(by: Self.itemPrecedes)
         let sortedTransportReceipts = transportReceipts.sorted(by: Self.transportReceiptPrecedes)
         let sortedContentTerminals = contentTerminals.sorted(by: Self.contentTerminalPrecedes)
-        let sortedArchiveIntents = archiveIntents.sorted(by: Self.archiveIntentPrecedes)
-        let sortedArchiveTerminals = archiveTerminals.sorted(by: Self.archiveTerminalPrecedes)
         let sortedBlobs = blobs.sorted(by: Self.blobPrecedes)
         try Self.validate(
-            vaultID: vaultID,
             items: sortedItems,
             transportReceipts: sortedTransportReceipts,
             contentTerminals: sortedContentTerminals,
-            archiveIntents: sortedArchiveIntents,
-            archiveTerminals: sortedArchiveTerminals,
             blobs: sortedBlobs
         )
         self.formatVersion = formatVersion
@@ -228,8 +215,6 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
         self.items = sortedItems
         self.transportReceipts = sortedTransportReceipts
         self.contentTerminals = sortedContentTerminals
-        self.archiveIntents = sortedArchiveIntents
-        self.archiveTerminals = sortedArchiveTerminals
         self.blobs = sortedBlobs
     }
 
@@ -288,8 +273,6 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
         items: [LANInboxItem]? = nil,
         transportReceipts: [LANInboxTransportReceipt]? = nil,
         contentTerminals: [LANInboxContentTerminal]? = nil,
-        archiveIntents: [LANArchiveIntent]? = nil,
-        archiveTerminals: [LANArchiveTerminal]? = nil,
         blobs: [LANInboxBlob]? = nil
     ) throws -> Self {
         try Self(
@@ -301,8 +284,6 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
             items: items ?? self.items,
             transportReceipts: transportReceipts ?? self.transportReceipts,
             contentTerminals: contentTerminals ?? self.contentTerminals,
-            archiveIntents: archiveIntents ?? self.archiveIntents,
-            archiveTerminals: archiveTerminals ?? self.archiveTerminals,
             blobs: blobs ?? self.blobs
         )
     }
@@ -324,16 +305,6 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
             forKey: .contentTerminals,
             maximumCount: Self.maximumContentTerminalCount
         )
-        let decodedArchiveIntents = try container.decodeBoundedArray(
-            LANArchiveIntent.self,
-            forKey: .archiveIntents,
-            maximumCount: Self.maximumArchiveIntentCount
-        )
-        let decodedArchiveTerminals = try container.decodeBoundedArray(
-            LANArchiveTerminal.self,
-            forKey: .archiveTerminals,
-            maximumCount: Self.maximumArchiveTerminalCount
-        )
         let decodedBlobs = try container.decodeBoundedArray(
             LANInboxBlob.self,
             forKey: .blobs,
@@ -352,15 +323,11 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
                 items: decodedItems,
                 transportReceipts: decodedTransportReceipts,
                 contentTerminals: decodedContentTerminals,
-                archiveIntents: decodedArchiveIntents,
-                archiveTerminals: decodedArchiveTerminals,
                 blobs: decodedBlobs
             )
             guard validated.items == decodedItems,
                   validated.transportReceipts == decodedTransportReceipts,
                   validated.contentTerminals == decodedContentTerminals,
-                  validated.archiveIntents == decodedArchiveIntents,
-                  validated.archiveTerminals == decodedArchiveTerminals,
                   validated.blobs == decodedBlobs else {
                 throw LANInboxError.invalidModel
             }
@@ -373,12 +340,9 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
     }
 
     private static func validate(
-        vaultID: UUID,
         items: [LANInboxItem],
         transportReceipts: [LANInboxTransportReceipt],
         contentTerminals: [LANInboxContentTerminal],
-        archiveIntents: [LANArchiveIntent],
-        archiveTerminals: [LANArchiveTerminal],
         blobs: [LANInboxBlob]
     ) throws {
         guard Set(items.map(\.id)).count == items.count,
@@ -386,9 +350,6 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
               Set(transportReceipts.map(\.id)).count == transportReceipts.count,
               Set(transportReceipts.map(\.transport)).count == transportReceipts.count,
               Set(contentTerminals.map(\.id)).count == contentTerminals.count,
-              Set(archiveIntents.map(\.id)).count == archiveIntents.count,
-              Set(archiveTerminals.map(\.id)).count == archiveTerminals.count,
-              Set(archiveTerminals.map { $0.intent.id }).count == archiveTerminals.count,
               Set(blobs.map(\.id)).count == blobs.count else {
             throw LANInboxError.duplicateIdentifier
         }
@@ -464,51 +425,12 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
             }
         }
 
-        let liveIntentIDs = Set(archiveIntents.map(\.id))
-        var reservedItemIDs: Set<LANInboxItem.ID> = []
-        var activeFingerprints: Set<ReportFingerprint> = []
-        for intent in archiveIntents {
-            guard intent.vaultID == vaultID else { throw LANInboxError.invalidReference }
-            for source in intent.orderedSources {
-                guard reservedItemIDs.insert(source.itemID).inserted,
-                      let item = itemsByID[source.itemID],
-                      item.isReviewable,
-                      item.revision == source.itemRevision,
-                      item.contentIdentity == source.contentIdentity else {
-                    throw LANInboxError.invalidReference
-                }
-            }
-            guard activeFingerprints.insert(intent.fingerprint).inserted else {
-                throw LANInboxError.receiptConflict
-            }
-        }
-        for terminal in archiveTerminals {
-            guard terminal.intent.vaultID == vaultID,
-                  !liveIntentIDs.contains(terminal.intent.id),
-                  terminal.intent.orderedSources.allSatisfy({ itemsByID[$0.itemID] == nil }) else {
-                throw LANInboxError.invalidReference
-            }
-        }
-
         var globallyOwnedIDs: Set<UUID> = []
         let ownedIDs = items.map(\.id)
             + transportReceipts.map(\.id)
             + contentTerminals.map(\.id)
-            + archiveIntents.map(\.id)
-            + archiveTerminals.map(\.id)
             + blobs.map(\.id)
             + items.compactMap(\.derivedArtifact).map(\.id)
-            + archiveIntents.flatMap { intent in
-                intent.orderedSources.flatMap { [$0.reportSourceID, $0.attachmentID] }
-                    + [intent.draftID, intent.documentObjectID]
-            }
-            + archiveTerminals.flatMap { terminal in
-                [terminal.intent.id]
-                    + terminal.intent.orderedSources.flatMap {
-                        [$0.itemID, $0.reportSourceID]
-                    }
-                    + [terminal.intent.draftID, terminal.intent.documentObjectID]
-            }
         for id in ownedIDs {
             guard globallyOwnedIDs.insert(id).inserted else {
                 throw LANInboxError.duplicateIdentifier
@@ -520,15 +442,11 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
         items: [LANInboxItem],
         transportReceipts: [LANInboxTransportReceipt],
         contentTerminals: [LANInboxContentTerminal],
-        archiveIntents: [LANArchiveIntent],
-        archiveTerminals: [LANArchiveTerminal],
         blobs: [LANInboxBlob]
     ) throws {
         guard items.count <= maximumItemCount,
               transportReceipts.count <= maximumTransportReceiptCount,
               contentTerminals.count <= maximumContentTerminalCount,
-              archiveIntents.count <= maximumArchiveIntentCount,
-              archiveTerminals.count <= maximumArchiveTerminalCount,
               blobs.count <= maximumBlobCount else {
             throw LANInboxError.resourceLimitExceeded
         }
@@ -562,23 +480,6 @@ public struct LANInboxSnapshot: Codable, Hashable, Sendable {
         _ rhs: LANInboxContentTerminal
     ) -> Bool {
         if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
-        return uuidPrecedes(lhs.id, rhs.id)
-    }
-
-    private static func archiveIntentPrecedes(
-        _ lhs: LANArchiveIntent,
-        _ rhs: LANArchiveIntent
-    ) -> Bool {
-        uuidPrecedes(lhs.id, rhs.id)
-    }
-
-    private static func archiveTerminalPrecedes(
-        _ lhs: LANArchiveTerminal,
-        _ rhs: LANArchiveTerminal
-    ) -> Bool {
-        if lhs.receipt.completedAt != rhs.receipt.completedAt {
-            return lhs.receipt.completedAt < rhs.receipt.completedAt
-        }
         return uuidPrecedes(lhs.id, rhs.id)
     }
 

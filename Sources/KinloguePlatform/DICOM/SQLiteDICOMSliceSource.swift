@@ -17,7 +17,7 @@ struct SQLiteDICOMSliceSource: DICOMVerifiedSliceSource {
                 let (index, originals) = try SQLiteDICOMRows.targetSeries(studyID, seriesID, db)
                 guard let seriesHash = try Data.fetchOne(db, sql: "SELECT content_hash FROM dicom_series WHERE study_id = ? AND series_id = ?",
                     arguments: [studyID.sqliteBytes, seriesID.sqliteBytes]) else { throw DICOMSliceServiceError.seriesUnavailable }
-                let token = DICOMVaultSessionToken(libraryID: state.libraryID, epoch: repository.epoch,
+                let token = DICOMLibrarySessionToken(libraryID: state.libraryID, epoch: repository.epoch,
                     studyID: studyID, contentRevision: study.contentRevision, seriesID: seriesID, seriesHash: seriesHash)
                 let instances = try zip(index.instances, originals).map { instance, original in
                     try DICOMSliceInstanceDescriptor(id: instance.id, attachmentID: original.id,

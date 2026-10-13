@@ -6,9 +6,9 @@ import KinlogueCore
 /// roots are never followed when they are symbolic links; intermediate aliases
 /// are resolved once so later storage paths no longer depend on mutable alias
 /// components.
-enum VaultCanonicalRootPath {
+enum LibraryCanonicalRootPath {
     struct CoordinatorIdentity: Sendable {
-        let lockLocations: [VaultProcessLockLocation]
+        let lockLocations: [LibraryProcessLockLocation]
     }
 
     static func rootURL(
@@ -61,7 +61,7 @@ enum VaultCanonicalRootPath {
 
         guard let parent = physicalDirectoryIdentity(for: requestedParent) else {
             return CoordinatorIdentity(
-                lockLocations: [VaultProcessLockLocation(
+                lockLocations: [LibraryProcessLockLocation(
                     parentURL: URL(fileURLWithPath: legacyKey)
                         .deletingLastPathComponent(),
                     namingKey: legacyKey
@@ -91,7 +91,7 @@ enum VaultCanonicalRootPath {
         }
         return CoordinatorIdentity(
             lockLocations: namingKeys.sorted().map {
-                VaultProcessLockLocation(
+                LibraryProcessLockLocation(
                     parentURL: parent.url,
                     namingKey: $0
                 )

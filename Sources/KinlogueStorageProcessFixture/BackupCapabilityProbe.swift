@@ -588,8 +588,6 @@ private extension BackupCapabilityProbe {
         let inbox = try await inboxStore.loadSnapshot()
         guard inbox.items.count == 1,
               inbox.contentTerminals.count == 1,
-              inbox.archiveIntents.isEmpty,
-              inbox.archiveTerminals.isEmpty,
               let item = inbox.items.first,
               let terminal = inbox.contentTerminals.first,
               case .deleted = terminal.kind else {

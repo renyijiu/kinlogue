@@ -982,7 +982,7 @@ private func viewerSession(
         windowWidth: 256
     )
     return try DICOMSliceSeriesSession(
-        token: DICOMVaultSessionToken(libraryID: UUID(), epoch: UUID(), studyID: studyID, contentRevision: 4,
+        token: DICOMLibrarySessionToken(libraryID: UUID(), epoch: UUID(), studyID: studyID, contentRevision: 4,
                                       seriesID: seriesID, seriesHash: Data(repeating: 0x42, count: 32)),
         studyID: studyID,
         seriesID: seriesID,

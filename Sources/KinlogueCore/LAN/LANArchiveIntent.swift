@@ -174,35 +174,3 @@ public struct LANArchiveReceipt: Codable, Identifiable, Hashable, Sendable {
         hasher.combine(outcome)
     }
 }
-
-public struct LANArchiveTerminal: Codable, Identifiable, Hashable, Sendable {
-    public var id: LANArchiveReceipt.ID { receipt.id }
-    public let intent: LANArchiveIntent
-    public let receipt: LANArchiveReceipt
-
-    public init(intent: LANArchiveIntent, receipt: LANArchiveReceipt) throws {
-        guard receipt.intentID == intent.id else { throw LANInboxError.invalidReference }
-        switch receipt.outcome {
-        case let .accepted(draftID):
-            guard draftID == intent.draftID else { throw LANInboxError.invalidReference }
-        case .duplicateSkipped:
-            break
-        }
-        self.intent = intent
-        self.receipt = receipt
-    }
-
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        do {
-            try self.init(
-                intent: container.decode(LANArchiveIntent.self, forKey: .intent),
-                receipt: container.decode(LANArchiveReceipt.self, forKey: .receipt)
-            )
-        } catch {
-            throw DecodingError.dataCorrupted(
-                .init(codingPath: decoder.codingPath, debugDescription: "Invalid archive terminal")
-            )
-        }
-    }
-}

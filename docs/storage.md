@@ -79,7 +79,7 @@ DICOM 另有以下门禁：
 
 pin 记下原件的元数据并阻止文件被回收，所以准备之后发生的合法编辑或删除不改变这次导出的内容；写每个 ZIP 条目时才打开该原件的只读 descriptor，逐块读取并核对长度、SHA-256 和读取前后的文件身份，发布前再整体核对一次 pin。一次准备只能用于一次导出，导出结束时归还 pin。
 
-`PlaintextOriginalArchiveExporter` 使用 ZIPFoundation `0.9.20` 的 stored entry 和 64 KiB provider 逐块 `pread`。work archive 位于目标同卷的私有 item-replacement directory，名称不带 `.zip`；新目标由该 API 生成的零字节 placeholder 会在写入前移除。写入后同步文件、重新打开并逐 entry 解压复核路径、数量、长度和摘要。只有这些步骤全部成功才原子 move/replace 用户目标：普通文件 authority 路径绑定目标和 work 父目录 descriptor 并以 `renameat` 发布，目录替换时按已捕获 inode 清除 placeholder/work；`NSSavePanel` security scope 路径使用 `NSFileCoordinator` 提供的协调 URL 与 Foundation replace/move，不额外要求未获授权的父目录访问。提交阶段不再接受取消；发布后还会尽力同步父目录，但 `NSSavePanel` 只授予目标文件而未授予父目录时的 `EACCES` / `EPERM`，以及文件系统明确不支持目录同步的错误，不会把已完整校验和原子发布的 ZIP 误报为失败；真正的目录 I/O 错误仍报告“发布状态不确定”。目标在资料库内、非 `.zip`、symlink 或非 regular replacement 均被拒绝。
+`OriginalArchiveExporter` 使用 ZIPFoundation `0.9.20` 的 stored entry 和 64 KiB provider 逐块 `pread`。work archive 位于目标同卷的私有 item-replacement directory，名称不带 `.zip`；新目标由该 API 生成的零字节 placeholder 会在写入前移除。写入后同步文件、重新打开并逐 entry 解压复核路径、数量、长度和摘要。只有这些步骤全部成功才原子 move/replace 用户目标：普通文件 authority 路径绑定目标和 work 父目录 descriptor 并以 `renameat` 发布，目录替换时按已捕获 inode 清除 placeholder/work；`NSSavePanel` security scope 路径使用 `NSFileCoordinator` 提供的协调 URL 与 Foundation replace/move，不额外要求未获授权的父目录访问。提交阶段不再接受取消；发布后还会尽力同步父目录，但 `NSSavePanel` 只授予目标文件而未授予父目录时的 `EACCES` / `EPERM`，以及文件系统明确不支持目录同步的错误，不会把已完整校验和原子发布的 ZIP 误报为失败；真正的目录 I/O 错误仍报告“发布状态不确定”。目标在资料库内、非 `.zip`、symlink 或非 regular replacement 均被拒绝。
 
 输出目录和文件名只由用户可见的成员名、确认日期、稳定序号、清洗后的报告显示名和类型扩展构成；DICOM 使用通用的 `.dcm` 名称。内部 UUID、原件或 study ID、摘要、原始路径和 DICOM UID 不进入 ZIP。该 ZIP 不含恢复所需的清单，不能当作资料库备份。
 

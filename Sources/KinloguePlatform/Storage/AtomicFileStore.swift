@@ -32,7 +32,7 @@ public struct AtomicFileStore: Sendable {
         rootURL: URL,
         failureInjector: (@Sendable (AtomicFileStoreFaultPoint) -> Bool)? = nil
     ) throws {
-        self.rootURL = try PlaintextVaultLayout(rootURL: rootURL).rootURL
+        self.rootURL = try DICOMImportLayout(rootURL: rootURL).rootURL
         self.failureInjector = failureInjector
     }
 

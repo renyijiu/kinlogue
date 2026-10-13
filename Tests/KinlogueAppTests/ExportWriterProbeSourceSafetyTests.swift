@@ -45,7 +45,7 @@ struct ExportWriterProbeSourceSafetyTests {
     @Test
     func productionExportKeepsOneArchiveOpenAndReadsOnlyItsPinnedOriginals() throws {
         let exporter = try contents(
-            "Sources/KinloguePlatform/Export/PlaintextOriginalArchiveExporter.swift"
+            "Sources/KinloguePlatform/Export/OriginalArchiveExporter.swift"
         )
 
         #expect(exporter.contains("func writeArchive("))

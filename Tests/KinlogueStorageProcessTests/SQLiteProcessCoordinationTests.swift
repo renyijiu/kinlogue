@@ -129,7 +129,7 @@ func sqliteDICOMHandoffRecoversAfterRealProcessCrash(point: Int) async throws {
         #expect(listing.items.count == (point == 5 ? 1 : 0))
         #expect(listing.damagedIDs.isEmpty)
         #expect(try reopened.recoverOriginals().isEmpty)
-        #expect(try VaultDICOMImportJournal(rootURL: fixture.rootURL).pendingOperationCount() == 0)
+        #expect(try DICOMImportJournal(rootURL: fixture.rootURL).pendingOperationCount() == 0)
         let originals = try FileManager.default.contentsOfDirectory(atPath: fixture.rootURL.appendingPathComponent("originals").path)
         #expect(originals.count == listing.items.count)
         if let study = listing.items.first {

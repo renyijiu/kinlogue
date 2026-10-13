@@ -12,7 +12,7 @@ func originalArchiveExporterStreamsConfirmedOriginalsAndPublishesAReadableZIP() 
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
     try Data("replace me".utf8).write(to: destination)
-    let exporter = PlaintextOriginalArchiveExporter(store: fixture.store)
+    let exporter = OriginalArchiveExporter(store: fixture.store)
 
     let preparation = try await exporter.prepare(undatedToken: "Undated")
     #expect(preparation.entryCount == 1)
@@ -37,14 +37,14 @@ func originalArchiveExporterPreservesExistingDestinationAndLeavesNoSuccessLookin
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
     let prior = Data("prior archive bytes".utf8)
     try prior.write(to: destination)
-    let exporter = PlaintextOriginalArchiveExporter(
+    let exporter = OriginalArchiveExporter(
         store: fixture.store,
         fileManager: .default,
         failureInjector: { $0 == .beforeVerification }
     )
 
     let preparation = try await exporter.prepare(undatedToken: "Undated")
-    await #expect(throws: PlaintextOriginalArchiveExportError.injectedFailure) {
+    await #expect(throws: OriginalArchiveExportError.injectedFailure) {
         _ = try await exporter.export(preparation, to: destination)
     }
 
@@ -59,10 +59,10 @@ func originalArchiveExporterRejectsSourceDigestMismatchBeforePublication() async
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
     try Data(repeating: 0x44, count: fixture.bytes.count).write(to: fixture.originalURL)
-    let exporter = PlaintextOriginalArchiveExporter(store: fixture.store)
+    let exporter = OriginalArchiveExporter(store: fixture.store)
 
     let preparation = try await exporter.prepare(undatedToken: "Undated")
-    await #expect(throws: PlaintextOriginalArchiveExportError.sourceIntegrityFailure) {
+    await #expect(throws: OriginalArchiveExportError.sourceIntegrityFailure) {
         _ = try await exporter.export(preparation, to: destination)
     }
     #expect(!FileManager.default.fileExists(atPath: destination.path))
@@ -74,7 +74,7 @@ func originalArchiveExporterKeepsItsCapturedOriginalsWhenTheLibraryChangesBefore
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
     let gate = ExportRevisionGate()
-    let exporter = PlaintextOriginalArchiveExporter(
+    let exporter = OriginalArchiveExporter(
         store: fixture.store,
         fileManager: .default,
         failureInjector: { fault in
@@ -108,16 +108,16 @@ func originalArchiveExporterKeepsItsCapturedOriginalsWhenTheLibraryChangesBefore
 func originalArchiveExporterRejectsInvalidDestinations() async throws {
     let fixture = try await OriginalArchiveExportFixture.make()
     defer { fixture.remove() }
-    let exporter = PlaintextOriginalArchiveExporter(store: fixture.store)
+    let exporter = OriginalArchiveExporter(store: fixture.store)
     let preparation = try await exporter.prepare(undatedToken: "Undated")
 
-    await #expect(throws: PlaintextOriginalArchiveExportError.invalidDestination) {
+    await #expect(throws: OriginalArchiveExportError.invalidDestination) {
         _ = try await exporter.export(
             preparation,
             to: fixture.container.appendingPathComponent("not-a-zip.txt")
         )
     }
-    await #expect(throws: PlaintextOriginalArchiveExportError.invalidDestination) {
+    await #expect(throws: OriginalArchiveExportError.invalidDestination) {
         _ = try await exporter.export(
             preparation,
             to: fixture.vaultRoot.appendingPathComponent("leak.zip")
@@ -143,7 +143,7 @@ func originalArchiveExporterRevalidatesAParentReplacedBeforePublication() async 
         replacement: replacement,
         symlinkTarget: fixture.vaultRoot
     )
-    let exporter = PlaintextOriginalArchiveExporter(
+    let exporter = OriginalArchiveExporter(
         store: fixture.store,
         fileManager: .default,
         destinationAccess: .init(start: { _ in .notRequired }, stop: { _ in }),
@@ -153,7 +153,7 @@ func originalArchiveExporterRevalidatesAParentReplacedBeforePublication() async 
         }
     )
 
-    await #expect(throws: PlaintextOriginalArchiveExportError.invalidDestination) {
+    await #expect(throws: OriginalArchiveExportError.invalidDestination) {
         _ = try await exporter.export(
             try await exporter.prepare(undatedToken: "Undated"),
             to: destination
@@ -183,7 +183,7 @@ func originalArchiveExporterKeepsFinalPublicationBoundToTheValidatedParent() asy
         replacement: replacement,
         symlinkTarget: fixture.vaultRoot
     )
-    let exporter = PlaintextOriginalArchiveExporter(
+    let exporter = OriginalArchiveExporter(
         store: fixture.store,
         fileManager: .default,
         destinationAccess: .init(start: { _ in .notRequired }, stop: { _ in }),
@@ -193,7 +193,7 @@ func originalArchiveExporterKeepsFinalPublicationBoundToTheValidatedParent() asy
         }
     )
 
-    await #expect(throws: PlaintextOriginalArchiveExportError.invalidDestination) {
+    await #expect(throws: OriginalArchiveExportError.invalidDestination) {
         _ = try await exporter.export(
             try await exporter.prepare(undatedToken: "Undated"),
             to: destination
@@ -217,13 +217,13 @@ func originalArchiveExporterDetectsPayloadCorruptionDuringFullVerification() asy
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
     let prior = Data("prior archive bytes".utf8)
     try prior.write(to: destination)
-    let exporter = PlaintextOriginalArchiveExporter(
+    let exporter = OriginalArchiveExporter(
         store: fixture.store,
         fileManager: .default,
         failureInjector: { $0 == .corruptWorkArchiveBeforeVerification }
     )
 
-    await #expect(throws: PlaintextOriginalArchiveExportError.archiveIntegrityFailure) {
+    await #expect(throws: OriginalArchiveExportError.archiveIntegrityFailure) {
         _ = try await exporter.export(
             try await exporter.prepare(undatedToken: "Undated"),
             to: destination
@@ -237,13 +237,13 @@ func originalArchiveExporterRejectsAnInjectedShortSourceRead() async throws {
     let fixture = try await OriginalArchiveExportFixture.make()
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
-    let exporter = PlaintextOriginalArchiveExporter(
+    let exporter = OriginalArchiveExporter(
         store: fixture.store,
         fileManager: .default,
         failureInjector: { $0 == .shortSourceRead }
     )
 
-    await #expect(throws: PlaintextOriginalArchiveExportError.sourceIntegrityFailure) {
+    await #expect(throws: OriginalArchiveExportError.sourceIntegrityFailure) {
         _ = try await exporter.export(
             try await exporter.prepare(undatedToken: "Undated"),
             to: destination
@@ -257,7 +257,7 @@ func originalArchiveExporterHonorsTaskCancellationBeforeCommit() async throws {
     let fixture = try await OriginalArchiveExportFixture.make(byteCount: 2 * 1_024 * 1_024)
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
-    let exporter = PlaintextOriginalArchiveExporter(store: fixture.store)
+    let exporter = OriginalArchiveExporter(store: fixture.store)
     let preparation = try await exporter.prepare(undatedToken: "Undated")
     let taskBox = ExportTaskBox()
     let task = Task {
@@ -283,15 +283,15 @@ func originalArchiveExporterRejectsSymlinkTargetAndBalancesGrantedDestinationAcc
     let symlinkTarget = fixture.container.appendingPathComponent("target.data")
     try Data("target".utf8).write(to: symlinkTarget)
     try FileManager.default.createSymbolicLink(at: destination, withDestinationURL: symlinkTarget)
-    let exporter = PlaintextOriginalArchiveExporter(store: fixture.store)
+    let exporter = OriginalArchiveExporter(store: fixture.store)
     let preparation = try await exporter.prepare(undatedToken: "Undated")
-    await #expect(throws: PlaintextOriginalArchiveExportError.invalidDestination) {
+    await #expect(throws: OriginalArchiveExportError.invalidDestination) {
         _ = try await exporter.export(preparation, to: destination)
     }
 
     try FileManager.default.removeItem(at: destination)
     let access = DestinationAccessCounter()
-    let failingExporter = PlaintextOriginalArchiveExporter(
+    let failingExporter = OriginalArchiveExporter(
         store: fixture.store,
         fileManager: .default,
         destinationAccess: .init(
@@ -302,7 +302,7 @@ func originalArchiveExporterRejectsSymlinkTargetAndBalancesGrantedDestinationAcc
     )
     // An export consumes its preparation: it releases the originals it had pinned.
     let retried = try await failingExporter.prepare(undatedToken: "Undated")
-    await #expect(throws: PlaintextOriginalArchiveExportError.injectedFailure) {
+    await #expect(throws: OriginalArchiveExportError.injectedFailure) {
         _ = try await failingExporter.export(retried, to: destination)
     }
     #expect(access.counts == (1, 1))
@@ -314,7 +314,7 @@ func originalArchiveExporterDeniesDestinationAccessWithoutCreatingOutput() async
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
     let access = DestinationAccessCounter()
-    let exporter = PlaintextOriginalArchiveExporter(
+    let exporter = OriginalArchiveExporter(
         store: fixture.store,
         fileManager: .default,
         destinationAccess: .init(
@@ -323,7 +323,7 @@ func originalArchiveExporterDeniesDestinationAccessWithoutCreatingOutput() async
         )
     )
 
-    await #expect(throws: PlaintextOriginalArchiveExportError.destinationAccessDenied) {
+    await #expect(throws: OriginalArchiveExportError.destinationAccessDenied) {
         _ = try await exporter.export(
             try await exporter.prepare(undatedToken: "Undated"),
             to: destination
@@ -338,15 +338,15 @@ func originalArchiveExporterReportsIndeterminateWhenParentSyncFailsAfterCommit()
     let fixture = try await OriginalArchiveExportFixture.make()
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
-    let exporter = PlaintextOriginalArchiveExporter(
+    let exporter = OriginalArchiveExporter(
         store: fixture.store,
         fileManager: .default,
         parentDirectorySync: { _ in
-            throw PlaintextOriginalArchiveExportError.ioFailure(EIO)
+            throw OriginalArchiveExportError.ioFailure(EIO)
         }
     )
 
-    await #expect(throws: PlaintextOriginalArchiveExportError.publicationIndeterminate) {
+    await #expect(throws: OriginalArchiveExportError.publicationIndeterminate) {
         _ = try await exporter.export(
             try await exporter.prepare(undatedToken: "Undated"),
             to: destination
@@ -364,11 +364,11 @@ func originalArchiveExporterAcceptsUnavailableParentSyncAfterCommit(
     let fixture = try await OriginalArchiveExportFixture.make()
     defer { fixture.remove() }
     let destination = fixture.container.appendingPathComponent("all-originals.zip")
-    let exporter = PlaintextOriginalArchiveExporter(
+    let exporter = OriginalArchiveExporter(
         store: fixture.store,
         fileManager: .default,
         parentDirectorySync: { _ in
-            throw PlaintextOriginalArchiveExportError.ioFailure(errorCode)
+            throw OriginalArchiveExportError.ioFailure(errorCode)
         }
     )
 
@@ -384,10 +384,10 @@ func originalArchiveExporterAcceptsUnavailableParentSyncAfterCommit(
 
 private final class ExportTaskBox: @unchecked Sendable {
     private let lock = NSLock()
-    private var task: Task<PlaintextOriginalArchiveExportResult, Error>?
+    private var task: Task<OriginalArchiveExportResult, Error>?
     private var cancellationPending = false
 
-    func set(_ task: Task<PlaintextOriginalArchiveExportResult, Error>) {
+    func set(_ task: Task<OriginalArchiveExportResult, Error>) {
         lock.withLock {
             self.task = task
             if cancellationPending { task.cancel() }

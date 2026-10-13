@@ -293,7 +293,7 @@ private struct ArchiveLibrary {
     var members: [FamilyMember] = []
     var records: [HealthRecord] = []
     var attachments: [KinlogueCore.Attachment] = []
-    var dicomStudies: [DICOMStudy] = []
+    var dicomStudies: [DICOMStudyHeader] = []
 }
 
 private func makePlan(
@@ -373,24 +373,22 @@ private func confirmedStudy(
     memberID: FamilyMember.ID,
     attachments: [KinlogueCore.Attachment],
     date: Date
-) throws -> DICOMStudy {
-    try DICOMStudy(
+) throws -> DICOMStudyHeader {
+    try DICOMStudyHeader(
         id: id(ordinal),
         state: .confirmed,
         fingerprint: fingerprint(attachments),
-        indexObjectID: id(ordinal + 300),
         attachmentIDs: attachments.map(\.id),
         confirmedMemberID: memberID,
         effectiveDate: date
     )
 }
 
-private func needsReviewStudy(_ ordinal: Int, attachments: [KinlogueCore.Attachment]) throws -> DICOMStudy {
-    try DICOMStudy(
+private func needsReviewStudy(_ ordinal: Int, attachments: [KinlogueCore.Attachment]) throws -> DICOMStudyHeader {
+    try DICOMStudyHeader(
         id: id(ordinal),
         state: .needsReview,
         fingerprint: fingerprint(attachments),
-        indexObjectID: id(ordinal + 300),
         attachmentIDs: attachments.map(\.id)
     )
 }

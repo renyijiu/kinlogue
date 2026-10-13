@@ -38,7 +38,7 @@ public struct VaultRevision: Codable, Equatable, Sendable {
     }
 }
 
-public enum VaultReadSnapshotPolicy {
+public enum LibraryReadSnapshotPolicy {
     public static let maximumObjectCount = 32
     public static let maximumRetainedByteCount = 128 * 1024 * 1024
 }

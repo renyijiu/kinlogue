@@ -83,7 +83,7 @@ struct SQLiteAppStartupTests {
         let fixture = try SQLStartupFixture()
         defer { fixture.remove() }
         let root = fixture.identity.sourceVault.rootURL
-        try VaultParentDirectoryPreparation.ensureParentDirectory(for: root)
+        try LibraryParentDirectoryPreparation.ensureParentDirectory(for: root)
         let initial = try SQLiteLibraryStore(rootURL: root)
         let reports = SQLiteReportRepository(store: initial)
         let member = try FamilyMember(displayName: "Synthetic cold launch")
@@ -116,8 +116,8 @@ struct SQLiteAppStartupTests {
         let fixture = try SQLStartupFixture()
         defer { fixture.remove() }
         let root = fixture.identity.sourceVault.rootURL
-        try VaultParentDirectoryPreparation.ensureParentDirectory(for: root)
-        let transaction = try PlaintextVaultDeletionTransaction(rootURL: root, strictReceipt: true)
+        try LibraryParentDirectoryPreparation.ensureParentDirectory(for: root)
+        let transaction = try LibraryDeletionTransaction(rootURL: root, strictReceipt: true)
         let bytes = Data("synthetic unknown deletion receipt".utf8)
         try bytes.write(to: transaction.receiptURL)
         let startup = LibraryLaunchCoordinator(identity: fixture.identity)
@@ -132,18 +132,18 @@ struct SQLiteAppStartupTests {
     /// The deletion is interrupted either right after its receipt was written or after the library
     /// was moved aside, and in the renumbered cases the launch that finishes it finds the volume
     /// under another device number than the receipt recorded.
-    @Test(arguments: [PlaintextVaultTransactionFault.afterDeletionReceipt, .afterDeletionRename], [false, true])
+    @Test(arguments: [LibraryDeletionFault.afterDeletionReceipt, .afterDeletionRename], [false, true])
     func ownedDeletionReceiptConvergesBeforeAnEmptyLibraryIsOpened(
-        interruptedAt fault: PlaintextVaultTransactionFault, afterTheVolumeWasRenumbered: Bool
+        interruptedAt fault: LibraryDeletionFault, afterTheVolumeWasRenumbered: Bool
     ) async throws {
         let fixture = try SQLStartupFixture()
         defer { fixture.remove() }
         let root = fixture.identity.sourceVault.rootURL
-        try VaultParentDirectoryPreparation.ensureParentDirectory(for: root)
+        try LibraryParentDirectoryPreparation.ensureParentDirectory(for: root)
         let store = try SQLiteLibraryStore(rootURL: root)
         try await SQLiteReportRepository(store: store).saveMember(try FamilyMember(displayName: "Synthetic member to delete"), replacing: nil)
         try store.close()
-        let transaction = try PlaintextVaultDeletionTransaction(rootURL: root, failureInjector: { $0 == fault }, strictReceipt: true)
+        let transaction = try LibraryDeletionTransaction(rootURL: root, failureInjector: { $0 == fault }, strictReceipt: true)
         #expect(throws: (any Error).self) { try transaction.begin() }
         if afterTheVolumeWasRenumbered {
             let text = try String(contentsOf: transaction.receiptURL, encoding: .utf8)
@@ -187,7 +187,7 @@ struct SQLiteAppStartupTests {
         let fixture = try SQLStartupFixture()
         defer { fixture.remove() }
         let root = fixture.identity.sourceVault.rootURL
-        try VaultParentDirectoryPreparation.ensureParentDirectory(for: root)
+        try LibraryParentDirectoryPreparation.ensureParentDirectory(for: root)
         let store = try SQLiteLibraryStore(rootURL: root)
         try store.close()
         let url = root.appendingPathComponent(SQLiteLibraryStore.databaseFilename)

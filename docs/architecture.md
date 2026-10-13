@@ -62,7 +62,7 @@ Helper 的 descriptor contract、watchdog、资源打包、slice memory、Viewer
 
 ### 全部原始文件导出链
 
-`SettingsView → AppModel → OriginalExportModel → LiveOriginalExportService → PlaintextOriginalArchiveExporter → SQLiteOriginalArchiveSource` 保持 UI、生命周期、平台写入和领域规划的依赖方向。App 层先显示明文/非备份警告，再用 `NSSavePanel` 取得 `.zip` 目标；长期状态只保存语义 phase/error，不缓存已本地化错误。`LiveOriginalExportService` 把整个导出纳入 `LibraryLifecycleCoordinator.withActiveOperation`，删除资料库时 revocation hook 请求取消并等待 admitted export；Platform 报告 `.committing` 后 cancellation gate 拒绝新取消，避免把已原子发布的文件误报为取消。目标文件已同步、验证并原子发布后，父目录同步是 best-effort：Powerbox 文件级授权导致的目录权限错误不改变成功结果，真实目录 I/O 错误仍保持发布状态不确定。
+`SettingsView → AppModel → OriginalExportModel → LiveOriginalExportService → OriginalArchiveExporter → SQLiteOriginalArchiveSource` 保持 UI、生命周期、平台写入和领域规划的依赖方向。App 层先显示明文/非备份警告，再用 `NSSavePanel` 取得 `.zip` 目标；长期状态只保存语义 phase/error，不缓存已本地化错误。`LiveOriginalExportService` 把整个导出纳入 `LibraryLifecycleCoordinator.withActiveOperation`，删除资料库时 revocation hook 请求取消并等待 admitted export；Platform 报告 `.committing` 后 cancellation gate 拒绝新取消，避免把已原子发布的文件误报为取消。目标文件已同步、验证并原子发布后，父目录同步是 best-effort：Powerbox 文件级授权导致的目录权限错误不改变成功结果，真实目录 I/O 错误仍保持发布状态不确定。
 
 Core 的 `OriginalArchivePlan` 只消费成员、已确认报告来源和已确认 study 的投影以及类型扩展映射，负责稳定排序和 identifier-free 安全路径；Platform 在一次读取里取得这些投影并 pin 住涉及的原件，逐项打开并校验 descriptor、流式写入/复核 ZIP 并原子发布。成功前不暴露 `.zip` work item；进度 DTO 只有 phase、bytes 和 entry counts，不含成员名、文件名、路径或内部 ID。
 

@@ -1,7 +1,7 @@
 import Foundation
 import KinlogueCore
 
-public struct PlaintextVaultLayout: Sendable {
+public struct DICOMImportLayout: Sendable {
     public let rootURL: URL
 
     public init(rootURL: URL) throws {

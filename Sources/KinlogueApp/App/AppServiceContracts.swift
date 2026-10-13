@@ -21,7 +21,6 @@ enum OriginalExportServiceError: Error, Equatable, Sendable {
     case invalidDestination
     case insufficientSpace
     case destinationAccessDenied
-    case vaultChanged
     case sourceIntegrityFailure
     case archiveIntegrityFailure
     case publicationIndeterminate
@@ -119,15 +118,6 @@ struct DICOMStudySummary: Identifiable, Equatable, Sendable {
         self.contentRevision = contentRevision
     }
 
-    init(study: DICOMStudy) {
-        self.init(
-            id: study.id,
-            state: study.state,
-            retainedObjectCount: study.attachmentIDs.count,
-            confirmedMemberID: study.confirmedMemberID,
-            effectiveDate: study.effectiveDate
-        )
-    }
     init(study: LibraryDICOMStudySummary) {
         self.init(id: study.id, state: study.state, retainedObjectCount: study.retainedObjectCount,
                   confirmedMemberID: study.confirmedMemberID, effectiveDate: study.effectiveDate,

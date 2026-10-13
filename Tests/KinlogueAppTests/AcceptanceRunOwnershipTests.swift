@@ -24,7 +24,7 @@ struct AcceptanceRunOwnershipTests {
         defer { fixture.remove() }
         let ownership = try fixture.claim()
         // Named like a lock, but not one of the names the library's owner uses for this root.
-        let stray = fixture.runRoot.appendingPathComponent(VaultMutationLockNaming.filename(
+        let stray = fixture.runRoot.appendingPathComponent(LibraryLockNaming.filename(
             forCanonicalRootPath: fixture.runRoot.appendingPathComponent("SourceVault").path
         ))
         #expect(FileManager.default.createFile(

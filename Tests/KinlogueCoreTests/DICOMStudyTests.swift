@@ -4,18 +4,16 @@ import Testing
 
 @Test
 func needsReviewStudyCannotPersistConfirmationFields() throws {
-    let indexID = UUID()
     let attachment = try syntheticAttachment()
     let fingerprint = try DICOMStudyFingerprint(objects: [
         .init(sha256Digest: attachment.sha256Digest, byteCount: attachment.byteCount),
     ])
 
     #expect(throws: DomainValidationError.invalidStateTransition) {
-        _ = try DICOMStudy(
+        _ = try DICOMStudyHeader(
             id: UUID(),
             state: .needsReview,
             fingerprint: fingerprint,
-            indexObjectID: indexID,
             attachmentIDs: [attachment.id],
             confirmedMemberID: UUID(),
             effectiveDate: Date(timeIntervalSince1970: 0)
@@ -31,10 +29,10 @@ func confirmedStudyRequiresMemberAndEffectiveDateTogether() throws {
     ])
 
     #expect(throws: DomainValidationError.invalidStateTransition) {
-        _ = try DICOMStudy(
+        _ = try DICOMStudyHeader(
+            id: UUID(),
             state: .confirmed,
             fingerprint: fingerprint,
-            indexObjectID: UUID(),
             attachmentIDs: [attachment.id],
             confirmedMemberID: UUID(),
             effectiveDate: nil
@@ -43,25 +41,25 @@ func confirmedStudyRequiresMemberAndEffectiveDateTogether() throws {
 }
 
 @Test
-func reconfirmingPreservesStudyIdentityAndImmutableGraph() throws {
+func studyHeaderRequiresOneDistinctAttachmentPerFingerprintObject() throws {
     let attachment = try syntheticAttachment()
     let fingerprint = try DICOMStudyFingerprint(objects: [
         .init(sha256Digest: attachment.sha256Digest, byteCount: attachment.byteCount),
     ])
-    let study = try DICOMStudy(
-        state: .needsReview,
-        fingerprint: fingerprint,
-        indexObjectID: UUID(),
-        attachmentIDs: [attachment.id]
-    )
     let memberID = UUID()
-    let confirmed = try study.confirmed(memberID: memberID, effectiveDate: Date(timeIntervalSince1970: 0))
+    let date = Date(timeIntervalSince1970: 0)
 
-    #expect(confirmed.id == study.id)
-    #expect(confirmed.fingerprint == study.fingerprint)
-    #expect(confirmed.indexObjectID == study.indexObjectID)
-    #expect(confirmed.attachmentIDs == study.attachmentIDs)
+    let confirmed = try DICOMStudyHeader(
+        id: UUID(), state: .confirmed, fingerprint: fingerprint, attachmentIDs: [attachment.id],
+        confirmedMemberID: memberID, effectiveDate: date
+    )
     #expect(confirmed.confirmedMemberID == memberID)
+    #expect(confirmed.effectiveDate == date)
+    for attachmentIDs in [[], [attachment.id, attachment.id], [attachment.id, UUID()]] {
+        #expect(throws: DomainValidationError.invalidCatalogReference) {
+            _ = try DICOMStudyHeader(id: UUID(), state: .needsReview, fingerprint: fingerprint, attachmentIDs: attachmentIDs)
+        }
+    }
 }
 
 @Test

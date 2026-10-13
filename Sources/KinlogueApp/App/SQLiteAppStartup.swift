@@ -31,7 +31,7 @@ struct SQLiteStartupContext: Sendable {
     @concurrent static func make(identity: AppRuntimeIdentity) async throws -> Self {
         try await LibraryStorageExecutor.run {
             try Task.checkCancellation()
-            try VaultParentDirectoryPreparation.ensureParentDirectory(for: identity.sourceVault.rootURL)
+            try LibraryParentDirectoryPreparation.ensureParentDirectory(for: identity.sourceVault.rootURL)
             let owner = try SQLiteLibraryOwner(rootURL: identity.sourceVault.rootURL)
             return try Self(owner: owner, verifier: BackupRestoreVerifier(owner: owner),
                 transaction: BackupRestoreTransaction(owner: owner), lifecycle: LibraryLifecycleCoordinator(),

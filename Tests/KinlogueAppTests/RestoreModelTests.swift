@@ -281,6 +281,7 @@ private func restoreModelSummary() -> BackupRestoreSummary {
         recordCount: 3,
         inboxItemCount: 4,
         plaintextByteCount: 5,
-        formatVersion: .current
+        formatVersion: .current,
+        logicalDigest: Data(repeating: 0x5A, count: 32)
     )
 }

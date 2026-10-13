@@ -5,7 +5,7 @@ import KinlogueCore
 
 extension SQLiteLibraryStore {
     func adoptDICOMOriginal(_ object: DICOMIndexedObject, session: SQLiteDICOMImportSession,
-                            staging: VaultDICOMStudyStaging) throws {
+                            staging: DICOMStudyStaging) throws {
         try staging.withOwnedStagedDescriptor(object.staged) { sourceDirectory, source, name in
             try admission.withLock {
                 try Task.checkCancellation()

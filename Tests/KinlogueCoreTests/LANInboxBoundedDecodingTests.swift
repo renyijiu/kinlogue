@@ -17,8 +17,6 @@ struct LANInboxBoundedDecodingTests {
             ("items", LANInboxSnapshot.maximumItemCount),
             ("transportReceipts", LANInboxSnapshot.maximumTransportReceiptCount),
             ("contentTerminals", LANInboxSnapshot.maximumContentTerminalCount),
-            ("archiveIntents", LANInboxSnapshot.maximumArchiveIntentCount),
-            ("archiveTerminals", LANInboxSnapshot.maximumArchiveTerminalCount),
             ("blobs", LANInboxSnapshot.maximumBlobCount),
         ]
 

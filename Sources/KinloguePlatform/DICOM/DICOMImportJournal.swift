@@ -11,14 +11,14 @@ public struct DICOMImportReconciliationResult: Equatable, Sendable {
 
 /// Durable opaque ownership ledger for objects promoted before the manifest.
 /// It contains only operation/object IDs and managed relative staging paths.
-public struct VaultDICOMImportJournal: Sendable {
+public struct DICOMImportJournal: Sendable {
     private static let maximumJournalBytes = 2 * 1_024 * 1_024
     private let rootURL: URL
     private let files: AtomicFileStore
-    private let layout: PlaintextVaultLayout
+    private let layout: DICOMImportLayout
 
     public init(rootURL: URL) throws {
-        layout = try PlaintextVaultLayout(rootURL: rootURL)
+        layout = try DICOMImportLayout(rootURL: rootURL)
         self.rootURL = layout.rootURL
         files = try AtomicFileStore(rootURL: layout.rootURL)
     }
@@ -37,7 +37,7 @@ public struct VaultDICOMImportJournal: Sendable {
     }
 
     func bindStagingOwnership(
-        _ ownership: VaultDICOMStagingOwnership,
+        _ ownership: DICOMStagingOwnership,
         operationID: UUID
     ) throws {
         guard ownership.operationID == operationID else {
@@ -54,7 +54,7 @@ public struct VaultDICOMImportJournal: Sendable {
     func verifyOwnership(
         operationID: UUID,
         vaultID: UUID,
-        ownership: VaultDICOMStagingOwnership
+        ownership: DICOMStagingOwnership
     ) throws {
         let receipt = try read(operationID: operationID)
         guard receipt.vaultID == vaultID, receipt.stagingOwnership == ownership else {
@@ -74,7 +74,7 @@ public struct VaultDICOMImportJournal: Sendable {
             .filter { $0.hasPrefix("\(directory)/") && $0.hasSuffix(".json") }
             .sorted()
         var reconciled = 0, removed = 0, preserved = 0, retries = 0
-        let staging = try VaultDICOMStudyStaging(rootURL: rootURL)
+        let staging = try DICOMStudyStaging(rootURL: rootURL)
         for path in journalPaths {
             guard let operationID = operationID(fromJournalPath: path) else {
                 throw DICOMImportError.integrityFailure
@@ -165,7 +165,7 @@ public struct VaultDICOMImportJournal: Sendable {
         let version: Int
         let operationID: UUID
         let vaultID: UUID
-        var stagingOwnership: VaultDICOMStagingOwnership?
+        var stagingOwnership: DICOMStagingOwnership?
         var promotedReferences: [VaultObjectReference]
     }
 }

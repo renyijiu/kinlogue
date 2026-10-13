@@ -220,7 +220,7 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
         try owner.validate()
         try closeDatabaseForReplacement()
         try owner.validate()
-        try PlaintextVaultDeletionTransaction(rootURL: rootURL, strictReceipt: true).begin()
+        try LibraryDeletionTransaction(rootURL: rootURL, strictReceipt: true).begin()
     }
 
     package func closeDatabaseForReplacement() throws {

@@ -205,7 +205,7 @@ public actor LANItemPreprocessor {
         for item in items {
             guard let artifact = item.derivedArtifact else { throw LANInboxError.invalidState }
             let next = retainedBytes.addingReportingOverflow(artifact.byteCount)
-            guard !next.overflow, next.partialValue <= VaultReadSnapshotPolicy.maximumRetainedByteCount else {
+            guard !next.overflow, next.partialValue <= LibraryReadSnapshotPolicy.maximumRetainedByteCount else {
                 throw LANItemPreprocessorError.sourceTooLarge
             }
             retainedBytes = next.partialValue

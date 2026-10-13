@@ -94,7 +94,7 @@ func sqliteDICOMPromotionFailurePublishesWholeGraphOrNothing(point: SQLiteOrigin
     let count = try await repository.summaries().items.count
     #expect(count == (point == .afterLiveCommit ? 1 : 0))
     #expect(try fixture.store.recoverOriginals().isEmpty)
-    #expect(try VaultDICOMImportJournal(rootURL: fixture.store.rootURL).pendingOperationCount() == 0)
+    #expect(try DICOMImportJournal(rootURL: fixture.store.rootURL).pendingOperationCount() == 0)
     #expect(fixture.store.activeDICOMImports.isEmpty)
     try fixture.store.close()
     let reopened = try SQLiteLibraryStore(rootURL: fixture.store.rootURL)
@@ -196,7 +196,7 @@ func sqliteDICOMActiveImportProtectsOwnerAndCancellationCleansStaging() async th
     #expect(try await workflow.cancelCurrentImport() == nil)
     await #expect(throws: DICOMImportError.cancelled) { _ = try await task.value }
     #expect(fixture.store.activeDICOMImports.isEmpty)
-    #expect(try VaultDICOMImportJournal(rootURL: fixture.store.rootURL).pendingOperationCount() == 0)
+    #expect(try DICOMImportJournal(rootURL: fixture.store.rootURL).pendingOperationCount() == 0)
 }
 
 @Test
@@ -406,7 +406,7 @@ func sqliteDICOMStagedFIFOIsRejectedWithoutBlockingAdoption() async throws {
     let fixture = try SQLiteDICOMFixture()
     defer { fixture.cleanup() }
     let repository = try SQLiteDICOMRepository(store: fixture.store)
-    let staging = try VaultDICOMStudyStaging(rootURL: fixture.store.rootURL)
+    let staging = try DICOMStudyStaging(rootURL: fixture.store.rootURL)
     let session = try await repository.beginImport(operationID: UUID(), staging: staging)
     let scan = try await DICOMFolderScanner().scan(directoryURL: fixture.source, operationID: session.ownership.operationID,
         securityScope: .notRequiredForTesting, staging: staging, ownership: session.ownership)
@@ -439,8 +439,8 @@ func sqliteDICOMImportLeftBehindIsReclaimedWhenTheRepositoryOpens(afterTheVolume
     let fixture = try SQLiteDICOMFixture()
     defer { fixture.cleanup() }
     let root = fixture.store.rootURL
-    let staging = try VaultDICOMStudyStaging(rootURL: root)
-    let journal = try VaultDICOMImportJournal(rootURL: root)
+    let staging = try DICOMStudyStaging(rootURL: root)
+    let journal = try DICOMImportJournal(rootURL: root)
     let operationID = UUID()
     try journal.begin(operationID: operationID, vaultID: try fixture.store.state().libraryID)
     let ownership = try staging.prepare(operationID: operationID)
@@ -482,7 +482,7 @@ func sqliteDICOMAdoptionGapProtectsOwnedBytesAndPreservesReplacedInode(replaced:
     let fixture = try SQLiteDICOMFixture()
     defer { fixture.cleanup() }
     let repository = try SQLiteDICOMRepository(store: fixture.store)
-    let staging = try VaultDICOMStudyStaging(rootURL: fixture.store.rootURL)
+    let staging = try DICOMStudyStaging(rootURL: fixture.store.rootURL)
     let session = try await repository.beginImport(operationID: UUID(), staging: staging)
     let scan = try await DICOMFolderScanner().scan(directoryURL: fixture.source, operationID: session.ownership.operationID,
         securityScope: .notRequiredForTesting, staging: staging, ownership: session.ownership)
@@ -515,7 +515,7 @@ func sqliteDICOMAdoptionGapProtectsOwnedBytesAndPreservesReplacedInode(replaced:
         try await repository.abortImport(session)
         #expect(!FileManager.default.fileExists(atPath: path.path))
         #expect(try fixture.store.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM originals") } == 0)
-        #expect(try VaultDICOMImportJournal(rootURL: fixture.store.rootURL).pendingOperationCount() == 0)
+        #expect(try DICOMImportJournal(rootURL: fixture.store.rootURL).pendingOperationCount() == 0)
     }
     #expect(fixture.store.activeDICOMImports.isEmpty)
 }
@@ -548,10 +548,10 @@ private actor SQLiteDICOMCommitResultGate: DICOMImportStoring {
     let loseResponse: Bool
     var continuation: CheckedContinuation<Void, Never>?
     init(repository: SQLiteDICOMRepository, loseResponse: Bool) { self.repository = repository; self.loseResponse = loseResponse }
-    func beginImport(operationID: UUID, staging: VaultDICOMStudyStaging) async throws -> DICOMImportSession {
+    func beginImport(operationID: UUID, staging: DICOMStudyStaging) async throws -> DICOMImportSession {
         try await repository.beginImport(operationID: operationID, staging: staging)
     }
-    func commitImport(_ proposal: DICOMIndexedStudyProposal, session: DICOMImportSession, staging: VaultDICOMStudyStaging,
+    func commitImport(_ proposal: DICOMIndexedStudyProposal, session: DICOMImportSession, staging: DICOMStudyStaging,
                       metrics: DICOMImportMetricsRecorder?) async throws -> DICOMImportCommit {
         let result = try await repository.commitImport(proposal, session: session, staging: staging, metrics: metrics)
         await withCheckedContinuation { continuation = $0 }
@@ -643,7 +643,7 @@ func sqliteDICOMLowCapacityFailsBeforeOwningAnyOriginal() async throws {
     #expect(try await repository.summaries().items.isEmpty)
     #expect(try fixture.store.state().generation == 0)
     #expect(try fixture.store.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM originals") } == 0)
-    #expect(try VaultDICOMImportJournal(rootURL: fixture.store.rootURL).pendingOperationCount() == 0)
+    #expect(try DICOMImportJournal(rootURL: fixture.store.rootURL).pendingOperationCount() == 0)
     #expect(fixture.store.activeDICOMImports.isEmpty)
 }
 
@@ -712,7 +712,7 @@ func sqliteDICOMTerminalCleanupPreservesUnrelatedStagedReport(abort: Bool) async
     let repository = try SQLiteDICOMRepository(store: fixture.store)
     let reportOperation = UUID()
     let report = try sqliteStage(Data("synthetic report awaiting publication".utf8), in: fixture.store, operationID: reportOperation)
-    let staging = try VaultDICOMStudyStaging(rootURL: fixture.store.rootURL)
+    let staging = try DICOMStudyStaging(rootURL: fixture.store.rootURL)
     let session = try await repository.beginImport(operationID: UUID(), staging: staging)
     let scan = try await DICOMFolderScanner().scan(directoryURL: fixture.source, operationID: session.ownership.operationID,
         securityScope: .notRequiredForTesting, staging: staging, ownership: session.ownership)
@@ -726,7 +726,7 @@ func sqliteDICOMTerminalCleanupPreservesUnrelatedStagedReport(abort: Bool) async
     let pin = try fixture.store.pinOriginal(report)
     try pin.withVerifiedDescriptor { _ in () }
     pin.release()
-    #expect(try VaultDICOMImportJournal(rootURL: fixture.store.rootURL).pendingOperationCount() == 0)
+    #expect(try DICOMImportJournal(rootURL: fixture.store.rootURL).pendingOperationCount() == 0)
     #expect(fixture.store.activeDICOMImports.isEmpty)
 }
 

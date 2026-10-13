@@ -711,7 +711,7 @@ enum StorageScaleProbe {
             started = now()
             let prepared = try await verifier.prepare(checkpointURL: repositoryURL.appendingPathComponent(result.finalLeafName), recoveryCode: recoveryCode)
             report.set("restore_prepare_ms", milliseconds(since: started))
-            guard prepared.summary.revisionPair == expectedPair, prepared.summary.logicalDigest?.count == 32,
+            guard prepared.summary.revisionPair == expectedPair, prepared.summary.logicalDigest.count == 32,
                   prepared.summary.memberCount == members.count, prepared.summary.recordCount == sourceCounts.0,
                   prepared.summary.inboxItemCount == sourceInbox.items.count else { throw ProbeError.unexpectedState }
             let transaction = try BackupRestoreTransaction(owner: owner)

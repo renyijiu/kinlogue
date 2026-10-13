@@ -25,7 +25,8 @@ public struct BackupRestoreSummary: Equatable, Sendable {
     public let inboxItemCount: Int
     public let plaintextByteCount: UInt64
     public let formatVersion: BackupFormatVersion
-    package let logicalDigest: Data?
+    /// The digest of the logical stream this summary was validated against.
+    package let logicalDigest: Data
 
     public init(
         checkpointID: BackupCheckpointID,
@@ -36,7 +37,7 @@ public struct BackupRestoreSummary: Equatable, Sendable {
         inboxItemCount: Int,
         plaintextByteCount: UInt64,
         formatVersion: BackupFormatVersion,
-        logicalDigest: Data? = nil
+        logicalDigest: Data
     ) {
         self.checkpointID = checkpointID
         self.revisionPair = revisionPair

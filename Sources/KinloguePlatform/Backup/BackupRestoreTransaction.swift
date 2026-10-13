@@ -65,7 +65,7 @@ private struct BackupRestoreTransactionReceipt: Codable {
     let inboxGeneration: UInt64
     let inboxCommitID: UUID
     let inboxManifestDigest: Data
-    let logicalDigest: Data?
+    let logicalDigest: Data
 }
 
 private struct BackupRestoreEpochRecord: Codable {
@@ -160,7 +160,6 @@ public final class BackupRestoreTransaction: @unchecked Sendable {
     ) async throws -> BackupRestoreActivationResult {
         try owner.validate()
         try owner.requireClosedDatabase()
-        guard prepared.summary.logicalDigest != nil else { throw BackupRestoreError.graphInvalid }
         guard prepared.activeRootName == activeRootName,
               prepared.stagingURL.deletingLastPathComponent() == stableParentURL,
               prepared.preflightReceiptURL.deletingLastPathComponent() == stableParentURL else {
@@ -531,7 +530,7 @@ public final class BackupRestoreTransaction: @unchecked Sendable {
     private func validateReceiptShape(_ receipt: BackupRestoreTransactionReceipt) throws {
         guard receipt.magic == BackupRestoreTransactionReceipt.magic,
               receipt.version == 2,
-              receipt.logicalDigest?.count == 32,
+              receipt.logicalDigest.count == 32,
               receipt.epoch > 0,
               receipt.activeRootNameDigest == ContentDigest.sha256(Data(activeRootName.utf8)),
               receipt.checkpointID.count == 16,

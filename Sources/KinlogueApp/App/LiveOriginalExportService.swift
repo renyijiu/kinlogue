@@ -17,10 +17,10 @@ actor LiveOriginalExportService: OriginalExportServicing {
     private var cancelActiveOperation: (@Sendable () -> Bool)?
 
     init(store: SQLiteLibraryStore, lifecycle: LibraryLifecycleCoordinator) {
-        self.init(exporter: PlaintextOriginalArchiveExporter(store: store), lifecycle: lifecycle)
+        self.init(exporter: OriginalArchiveExporter(store: store), lifecycle: lifecycle)
     }
 
-    private init(exporter: PlaintextOriginalArchiveExporter, lifecycle: LibraryLifecycleCoordinator) {
+    private init(exporter: OriginalArchiveExporter, lifecycle: LibraryLifecycleCoordinator) {
         self.lifecycle = lifecycle
         prepareOperation = { undatedToken in
             do {
@@ -144,7 +144,7 @@ actor LiveOriginalExportService: OriginalExportServicing {
     }
 
     nonisolated private static func appError(for error: Error) -> OriginalExportServiceError {
-        guard let error = error as? PlaintextOriginalArchiveExportError else {
+        guard let error = error as? OriginalArchiveExportError else {
             return .unavailable
         }
         switch error {
@@ -152,7 +152,6 @@ actor LiveOriginalExportService: OriginalExportServicing {
         case .invalidDestination: return .invalidDestination
         case .insufficientSpace: return .insufficientSpace
         case .destinationAccessDenied: return .destinationAccessDenied
-        case .vaultChanged: return .vaultChanged
         case .sourceIntegrityFailure: return .sourceIntegrityFailure
         case .archiveIntegrityFailure: return .archiveIntegrityFailure
         case .publicationIndeterminate: return .publicationIndeterminate

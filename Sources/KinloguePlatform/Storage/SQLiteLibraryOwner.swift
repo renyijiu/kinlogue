@@ -11,7 +11,7 @@ package final class SQLiteLibraryOwner: @unchecked Sendable {
     private let locks: [(url: URL, descriptor: Int32)]
 
     package init(rootURL: URL) throws {
-        self.rootURL = try VaultCanonicalRootPath.rootURL(for: rootURL, allowMissing: true)
+        self.rootURL = try LibraryCanonicalRootPath.rootURL(for: rootURL, allowMissing: true)
         parentIdentity = try SQLiteFileIdentity.directory(at: self.rootURL.deletingLastPathComponent(), privateMode: false)
         // Ownership lasts as long as these descriptors: the kernel drops the flock when the process dies.
         let lock = Self.processLock(rootURL: self.rootURL)
@@ -40,17 +40,17 @@ package final class SQLiteLibraryOwner: @unchecked Sendable {
         Set(processLock(rootURL: rootURL).lockURLs.map(\.lastPathComponent))
     }
 
-    private static func processLock(rootURL: URL) -> VaultProcessLock {
-        let identity = VaultCanonicalRootPath.coordinatorIdentity(for: rootURL)
-        return VaultProcessLock(locations: identity.lockLocations.map {
-            VaultProcessLockLocation(parentURL: $0.parentURL, namingKey: "sqlite-owner:" + $0.namingKey)
+    private static func processLock(rootURL: URL) -> LibraryProcessLock {
+        let identity = LibraryCanonicalRootPath.coordinatorIdentity(for: rootURL)
+        return LibraryProcessLock(locations: identity.lockLocations.map {
+            LibraryProcessLockLocation(parentURL: $0.parentURL, namingKey: "sqlite-owner:" + $0.namingKey)
         })
     }
 
     package func reconcilePendingDeletion() throws {
         try validate()
         try requireClosedDatabase()
-        _ = try PlaintextVaultDeletionTransaction(rootURL: rootURL, strictReceipt: true).reconcile()
+        _ = try LibraryDeletionTransaction(rootURL: rootURL, strictReceipt: true).reconcile()
     }
 
     func claimDatabase() throws -> UUID {

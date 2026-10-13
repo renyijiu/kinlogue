@@ -13,7 +13,7 @@ func parentPreparationCreatesOnlyPrivateParent() throws {
     let parent = ancestor.appendingPathComponent("Kinlogue", isDirectory: true)
     let active = parent.appendingPathComponent("Vault", isDirectory: true)
 
-    #expect(try VaultParentDirectoryPreparation.ensureParentDirectory(for: active) == parent)
+    #expect(try LibraryParentDirectoryPreparation.ensureParentDirectory(for: active) == parent)
     #expect(!FileManager.default.fileExists(atPath: active.path))
     var metadata = stat()
     #expect(lstat(parent.path, &metadata) == 0)
@@ -33,7 +33,7 @@ func parentPreparationRejectsSymlinkWithoutTouchingItsTarget() throws {
     let active = parent.appendingPathComponent("Vault", isDirectory: true)
 
     #expect(throws: VaultError.invalidPath) {
-        try VaultParentDirectoryPreparation.ensureParentDirectory(for: active)
+        try LibraryParentDirectoryPreparation.ensureParentDirectory(for: active)
     }
     #expect(try FileManager.default.contentsOfDirectory(atPath: external.path).isEmpty)
 }
@@ -48,7 +48,7 @@ func parentPreparationRejectsRegularFileAtParentName() throws {
     try Data("synthetic".utf8).write(to: parent)
 
     #expect(throws: VaultError.invalidPath) {
-        try VaultParentDirectoryPreparation.ensureParentDirectory(
+        try LibraryParentDirectoryPreparation.ensureParentDirectory(
             for: parent.appendingPathComponent("Vault")
         )
     }
