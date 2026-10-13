@@ -648,6 +648,8 @@
 	<string>File Order</string>
 	<key>新恢复点已保留，但旧恢复点暂未清理。</key>
 	<string>The new restore point was kept, but old restore points have not been cleaned up yet.</string>
+	<key>新的恢复点已创建并通过验证。</key>
+	<string>A new restore point was created and verified.</string>
 	<key>无法使用所选备份目录，请重新选择。</key>
 	<string>The selected backup folder cannot be used. Choose it again.</string>
 	<key>无法使用所选导出位置，请选择其他位置。</key>

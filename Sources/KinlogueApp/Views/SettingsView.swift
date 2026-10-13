@@ -231,7 +231,7 @@ struct SettingsView: View {
 
             if let verifiedAt = backupModel.status.lastLocalVerificationAt {
                 LabeledContent(AppLocalization.string("最近本地验证")) {
-                    Text(verifiedAt, style: .relative)
+                    Text(verifiedAt, format: Date.FormatStyle(date: .abbreviated, time: .shortened))
                 }
             }
             if let estimate = backupModel.status.estimate {
@@ -303,6 +303,12 @@ struct SettingsView: View {
             .buttonStyle(.kinlogueSecondary)
             .frame(maxWidth: .infinity, alignment: .trailing)
             .disabled(backupModel.phase == .backingUp)
+
+            if let completion = backupModel.completionText {
+                KinlogueStatusLabel(completion, tone: .success)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .accessibilityIdentifier("backup-status-complete")
+            }
         }
         .disabled(backupModel.isManualBackupInFlight)
     }

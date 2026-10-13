@@ -3255,6 +3255,16 @@
         }
       }
     },
+    "新的恢复点已创建并通过验证。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A new restore point was created and verified."
+          }
+        }
+      }
+    },
     "无法使用所选备份目录，请重新选择。": {
       "localizations": {
         "en": {

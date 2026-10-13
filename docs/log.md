@@ -1648,3 +1648,12 @@
 - **测试计数**（本条与上一条合计）：`@Test` 声明由 1214 个减为 1200 个，减少的 14 项都是隔离运行的探针测试；主清单仍是 1166 tests / 96 suites。Core 里一项针对旧结构体方法的测试换成了一项针对 `DICOMStudyHeader` 附件校验的测试。并发审计清单为 66 处 / 36 个文件。
 - **验证**（本条与上一条的改动合在一起）：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，全部源码和测试改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1166 tests / 96 suites，隔离运行的验收扫描、storage process（含 4 项探针激活测试）、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只追加了这两条日志。传入实际清单摘要的 `scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
 - **未执行**：`run-backup-capability-probe.sh` 没有运行（见上一条）；改名没有另做逐文件的人工复核，依据是编译、完整测试和对落盘字符串的检索。其余与前几条相同：`run-acceptance.sh`、托管平台上的 CI、macOS 26、真实手机和人工门禁都没有执行。
+
+## [2026-10-13] backup/ui | 手动备份完成后给出提示，“最近本地验证”不再跳动
+
+- **起因**：用户在迁移后的真实资料库上重新启用备份并点了“立即备份”，反馈“看起来没有反应，时间在一直走”。按文件名、大小和修改时间核对备份目录：专用 repository 里在点击后多了第二个 `.kinloguebackup` 文件，大小与第一个相同，备份实际已经完成。问题在界面：完成后按钮变回“立即备份”，没有任何完成提示；“最近本地验证”用的是相对时间，每秒跳动且不带“前”字，读起来像仍在进行的计时。
+- **改动**：[`BackupModel`](../Sources/KinlogueApp/ViewModels/BackupModel.swift) 增加 `completionText`，只在手动备份刚完成且没有其他说明时返回“新的恢复点已创建并通过验证。”；[`SettingsView`](../Sources/KinlogueApp/Views/SettingsView.swift) 在两个按钮下方显示它，状态下一次重新读取（刷新、调度事件）时消失。旧恢复点暂未清理时仍只显示原有的那句说明，备份失败时只显示失败原因。“最近本地验证”改为显示日期和时刻，由 Foundation 按当前界面语言格式化。新文案已加入 String Catalog 并重新生成英文资源。
+- **测试**：新增 3 项声明（完成后有提示且刷新后消失、清理推迟时只显示那句说明、失败时不提示）；设置页的源码断言增加完成提示的标识符，并要求不再使用相对时间。`@Test` 声明 1203 个，主清单 1169 tests / 96 suites。
+- **界面核对**：用临时测试把设置页（合成状态，不接触真实资料库）离屏渲染成图片看过：提示出现在按钮下方靠右，验证时间为固定的日期时刻；临时测试随后删除。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，源码和测试改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1169 tests / 96 suites，隔离运行的验收扫描、storage process、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只改了本条日志。传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：改动后的构建没有在界面上实际点过“立即备份”；英文界面没有渲染核对；`run-acceptance.sh`、托管平台上的 CI、macOS 26、真实手机和人工门禁与前几条相同，都没有执行。

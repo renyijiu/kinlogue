@@ -200,6 +200,9 @@ struct DeleteVaultViewSafetyTests {
         #expect(settings.contains("\"settings-delete-local-data\""))
         #expect(settings.contains("\"backup-show-in-finder\""))
         #expect(settings.contains("AppLocalization.string(\"正在准备加密备份…\")"))
+        #expect(settings.contains("\"backup-status-complete\""))
+        // A relative date keeps counting up beside the button and reads as a backup still running.
+        #expect(!settings.contains("style: .relative"))
     }
 
     private var sourceURL: URL {
