@@ -348,7 +348,9 @@ struct AppShellPresentationSafetyTests {
         let terminalFailure = source[failureStart.lowerBound..<genericFailureStart.lowerBound]
 
         #expect(terminalFailure.contains("restore-failure-quit"))
-        #expect(terminalFailure.contains("NSApplication.shared.terminate(nil)"))
+        // A plain `terminate` is refused while this sheet is up, so the button did nothing.
+        #expect(terminalFailure.contains("RestartRequiredQuit.perform()"))
+        #expect(!source.contains("NSApplication.shared.terminate(nil)"))
         #expect(!terminalFailure.contains("当前资料库不会因验证失败而被替换"))
     }
 

@@ -65,6 +65,22 @@
 
 **验证门禁**：自动化结果和未执行的门禁见 [`log.md`](log.md) 与 [当前验收账本](acceptance/current-release.md)；`run-acceptance.sh`、macOS 26 和人工门禁没有执行。
 
+## [2026-10-13] 资料库里记录的文件身份不比较设备号
+
+**问题**：原件行记录登记时的设备号和 inode，读取、备份、删除时要求两者都与磁盘上的文件一致。用户把现有资料迁入新格式时，恢复停在清除旧备份配置这一步；核对发现那份配置记录的目录 inode 没变，设备号却从登记时的值变成了另一个值。macOS 不保证同一个卷的设备号跨重启或系统更新保持不变。按这个比较方式，卷被重新编号后资料库里的每个原件都会被判为无效；反向验证（把比较改回去）复现了这一点。
+
+**选择**：记录下来的身份只比较 inode。原件总是从原件目录里按名字、以 no-follow 方式打开，而原件目录自身的身份在资料库打开期间固定，所以文件不可能在别的卷上，设备号不增加任何判别力。表结构、行摘要的算法和逻辑备份格式都不变，登记时的设备号继续写入。清除本机备份配置（恢复和重置时）也不再要求配置内容有效，只确认同名位置是当前用户私有的普通文件。
+
+**未选择的替代方案**：打开资料库时把所有行的设备号改写成当前值——要在只读的打开路径上写库并重算行摘要，中断时留下一半新一半旧；去掉设备号列——改变表结构和行摘要，而项目只支持当前 schema；保留比较并提示用户“资料库已损坏”——数据完好，这是误报。
+
+**影响的代码/文档**：[`SQLiteLibraryOwner.swift`](../Sources/KinloguePlatform/Storage/SQLiteLibraryOwner.swift) 的 `isFile(recordedAs:)` 及其在原件生命周期、LAN 上传和逻辑备份来源中的调用点；[`BackupLocalConfigurationStore`](../Sources/KinloguePlatform/Backup/BackupLocalConfigurationStore.swift) 的 `removeForDestructiveReset`；[`sqlite-storage.md`](sqlite-storage.md)、[`backup-and-restore.md`](backup-and-restore.md)。
+
+**没有处理的同类依赖**：备份配置记录自身、备份目标目录的身份、恢复事务和整库删除的收据仍然记录并比较设备号。前两者在卷被重新编号后使备份需要重新设置；后两者只在一次操作中断、且恰好在下次启动前卷被重新编号时才会无法收敛。这些没有改动，也没有验证过界面在这些情况下的表现。
+
+**迁移/回滚要求**：没有迁移，已有的行不用改写。回滚即还原比较方式。
+
+**验证门禁**：自动化结果见 [`log.md`](log.md)；真实的卷重新编号只能通过改写行里记录的设备号来模拟，没有在重启前后实测。
+
 ## 已被 supersede 的早期决策
 
 [`2026-08-01-001-feat-kinlogue-macos-vault-plan.md`](plans/2026-08-01-001-feat-kinlogue-macos-vault-plan.md) 早期计划曾以“加密 Vault、Keychain、加密 backup/restore”为 MVP 方向；它已被明文 MVP 计划的 `supersedes` 字段覆盖。它仍然保留 threat model、早期 target 规划和未来安全升级的背景，但不能作为当前代码或隐私文案的事实来源。

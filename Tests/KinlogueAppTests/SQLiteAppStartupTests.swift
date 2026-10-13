@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import KinlogueCore
 @testable import KinlogueApp
-@testable import KinloguePlatform
+@_spi(Testing) @testable import KinloguePlatform
 
 @Suite(.serialized)
 @MainActor
@@ -205,6 +205,134 @@ struct SQLiteAppStartupTests {
         #expect(!(await startup.start()))
         #expect(startup.failure == .unrecognized && startup.failure?.canRetry == false)
         await startup.shutdown()
+    }
+
+    enum OldLibraryCircumstance: Sendable {
+        case nothingElse
+        /// What an upgrade on a long-used Mac looks like: the old App left a backup profile, and
+        /// the volume has been given another device number since it was written, so the profile
+        /// no longer validates. The restore has to clear it instead of stopping on it.
+        case aStaleBackupProfile
+        /// An earlier restore over the same library stopped right after recording its intent.
+        /// The launch has to undo it and leave the old library in place for another attempt.
+        case anInterruptedEarlierRestore
+    }
+
+    @Test(arguments: [OldLibraryCircumstance.nothingElse, .aStaleBackupProfile, .anInterruptedEarlierRestore])
+    func restoringOverAnOldFormatLibraryReplacesItAndTheNextLaunchOpensTheRestoredOne(
+        with circumstance: OldLibraryCircumstance
+    ) async throws {
+        let fixture = try SQLStartupFixture()
+        defer { fixture.remove() }
+        let donorParent = fixture.base.appendingPathComponent("donor", isDirectory: true)
+        try FileManager.default.createDirectory(at: donorParent, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let donor = try SQLiteLibraryStore(rootURL: donorParent.appendingPathComponent("Vault", isDirectory: true))
+        let member = try FamilyMember(displayName: "Synthetic restored member")
+        try await SQLiteReportRepository(store: donor).saveMember(member, replacing: nil)
+        let enrollment = try BackupKeyHierarchy.makeEnrollment()
+        let bytes = RestorePointBytes()
+        let snapshot = try await SQLiteLogicalBackupSource(store: donor).prepare()
+        _ = try await EncryptedBackupContainerWriter().write(
+            entries: snapshot.sources(), revisionPair: snapshot.revisionPair, sequence: 1,
+            signer: try BackupDeviceSigner(descriptor: enrollment.descriptor, authorization: enrollment.authorization,
+                                           deviceSigningSeed: enrollment.deviceSigningSeed),
+            sink: .init(write: bytes.append, readBackSource: bytes.source))
+        snapshot.release()
+        try donor.close()
+        let restorePoint = fixture.base.appendingPathComponent("synthetic.kinloguebackup")
+        try bytes.data.write(to: restorePoint)
+        #expect(chmod(restorePoint.path, 0o600) == 0)
+
+        let root = fixture.identity.sourceVault.rootURL
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("objects", isDirectory: true),
+            withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let oldManifest = Data("synthetic old JSON bytes".utf8)
+        try oldManifest.write(to: root.appendingPathComponent("library.json"))
+        try Data("synthetic old object".utf8).write(to: root.appendingPathComponent("objects/synthetic.bin"))
+        let profileRoot = fixture.identity.backupIdentity.rootURL
+        let profileRecord = profileRoot.appendingPathComponent("configuration.json")
+        if circumstance == .aStaleBackupProfile {
+            let profile = BackupLocalConfigurationStore(rootURL: profileRoot)
+            let material = try BackupKeyHierarchy.makeEnrollment()
+            let created = try await profile.createPending(try BackupPendingEnrollment(
+                bookmarkData: Data("opaque-bookmark".utf8),
+                selectedDirectoryIdentity: .init(device: 1, inode: 2),
+                repositoryDirectoryIdentity: .init(device: 1, inode: 3),
+                descriptor: material.descriptor, authorization: material.authorization,
+                deviceSigningSeed: material.deviceSigningSeed, writerEpoch: material.writerEpoch))
+            _ = try await profile.promotePending(enrollmentEpoch: created.enrollmentEpoch, expectedRevision: created.revision)
+            var directory = stat()
+            #expect(lstat(profileRoot.path, &directory) == 0)
+            let text = try String(contentsOf: profileRecord, encoding: .utf8)
+            let recorded = "\"device\":\(directory.st_dev),\"inode\":\(directory.st_ino)"
+            #expect(text.components(separatedBy: recorded).count == 2)
+            let handle = try FileHandle(forWritingTo: profileRecord)
+            try handle.truncate(atOffset: 0)
+            try handle.write(contentsOf: Data(text.replacingOccurrences(
+                of: recorded, with: "\"device\":\(Int(directory.st_dev) + 3),\"inode\":\(directory.st_ino)").utf8))
+            try handle.close()
+            await #expect(throws: BackupLocalConfigurationStoreError.invalidRecord) { _ = try await profile.load() }
+        }
+
+        func restoreLeftovers() throws -> [String] {
+            try FileManager.default.contentsOfDirectory(atPath: root.deletingLastPathComponent().path)
+                .filter { $0.hasPrefix(".kinlogue-restore-") }
+        }
+        if circumstance == .anInterruptedEarlierRestore {
+            // Scoped, so the owner is released before the launch takes it.
+            let owner = try SQLiteLibraryOwner(rootURL: root)
+            let prepared = try await BackupRestoreVerifier(owner: owner)
+                .prepare(checkpointURL: restorePoint, recoveryCode: enrollment.recoveryCode)
+            let interrupted = try BackupRestoreTransaction(owner: owner, failureInjector: { $0 == .afterIntent })
+            await #expect(throws: BackupRestoreError.injectedFailure) {
+                _ = try await interrupted.activate(prepared: prepared, resetWriter: {})
+            }
+            #expect(try !restoreLeftovers().isEmpty)
+        }
+
+        let startup = LibraryLaunchCoordinator(identity: fixture.identity)
+        startup.acknowledgeStorageDisclosure()
+        await #expect(throws: SQLiteLibraryError.unsupportedFormat) { try await startup.openEnvironment() }
+        #expect(try Data(contentsOf: root.appendingPathComponent("library.json")) == oldManifest)
+        #expect(try restoreLeftovers().isEmpty)
+        do {
+            // Scoped: the service keeps the library's owner, which the next launch has to take.
+            let restore = try #require(startup.seedRestoreService)
+            #expect(try await restore.prepare(checkpointURL: restorePoint, recoveryCode: enrollment.recoveryCode).memberCount == 1)
+            // Checking the restore point replaces nothing; only the confirmed activation does.
+            #expect(try Data(contentsOf: root.appendingPathComponent("library.json")) == oldManifest)
+            #expect(try await restore.activatePreparedRestore().requiresApplicationRestart)
+        }
+        await startup.shutdown()
+
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("library.json").path))
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("objects").path))
+        #expect(!FileManager.default.fileExists(atPath: profileRecord.path))
+        func setAsideDirectories() throws -> [String] {
+            try FileManager.default.contentsOfDirectory(atPath: root.deletingLastPathComponent().path)
+                .filter { $0.hasPrefix(".kinlogue-restore-rollback-") }
+        }
+        // The replaced directory stays beside the library until the next launch settles the restore.
+        #expect(try setAsideDirectories().count == 1)
+        let next = LibraryLaunchCoordinator(identity: fixture.identity)
+        next.acknowledgeStorageDisclosure()
+        #expect(try await next.openEnvironment().dataService.bootstrap().members.map(\.id) == [member.id])
+        #expect(try setAsideDirectories().isEmpty)
+        await next.shutdown()
+    }
+}
+
+private final class RestorePointBytes: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = Data()
+    func append(_ bytes: Data) { lock.withLock { storage.append(bytes) } }
+    var data: Data { lock.withLock { storage } }
+    func source() -> BackupContainerByteSource {
+        let snapshot = data
+        return .init(byteCount: UInt64(snapshot.count)) { offset, count in
+            let start = Int(offset)
+            return Data(snapshot[start..<min(snapshot.count, start + count)])
+        }
     }
 }
 

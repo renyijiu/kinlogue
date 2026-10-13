@@ -457,15 +457,28 @@ public final class BackupLocalConfigurationStore: @unchecked Sendable {
     /// repository contents are outside this transaction and are never touched.
     /// The restore transaction writes its typed intent before invoking this
     /// operation, so a crash cannot silently re-enable the old scheduler.
+    /// Removes the record without reading what it says.
+    ///
+    /// A restore or a reset replaces the library this profile wrote for, so a record that no
+    /// longer validates must not stop it. That happens to an untouched record too: it names its
+    /// directory by device number and inode, and macOS can give the same volume another device
+    /// number after a restart or a system update. Only an owner-private regular file under the
+    /// record's name is removed; anything else there still fails closed.
     public func removeForDestructiveReset() async throws {
         do {
-            try withExclusiveAccess(createRoot: false) { rootDescriptor, rootIdentity in
+            try withExclusiveAccess(createRoot: false) { rootDescriptor, _ in
                 guard namedNodeExists(Self.recordName, at: rootDescriptor) else { return }
-                let stored = try readConfiguration(
-                    at: rootDescriptor,
-                    rootIdentity: rootIdentity
+                let descriptor = openat(
+                    rootDescriptor,
+                    Self.recordName,
+                    O_RDONLY | O_NOFOLLOW | O_CLOEXEC
                 )
-                try ensureSameLeaf(stored.identity, named: Self.recordName, at: rootDescriptor)
+                guard descriptor >= 0 else {
+                    throw BackupLocalConfigurationStoreError.invalidRecord
+                }
+                defer { Darwin.close(descriptor) }
+                let identity = try strictRegularFileIdentity(descriptor, expectedMode: 0o600)
+                try ensureSameLeaf(identity, named: Self.recordName, at: rootDescriptor)
                 guard unlinkat(rootDescriptor, Self.recordName, 0) == 0 else {
                     throw BackupLocalConfigurationStoreError.ioFailure
                 }

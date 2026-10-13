@@ -294,6 +294,56 @@ func destructiveResetRemovesTheLocalWriterProfileAndIsIdempotentWhenUnconfigured
     }
 }
 
+@Test
+func destructiveResetRemovesARecordThatNoLongerValidatesBecauseItsVolumeWasRenumbered() async throws {
+    try await withBackupStoreFixture { fixture in
+        let created = try await fixture.store.createPending(try fixture.pending())
+        _ = try await fixture.store.promotePending(
+            enrollmentEpoch: created.enrollmentEpoch,
+            expectedRevision: created.revision
+        )
+        // The record names its own directory by device number and inode. Rewriting the device
+        // number leaves exactly what a restart that renumbers the volume leaves behind.
+        let record = fixture.root.appendingPathComponent("configuration.json")
+        var directory = stat()
+        #expect(lstat(fixture.root.path, &directory) == 0)
+        let text = try String(contentsOf: record, encoding: .utf8)
+        let recorded = "\"device\":\(directory.st_dev),\"inode\":\(directory.st_ino)"
+        #expect(text.components(separatedBy: recorded).count == 2)
+        let renumbered = text.replacingOccurrences(
+            of: recorded,
+            with: "\"device\":\(Int(directory.st_dev) + 3),\"inode\":\(directory.st_ino)"
+        )
+        let handle = try FileHandle(forWritingTo: record)
+        try handle.truncate(atOffset: 0)
+        try handle.write(contentsOf: Data(renumbered.utf8))
+        try handle.close()
+        await #expect(throws: BackupLocalConfigurationStoreError.invalidRecord) {
+            _ = try await fixture.store.load()
+        }
+
+        try await fixture.store.removeForDestructiveReset()
+
+        #expect(!FileManager.default.fileExists(atPath: record.path))
+        #expect(try await fixture.store.load() == nil)
+    }
+}
+
+@Test
+func destructiveResetStillRefusesALeafThatIsNotAnOwnerPrivateRecord() async throws {
+    try await withBackupStoreFixture { fixture in
+        _ = try await fixture.store.createPending(try fixture.pending())
+        let record = fixture.root.appendingPathComponent("configuration.json")
+        #expect(chmod(record.path, 0o644) == 0)
+
+        await #expect(throws: BackupLocalConfigurationStoreError.self) {
+            try await fixture.store.removeForDestructiveReset()
+        }
+
+        #expect(FileManager.default.fileExists(atPath: record.path))
+    }
+}
+
 private struct BackupStoreFixture {
     let base: URL
     let root: URL

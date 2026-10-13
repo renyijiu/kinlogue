@@ -44,6 +44,10 @@
 4. 用户再次确认后，恢复会替换而不是合并当前资料库；durable receipt 保护 whole-root 切换、回滚和下次启动收敛。
 5. 成功后必须退出并重新打开 App。本机备份配置会移除，外部恢复点保持不变，也不会被自动采用为新的备份目标。
 
+移除本机备份配置时不读取也不校验配置的内容，只确认那个名字下是当前用户私有的普通文件，因此一份已经通不过校验的配置不会挡住恢复。这种配置在没有被改动的情况下也会出现：配置记录用设备号加 inode 标识自己所在的目录，macOS 可能在重启或系统更新之后给同一个卷分配另一个设备号，此后读取这份记录会被判为无效。[存储回归](../Tests/KinloguePlatformTests/BackupLocalConfigurationStoreTests.swift)和[启动测试](../Tests/KinlogueAppTests/SQLiteAppStartupTests.swift)覆盖带着这样一份配置的恢复，以及同名位置不是私有普通文件时仍然拒绝。备份配置自身对设备号的依赖没有改：卷被重新编号后，设置页如何呈现失效的配置、能否原地重新设置，待核实。
+
+恢复成功或替换未完成时，界面只留下“退出续页”。这两种状态下恢复面板不允许关闭，而 AppKit 在有模态面板时会直接拒绝退出、不询问任何代理，按钮因此曾经不起作用。按钮现在先解除窗口对退出的拦截再走正常的终止流程（[`RestartRequiredQuit`](../Sources/KinlogueApp/App/RestartRequiredQuit.swift)）；终止仍被拒绝时直接结束进程，此时资料库的服务已经撤销，磁盘上的状态由下一次启动收敛。
+
 确认替换后，`LibraryLifecycleCoordinator` 会取消并等待已经进入的普通报告导入、重试和重新 OCR，以及 LAN、DICOM 与原件导出操作；这些任务到达终态后才允许 whole-root 切换。取消验证或重新选择恢复点会取消当前 preparation，并等待任务退出、完成本次 staging 清理尝试后再完成取消或开始下一次准备。operation generation 继续隔离迟到结果，较旧的 preparation 不能覆盖或取消较新的已验证恢复点。
 
 恢复 ViewModel 在文件授权返回后再次检查 generation，并冻结本次恢复码。释放授权后的迟到结果只丢弃自身 UI 发布；staging 清理由 `LiveRestoreService` 按 preparation generation 负责，不能在 ViewModel 中用全局 cancel 清理另一次恢复。对应组合回归见 [`BackupConcurrencyRegressionTests`](../Tests/KinlogueAppTests/BackupConcurrencyRegressionTests.swift)，目录授权持久化与身份拒绝见 [`LiveBackupServiceTests`](../Tests/KinlogueAppTests/LiveBackupServiceTests.swift)。
@@ -70,7 +74,7 @@
 
 ## 当前验证边界
 
-Core/Platform/App 自动化覆盖 canonical 格式、pending enrollment 重启恢复与显式放弃、错误恢复码、篡改/截断、资源上限、目录替换、稳定 writer 配置变化、真实双进程线性 publication、保留策略、私有 staging、whole-root 回滚、设置模型和降级恢复。[逻辑备份测试](../Tests/KinloguePlatformTests/SQLiteLogicalBackupTests.swift)用真实的仓库和 LAN 上传建立资料库，恢复后逐项核对成员、报告及其 OCR、LAN 预处理结果、DICOM 图和原件导出；冻结时仍在处理中的草稿和 LAN 项以可重试的失败状态进入恢复点，进行中的上传不进入。[恢复测试](../Tests/KinloguePlatformTests/EncryptedCheckpointRestoreTests.swift)覆盖错误恢复码、文件树格式的拒绝、已有资料库的整根替换、旧根移走之后中断的回滚、截断的事务收据失败关闭，以及只清理有收据的废弃预检。跨进程恢复探针不再维护第二套 activation 状态机：seed 只生成合成 checkpoint，execute 与 relaunch reconcile 直接调用生产 `BackupRestoreVerifier` 和 `BackupRestoreTransaction`。当前 Mac 的真实子进程矩阵会在 existing root 的 intent、writer reset、old-root move、new-root activation、validation、commit 六个 durable phase，以及 absent root 适用的五个 phase 触发 `SIGKILL`；新进程必须收敛到精确旧根、空根或新根，由对资料库的严格打开和逻辑校验确认内容，并证明 receipt、staging 与 rollback 已清理。另一个进程持有资料库时，恢复在准备任何暂存之前被拒绝；它放手之后同一次恢复成功。隔离的 ad-hoc probe 还完成了 20,000 对象、2 GiB 合成数据的流式备份和完整读取。
+Core/Platform/App 自动化覆盖 canonical 格式、pending enrollment 重启恢复与显式放弃、错误恢复码、篡改/截断、资源上限、目录替换、稳定 writer 配置变化、真实双进程线性 publication、保留策略、私有 staging、whole-root 回滚、设置模型和降级恢复。[逻辑备份测试](../Tests/KinloguePlatformTests/SQLiteLogicalBackupTests.swift)用真实的仓库和 LAN 上传建立资料库，恢复后逐项核对成员、报告及其 OCR、LAN 预处理结果、DICOM 图和原件导出；冻结时仍在处理中的草稿和 LAN 项以可重试的失败状态进入恢复点，进行中的上传不进入。[恢复测试](../Tests/KinloguePlatformTests/EncryptedCheckpointRestoreTests.swift)覆盖错误恢复码、文件树格式的拒绝、已有资料库的整根替换、旧根移走之后中断的回滚、截断的事务收据失败关闭，以及只清理有收据的废弃预检。[启动测试](../Tests/KinlogueAppTests/SQLiteAppStartupTests.swift)另外覆盖启动页的恢复入口：资料库目录是不受支持的旧格式时，经它恢复一个逻辑格式的恢复点会整根替换该目录，下一次启动打开恢复后的资料库并删除移走的旧目录。跨进程恢复探针不再维护第二套 activation 状态机：seed 只生成合成 checkpoint，execute 与 relaunch reconcile 直接调用生产 `BackupRestoreVerifier` 和 `BackupRestoreTransaction`。当前 Mac 的真实子进程矩阵会在 existing root 的 intent、writer reset、old-root move、new-root activation、validation、commit 六个 durable phase，以及 absent root 适用的五个 phase 触发 `SIGKILL`；新进程必须收敛到精确旧根、空根或新根，由对资料库的严格打开和逻辑校验确认内容，并证明 receipt、staging 与 rollback 已清理。另一个进程持有资料库时，恢复在准备任何暂存之前被拒绝；它放手之后同一次恢复成功。隔离的 ad-hoc probe 还完成了 20,000 对象、2 GiB 合成数据的流式备份和完整读取。
 
 activation 的安装探针按生产事务契约逐 phase 固定终态，不再把任意旧根或新根都视为成功：existing root 在 intent、writer reset、old-root move 后必须恢复精确旧根，后续三 phase 必须保留新根；absent root 在 intent、writer reset 后必须保持无根，后续三 phase 必须保留新根，且每项都要求 transaction/preflight receipt、staging 与 rollback 全部不存在。[真实进程测试](../Tests/KinlogueStorageProcessTests/SQLiteLogicalRestoreProcessTests.swift)另有两个场景在新根激活之后破坏其中一个原件：下一个进程的 reconcile 必须发现校验失败，恢复逐文件相同的旧根或原本的无根状态，并清空上述事务工件。
 
