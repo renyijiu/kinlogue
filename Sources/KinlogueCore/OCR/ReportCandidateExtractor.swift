@@ -127,6 +127,7 @@ public struct ReportCandidateExtractor: Sendable {
     private static let referenceColumnHeadings: Set<String> = [
         "参考值", "参考范围", "参考区间", "生物参考区间", "参考值范围",
     ]
+    private static let rowNumberColumnHeadings: Set<String> = ["序号", "编号", "No", "No.", "NO", "NO."]
     private static let resultTableFooterHeadings = dateLabelMappings.map { $0.0 } + [
         "检验：", "检验:", "核对：", "核对:",
         "备注", "注：", "注:", "**代表",
@@ -424,14 +425,21 @@ public struct ReportCandidateExtractor: Sendable {
                 let left = ([item] + own).last { $0.boundingBox.x < heading.boundingBox.x } ?? item
                 return (left.boundingBox.x + heading.boundingBox.x) / 2
             }
+            // A heading is often centred over cells that start further left, so the table's
+            // edges follow the right edge of the neighbouring heading rather than a midpoint.
+            // A row-number column printed before the second table's item heading is that table's.
+            func rightEdge(of heading: OCRBlock, before limit: OCRBlock) -> Double {
+                min(heading.boundingBox.x + heading.boundingBox.width, limit.boundingBox.x)
+            }
             let previous = sameLine.last { $0.boundingBox.x < item.boundingBox.x }
+            let last = own.reversed().first { !Self.rowNumberColumnHeadings.contains(normalizedHeaderCell($0.text)) }
             headers.append(ResultTableHeader(
                 pageNumber: item.pageNumber,
                 y: max(item.boundingBox.y, result.boundingBox.y, reference.boundingBox.y),
                 resultBoundary: boundary(before: result),
                 referenceBoundary: boundary(before: reference),
-                leftBoundary: previous.map { ($0.boundingBox.x + item.boundingBox.x) / 2 },
-                rightBoundary: next.map { ((own.last ?? reference).boundingBox.x + $0.boundingBox.x) / 2 },
+                leftBoundary: previous.map { rightEdge(of: $0, before: item) },
+                rightBoundary: next.map { rightEdge(of: last ?? reference, before: $0) },
                 blockIDs: [item.id, result.id, reference.id]
             ))
         }

@@ -1701,3 +1701,14 @@
 - **测试**：Core 新增 2 项（检验科版式的列归并、并排表格且两行表头高度不同），后一项先在没有修复的代码上确认失败；Platform 搜索集成测试改为覆盖“结果字段位置已记住时仍从已校验的搜索行列出、重新读取时详情损坏则不列”，并改用新的 `match` 签名。主清单 1181 tests / 96 suites。
 - **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，本条改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1181 tests / 96 suites，隔离运行的验收扫描、storage process、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只追加了本条日志。传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
 - **未处理**：带文字层的 PDF 按行生成 block，一行各列合成一个 block，因此抽不出表格，科室和日期候选会带上同行其他文字，没有标记的表格行不进入任何已确认字段、搜不到。可以按字符位置把文字层的行在大间隔处拆开，但 block 数会增加数倍，可能触发每份 4,096 个 block 的输出上限，需要单独评估。识别层误读（“↑”读成“个”或“T”，“白”读成“自”，“U/L”读成“UIL”）原样保留，由用户在复核时修正。
+
+## [2026-10-14] review/fix | 搜索呈现与抽取规则 version 6 的评审修复
+
+- **起因**：对 PR 22 做代码评审，发现 11 项问题，用户要求按建议处理。
+- **抽取**：[`ReportCandidateExtractor`](../Sources/KinlogueCore/OCR/ReportCandidateExtractor.swift) 原先取相邻两个表头左缘的中点作为一张表的左右边界。检验单的表头常居中印在左对齐的项目名上方，项目名落到边界左侧，整行被丢掉；version 5 没有左边界，这一行还能抽出。现在改取相邻表头的右缘；并排的右表若有自己的序号或编号列，该列不再并入左表的参考值格。仍属同一次未发布的 version 6，版本号不变。
+- **Core**：[`ReportedResultLine.lines(matching:)`](../Sources/KinlogueCore/Domain/ReportedResultLine.swift) 的每次查找都从所在行的换行之后继续，保证循环前进；只在测试里使用的公开 `lines(in:)` 已删除。[`SearchExcerpt`](../Sources/KinlogueCore/Domain/SearchExcerpt.swift) 把搜索词里的空白按同样方式折叠，含制表符或连续空白的词也能摘录。摘录跳过字段时不再要求与卡片显示的文字完全相同：卡片显示的是字段开头，且命中落在这一段里才跳过，所以超过 160 个标量的标题只在命中落在截断之后时摘录。含 NUL 的检查集中到 `RecordQuery.canLocate`。
+- **Platform**：搜索行的摘要与内容哈希核对抽成 `SQLiteReportSearch.isVerified`，扫描和呈现共用。`SQLiteReportSearchCache` 的说明改为如实写明结果字段位置只按报告行记的两个摘要使用、不再核对详情字节；[`sqlite-storage.md`](sqlite-storage.md#app-查询与提交观察) 同步写明详情行此后单独损坏时同一会话的表现。
+- **App**：`TimelineCard` 的 `showsDate` 与 `highlightTerm` 合并为一个 `searchTerm`；VoiceOver 读摘录正文，不再读出两端的省略号。
+- **未处理**：搜索字段只是无标签的字符串数组，需要按详情找出结果字段的位置。改为带标签的格式要改动已校验的行格式并迁移现有资料库，这次不做。
+- **测试**：Core 新增 1 项（表头居中、两表各带序号列），并在现有测试里补上按行前进、含换行或 NUL 的词、含空白的词的摘录、超长标题的摘录；Platform 缓存测试补上结果字段位置的摘要匹配、随报告清除、20,000 条上限和 `removeAll`。三处新断言先在未修复的代码上确认失败。主清单 1182 tests / 96 suites。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，完整 `scripts/test.sh` 退出码 0，主清单 1182 tests / 96 suites，隔离门禁一并通过；传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。近上限资料库的首页计时没有重测：摘录跳过字段的判断只对卡片显示的两三段文字做前缀比较，预计不改变 [搜索呈现测量](search-presentation-measurement-2026-10-14.md) 的结果，但这是推断。真实检验单版式上的边界效果仍未核对。

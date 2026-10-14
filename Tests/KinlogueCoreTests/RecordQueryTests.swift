@@ -191,12 +191,17 @@ private func queryRecord(
     )
 }
 
+/// Every line of a transcription that holds at least two non-empty cells.
+private func tableLines(_ transcription: String) -> [ReportedResultLine] {
+    transcription.split(whereSeparator: \.isNewline).compactMap { ReportedResultLine($0) }
+}
+
 @Test
 func resultLinesKeepTheTableCellsOfExtractedResultsVerbatim() throws {
     // The exact transcription the table extraction writes for two lab rows.
     let transcription = "合成项目甲\t12.2 ↑\t3.0~10.0%\n合成项目乙\t5.9\t3.5~9.5"
 
-    #expect(ReportedResultLine.lines(in: transcription).map(\.cells) == [
+    #expect(tableLines(transcription).map(\.cells) == [
         ["合成项目甲", "12.2 ↑", "3.0~10.0%"],
         ["合成项目乙", "5.9", "3.5~9.5"],
     ])
@@ -209,16 +214,22 @@ func resultLinesKeepTheTableCellsOfExtractedResultsVerbatim() throws {
 
 @Test
 func resultLinesNeedTwoCellsAndIgnoreNarrativeText() {
-    #expect(ReportedResultLine.lines(in: "合成检查所见正文。\n合成项目 12 3~4").isEmpty)
+    #expect(tableLines("合成检查所见正文。\n合成项目 12 3~4").isEmpty)
     #expect(ReportedResultLine.lines(matching: "合成", in: "合成检查所见正文。").isEmpty)
     // A user edit can leave a single cell, blank cells or Windows line endings behind.
     let edited = "合成项目甲\t\n\t\t\n 合成项目乙 \t\t 5.9 \r\n合成说明一句\n合成项目丙\t7\t5~8\t附注"
-    #expect(ReportedResultLine.lines(in: edited).map(\.cells) == [
+    #expect(tableLines(edited).map(\.cells) == [
         ["合成项目乙", "5.9"],
         ["合成项目丙", "7", "5~8", "附注"],
     ])
     // The term is searched in the stored line, so it never spans a tab.
     #expect(ReportedResultLine.lines(matching: "项目乙 5.9", in: edited).isEmpty)
+    // Each search resumes after the break of the line it found, a one-cell line and CRLF included.
+    #expect(ReportedResultLine.lines(matching: "合成项目", in: edited).map { $0.cells[0] } == ["合成项目乙", "合成项目丙"])
+    // A term with a line break is never within one line; a term with NUL takes the guarded search.
+    #expect(ReportedResultLine.lines(matching: "乙\n合成", in: "合成项目乙\t5.9\n合成项目丙\t7").isEmpty)
+    #expect(ReportedResultLine.lines(matching: "项目丙\u{0}", in: "合成项目乙\t5.9\n合成项目丙\u{0}\t7").map(\.cells)
+        == [["合成项目丙\u{0}", "7"]])
 }
 
 @Test
@@ -257,6 +268,8 @@ func searchExcerptKeepsAWindowAroundTheFirstMatch() throws {
     #expect(SearchExcerpt(term: "absent", in: "Synthetic") == nil)
     #expect(SearchExcerpt(term: "", in: "Synthetic") == nil)
     #expect(SearchExcerpt(term: "成\u{0}", in: "合成\u{0}") == nil)
+    // A term that spans a tab or a line break is found again once both are folded.
+    #expect(SearchExcerpt(term: "LDL-C\n 2.1", in: "  Synthetic\tLDL-C\n 2.1  ")?.text == "Synthetic LDL-C 2.1")
 }
 
 @Test
@@ -267,10 +280,15 @@ func searchMatchPrefersResultLinesAndSkipsFieldsTheRowShows() throws {
     #expect(LibraryReportSearchMatch.none.isEmpty)
 
     let fields = ["合成标题", "合成医院", "合成内分泌科", "合成结论提到内分泌", "2026-10-09T00:00:00Z"]
-    let visible: Set = ["合成标题", "合成医院", "2026-10-09T00:00:00Z"]
+    let visible = ["合成标题", "合成医院", "2026-10-09T00:00:00Z"]
     #expect(LibraryReportSearchMatch.excerpt(term: "内分泌", fields: fields, hiding: visible)?.text == "合成内分泌科")
     #expect(LibraryReportSearchMatch.excerpt(term: "标题", fields: fields, hiding: visible) == nil)
     #expect(LibraryReportSearchMatch.excerpt(term: "2026", fields: fields, hiding: visible) == nil)
+    // A title the row cuts short hides only the matches the row shows.
+    let title = String(repeating: "甲", count: 160) + "合成尾词"
+    let shown = [String(String.UnicodeScalarView(title.unicodeScalars.prefix(160)))]
+    #expect(LibraryReportSearchMatch.excerpt(term: "甲甲", fields: [title], hiding: shown) == nil)
+    #expect(LibraryReportSearchMatch.excerpt(term: "尾词", fields: [title], hiding: shown)?.text.hasSuffix("合成尾词") == true)
 
     let member = try FamilyMember(displayName: "Synthetic member")
     let summary = LibraryReportSummary(record: try queryRecord(memberID: member.id, state: .confirmed, conclusion: "Synthetic"))

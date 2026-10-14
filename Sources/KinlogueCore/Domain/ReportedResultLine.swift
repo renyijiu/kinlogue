@@ -19,24 +19,19 @@ public struct ReportedResultLine: Hashable, Sendable {
 
     private init(cells: [String]) { self.cells = cells }
 
-    /// The lines that hold at least two non-empty cells. Narrative text has no tabs and yields none.
-    public static func lines(in transcription: String) -> [Self] {
-        guard transcription.utf8.contains(UInt8(ascii: "\t")) else { return [] }
-        return transcription.split(whereSeparator: \.isNewline).compactMap(Self.init)
-    }
-
     /// The lines in which `term` is found by the localized, case-insensitive search that decides
     /// whether a report matches, applied to the line as stored, tabs included.
     public static func lines(matching term: String, in transcription: String, locale: Locale = .current) -> [Self] {
         guard !term.isEmpty, !term.contains(where: \.isNewline),
               transcription.utf8.contains(UInt8(ascii: "\t")) else { return [] }
         // A term with NUL needs the guarded predicate, line by line.
-        guard !term.unicodeScalars.contains(where: { $0.value == 0 }) else {
+        guard RecordQuery.canLocate(term) else {
             return transcription.split(whereSeparator: \.isNewline).compactMap { line in
                 RecordQuery.localizedContains(term, in: String(line), locale: locale) ? Self(line) : nil
             }
         }
-        // One search per matching line: each finds the next match, which names its line.
+        // One search per matching line: each finds the next match, which names its line, and the
+        // next search starts after that line's break, so every pass moves forward.
         var lines: [Self] = []
         var searchStart = transcription.startIndex
         while searchStart < transcription.endIndex,
@@ -46,7 +41,8 @@ public struct ReportedResultLine: Hashable, Sendable {
                 .map { transcription.index(after: $0) } ?? transcription.startIndex
             let lineEnd = transcription[found.lowerBound...].firstIndex(where: \.isNewline) ?? transcription.endIndex
             if let line = Self(transcription[lineStart..<lineEnd]) { lines.append(line) }
-            searchStart = lineEnd
+            guard lineEnd < transcription.endIndex else { break }
+            searchStart = transcription.index(after: lineEnd)
         }
         return lines
     }

@@ -56,7 +56,8 @@ package struct LibraryReportSummary: Equatable, Identifiable, Sendable {
              matchedResultLines: match.resultLines, matchedExcerpt: match.excerpt)
     }
 
-    /// The text a row already shows for this report: its heading and organization.
+    /// The text a row already shows for this report: its heading and organization, each possibly
+    /// cut short of the field it comes from.
     package var visibleSearchText: [String] {
         [title ?? reportType, organization].compactMap { $0 }
     }
@@ -77,12 +78,18 @@ package struct LibraryReportSearchMatch: Equatable, Sendable {
 
     package var isEmpty: Bool { resultLines.isEmpty && excerpt == nil }
 
-    /// The excerpt from the first of `fields` that the row does not already show and the term is
-    /// found in. `fields` are a report's search fields in their stored order.
-    package static func excerpt(term: String, fields: [String], hiding visible: Set<String>,
+    /// The excerpt from the first of `fields` the term is found in, skipping a field whose match
+    /// the row already shows. `fields` are a report's search fields in their stored order and
+    /// `visible` the text the row shows of them; a visible text may be the start of a longer field,
+    /// so the field is skipped only when the term is found in that start.
+    package static func excerpt(term: String, fields: [String], hiding visible: [String],
                                 locale: Locale = .current) -> SearchExcerpt? {
-        for field in fields where !visible.contains(field) {
-            if let excerpt = SearchExcerpt(term: term, in: field, locale: locale) { return excerpt }
+        for field in fields {
+            let shown = visible.contains { text in
+                field.unicodeScalars.starts(with: text.unicodeScalars)
+                    && RecordQuery.localizedContains(term, in: text, locale: locale)
+            }
+            if !shown, let excerpt = SearchExcerpt(term: term, in: field, locale: locale) { return excerpt }
         }
         return nil
     }

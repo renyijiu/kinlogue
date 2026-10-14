@@ -286,6 +286,34 @@ func candidateExtractorKeepsTwoTablesPrintedSideBySideApart() throws {
 }
 
 @Test
+func candidateExtractorKeepsCellsThatStartLeftOfTheirCentredHeading() throws {
+    // Two tables side by side, each with a row number, headings centred over left-aligned cells.
+    let blocks = try [
+        block("序号", page: 1, x: 0.04, y: 0.82, width: 0.04),
+        block("项目名称", page: 1, x: 0.16, y: 0.82, width: 0.08),
+        block("结果", page: 1, x: 0.36, y: 0.82, width: 0.04),
+        block("参考值", page: 1, x: 0.47, y: 0.82, width: 0.06),
+        block("序号", page: 1, x: 0.58, y: 0.82, width: 0.04),
+        block("项目", page: 1, x: 0.70, y: 0.82, width: 0.04),
+        block("结果", page: 1, x: 0.84, y: 0.82, width: 0.04),
+        block("参考范围", page: 1, x: 0.92, y: 0.82, width: 0.07),
+        block("1", page: 1, x: 0.055, y: 0.79, width: 0.01),
+        block("合成项目甲", page: 1, x: 0.09, y: 0.79, width: 0.15),
+        block("6.85↑", page: 1, x: 0.35, y: 0.79, width: 0.06),
+        block("3.89-6.11", page: 1, x: 0.45, y: 0.79, width: 0.08),
+        block("2", page: 1, x: 0.595, y: 0.79, width: 0.01),
+        block("合成项目丙", page: 1, x: 0.63, y: 0.79, width: 0.15),
+        block("28", page: 1, x: 0.84, y: 0.79, width: 0.03),
+        block("7-40", page: 1, x: 0.91, y: 0.79, width: 0.05),
+    ]
+
+    let candidates = ReportCandidateExtractor().extract(from: blocks)
+
+    #expect(candidates.reportedResults?.transcription
+        == "合成项目甲\t6.85↑\t3.89-6.11\n合成项目丙\t28\t7-40")
+}
+
+@Test
 func candidateExtractorJoinsASameLineSplitDateLabelAndValue() throws {
     let blocks = try [
         block("采样日期：", page: 1, x: 0.05, y: 0.8, width: 0.18),

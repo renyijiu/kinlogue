@@ -114,8 +114,7 @@ struct TimelineView: View {
                                 record: record,
                                 memberLabel: memberLabel(record),
                                 showsMemberLabel: showsMemberLabels,
-                                showsDate: true,
-                                highlightTerm: searchTerm,
+                                searchTerm: searchTerm,
                                 isSelected: record.id == selectedRecordID,
                                 comparisonModel: comparisonModel,
                                 onSelect: onSelect
@@ -135,8 +134,7 @@ struct TimelineView: View {
                                         record: record,
                                         memberLabel: memberLabel(record),
                                         showsMemberLabel: showsMemberLabels,
-                                        showsDate: false,
-                                        highlightTerm: "",
+                                        searchTerm: "",
                                         isSelected: record.id == selectedRecordID,
                                         comparisonModel: comparisonModel,
                                         onSelect: onSelect
@@ -273,10 +271,8 @@ private struct TimelineCard: View {
     let record: LibraryReportSummary
     let memberLabel: String
     let showsMemberLabel: Bool
-    /// Search results have no date sections above them, so each card names its own date.
-    let showsDate: Bool
     /// The search term to set in bold wherever the card shows it; empty on the timeline.
-    let highlightTerm: String
+    let searchTerm: String
     let isSelected: Bool
     @ObservedObject var comparisonModel: ComparisonModel
     let onSelect: (HealthRecord.ID) -> Void
@@ -307,7 +303,7 @@ private struct TimelineCard: View {
                         }
                         Text(SearchHighlight.text(
                             record.title ?? record.reportType ?? AppLocalization.string("健康记录"),
-                            term: highlightTerm
+                            term: searchTerm
                         ))
                             .font(.headline)
                         Spacer()
@@ -319,14 +315,14 @@ private struct TimelineCard: View {
                                 .kinlogueChip()
                         }
                     }
-                    if showsDate {
+                    if isSearchResult {
                         Label(dateText, systemImage: "calendar")
                             .font(.subheadline)
                             .foregroundStyle(KinlogueTheme.onVariant)
                     }
                     if let organization = record.organization {
                         Label {
-                            Text(SearchHighlight.text(organization, term: highlightTerm))
+                            Text(SearchHighlight.text(organization, term: searchTerm))
                         } icon: {
                             Image(systemName: "building.2")
                         }
@@ -338,12 +334,12 @@ private struct TimelineCard: View {
                         MatchedResultLinesView(
                             lines: record.matchedResultLines,
                             totalCount: record.matchedResultLineCount,
-                            term: highlightTerm
+                            term: searchTerm
                         )
                     } else if let excerpt = record.matchedExcerpt {
                         // Shows where the term was found when the heading does not.
                         Label {
-                            Text(SearchHighlight.text(excerpt.displayText, term: highlightTerm))
+                            Text(SearchHighlight.text(excerpt.displayText, term: searchTerm))
                                 .foregroundStyle(.primary)
                                 .lineLimit(2)
                         } icon: {
@@ -366,6 +362,9 @@ private struct TimelineCard: View {
         }
     }
 
+    /// Search results have no date sections above them, so each card names its own date.
+    private var isSearchResult: Bool { !searchTerm.isEmpty }
+
     private var isHighlighted: Bool {
         comparisonModel.isSelecting ? comparisonModel.isSelected(record.id) : isSelected
     }
@@ -373,9 +372,10 @@ private struct TimelineCard: View {
     private var localizedAccessibilityLabel: String {
         let recordType = record.reportType
             ?? AppLocalization.string("健康记录")
-        guard showsDate else { return AppLocalization.string("\(memberLabel)，\(recordType)") }
+        guard isSearchResult else { return AppLocalization.string("\(memberLabel)，\(recordType)") }
         guard !record.matchedResultLines.isEmpty else {
-            if let excerpt = record.matchedExcerpt?.displayText {
+            // The ellipses are only drawn; VoiceOver reads the excerpt's own text.
+            if let excerpt = record.matchedExcerpt?.text {
                 return AppLocalization.string("\(memberLabel)，\(recordType)，\(dateText)，匹配内容：\(excerpt)")
             }
             return AppLocalization.string("\(memberLabel)，\(recordType)，\(dateText)")
@@ -443,7 +443,7 @@ enum SearchHighlight {
     static func text(_ value: String, term: String, locale: Locale = .current) -> AttributedString {
         var attributed = AttributedString(value)
         // A term with NUL takes a guarded path in the match predicate; it is not highlighted.
-        guard !term.isEmpty, !term.unicodeScalars.contains(where: { $0.value == 0 }) else { return attributed }
+        guard RecordQuery.canLocate(term) else { return attributed }
         var searchStart = value.startIndex
         while let found = value.range(of: term, options: .caseInsensitive,
                                       range: searchStart..<value.endIndex, locale: locale),

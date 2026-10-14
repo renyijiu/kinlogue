@@ -15,7 +15,7 @@ public struct SearchExcerpt: Hashable, Sendable {
     /// Nil when the term is not found in `field` by the localized, case-insensitive search.
     public init?(term: String, in field: String, locale: Locale = .current) {
         // A term with NUL takes a guarded path in the match predicate; it gets no excerpt.
-        guard !term.isEmpty, !term.unicodeScalars.contains(where: { $0.value == 0 }),
+        guard RecordQuery.canLocate(term),
               let raw = field.range(of: term, options: .caseInsensitive, locale: locale) else { return nil }
         // Whitespace is folded only near the match, so a long field costs one search. Each folded
         // run was at least one character, so this window holds the whole excerpt.
@@ -23,8 +23,11 @@ public struct SearchExcerpt: Hashable, Sendable {
             ?? field.startIndex
         let windowEnd = field.index(raw.upperBound, offsetBy: Self.maximumCharacters, limitedBy: field.endIndex)
             ?? field.endIndex
-        let flat = field[windowStart..<windowEnd].split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        guard let match = flat.range(of: term, options: .caseInsensitive, locale: locale) else { return nil }
+        // The term's own whitespace folds the same way, so a term that spans a tab is found again.
+        let flat = Self.folded(field[windowStart..<windowEnd]), flatTerm = Self.folded(term[...])
+        guard !flatTerm.isEmpty, let match = flat.range(of: flatTerm, options: .caseInsensitive, locale: locale) else {
+            return nil
+        }
         let start = flat.index(match.lowerBound, offsetBy: -Self.leadingCharacters, limitedBy: flat.startIndex)
             ?? flat.startIndex
         let budgetEnd = flat.index(start, offsetBy: Self.maximumCharacters, limitedBy: flat.endIndex) ?? flat.endIndex
@@ -32,6 +35,10 @@ public struct SearchExcerpt: Hashable, Sendable {
         text = String(flat[start..<end])
         isTruncatedAtStart = start > flat.startIndex || field[..<windowStart].contains { !$0.isWhitespace }
         isTruncatedAtEnd = end < flat.endIndex || field[windowEnd...].contains { !$0.isWhitespace }
+    }
+
+    private static func folded(_ text: Substring) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
     private init(text: String, isTruncatedAtStart: Bool, isTruncatedAtEnd: Bool) {

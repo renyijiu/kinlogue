@@ -136,6 +136,13 @@ public enum RecordQuery {
         return text.range(of: term, options: .caseInsensitive, locale: locale) != nil
     }
 
+    /// Whether the places `term` is found can be located with a plain localized search of the
+    /// field. A term holding NUL cannot, for the reason above: paths that need a match's range
+    /// rather than a yes or no leave such a term alone.
+    package static func canLocate(_ term: String) -> Bool {
+        !term.isEmpty && !term.unicodeScalars.contains { $0.value == 0 }
+    }
+
     package static func searchableFields(record: HealthRecord) -> [String] {
         searchableFields(record: record, dateFormatter: ISO8601DateFormatter())
     }

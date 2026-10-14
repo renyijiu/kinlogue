@@ -43,8 +43,9 @@ struct TimelineViewSourceTests {
         let timeline = try source(named: "TimelineView.swift")
 
         // Only search results lack the date sections, so only they name the date on the card.
-        #expect(timeline.components(separatedBy: "showsDate: true,").count - 1 == 1)
-        #expect(timeline.components(separatedBy: "showsDate: false,").count - 1 == 1)
+        #expect(timeline.components(separatedBy: "searchTerm: searchTerm,").count - 1 == 1)
+        #expect(timeline.components(separatedBy: "searchTerm: \"\",").count - 1 == 1)
+        #expect(timeline.contains("private var isSearchResult: Bool { !searchTerm.isEmpty }"))
         #expect(timeline.contains("if !record.matchedResultLines.isEmpty {"))
         #expect(timeline.contains("AppLocalization.string(\"\\(memberLabel)，\\(recordType)，\\(dateText)，匹配的结果行：\\(lines)\")"))
         // The lines are printed cells. No status tone may suggest the value is normal or not.
@@ -61,14 +62,15 @@ struct TimelineViewSourceTests {
         let shell = try source(named: "AppShellView.swift")
 
         #expect(shell.contains("searchTerm: model.searchText.trimmingCharacters(in: .whitespacesAndNewlines),"))
-        #expect(timeline.contains("highlightTerm: searchTerm,"))
-        #expect(timeline.contains("highlightTerm: \"\","))
+        #expect(timeline.components(separatedBy: "term: searchTerm").count - 1 == 4)
         // Lines come first, then the excerpt, and only then the conclusion.
         let lines = try #require(timeline.range(of: "if !record.matchedResultLines.isEmpty {"))
         let excerpt = try #require(timeline.range(of: "} else if let excerpt = record.matchedExcerpt {"))
         let conclusion = try #require(timeline.range(of: "AppLocalization.string(\"原报告未提供结论\")"))
         #expect(lines.lowerBound < excerpt.lowerBound && excerpt.lowerBound < conclusion.lowerBound)
         #expect(timeline.contains("AppLocalization.string(\"\\(memberLabel)，\\(recordType)，\\(dateText)，匹配内容：\\(excerpt)\")"))
+        // VoiceOver reads the excerpt without the drawn ellipses.
+        #expect(timeline.contains("if let excerpt = record.matchedExcerpt?.text {"))
     }
 
     @Test

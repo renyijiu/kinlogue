@@ -543,8 +543,25 @@ func sqliteSearchCacheStopsGrowingAtItsBudgetAndDropsEntriesOfMissingReports() {
     let kept = Set(stored.keys.prefix(1)), newcomer = UUID()
     cache.update([(newcomer, one)], present: kept.union([newcomer]))
     #expect(Set(cache.snapshot().keys) == kept.union([newcomer]))
+
+    // A results-field index holds only for both digests it was learned with, and goes with its report.
+    let search = Data(repeating: 3, count: 32), detail = Data(repeating: 4, count: 32), indexed = UUID()
+    cache.setResultsField(indexed, .init(fieldsHash: search, detailHash: detail, index: 4))
+    #expect(cache.resultsField(indexed, fieldsHash: search, detailHash: detail)?.index == 4)
+    #expect(cache.resultsField(indexed, fieldsHash: search, detailHash: search) == nil)
+    #expect(cache.resultsField(indexed, fieldsHash: detail, detailHash: detail) == nil)
+    cache.update([], present: [newcomer])
+    #expect(cache.resultsField(indexed, fieldsHash: search, detailHash: detail) == nil)
+    // At its limit a report already known is still updated; a new one is not remembered.
+    let known = (0..<SQLiteReportSearchCache.resultsFieldLimit).map { _ in UUID() }
+    for id in known { cache.setResultsField(id, .init(fieldsHash: search, detailHash: detail, index: nil)) }
+    cache.setResultsField(indexed, .init(fieldsHash: search, detailHash: detail, index: 4))
+    #expect(cache.resultsField(indexed, fieldsHash: search, detailHash: detail) == nil)
+    cache.setResultsField(known[0], .init(fieldsHash: search, detailHash: detail, index: 2))
+    #expect(cache.resultsField(known[0], fieldsHash: search, detailHash: detail)?.index == 2)
     cache.removeAll()
     #expect(cache.snapshot().isEmpty)
+    #expect(cache.resultsField(known[0], fieldsHash: search, detailHash: detail) == nil)
 }
 
 @Test
