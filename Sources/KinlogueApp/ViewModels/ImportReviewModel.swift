@@ -55,8 +55,9 @@ private enum ImportReviewError: Equatable {
 
 @MainActor
 final class ImportReviewModel: ObservableObject {
-    private let draftID: ImportDraft.ID
+    let draftID: ImportDraft.ID
     private let service: any AppDataServicing
+    private var libraryRevision: LibraryRevision?
     private var draftRevision: UInt64 = 0
     private var originalLoadTask: Task<OriginalDocumentPayload, Error>?
     private var originalLoadID: UUID?
@@ -71,7 +72,7 @@ final class ImportReviewModel: ObservableObject {
     @Published private(set) var isRecognitionSlow = false
     @Published var isPresented = true
     @Published var isDiscardConfirmationPresented = false
-    @Published private(set) var members: [FamilyMember] = []
+    @Published private(set) var members: [LibraryMemberSummary] = []
     @Published private(set) var memberSelectionLabels: [FamilyMember.ID: String] = [:]
     @Published private(set) var dateCandidates: [ReportDateCandidate] = []
     @Published var selectedMemberID: FamilyMember.ID?
@@ -95,14 +96,18 @@ final class ImportReviewModel: ObservableObject {
     @Published private(set) var abnormalSourceDescriptions: [String] = []
     @Published private var userError: ImportReviewError?
 
+    private let onReadFailure: @MainActor (Error) -> Void
+
     init(
         draftID: ImportDraft.ID,
         service: any AppDataServicing,
-        slowRecognitionNoticeDelay: Duration = ReportRecognitionNotice.slowDelay
+        slowRecognitionNoticeDelay: Duration = ReportRecognitionNotice.slowDelay,
+        onReadFailure: @escaping @MainActor (Error) -> Void = { _ in }
     ) {
         self.draftID = draftID
         self.service = service
         self.slowRecognitionNoticeDelay = slowRecognitionNoticeDelay
+        self.onReadFailure = onReadFailure
     }
 
     var errorMessage: String? { userError?.localizedText }
@@ -117,9 +122,10 @@ final class ImportReviewModel: ObservableObject {
                 isLoading = false
                 return
             }
+            libraryRevision = content.revision
             draftRevision = content.draft.revision
             members = content.members
-            memberSelectionLabels = RecordQuery.selectionLabels(for: content.members)
+            memberSelectionLabels = LibraryMemberSummary.labels( content.members)
             selectedMemberID = content.draft.memberID.flatMap { memberID in
                 content.members.contains(where: { $0.id == memberID }) ? memberID : nil
             }
@@ -128,6 +134,8 @@ final class ImportReviewModel: ObservableObject {
             selectedOriginalSourceID = content.draft.sources.first.id
             originalDocument = content.original
         } catch {
+            guard isPresented else { isLoading = false; return }
+            onReadFailure(error)
             loadFailed = true
             userError = .unavailable
         }
@@ -180,10 +188,12 @@ final class ImportReviewModel: ObservableObject {
         selectedOriginalSourceID = sourceID
         originalDocument = nil
         isOriginalLoading = true
+        guard let libraryRevision else { return }
+        let expectedRevision = draftRevision
         let task = Task { [service, draftID] in
             let payload = try await service.loadReviewOriginal(
                 draftID: draftID,
-                sourceID: sourceID
+                sourceID: sourceID, expectedRevision: expectedRevision, expectedLibrary: libraryRevision
             )
             try Task.checkCancellation()
             return payload
@@ -199,6 +209,7 @@ final class ImportReviewModel: ObservableObject {
             // A newer source selection owns the presentation state.
         } catch {
             guard isPresented, originalLoadID == requestID else { return }
+            onReadFailure(error)
             isOriginalLoading = false
             originalLoadTask = nil
             userError = .originalUnavailable

@@ -52,8 +52,6 @@ final class OriginalExportModel: ObservableObject {
             AppLocalization.string("所选位置没有足够空间完成导出。")
         case .destinationAccessDenied:
             AppLocalization.string("续页没有权限写入所选位置，请重新选择。")
-        case .vaultChanged:
-            AppLocalization.string("导出期间资料库发生变化，未生成不完整的压缩包。请重试。")
         case .sourceIntegrityFailure:
             AppLocalization.string("部分原始文件已损坏或发生变化，导出未完成。")
         case .archiveIntegrityFailure:

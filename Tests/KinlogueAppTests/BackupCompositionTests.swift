@@ -6,52 +6,12 @@ import Testing
 @MainActor
 struct BackupCompositionTests {
     @Test
-    func constructingCompositionDoesNotCreateBackupIdentity() throws {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "KinlogueBackupComposition-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        defer { try? FileManager.default.removeItem(at: base) }
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        let identity = try AppRuntimeIdentity.resolve(
-            bundleInfo: ["CFBundleIdentifier": AppRuntimeIdentity.productionBundleIdentifier],
-            arguments: ["Kinlogue"],
-            trustedApplicationSupportDirectory: base
-        )
-
-        _ = AppComposition.makeDefault(identity: identity)
-
-        #expect(!FileManager.default.fileExists(atPath: identity.backupIdentity.rootURL.path))
-    }
-
-    @Test
-    func anAbsentVaultUsesNormalFirstLaunchBootstrapInsteadOfDamagedVaultRecovery() async throws {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "KinlogueBackupFirstLaunch-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        defer { try? FileManager.default.removeItem(at: base) }
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        let identity = try AppRuntimeIdentity.resolve(
-            bundleInfo: ["CFBundleIdentifier": AppRuntimeIdentity.productionBundleIdentifier],
-            arguments: ["Kinlogue"],
-            trustedApplicationSupportDirectory: base
-        )
-        let composition = AppComposition.makeDefault(identity: identity)
-
-        await composition.startupCoordinator.start()
-
-        #expect(composition.appModel.phase == .ready)
-        #expect(composition.restoreModel.phase == .idle)
-        #expect(!FileManager.default.fileExists(atPath: identity.backupIdentity.rootURL.path))
-    }
-
-    @Test
     func startupReconcilesRestoreBeforeStorageAndScheduler() async {
         let events = StartupEvents()
         let coordinator = AppStartupCoordinator(
             reconcileRestore: { await events.append("restore-reconcile"); return true },
             startStorage: { await events.append("storage-start"); return true },
+            startProcessing: { await events.append("processing-start") },
             startScheduler: { await events.append("scheduler-start") }
         )
 
@@ -60,6 +20,7 @@ struct BackupCompositionTests {
         #expect(await events.values == [
             "restore-reconcile",
             "storage-start",
+            "processing-start",
             "scheduler-start",
         ])
     }

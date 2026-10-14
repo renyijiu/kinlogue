@@ -56,9 +56,8 @@ struct GitHubActionsWorkflowTests {
 
         #expect(workflow.contains("pull_request:"))
         #expect(workflow.contains("push:"))
-        let jobNames = ["quality", "bundle", "complementary-tests", "dedicated-lan-derived-tests"]
-        let checkNames = ["Lint and test", "Verify bundle and DICOM XPC",
-                          "Complementary test partition", "Dedicated LAN derived-artifact tests"]
+        let jobNames = ["quality", "bundle", "complementary-tests"]
+        let checkNames = ["Lint and test", "Verify bundle and DICOM XPC", "Complementary test partition"]
         // Pull requests run the macOS 26 baseline only; other events add the preview.
         let runnerMatrix = #"${{ fromJSON(github.event_name == 'pull_request' "#
             + #"&& '["macos-26"]' || '["macos-26", "xcode-27"]') }}"#
@@ -86,9 +85,15 @@ struct GitHubActionsWorkflowTests {
         #expect(!workflow.contains("SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH"))
         #expect(workflow.contains("KINLOGUE_PRIMARY_TEST_TIMEOUT_SECONDS: \"1200\""))
         #expect(workflow.contains("KINLOGUE_ISOLATED_TEST_TIMEOUT_SECONDS: \"180\""))
-        #expect(workflow.contains("KINLOGUE_PRIMARY_TEST_PARTITION: \"0/3\""))
-        #expect(workflow.contains("KINLOGUE_PRIMARY_TEST_PARTITION: \"1/3\""))
-        #expect(workflow.contains("KINLOGUE_PRIMARY_TEST_PARTITION: \"2/3\""))
+        // The jobs that run the tests cover every partition exactly once, whatever the count.
+        let partitions = workflow.matches(of: /KINLOGUE_PRIMARY_TEST_PARTITION: "(\d+)\/(\d+)"/).map {
+            (index: Int($0.output.1) ?? -1, count: Int($0.output.2) ?? -1)
+        }
+        #expect(partitions.count >= 2)
+        #expect(Set(partitions.map(\.count)) == [partitions.count])
+        #expect(partitions.map(\.index).sorted() == Array(0..<partitions.count))
+        #expect(workflow.components(separatedBy: "run: scripts/test.sh").count - 1 == partitions.count)
+        #expect(!workflow.contains("dedicated-lan-derived-tests"))
         #expect(workflow.contains("scripts/install-ci-ripgrep.sh"))
         #expect(workflow.contains("$GITHUB_WORKSPACE/.build/ci-tools/bin"))
         #expect(workflow.contains(">> \"$GITHUB_PATH\""))
@@ -98,7 +103,6 @@ struct GitHubActionsWorkflowTests {
         #expect(workflow.contains("fetch-depth: 0"))
         #expect(workflow.contains("scripts/privacy-history-guard.sh --ref HEAD"))
         #expect(workflow.contains("scripts/test.sh"))
-        #expect(workflow.components(separatedBy: "run: scripts/test.sh").count - 1 == 3)
         let qualityJob = try job(named: "quality", in: workflow)
         let bundleJob = try job(named: "bundle", in: workflow)
         #expect(!qualityJob.contains("scripts/verify-app.sh"))
@@ -524,6 +528,20 @@ struct GitHubActionsWorkflowTests {
         #expect(
             passedWithShardedEvidence.status == 0,
             Comment(rawValue: passedWithShardedEvidence.output)
+        )
+
+        // A shard that holds exactly one test prints "1 test"; it still counts.
+        let passedWithSingleTestShard = try runDocumentationVerifier(
+            repositoryRoot: passedFixture.root,
+            observedTestResult: """
+            Test run with 862 tests in 80 suites passed
+            Test run with 1 test in 0 suites passed
+            """,
+            requiresTestEvidence: true
+        )
+        #expect(
+            passedWithSingleTestShard.status == 0,
+            Comment(rawValue: passedWithSingleTestShard.output)
         )
 
         let passedWithInventoryEvidence = try runDocumentationVerifier(

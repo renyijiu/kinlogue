@@ -7,7 +7,7 @@ final class DICOMLibraryModel: ObservableObject {
     private var memberLabelsByID: [FamilyMember.ID: String] = [:]
 
     @Published private(set) var studies: [DICOMStudySummary] = []
-    @Published private(set) var members: [FamilyMember] = []
+    @Published private(set) var members: [LibraryMemberSummary] = []
     @Published private(set) var selectedStudyID: DICOMStudy.ID?
 
     var reviewStudies: [DICOMStudySummary] {
@@ -24,12 +24,12 @@ final class DICOMLibraryModel: ObservableObject {
         return confirmedStudiesByDate.filter { $0.confirmedMemberID == memberID }
     }
 
-    func update(studies: [DICOMStudySummary], members: [FamilyMember]) {
+    func update(studies: [DICOMStudySummary], members: [LibraryMemberSummary]) {
         self.studies = studies
         self.members = members
         confirmedStudiesByDate = studies.filter { $0.state == .confirmed }
             .sorted(by: Self.precedes)
-        memberLabelsByID = RecordQuery.selectionLabels(for: members)
+        memberLabelsByID = LibraryMemberSummary.labels( members)
         if let selectedStudyID,
            !studies.contains(where: {
                $0.id == selectedStudyID && $0.state == .confirmed

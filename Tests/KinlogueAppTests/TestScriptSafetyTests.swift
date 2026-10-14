@@ -14,45 +14,31 @@ struct TestScriptSafetyTests {
         #expect(!script.contains("--parallel"))
         #expect(!script.contains("--num-workers"))
         #expect(!script.contains("KINLOGUE_TEST_WORKERS"))
-        #expect(script.components(separatedBy: "--no-parallel").count == 10)
+        // Every command that runs tests is serial and bounded by a deadline, however many there are.
+        let testCommands = Self.logicalCommands(in: script).filter {
+            $0.contains("swift test \"${SWIFT_TEST_ARGUMENTS[@]}\"")
+        }
+        #expect(testCommands.count >= 6)
+        for command in testCommands {
+            #expect(command.contains("scripts/run-with-deadline.sh"), Comment(rawValue: command))
+            if !command.contains("list > \"$PRIMARY_TEST_LIST\"") {
+                #expect(command.contains("--no-parallel"), Comment(rawValue: command))
+            }
+        }
         #expect(!script.contains("SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH"))
         #expect(script.contains("--filter KinlogueCoreTests"))
         #expect(script.contains("primary-test-shards.rb"))
         #expect(script.contains("run-test-shard.rb"))
         #expect(script.contains("swift test \"${SWIFT_TEST_ARGUMENTS[@]}\""))
         #expect(script.contains("list > \"$PRIMARY_TEST_LIST\""))
-        let dedicatedBundleBuild = try #require(script.range(of: "--build-tests"))
-        #expect(script.contains("/usr/bin/xcrun xctest"))
-        #expect(script.contains("discover-derived-xctest-cases.rb"))
-        let dedicatedDerivedGate = try #require(script.range(of:
-            "-XCTest \"$derived_xctest_case\""
-        ))
-        #expect(!script.contains(
-            "LANDerivedArtifactSinkTests/testProductionAdmissionUsesTheDocumentedStoreAndOwnerBounds"
-        ))
-        #expect(!script.contains(
-            "LANDerivedArtifactSinkTests/testRejectsNonPrivateOrHardLinkedDescriptorsAtOwnershipTransfer"
-        ))
-        #expect(script.contains(
-            "Executed 1 test, with 0 failures (0 unexpected)"
-        ))
-        #expect(!script.contains(
-            "Executed 13 tests, with 0 failures (0 unexpected)"
-        ))
-        #expect(script.contains("--disable-swift-testing --enable-xctest"))
-        #expect(script.contains("--show-bin-path"))
-        #expect(script.contains("KinloguePackageTests.xctest"))
-        #expect(script.contains("KinloguePlatformTests.xctest"))
-        let inventoryBuild = try #require(script.range(of: "list > \"$PRIMARY_TEST_LIST\""))
-        #expect(inventoryBuild.lowerBound < dedicatedBundleBuild.lowerBound)
-        #expect(dedicatedBundleBuild.lowerBound < dedicatedDerivedGate.lowerBound)
-        #expect(script.contains(
-            "PRIMARY_PARTITION_INDEX\" -eq $((PRIMARY_PARTITION_COUNT - 1))"
-        ))
+        // Every test is a Swift Testing test in the planned shards; nothing runs through a
+        // separately built XCTest bundle.
+        #expect(!script.contains("xcrun xctest"))
+        #expect(!script.contains("--enable-xctest"))
         #expect(script.contains("--skip-build"))
         #expect(script.contains("--filter KinlogueStorageProcessTests"))
         #expect(script.contains(
-            "--filter differentlyCasedVaultAliasesShareStableAndLegacyLockIdentity"
+            "--filter differentlyCasedLibraryAliasesContendForOneOwner"
         ))
         #expect(script.contains("--filter AcceptanceScanScriptTests"))
         #expect(script.contains("--skip AcceptanceScanScriptTests"))
@@ -61,8 +47,6 @@ struct TestScriptSafetyTests {
         )
         let primaryShardLoop = try #require(script.range(of: "while IFS=$'\\t' read"))
         #expect(acceptanceScanGate.lowerBound < primaryShardLoop.lowerBound)
-        #expect(script.contains("--filter DICOMImportWorkflowIntegrationTests"))
-        #expect(script.contains("--skip DICOMImportWorkflowIntegrationTests"))
         #expect(script.contains(
             "--filter installedLANProbeUsesProductionHTTPAndPersistsAcrossProcessPhases"
         ))
@@ -84,7 +68,6 @@ struct TestScriptSafetyTests {
         #expect(script.contains(
             "KINLOGUE_TEST_SUMMARY_MAX_SECONDS=\"$SHARD_SUPERVISOR_TIMEOUT_SECONDS\""
         ))
-        #expect(script.components(separatedBy: "scripts/run-with-deadline.sh").count == 15)
     }
 
     @Test
@@ -98,7 +81,6 @@ struct TestScriptSafetyTests {
             "KinloguePlatformTests.BackupSuite/first()",
             "KinloguePlatformTests.BackupSuite/second()",
             "KinloguePlatformTests.platformRule()",
-            "KinloguePlatformTests.DICOMImportWorkflowIntegrationTests/isolatedDICOM()",
             "KinloguePlatformTests.LANRealSocketBackpressureTests/ordinarySocketRule()",
             "KinloguePlatformTests.LANRealSocketBackpressureTests/productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect()",
             "KinlogueAppTests.AppSuite/first()",
@@ -108,11 +90,9 @@ struct TestScriptSafetyTests {
             "KinlogueAppTests.SyntheticAcceptanceRunnerTests/ordinaryRunnerRule()",
             "KinlogueAppTests.SyntheticAcceptanceRunnerTests/installedLANProbeUsesProductionHTTPAndPersistsAcrossProcessPhases()",
             "KinlogueStorageProcessTests.StorageSuite/isolatedStorage()",
-            "KinloguePlatformTests.differentlyCasedVaultAliasesShareStableAndLegacyLockIdentity()",
+            "KinloguePlatformTests.differentlyCasedLibraryAliasesContendForOneOwner()",
             "KinloguePlatformTests.LANDeliveryPrerequisiteTests/first()",
             "KinloguePlatformTests.LANDeliveryPrerequisiteTests/second()",
-            "KinloguePlatformTests.LANDerivedArtifactSinkTests/first()",
-            "KinloguePlatformTests.LANDerivedArtifactSinkTests/second()",
         ]
         try (specifiers.joined(separator: "\n") + "\n").write(
             to: fixture,
@@ -124,22 +104,16 @@ struct TestScriptSafetyTests {
         let firstPartition = try runPrimaryShardPlanner(
             fixture: fixture,
             partitionIndex: 0,
-            partitionCount: 3
+            partitionCount: 2
         )
         let secondPartition = try runPrimaryShardPlanner(
             fixture: fixture,
             partitionIndex: 1,
-            partitionCount: 3
-        )
-        let dedicatedPartition = try runPrimaryShardPlanner(
-            fixture: fixture,
-            partitionIndex: 2,
-            partitionCount: 3
+            partitionCount: 2
         )
         #expect(complete.status == 0, Comment(rawValue: complete.output))
         #expect(firstPartition.status == 0, Comment(rawValue: firstPartition.output))
         #expect(secondPartition.status == 0, Comment(rawValue: secondPartition.output))
-        #expect(dedicatedPartition.status == 0, Comment(rawValue: dedicatedPartition.output))
         let text = complete.output
 
         let patterns = text.split(separator: "\n").compactMap { line -> String? in
@@ -148,31 +122,21 @@ struct TestScriptSafetyTests {
         }
         #expect(patterns.count == text.split(separator: "\n").count)
         let primarySpecifiers = [
-            specifiers[1], specifiers[2], specifiers[3], specifiers[5], specifiers[7],
-            specifiers[8], specifiers[9], specifiers[11],
-            specifiers[15], specifiers[16],
+            specifiers[1], specifiers[2], specifiers[3], specifiers[4], specifiers[6],
+            specifiers[7], specifiers[8], specifiers[10],
+            specifiers[14], specifiers[15],
         ]
         let excludedSpecifiers = [
-            specifiers[0], specifiers[4], specifiers[6], specifiers[10], specifiers[12],
-            specifiers[13], specifiers[14], specifiers[17], specifiers[18],
+            specifiers[0], specifiers[5], specifiers[9], specifiers[11], specifiers[12],
+            specifiers[13],
         ]
         #expect(patterns.count == 4)
         let firstPatterns = shardPatterns(in: firstPartition.output)
         let secondPatterns = shardPatterns(in: secondPartition.output)
-        let dedicatedPatterns = shardPatterns(in: dedicatedPartition.output)
         #expect(firstPatterns.count + secondPatterns.count == 4)
         #expect(abs(firstPatterns.count - secondPatterns.count) <= 1)
-        #expect(dedicatedPatterns.count == 1)
-        #expect(dedicatedPatterns[0].contains("LANDerivedArtifactSinkTests"))
-        #expect(!dedicatedPatterns[0].contains("LANDeliveryPrerequisiteTests"))
         #expect(Set(firstPatterns).isDisjoint(with: Set(secondPatterns)))
-        #expect(Set(firstPatterns + secondPatterns).isDisjoint(with: Set(dedicatedPatterns)))
         #expect(Set(firstPatterns + secondPatterns) == Set(patterns))
-        #expect(Set(firstPatterns + secondPatterns + dedicatedPatterns).count == 5)
-        #expect(patterns.allSatisfy {
-            !($0.contains("LANDeliveryPrerequisiteTests") &&
-                $0.contains("LANDerivedArtifactSinkTests"))
-        })
         for pattern in patterns {
             let targets = Set(primarySpecifiers.filter {
                 matches(pattern, runtimeIdentifier(for: $0))
@@ -191,47 +155,6 @@ struct TestScriptSafetyTests {
         let inventory = try runPrimaryShardPlannerInventory(fixture: fixture)
         #expect(inventory.status == 0, Comment(rawValue: inventory.output))
         #expect(inventory.output == "KLT_PRIMARY_TEST_INVENTORY tests=11 suites=5\n")
-    }
-
-    @Test
-    func dedicatedXCTestSelectorDiscoveryUsesTheCompleteBuiltInventory() throws {
-        let fixture = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "kinlogue-derived-selectors-\(UUID().uuidString)"
-        )
-        defer { try? FileManager.default.removeItem(at: fixture) }
-        try """
-        KinlogueCoreTests.coreRule()
-        KinloguePlatformTests.LANDerivedArtifactSinkTests/testSecond
-        KinloguePlatformTests.LANDeliveryPrerequisiteTests/other
-        KinloguePlatformTests.LANDerivedArtifactSinkTests/testFirst
-        """.write(to: fixture, atomically: true, encoding: .utf8)
-
-        let result = try runProcess(
-            executable: URL(fileURLWithPath: "/usr/bin/ruby"),
-            arguments: [derivedSelectorDiscoveryURL.path, fixture.path],
-            environment: [:]
-        )
-        #expect(result.status == 0, Comment(rawValue: result.output))
-        #expect(result.output == """
-        KinloguePlatformTests.LANDerivedArtifactSinkTests/testFirst
-        KinloguePlatformTests.LANDerivedArtifactSinkTests/testSecond
-
-        """)
-
-        for invalid in [
-            "KinloguePlatformTests.LANDeliveryPrerequisiteTests/other\n",
-            "KinloguePlatformTests.LANDerivedArtifactSinkTests/testFirst\n"
-                + "KinloguePlatformTests.LANDerivedArtifactSinkTests/testFirst\n",
-            "KinloguePlatformTests.LANDerivedArtifactSinkTests/notATest\n",
-        ] {
-            try invalid.write(to: fixture, atomically: true, encoding: .utf8)
-            let rejected = try runProcess(
-                executable: URL(fileURLWithPath: "/usr/bin/ruby"),
-                arguments: [derivedSelectorDiscoveryURL.path, fixture.path],
-                environment: [:]
-            )
-            #expect(rejected.status != 0, Comment(rawValue: rejected.output))
-        }
     }
 
     @Test
@@ -926,6 +849,21 @@ struct TestScriptSafetyTests {
         )
     }
 
+    /// Shell lines joined across trailing backslashes, so one entry is one command.
+    private static func logicalCommands(in script: String) -> [String] {
+        var commands: [String] = []
+        var current = ""
+        for line in script.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasSuffix("\\") {
+                current += line.dropLast() + " "
+            } else {
+                commands.append(current + line)
+                current = ""
+            }
+        }
+        return commands
+    }
+
     private var scriptURL: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -944,11 +882,6 @@ struct TestScriptSafetyTests {
 
     private var shardSupervisorURL: URL {
         scriptURL.deletingLastPathComponent().appendingPathComponent("run-test-shard.rb")
-    }
-
-    private var derivedSelectorDiscoveryURL: URL {
-        scriptURL.deletingLastPathComponent()
-            .appendingPathComponent("discover-derived-xctest-cases.rb")
     }
 
     private struct CIRipgrepInstallerFixture {

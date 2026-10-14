@@ -118,7 +118,8 @@ actor BackupOperationCoordinator: BackupAutomaticRunning {
         let checkpointCreator = self.checkpointCreator
         let retentionExecutor = self.retentionExecutor
         let clock = self.clock
-        let task = Task<BackupOperationResult, Error> {
+        // Capturing, encrypting and verifying a checkpoint waits on storage and file I/O.
+        let operation: @Sendable () async throws -> BackupOperationResult = {
             try Task.checkCancellation()
             guard let configuration = try await configurationStore.load(),
                   configuration.phase == .enabled else {
@@ -183,6 +184,7 @@ actor BackupOperationCoordinator: BackupAutomaticRunning {
                 cleanup: cleanup
             )
         }
+        let task = Task<BackupOperationResult, Error> { try await LibraryStorageExecutor.run(operation) }
         activeOperation = .init(id: id, task: task)
         defer { finishOperation(id: id) }
         return try await task.value
@@ -212,19 +214,6 @@ actor BackupOperationCoordinator: BackupAutomaticRunning {
         case .finalAlreadyExists, .verificationFailed, .ioFailure:
             .semantic(.verificationFailed)
         }
-    }
-}
-
-/// Concrete U4 bridge for an already-resolved, security-scoped local
-/// repository. U7 owns opening/closing the bookmark scope around this adapter.
-struct LocalDirectoryCheckpointCreator: BackupCheckpointCreating {
-    let publisher: BackupCheckpointPublisher
-
-    func createCheckpoint(
-        configuration: BackupLocalConfiguration
-    ) async throws -> BackupCheckpointCreation {
-        let result = try await publisher.publishNext(configuration: configuration)
-        return .init(revisionPair: result.revisionPair)
     }
 }
 

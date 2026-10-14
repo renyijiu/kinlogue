@@ -62,7 +62,7 @@ final class DICOMStudyViewerModel: ObservableObject {
     }
 
     private struct PrefetchRequest: Equatable, Sendable {
-        let token: DICOMVaultSessionToken
+        let token: DICOMLibrarySessionToken
         let seriesID: DICOMStudyIndex.Series.ID
         let instanceID: DICOMStudyIndex.Instance.ID
     }
@@ -71,6 +71,7 @@ final class DICOMStudyViewerModel: ObservableObject {
     private let metadataService: any DICOMStudyViewerMetadataServicing
     private let sliceService: any DICOMSliceViewing
     private let viewerRegistry: DICOMViewerRegistry?
+    private let onReadFailure: @MainActor (Error) -> Void
     private let playbackSleep: @Sendable (Duration) async throws -> Void
     private var initialContent: DICOMStudyViewerContent?
     private var currentSession: DICOMSliceSeriesSession?
@@ -108,6 +109,7 @@ final class DICOMStudyViewerModel: ObservableObject {
         sliceService: any DICOMSliceViewing,
         initialContent: DICOMStudyViewerContent? = nil,
         viewerRegistry: DICOMViewerRegistry? = nil,
+        onReadFailure: @escaping @MainActor (Error) -> Void = { _ in },
         playbackSleep: @escaping @Sendable (Duration) async throws -> Void = {
             try await ContinuousClock().sleep(for: $0)
         }
@@ -117,6 +119,7 @@ final class DICOMStudyViewerModel: ObservableObject {
         self.sliceService = sliceService
         self.initialContent = initialContent
         self.viewerRegistry = viewerRegistry
+        self.onReadFailure = onReadFailure
         self.playbackSleep = playbackSleep
     }
 
@@ -197,6 +200,7 @@ final class DICOMStudyViewerModel: ObservableObject {
             await selectSeries(preferred.id)
         } catch {
             guard isCurrent(generation) else { return }
+            onReadFailure(error)
             phase = .failed
             statusAnnouncementState = .viewerLoadFailed
         }
@@ -222,6 +226,7 @@ final class DICOMStudyViewerModel: ObservableObject {
             await renderCurrent(generation: generation, window: nil)
         } catch {
             guard !Task.isCancelled else { return }
+            if isCurrent(generation) { onReadFailure(error) }
             failIfCurrent(generation)
         }
     }
@@ -518,6 +523,7 @@ final class DICOMStudyViewerModel: ObservableObject {
             }
         } catch {
             guard !Task.isCancelled else { return }
+            if isCurrent(generation) { onReadFailure(error) }
             failIfCurrent(generation)
         }
     }

@@ -22,7 +22,7 @@ struct DICOMLibraryModelTests {
         let pending = dicomSummary(state: .needsReview)
         let model = DICOMLibraryModel()
 
-        model.update(studies: [pending, first, second], members: [firstMember, secondMember])
+        model.update(studies: [pending, first, second], members: [firstMember, secondMember].map(LibraryMemberSummary.init))
 
         #expect(model.reviewStudies.map(\.id) == [pending.id])
         #expect(Set(model.confirmedStudies(memberID: nil).map(\.id)) == Set([first.id, second.id]))
@@ -38,14 +38,14 @@ struct DICOMLibraryModelTests {
             effectiveDate: Date(timeIntervalSinceReferenceDate: 30)
         )
         let model = DICOMLibraryModel()
-        model.update(studies: [study], members: [member])
+        model.update(studies: [study], members: [LibraryMemberSummary(member)])
         model.select(study.id)
         #expect(model.selectedStudyID == study.id)
 
-        model.update(studies: [], members: [member])
+        model.update(studies: [], members: [LibraryMemberSummary(member)])
         #expect(model.selectedStudyID == nil)
 
-        model.update(studies: [study], members: [member])
+        model.update(studies: [study], members: [LibraryMemberSummary(member)])
         model.select(study.id)
         model.clear()
         #expect(model.studies.isEmpty)

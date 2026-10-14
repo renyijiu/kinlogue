@@ -48,21 +48,14 @@ func domainModelsRoundTripWithoutLosingProvenance() throws {
         conclusion: source,
         notes: [try UserNote(text: "Separate user note")]
     )
-    let catalog = try VaultCatalog(
-        vaultID: UUID(uuidString: "00000000-0000-0000-0000-000000000006")!,
-        generation: 7,
-        members: [member],
-        records: [record],
-        attachments: [attachment]
-    )
+    let decoded = try JSONDecoder().decode(HealthRecord.self, from: JSONEncoder().encode(record))
 
-    let encoded = try JSONEncoder().encode(catalog)
-    let decoded = try JSONDecoder().decode(VaultCatalog.self, from: encoded)
-
-    #expect(decoded == catalog)
-    #expect(decoded.records[0].revision == 7)
-    #expect(decoded.records[0].timelineDate == candidate.date)
-    #expect(decoded.records[0].conclusion?.transcription == "Corrected source")
+    #expect(decoded == record)
+    #expect(try JSONDecoder().decode(FamilyMember.self, from: JSONEncoder().encode(member)) == member)
+    #expect(try JSONDecoder().decode(Attachment.self, from: JSONEncoder().encode(attachment)) == attachment)
+    #expect(decoded.revision == 7)
+    #expect(decoded.timelineDate == candidate.date)
+    #expect(decoded.conclusion?.transcription == "Corrected source")
     #expect(block.referencesSource(pageNumber: 1, boundingBox: bounds))
 }
 
@@ -111,74 +104,6 @@ func normalizedRectDecodingPreservesWireKeysAndRejectsInvalidBounds() throws {
 }
 
 @Test
-func catalogDecodingRejectsInvalidGenerationReferencesAndSelection() throws {
-    let member = try FamilyMember(displayName: "Member")
-    let attachment = try Attachment(
-        contentTypeIdentifier: "public.png",
-        byteCount: 4,
-        sha256Digest: Data(repeating: 0x1A, count: 32)
-    )
-    let candidate = ReportDateCandidate(
-        date: Date(timeIntervalSince1970: 1_700_000_000),
-        kind: .report,
-        source: try SourceField(originalTranscription: "Synthetic date")
-    )
-    let record = try HealthRecord(
-        memberID: member.id,
-        attachmentID: attachment.id,
-        importState: .confirmed,
-        dateCandidates: [candidate],
-        timelineDateCandidateID: candidate.id
-    )
-    let catalog = try VaultCatalog(
-        vaultID: UUID(),
-        generation: 1,
-        members: [member],
-        records: [record],
-        attachments: [attachment]
-    )
-    let encoded = try JSONEncoder().encode(catalog)
-    let validObject = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
-
-    var invalidGeneration = validObject
-    invalidGeneration["generation"] = 0
-
-    var invalidReference = validObject
-    var records = try #require(invalidReference["records"] as? [[String: Any]])
-    records[0]["memberID"] = UUID().uuidString
-    invalidReference["records"] = records
-
-    var invalidSelection = validObject
-    records = try #require(invalidSelection["records"] as? [[String: Any]])
-    records[0]["timelineDateCandidateID"] = UUID().uuidString
-    invalidSelection["records"] = records
-
-    var duplicateIdentifier = validObject
-    var members = try #require(duplicateIdentifier["members"] as? [[String: Any]])
-    members.append(members[0])
-    duplicateIdentifier["members"] = members
-
-    for invalidObject in [invalidGeneration, invalidReference, invalidSelection, duplicateIdentifier] {
-        let invalidData = try JSONSerialization.data(withJSONObject: invalidObject)
-        do {
-            _ = try JSONDecoder().decode(VaultCatalog.self, from: invalidData)
-            Issue.record("Invalid catalog decoded successfully")
-        } catch {
-            // Expected: decoding must route through catalog validation.
-        }
-    }
-
-    var mutatedCatalog = catalog
-    mutatedCatalog.records[0].timelineDateCandidateID = UUID()
-    do {
-        _ = try JSONEncoder().encode(mutatedCatalog)
-        Issue.record("Invalid catalog encoded successfully")
-    } catch {
-        // Expected: persistence must validate even after in-memory mutation.
-    }
-}
-
-@Test
 func healthRecordRejectsDuplicateDateCandidateIdentifiersAtEveryPersistenceBoundary() throws {
     let candidateID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
     let first = ReportDateCandidate(
@@ -214,31 +139,6 @@ func healthRecordRejectsDuplicateDateCandidateIdentifiersAtEveryPersistenceBound
 
     #expect(throws: DecodingError.self) {
         _ = try JSONDecoder().decode(HealthRecord.self, from: duplicateData)
-    }
-
-    let member = try FamilyMember(
-        id: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
-        displayName: "Synthetic Member"
-    )
-    let attachment = try Attachment(
-        id: UUID(uuidString: "20000000-0000-0000-0000-000000000001")!,
-        contentTypeIdentifier: "public.png",
-        byteCount: 4,
-        sha256Digest: Data(repeating: 0xD1, count: 32)
-    )
-    var mutatedCatalog = try VaultCatalog(
-        vaultID: UUID(),
-        generation: 1,
-        members: [member],
-        records: [mutated],
-        attachments: [attachment]
-    )
-    mutatedCatalog.records[0].dateCandidates.append(first)
-    #expect(throws: DomainValidationError.duplicateIdentifier) {
-        try mutatedCatalog.validate()
-    }
-    #expect(throws: EncodingError.self) {
-        _ = try JSONEncoder().encode(mutatedCatalog)
     }
 
     mutated.dateCandidates.append(first)

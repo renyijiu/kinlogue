@@ -533,6 +533,232 @@ struct LANInboxModelTests {
         #expect(model.items.map(\.id) == [completed.item.id])
     }
 
+    @Test
+    func replacementPresentationJoinsTheAppOwnedPreprocessingTask() async throws {
+        let fixture = try storedItem(seed: 90)
+        let service = try LANPendingQueueServiceSpy(items: [fixture.item], blobs: [fixture.blob])
+        let gate = AsyncOperationGate()
+        await service.setPreprocessGate(gate, for: fixture.item.id)
+        let lifecycle = LibraryLifecycleCoordinator()
+        let processing = AppProcessingCoordinator(lanService: service, lifecycle: lifecycle)
+        var first: LANInboxModel? = LANInboxModel(service: service, processing: processing)
+        await first?.start()
+        #expect(await gate.waitUntilStarted())
+        let originalPresentation = { [weak first] in first }
+        first = nil
+        #expect(originalPresentation() == nil)
+        let replacement = LANInboxModel(service: service, processing: processing)
+        await replacement.start()
+        #expect(replacement.busyItemIDs == [fixture.item.id])
+        #expect(await service.preprocessedItemIDs == [fixture.item.id])
+        await gate.open()
+        await processing.cancelAndDrain()
+    }
+
+    @Test
+    func preprocessingPreservesQueueOrderAndRemovesDirectAttemptsWithoutDuplicates() async throws {
+        let first = try storedItem(seed: 93).item
+        let second = try storedItem(seed: 94).item
+        let third = try storedItem(seed: 95).item
+        let fourth = try storedItem(seed: 96).item
+        let service = try LANPendingQueueServiceSpy(items: [first, second, third])
+        let firstGate = AsyncOperationGate()
+        let lastGate = AsyncOperationGate()
+        await service.setPreprocessGate(firstGate, for: first.id)
+        await service.setPreprocessGate(lastGate, for: fourth.id)
+        let processing = AppProcessingCoordinator(lanService: service)
+
+        processing.schedulePreprocessing()
+        #expect(await firstGate.waitUntilStarted())
+        let revisedSecond = try storedItem(seed: 94, revision: 1).item
+        try await service.replace(items: [first, revisedSecond, third, fourth], blobs: [first, second, third, fourth].map {
+            try LANInboxBlob(id: $0.blobID, sha256Digest: $0.contentIdentity.sha256Digest, byteCount: $0.contentIdentity.byteCount)
+        })
+        processing.schedulePreprocessing()
+        #expect(await processing.preprocess(itemID: third.id))
+        #expect(await service.preprocessedItemIDs == [first.id, third.id])
+
+        await firstGate.open()
+        #expect(await lastGate.waitUntilStarted())
+        #expect(await service.preprocessedItemIDs == [first.id, third.id, second.id, fourth.id])
+        await lastGate.open()
+        await processing.cancelAndDrain()
+    }
+
+    @Test
+    func aRequestThatArrivesDuringAFailedSweepStillGetsItsOwnSweep() async throws {
+        let item = try storedItem(seed: 97).item
+        let service = try LANPendingQueueServiceSpy(items: [item])
+        let failingRead = AsyncOperationGate()
+        await service.failNextProcessingPage(after: failingRead)
+        let processing = AppProcessingCoordinator(lanService: service)
+
+        processing.schedulePreprocessing()
+        #expect(await failingRead.waitUntilStarted())
+        // A new upload asks for a sweep while the read that is about to fail is still in flight.
+        processing.schedulePreprocessing()
+        await failingRead.open()
+
+        for _ in 0..<200 where await service.preprocessedItemIDs.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await service.preprocessedItemIDs == [item.id])
+        await processing.cancelAndDrain()
+    }
+
+    @Test
+    func automaticFailureIsNotRetriedByRefreshOrReplacementPresentation() async throws {
+        let fixture = try storedItem(seed: 91)
+        let service = try LANPendingQueueServiceSpy(items: [fixture.item], blobs: [fixture.blob])
+        await service.setPreprocessError(LANInboxError.storageFailure)
+        let processing = AppProcessingCoordinator(lanService: service)
+        let first = LANInboxModel(service: service, processing: processing)
+        await first.start()
+        // Join the existing owned attempt, even if it has already failed.
+        for _ in 0..<500 where processing.failedItemIDs.isEmpty {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(processing.failedItemIDs == [fixture.item.id])
+        await first.refresh()
+        let replacement = LANInboxModel(service: service, processing: processing)
+        await replacement.start()
+        await replacement.refresh()
+        #expect(await service.preprocessedItemIDs == [fixture.item.id])
+        await replacement.retry(itemID: fixture.item.id)
+        #expect(await service.preprocessedItemIDs == [fixture.item.id, fixture.item.id])
+        await processing.cancelAndDrain()
+    }
+
+    @Test
+    func lifecycleDrainsOwnedLANProcessingAndFencesLatePresentation() async throws {
+        let fixture = try storedItem(seed: 92)
+        let service = try LANPendingQueueServiceSpy(items: [fixture.item], blobs: [fixture.blob])
+        let gate = AsyncOperationGate()
+        await service.setPreprocessGate(gate, for: fixture.item.id)
+        let lifecycle = LibraryLifecycleCoordinator()
+        let revocationGate = try await installRevocationGate(on: lifecycle)
+        let processing = AppProcessingCoordinator(lanService: service, lifecycle: lifecycle)
+        let model = LANInboxModel(service: service, processing: processing)
+        await model.start()
+        #expect(await gate.waitUntilStarted())
+        model.beginDestructiveVaultLifecycle()
+        let revocation = Task { await lifecycle.revoke() }
+        #expect(await revocationGate.waitUntilStarted())
+        await revocationGate.open()
+        #expect(model.items.isEmpty)
+        await gate.open()
+        await revocation.value
+        #expect(model.items.isEmpty)
+        #expect(model.busyItemIDs.isEmpty)
+        #expect(model.userErrorMessage == nil)
+        await model.start()
+        #expect(await service.preprocessedItemIDs == [fixture.item.id])
+    }
+
+    @Test
+    func pagedSelectionSurvivesRefreshAndStalePageCannotUndoDeletion() async throws {
+        let items = try pagedItems()
+        let service = try LANPendingQueueServiceSpy(items: items)
+        let model = LANInboxModel(service: service)
+        await model.start()
+        #expect(model.items.count == 100)
+        #expect(model.storage?.itemCount == 201)
+        await model.loadMore()
+        await model.loadMore()
+        #expect(model.items.map(\.id) == items.map(\.id))
+        model.selectedItemIDs = Set(items.suffix(34).map(\.id))
+        model.reconcileSelectionOrder()
+        await model.refresh()
+        #expect(model.selectedItemIDs.count == 34)
+        #expect(model.orderedSelectedItems.count == 34)
+        model.selectedMemberID = UUID()
+        #expect(!model.canArchiveSelection)
+        model.selectedItemIDs = [items[200].id]
+        model.reconcileSelectionOrder()
+        await model.refresh()
+        #expect(model.items.count == 100)
+        #expect(model.orderedSelectedItems.map(\.id) == [items[200].id])
+        let gate = AsyncOperationGate()
+        await service.setPageGate(gate)
+        let more = Task { await model.loadMore() }
+        #expect(await gate.waitUntilStarted())
+        model.requestDelete([items[200].id])
+        await model.confirmDeleteItems(try #require(model.pendingDeleteCommand))
+        await gate.open()
+        await more.value
+        #expect(model.items.count == 100)
+        #expect(model.storage?.itemCount == 200)
+        #expect(model.selectedItemIDs.isEmpty)
+        #expect(model.orderedSelectedItems.isEmpty)
+    }
+
+    @Test
+    func paginationFailureRetainsRowsAndRevocationRejectsLatePage() async throws {
+        let items = try pagedItems()
+        let service = try LANPendingQueueServiceSpy(items: items)
+        let model = LANInboxModel(service: service)
+        await model.start()
+        await service.setPageError(true)
+        await model.loadMore()
+        #expect(model.items.map(\.id) == Array(items.prefix(100)).map(\.id))
+        #expect(model.hasMore)
+        #expect(model.userErrorMessage != nil)
+        #expect(model.canRetryQueueLoad)
+        await service.setPageError(false)
+        await model.retryQueueLoad()
+        #expect(model.items.count == 200)
+        await service.setRefreshError(true)
+        await model.refresh()
+        #expect(model.items.count == 200)
+        await service.setRefreshError(false)
+        await model.retryQueueLoad()
+        try #require(model.items.count == 100)
+        #expect(!model.canRetryQueueLoad)
+        await model.loadMore()
+        await model.prepareReceiving()
+        #expect(model.userErrorMessage != nil)
+        #expect(!model.canRetryQueueLoad)
+        let gate = AsyncOperationGate()
+        await service.setPageGate(gate)
+        let more = Task { await model.loadMore() }
+        #expect(await gate.waitUntilStarted())
+        model.beginDestructiveVaultLifecycle()
+        await gate.open()
+        await more.value
+        #expect(model.items.isEmpty)
+        #expect(!model.hasMore)
+        #expect(!model.isLoadingMore)
+    }
+
+    private func pagedItems() throws -> [LANInboxItem] {
+        try (1...201).map { index in
+            let blob = UUID()
+            return try LANInboxItem(originatingSessionID: UUID(), displayName: LANInboxDisplayName(rawValue: "synthetic.png"),
+                receivedAt: Date(timeIntervalSince1970: 0), sequence: UInt64(index),
+                contentIdentity: LANInboxContentIdentity(sha256Digest: Data(repeating: UInt8(index), count: 32), byteCount: index),
+                state: .reviewable(blobID: blob, derived: LANInboxDerivedArtifact(sha256Digest: Data(repeating: 1, count: 32), byteCount: 10)))
+        }
+    }
+
+    private func storedItem(
+        seed: UInt8,
+        revision: UInt64 = 0
+    ) throws -> (item: LANInboxItem, blob: LANInboxBlob) {
+        let fixture = try item(seed: seed, sequence: UInt64(seed), name: "synthetic.png")
+        return (
+            try LANInboxItem(
+                id: fixture.item.id,
+                originatingSessionID: fixture.item.originatingSessionID,
+                displayName: fixture.item.displayName,
+                receivedAt: fixture.item.receivedAt,
+                sequence: fixture.item.sequence,
+                revision: revision,
+                contentIdentity: fixture.item.contentIdentity,
+                state: .stored(blobID: fixture.blob.id)
+            ), fixture.blob
+        )
+    }
+
     private func item(
         seed: UInt8,
         sequence: UInt64,
@@ -581,11 +807,14 @@ private struct ArchiveRequest: Equatable, Sendable {
 }
 
 private actor LANPendingQueueServiceSpy: LANInboxServicing {
+    private let queryEpoch = UUID()
+    private var durableSnapshot: LANInboxSnapshot
     private(set) var screenSnapshot: LANInboxScreenSnapshot
     private(set) var preprocessedItemIDs: [LANInboxItem.ID] = []
     private(set) var lastArchiveRequest: ArchiveRequest?
     private var archiveError: (any Error)?
     private var deleteError: (any Error)?
+    private var preprocessError: (any Error)?
     private var receiving = false
     private var resolution: LANNetworkInterfaceResolution = .unavailable
     private var replacementOnStop: ([LANInboxItem], [LANInboxBlob])?
@@ -593,6 +822,10 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
     private var previewGates: [LANInboxItem.ID: AsyncOperationGate] = [:]
     private var initializeGate: AsyncOperationGate?
     private var refreshGate: AsyncOperationGate?
+    private var pageGate: AsyncOperationGate?
+    private var processingPageFailureGate: AsyncOperationGate?
+    private var pageError = false
+    private var refreshError = false
     private var resolveAddressesGate: AsyncOperationGate?
     private var startReceivingGate: AsyncOperationGate?
     private var archiveGate: AsyncOperationGate?
@@ -621,6 +854,7 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
             items: items,
             blobs: resolvedBlobs
         )
+        durableSnapshot = snapshot
         screenSnapshot = LANInboxScreenSnapshot(
             snapshot: snapshot,
             storage: try LANInboxStorageSummary(
@@ -633,26 +867,44 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
                 pendingUploadCount: 0,
                 pendingByteCount: 0,
                 metadataByteCount: 0
-            )
+            ),
+            openEpoch: queryEpoch
         )
     }
 
     func replace(items: [LANInboxItem], blobs: [LANInboxBlob]) throws {
-        screenSnapshot = LANInboxScreenSnapshot(
-            snapshot: try screenSnapshot.snapshot.replacing(
-                generation: screenSnapshot.snapshot.generation + 1,
-                commitID: UUID(),
-                lastWriterRuntimeGeneration:
-                    screenSnapshot.snapshot.lastWriterRuntimeGeneration,
-                items: items,
-                blobs: blobs
-            ),
-            storage: screenSnapshot.storage
-        )
+        durableSnapshot = try durableSnapshot.replacing(generation: durableSnapshot.generation + 1, commitID: UUID(),
+            lastWriterRuntimeGeneration: durableSnapshot.lastWriterRuntimeGeneration, items: items, blobs: blobs)
+        screenSnapshot = LANInboxScreenSnapshot(snapshot: durableSnapshot, storage: try durableSnapshot.storageSummary(), openEpoch: queryEpoch)
+    }
+    func loadItems(ids: [UUID]) async throws -> [LANInboxItem] {
+        try ids.map { id in
+            guard let item = durableSnapshot.item(id: id) else { throw LANInboxError.fileNotFound }
+            return item
+        }
+    }
+    func setPageGate(_ gate: AsyncOperationGate) { pageGate = gate }
+    func setPageError(_ failed: Bool) { pageError = failed }
+    func setRefreshError(_ failed: Bool) { refreshError = failed }
+    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxScreenSnapshot {
+        if pageError { throw LANInboxError.storageFailure }
+        let response = LANInboxScreenSnapshot(page: try stubInboxPage(durableSnapshot, cursor: cursor, processing: false, openEpoch: queryEpoch), storage: screenSnapshot.storage)
+        if let gate = pageGate { pageGate = nil; await gate.wait() }
+        return response
+    }
+    func failNextProcessingPage(after gate: AsyncOperationGate) { processingPageFailureGate = gate }
+    func processingPage(cursor: LANInboxPageCursor?) async throws -> LANInboxPage {
+        if let gate = processingPageFailureGate {
+            processingPageFailureGate = nil
+            await gate.wait()
+            throw LANInboxError.storageFailure
+        }
+        return try stubInboxPage(durableSnapshot, cursor: cursor, processing: true, openEpoch: queryEpoch)
     }
 
     func setArchiveError(_ error: any Error) { archiveError = error }
     func setDeleteError(_ error: any Error) { deleteError = error }
+    func setPreprocessError(_ error: any Error) { preprocessError = error }
 
     func setPreviewPayload(_ payload: LANInboxPreviewPayload, for itemID: LANInboxItem.ID) {
         previewPayloads[itemID] = payload
@@ -694,6 +946,7 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
     }
     func refresh() async throws -> LANInboxScreenSnapshot {
         refreshCallCount += 1
+        if refreshError { throw LANInboxError.storageFailure }
         let response = screenSnapshot
         if let gate = refreshGate {
             refreshGate = nil
@@ -730,11 +983,13 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
         }
     }
     func isReceiving() async -> Bool { receiving }
-    func preprocess(itemID: LANInboxItem.ID) async throws {
+    func preprocess(itemID: LANInboxItem.ID, expectedRevision: UInt64? = nil) async throws {
+        if let expectedRevision, durableSnapshot.item(id: itemID)?.revision != expectedRevision { throw LANInboxError.staleRevision }
         preprocessedItemIDs.append(itemID)
         if let gate = preprocessGates.removeValue(forKey: itemID) {
             await gate.wait()
         }
+        if let preprocessError { throw preprocessError }
     }
     func delete(itemID: LANInboxItem.ID, expectedRevision: UInt64) async throws {
         deleteRequests.append(LANInboxDeleteTarget(
@@ -745,19 +1000,20 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
             await gate.wait()
         }
         if let deleteError { throw deleteError }
-        guard let item = screenSnapshot.snapshot.items.first(where: { $0.id == itemID }),
+        guard let item = durableSnapshot.items.first(where: { $0.id == itemID }),
               item.revision == expectedRevision else {
             throw LANInboxError.staleRevision
         }
-        let retainedItems = screenSnapshot.snapshot.items.filter { $0.id != itemID }
+        let retainedItems = durableSnapshot.items.filter { $0.id != itemID }
         let retainedBlobIDs = Set(retainedItems.map(\.blobID))
         try replace(
             items: retainedItems,
-            blobs: screenSnapshot.snapshot.blobs.filter { retainedBlobIDs.contains($0.id) }
+            blobs: durableSnapshot.blobs.filter { retainedBlobIDs.contains($0.id) }
         )
     }
     func archive(
         itemIDs: [LANInboxItem.ID],
+        expectedRevisions: [UInt64]?,
         memberID: FamilyMember.ID,
         canonicalReportDate: Date
     ) async throws -> LANReportArchiveResult {
@@ -768,13 +1024,13 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
         )
         if let archiveError { throw archiveError }
         let removed = Set(itemIDs)
-        let retainedItems = screenSnapshot.snapshot.items.filter {
+        let retainedItems = durableSnapshot.items.filter {
             !removed.contains($0.id)
         }
         let retainedBlobIDs = Set(retainedItems.map(\.blobID))
         try replace(
             items: retainedItems,
-            blobs: screenSnapshot.snapshot.blobs.filter {
+            blobs: durableSnapshot.blobs.filter {
                 retainedBlobIDs.contains($0.id)
             }
         )

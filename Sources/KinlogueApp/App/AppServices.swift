@@ -3,81 +3,37 @@ import KinlogueCore
 import KinloguePlatform
 import UniformTypeIdentifiers
 
-struct LiveAppServiceEnvironment {
+struct LiveAppServiceEnvironment: Sendable {
     let dataService: LiveAppService
     let originalExportService: any OriginalExportServicing
     let destroyService: any VaultDestroyServicing
     let lanInboxService: any LANInboxServicing
     let dicomSliceServiceFactory: @Sendable () -> any DICOMSliceViewing
     let dicomImportMetrics: DICOMImportMetricsRecorder?
-    let vault: PlaintextVault
     let lifecycle: LibraryLifecycleCoordinator
+    var commitChanges: (@Sendable () -> AsyncStream<LibraryRevision>)? = nil
 
-    static func makeDefault() throws -> Self {
-        try makeDefault(identity: AppRuntimeIdentity.current())
-    }
-
-    static func makeDefault(identity: AppRuntimeIdentity) throws -> Self {
-        let source = identity.sourceVault
-        try VaultParentDirectoryPreparation.ensureParentDirectory(
-            for: source.rootURL
-        )
-        let vault = try PlaintextVault(rootURL: source.rootURL)
-        let lifecycle = LibraryLifecycleCoordinator()
-        let lanInboxService = LiveLANInboxService(
-            rootURL: source.rootURL,
-            vault: vault,
-            lifecycle: lifecycle
-        )
-        let destroyService = LifecycleCoordinatedVaultDestroyService(
-            lifecycle: lifecycle,
-            underlying: PlaintextVaultDestroyService(vault: vault)
-        )
-        let originalExportService = LiveOriginalExportService(
-            vault: vault,
-            lifecycle: lifecycle
-        )
-        let store = VaultImportDraftStore(vault: vault)
-        let textExtractor = OnDeviceTextExtractionService()
-        let workflow = ImportWorkflow(
-            store: store,
-            textExtractor: textExtractor
-        )
-        let acceptanceMetrics: DICOMImportMetricsRecorder?
-        let securityScope: DICOMSecurityScopeRequirement
-        if case .acceptance = identity.mode {
-            acceptanceMetrics = DICOMImportMetricsRecorder()
-            securityScope = .notRequiredForTesting
-        } else {
-            acceptanceMetrics = nil
-            securityScope = .required
+    @concurrent
+    static func makeOpened(identity: AppRuntimeIdentity, store: SQLiteLibraryStore,
+                           lifecycle: LibraryLifecycleCoordinator) async throws -> Self {
+        try await LibraryStorageExecutor.run {
+            let reports = SQLiteReportRepository(store: store)
+            let studies = try SQLiteDICOMRepository(store: store)
+            let extractor = OnDeviceTextExtractionService()
+            let metrics: DICOMImportMetricsRecorder? = if case .acceptance = identity.mode { DICOMImportMetricsRecorder() } else { nil }
+            let scope: DICOMSecurityScopeRequirement = if case .acceptance = identity.mode { .notRequiredForTesting } else { .required }
+            let workflow = ImportWorkflow(store: reports, textExtractor: extractor)
+            let dicom = try DICOMImportWorkflow(repository: studies, metrics: metrics)
+            return Self(dataService: LiveAppService(reports: reports, studies: studies, draftStore: reports,
+                workflow: workflow, textExtractor: extractor, lifecycle: lifecycle,
+                dicomRuntime: DICOMAppRuntime(workflow: dicom, lifecycle: lifecycle, securityScope: scope)),
+                originalExportService: LiveOriginalExportService(store: store, lifecycle: lifecycle),
+                destroyService: LifecycleCoordinatedVaultDestroyService(lifecycle: lifecycle,
+                    underlying: SQLiteVaultDestroyService(store: store)),
+                lanInboxService: try LiveLANInboxService(store: store, lifecycle: lifecycle),
+                dicomSliceServiceFactory: { DICOMSliceService(repository: studies) }, dicomImportMetrics: metrics,
+                lifecycle: lifecycle, commitChanges: { store.changes() })
         }
-        let dicomWorkflow = try DICOMImportWorkflow(
-            rootURL: source.rootURL,
-            vault: vault,
-            metrics: acceptanceMetrics
-        )
-        return Self(
-            dataService: LiveAppService(
-                vault: vault,
-                draftStore: store,
-                workflow: workflow,
-                textExtractor: textExtractor,
-                lifecycle: lifecycle,
-                dicomRuntime: DICOMAppRuntime(
-                    workflow: dicomWorkflow,
-                    lifecycle: lifecycle,
-                    securityScope: securityScope
-                )
-            ),
-            originalExportService: originalExportService,
-            destroyService: destroyService,
-            lanInboxService: lanInboxService,
-            dicomSliceServiceFactory: { DICOMSliceService(vault: vault) },
-            dicomImportMetrics: acceptanceMetrics,
-            vault: vault,
-            lifecycle: lifecycle
-        )
     }
 }
 
@@ -97,25 +53,14 @@ struct DICOMAppRuntime: Sendable {
     }
 }
 
-actor PlaintextVaultDestroyService: VaultDestroyServicing {
-    private let vault: PlaintextVault
-
-    init(vault: PlaintextVault) {
-        self.vault = vault
-    }
-
-    func destroyCurrentVault() async throws {
-        try await vault.destroy()
-    }
-}
-
 actor LiveAppService: AppDataServicing, DICOMAppServicing {
     private struct ActiveReportOperation: Sendable {
         let cancel: @Sendable () -> Void
         let waitForCompletion: @Sendable () async -> Void
     }
 
-    private let vault: any VaultStore
+    private let reports: any LibraryReportStoring
+    private let studies: any LibraryDICOMStoring
     private let draftStore: any ImportDraftStore
     private let workflow: ImportWorkflow
     private let textExtractor: any TextExtractionService
@@ -125,11 +70,25 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
     private let reportLifecycleRegistrationID = UUID()
     private let dicomLifecycleRegistrationID = UUID()
     private var reportLifecycleRegistered = false
+    private var reportLifecycleRevoked = false
     private var activeReportOperations: [UUID: ActiveReportOperation] = [:]
     private var dicomLifecycleRegistered = false
     private var startupTask: Task<AppSnapshot, Error>?
     private var startupAttemptID: UUID?
     private var startupCompleted: Bool
+    private var recoveryDraftIDs: [UUID] = []
+    private struct RecoveryAttempt {
+        let originalRevision: UInt64
+        let id: UUID
+        var failed = false
+
+        func stillMatches(_ draft: ImportDraft) -> Bool {
+            draft.isResumableAfterInterruption && (
+                draft.revision == originalRevision || (draft.state == .processing && draft.attemptID == id)
+            )
+        }
+    }
+    private var recoveryAttempts: [ImportDraft.ID: RecoveryAttempt] = [:]
     private var activeDICOMImportTask: Task<DICOMAppImportOutcome, Error>?
     private var activeDICOMImportID: UUID?
     private var terminalDICOMImportTask: Task<DICOMAppImportOutcome, Error>?
@@ -143,54 +102,37 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
     ] = [:]
 #endif
 
-    init(
-        vault: any VaultStore,
-        draftStore: any ImportDraftStore,
-        workflow: ImportWorkflow,
-        textExtractor: any TextExtractionService = OnDeviceTextExtractionService(),
-        validator: ImportedFileValidator = ImportedFileValidator(),
-        startupCompleted: Bool = false,
-        lifecycle: LibraryLifecycleCoordinator? = nil,
-        dicomRuntime: DICOMAppRuntime? = nil
-    ) {
-        self.vault = vault
-        self.draftStore = draftStore
-        self.workflow = workflow
-        self.textExtractor = textExtractor
-        self.validator = validator
-        self.startupCompleted = startupCompleted
-        self.lifecycle = lifecycle
-        self.dicomRuntime = dicomRuntime
+    init(reports: any LibraryReportStoring, studies: any LibraryDICOMStoring,
+         draftStore: any ImportDraftStore, workflow: ImportWorkflow,
+         textExtractor: any TextExtractionService = OnDeviceTextExtractionService(),
+         validator: ImportedFileValidator = ImportedFileValidator(), startupCompleted: Bool = false,
+         lifecycle: LibraryLifecycleCoordinator? = nil, dicomRuntime: DICOMAppRuntime? = nil) {
+        self.reports = reports; self.studies = studies; self.draftStore = draftStore; self.workflow = workflow
+        self.textExtractor = textExtractor; self.validator = validator; self.startupCompleted = startupCompleted
+        self.lifecycle = lifecycle; self.dicomRuntime = dicomRuntime
     }
 
     func bootstrap() async throws -> AppSnapshot {
         try Task.checkCancellation()
+        try await lifecycle?.requireActive()
         if startupCompleted {
-            return Self.snapshot(from: try await vault.loadCatalog())
+            return AppSnapshot(header: try await reports.header())
         }
         if let startupTask, let startupAttemptID {
             return try await finishStartup(startupTask, attemptID: startupAttemptID)
         }
 
-        let vault = self.vault
-        let workflow = self.workflow
+        if let lifecycle { try await registerReportLifecycleIfNeeded(on: lifecycle) }
+        guard !reportLifecycleRevoked else { throw LibraryLifecycleCoordinatorError.revoked }
+        if let startupTask, let startupAttemptID {
+            return try await finishStartup(startupTask, attemptID: startupAttemptID)
+        }
         let attemptID = UUID()
-        let task = Task<AppSnapshot, Error> {
-            let initialCatalog: VaultCatalog
-            do {
-                initialCatalog = try await vault.loadValidatedCatalog()
-            } catch VaultError.vaultMissing {
-                initialCatalog = try await vault.initialize()
-            } catch {
-                throw AppServiceError.vaultUnavailable
-            }
-            let resumableDraftIDs = initialCatalog.importDrafts
-                .filter(\.isResumableAfterInterruption)
-                .map(\.id)
-            _ = try await workflow.resumeInterruptedImports(
-                draftIDs: resumableDraftIDs
-            )
-            return Self.snapshot(from: try await vault.loadCatalog())
+        let task = Task<AppSnapshot, Error> { [self] in
+            _ = try await reports.initializeLibrary()
+            recoveryDraftIDs = try await draftStore.resumableDraftIDs()
+            try Task.checkCancellation()
+            return AppSnapshot(header: try await reports.header())
         }
         startupTask = task
         startupAttemptID = attemptID
@@ -205,90 +147,164 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
     }
 #endif
 
+    func resumeInterruptedImports(
+        onDraftCompleted: @escaping @Sendable () async -> Void
+    ) async {
+        guard (try? await requireStartup()) != nil else { return }
+        let ids = recoveryDraftIDs
+        recoveryDraftIDs.removeAll()
+        for id in ids {
+            guard !Task.isCancelled else { return }
+            do {
+                _ = try await processRecoveryAttempt(for: reports.draft(id))
+            } catch is CancellationError { return }
+            catch LibraryLifecycleCoordinatorError.revoked { return }
+            catch { /* The attempt retains its retry state; continue with the next draft. */ }
+            guard !Task.isCancelled else { return }
+            do { try await lifecycle?.requireActive() } catch { return }
+            await onDraftCompleted()
+        }
+    }
+
     func refresh() async throws -> AppSnapshot {
         try await requireStartup()
-        return Self.snapshot(from: try await vault.loadCatalog())
+        return try await withActiveReportOperation { [self] in
+            try await performRefresh()
+        }
     }
 
-    func createMember(
-        displayName: String,
-        disambiguationLabel: String?
-    ) async throws -> AppSnapshot {
-        try await requireStartup()
-        let member = try FamilyMember(
-            displayName: displayName,
-            disambiguationLabel: disambiguationLabel
-        )
-        return try await mutateCatalog(
-            { catalog in
-                var members = catalog.members
-                members.append(member)
-                return try catalog.next(members: members)
-            },
-            isApplied: { catalog, _ in catalog.members.contains(member) }
-        )
+    private func performRefresh() async throws -> AppSnapshot {
+        return AppSnapshot(header: try await reports.header())
     }
 
-    func updateMember(_ member: FamilyMember) async throws -> AppSnapshot {
+    func createMember(displayName: String, disambiguationLabel: String?) async throws -> AppSnapshot {
         try await requireStartup()
-        return try await mutateCatalog(
-            { catalog in
-                guard let index = catalog.members.firstIndex(where: { $0.id == member.id }) else {
-                    throw AppServiceError.memberUnavailable
+        return try await withActiveReportOperation { [self] in
+            try await performCreateMember(displayName: displayName, disambiguationLabel: disambiguationLabel)
+        }
+    }
+
+    private func performCreateMember(displayName: String, disambiguationLabel: String?) async throws -> AppSnapshot {
+        try await reports.saveMember(FamilyMember(displayName: displayName, disambiguationLabel: disambiguationLabel), replacing: nil)
+        return AppSnapshot(header: try await reports.header())
+    }
+
+    func loadMember(id: UUID) async throws -> FamilyMember {
+        try await requireStartup()
+        return try await withActiveReportOperation { [self] in
+            try await performLoadMember(id: id)
+        }
+    }
+
+    private func performLoadMember(id: UUID) async throws -> FamilyMember {
+        return try await reports.member(id)
+    }
+
+    func updateMember(_ member: FamilyMember, replacing expected: FamilyMember) async throws -> AppSnapshot {
+        try await requireStartup()
+        return try await withActiveReportOperation { [self] in
+            try await performUpdateMember(member, replacing: expected)
+        }
+    }
+
+    private func performUpdateMember(_ member: FamilyMember, replacing expected: FamilyMember) async throws -> AppSnapshot {
+        try await reports.saveMember(member, replacing: expected)
+        return AppSnapshot(header: try await reports.header())
+    }
+
+    func archiveMember(id: UUID) async throws -> AppSnapshot {
+        try await requireStartup()
+        return try await withActiveReportOperation { [self] in
+            try await performArchiveMember(id: id)
+        }
+    }
+
+    private func performArchiveMember(id: UUID) async throws -> AppSnapshot {
+        let current = try await reports.member(id)
+        var archived = current; archived.isArchived = true
+        try await reports.saveMember(archived, replacing: current)
+        return AppSnapshot(header: try await reports.header())
+    }
+
+    func deleteMember(id: UUID) async throws -> AppSnapshot {
+        try await requireStartup()
+        return try await withActiveReportOperation { [self] in
+            try await performDeleteMember(id: id)
+        }
+    }
+
+    private func performDeleteMember(id: UUID) async throws -> AppSnapshot {
+        do { try await reports.deleteMember(id) }
+        catch CatalogDeletionError.memberStillReferenced(let records, let drafts) {
+            throw AppServiceError.memberStillReferenced(recordCount: records, draftCount: drafts)
+        } catch CatalogDeletionError.memberStillReferencedByDICOMStudy(let count) {
+            throw AppServiceError.memberStillReferencedByDICOMStudy(studyCount: count)
+        }
+        return AppSnapshot(header: try await reports.header())
+    }
+
+    func timelinePage(memberID: UUID?, cursor: LibraryQueryCursor?) async throws -> LibraryTimelinePage {
+        try await requireStartup()
+        return try await withActiveReportOperation { [self] in
+            try await performTimelinePage(memberID: memberID, cursor: cursor)
+        }
+    }
+
+    private func performTimelinePage(memberID: UUID?, cursor: LibraryQueryCursor?) async throws -> LibraryTimelinePage {
+        return try await reports.timelinePage(memberID: memberID, limit: 100, cursor: cursor)
+    }
+    func reportPage(query: String, memberID: UUID?, cursor: LibraryQueryCursor?) async throws -> LibraryReportPage {
+        try await requireStartup()
+        return try await withActiveReportOperation { [self] in
+            try await performReportPage(query: query, memberID: memberID, cursor: cursor)
+        }
+    }
+
+    private func performReportPage(query: String, memberID: UUID?, cursor: LibraryQueryCursor?) async throws -> LibraryReportPage {
+        return try await reports.reportPage(query: query, memberID: memberID, limit: 100, cursor: cursor)
+    }
+    func draftPage(states: [ImportState], cursor: LibraryQueryCursor?) async throws -> AppDraftPage {
+        try await requireStartup()
+        return try await withActiveReportOperation { [self] in
+            try await performDraftPage(states: states, cursor: cursor)
+        }
+    }
+
+    private func performDraftPage(states: [ImportState], cursor: LibraryQueryCursor?) async throws -> AppDraftPage {
+        let page = try await reports.draftPage(states: states, limit: 100, cursor: cursor)
+        var items: [DraftSummary] = []
+        for draft in page.items {
+            var retry = false
+            if let attempt = recoveryAttempts[draft.id], attempt.failed {
+                // Only the few failed in-memory attempts need a full target read, never the whole queue.
+                if let current = try? await reports.draft(draft.id), current.revision == draft.revision {
+                    retry = attempt.stillMatches(current)
                 }
-                var members = catalog.members
-                members[index] = member
-                return try catalog.next(members: members)
-            },
-            isApplied: { catalog, _ in catalog.members.contains(member) }
-        )
-    }
-
-    func archiveMember(id: FamilyMember.ID) async throws -> AppSnapshot {
-        try await requireStartup()
-        return try await mutateCatalog(
-            { catalog in
-                guard let index = catalog.members.firstIndex(where: { $0.id == id }) else {
-                    throw AppServiceError.memberUnavailable
-                }
-                var members = catalog.members
-                members[index].isArchived = true
-                return try catalog.next(members: members)
-            },
-            isApplied: { catalog, _ in
-                catalog.members.contains(where: { $0.id == id && $0.isArchived })
             }
-        )
+            items.append(DraftSummary(draft: draft, canRetryRecovery: retry))
+        }
+        return AppDraftPage(revision: page.revision, items: items, nextCursor: page.nextCursor, damagedIDs: page.damagedIDs)
+    }
+    func loadDraft(id: UUID) async throws -> ImportDraft {
+        try await requireStartup()
+        return try await withActiveReportOperation { [self] in
+            try await performLoadDraft(id: id)
+        }
     }
 
-    func deleteMember(id: FamilyMember.ID) async throws -> AppSnapshot {
+    private func performLoadDraft(id: UUID) async throws -> ImportDraft {
+        return try await reports.draft(id)
+    }
+    func loadRecords(ids: [UUID]) async throws -> LibraryRecordSelection {
         try await requireStartup()
-        return try await mutateCatalog(
-            { catalog in
-                do {
-                    return try catalog.deletingMember(id: id)
-                } catch CatalogDeletionError.memberNotFound {
-                    throw AppServiceError.memberUnavailable
-                } catch CatalogDeletionError.memberStillReferenced(
-                    let recordCount,
-                    let draftCount
-                ) {
-                    throw AppServiceError.memberStillReferenced(
-                        recordCount: recordCount,
-                        draftCount: draftCount
-                    )
-                } catch CatalogDeletionError.memberStillReferencedByDICOMStudy(
-                    let studyCount
-                ) {
-                    throw AppServiceError.memberStillReferencedByDICOMStudy(
-                        studyCount: studyCount
-                    )
-                }
-            },
-            isApplied: { catalog, _ in
-                !catalog.members.contains(where: { $0.id == id })
-            }
-        )
+        return try await withActiveReportOperation { [self] in
+            try await performLoadRecords(ids: ids)
+        }
+    }
+
+    private func performLoadRecords(ids: [UUID]) async throws -> LibraryRecordSelection {
+        do { return try await reports.recordSelection(ids) }
+        catch LibraryReportError.recordNotFound { throw AppServiceError.recordUnavailable }
     }
 
     func importFile(at url: URL) async throws -> AppImportOutcome {
@@ -314,41 +330,60 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
 
     func retryDraft(id: ImportDraft.ID) async throws -> AppImportOutcome {
         try await requireStartup()
+        let draft = try await reports.draft(id)
+        return try await processRecoveryAttempt(for: draft)
+    }
+
+    private func processRecoveryAttempt(for draft: ImportDraft) async throws -> AppImportOutcome {
+        let attempt = RecoveryAttempt(originalRevision: draft.revision, id: UUID())
+        recoveryAttempts[draft.id] = attempt
         let workflow = self.workflow
-        return try await withActiveReportOperation {
-            AppImportOutcome(try await workflow.retry(draftID: id))
+        do {
+            let outcome = try await withActiveReportOperation {
+                AppImportOutcome(try await workflow.retry(draftID: draft.id, attemptID: attempt.id))
+            }
+            if recoveryAttempts[draft.id]?.id == attempt.id {
+                recoveryAttempts.removeValue(forKey: draft.id)
+            }
+            return outcome
+        } catch {
+            if recoveryAttempts[draft.id]?.id == attempt.id {
+                switch error {
+                case is CancellationError, LibraryLifecycleCoordinatorError.revoked,
+                     ImportDraftError.staleAttempt, ImportDraftError.invalidState,
+                     LibraryReportError.draftNotFound:
+                    recoveryAttempts.removeValue(forKey: draft.id)
+                default:
+                    if Task.isCancelled || reportLifecycleRevoked {
+                        recoveryAttempts.removeValue(forKey: draft.id)
+                    } else {
+                        recoveryAttempts[draft.id]?.failed = true
+                    }
+                }
+            }
+            throw error
         }
     }
 
     func loadReview(draftID: ImportDraft.ID) async throws -> ImportReviewContent {
         try await requireStartup()
-        let snapshot: ImportDraftReviewSnapshot
-        do {
-            snapshot = try await draftStore.loadReviewSnapshot(draftID: draftID)
-        } catch let error as VaultImportDraftStoreError {
-            switch error {
-            case .draftNotFound, .attachmentNotFound:
-                throw AppServiceError.draftUnavailable
-            case .documentNotFound, .invalidDraftDocument:
-                throw error
-            }
+        return try await withActiveReportOperation { [self] in
+            try await performLoadReview(draftID: draftID)
         }
+    }
+
+    private func performLoadReview(draftID: ImportDraft.ID) async throws -> ImportReviewContent {
+        let snapshot = try await reports.reviewContent(draftID: draftID)
         let source = snapshot.draft.sources.first
         return ImportReviewContent(
+            revision: snapshot.revision,
             draft: snapshot.draft,
             document: try refreshedDocument(
                 snapshot.document,
                 sources: snapshot.draft.sources
             ),
-            members: RecordQuery.selectableMembers(from: snapshot.members),
-            original: OriginalDocumentPayload(
-                data: snapshot.originalData,
-                contentTypeIdentifier: snapshot.attachment.contentTypeIdentifier,
-                sourceID: source.id,
-                attachmentID: source.attachmentID,
-                displayName: source.displayName,
-                pageCount: source.pageCount
-            )
+            members: LibraryMemberSummary.selectable(snapshot.members),
+            original: originalPayload(source: source, attachment: snapshot.attachment, data: snapshot.originalData)
         )
     }
 
@@ -364,15 +399,10 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
     private func performRecognizeReview(
         _ command: RecognizeReviewCommand
     ) async throws -> RecognizedReviewContent {
-        let catalog = try await vault.loadCatalog()
-        guard let draft = catalog.importDrafts.first(where: {
-            $0.id == command.draftID
-                && $0.state == .needsReview
-                && $0.revision == command.expectedRevision
-        }), draft.revision < UInt64.max,
-        command.memberID == nil || catalog.members.contains(where: {
-            $0.id == command.memberID && !$0.isArchived
-        }) else {
+        let draft = try await reports.draft(command.draftID)
+        guard draft.state == .needsReview, draft.revision == command.expectedRevision,
+              draft.revision < UInt64.max else { throw AppServiceError.invalidReview }
+        if let memberID = command.memberID, try await reports.member(memberID).isArchived {
             throw AppServiceError.invalidReview
         }
 
@@ -385,7 +415,11 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
             selection: command.timelineDateSelection,
             detectedDateCandidate: command.detectedDateCandidate
         )
-        let recognized = try await recognizeDocument(for: draft)
+        let recognized: ImportDraftDocument
+        // Either store reports a draft that changed while its originals were being read.
+        do { recognized = try await recognizeDocument(for: draft) }
+        catch LibraryReportError.staleRevision { throw AppServiceError.invalidReview }
+        catch ImportDraftError.staleAttempt { throw AppServiceError.invalidReview }
         try Task.checkCancellation()
         let persistedDateSelection = dateSelectionAfterRecognition(
             currentDateSelection,
@@ -420,43 +454,32 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
         )
     }
 
-    func loadReviewOriginal(
-        draftID: ImportDraft.ID,
-        sourceID: ReportSource.ID
-    ) async throws -> OriginalDocumentPayload {
+    func loadReviewOriginal(draftID: UUID, sourceID: UUID, expectedRevision: UInt64, expectedLibrary: LibraryRevision) async throws -> OriginalDocumentPayload {
         try await requireStartup()
-        let snapshot = try await vault.readSnapshot { catalog in
-            guard let draft = catalog.importDrafts.first(where: {
-                $0.id == draftID && $0.state == .needsReview
-            }), let source = draft.sources.elements.first(where: { $0.id == sourceID }) else {
-                throw AppServiceError.draftUnavailable
-            }
-            return [VaultObjectReference(id: source.attachmentID, kind: .attachment)]
+        return try await withActiveReportOperation { [self] in
+            try await performLoadReviewOriginal(draftID: draftID, sourceID: sourceID, expectedRevision: expectedRevision, expectedLibrary: expectedLibrary)
         }
-        let catalog = snapshot.catalog
-        guard let draft = catalog.importDrafts.first(where: {
-            $0.id == draftID && $0.state == .needsReview
-        }), let source = draft.sources.elements.first(where: { $0.id == sourceID }) else {
-            throw AppServiceError.draftUnavailable
-        }
-        return try originalPayload(
-            source: source,
-            snapshot: snapshot,
-            unavailableError: .draftUnavailable
-        )
+    }
+
+    private func performLoadReviewOriginal(draftID: UUID, sourceID: UUID, expectedRevision: UInt64, expectedLibrary: LibraryRevision) async throws -> OriginalDocumentPayload {
+        let draft = try await reports.draft(draftID)
+        guard draft.revision == expectedRevision, draft.state == .needsReview,
+              let source = draft.sources.elements.first(where: { $0.id == sourceID }) else { throw AppServiceError.draftUnavailable }
+        let value = try await reports.original(draftID: draftID, expectedRevision: expectedRevision, sourceID: sourceID, expectedLibrary: expectedLibrary)
+        return originalPayload(source: source, attachment: value.0, data: value.1)
     }
 
     func confirmDraft(_ command: ConfirmDraftCommand) async throws -> AppSnapshot {
         try await requireStartup()
-        let catalog = try await vault.loadCatalog()
-        guard let draft = catalog.importDrafts.first(where: {
-            $0.id == command.draftID
-                && $0.state == .needsReview
-                && $0.revision == command.expectedRevision
-        }),
-              catalog.members.contains(where: { $0.id == command.memberID && !$0.isArchived }) else {
-            throw AppServiceError.invalidReview
+        return try await withActiveReportOperation { [self] in
+            try await performConfirmDraft(command)
         }
+    }
+
+    private func performConfirmDraft(_ command: ConfirmDraftCommand) async throws -> AppSnapshot {
+        let draft = try await reports.draft(command.draftID)
+        guard draft.state == .needsReview, draft.revision == command.expectedRevision,
+              try await !reports.member(command.memberID).isArchived else { throw AppServiceError.invalidReview }
         let storedDocument = try await draftStore.loadDocument(draftID: command.draftID)
         let document = try refreshedDocument(storedDocument, sources: draft.sources)
         let candidates = document.candidates
@@ -488,16 +511,16 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
             notes: notes
         )
         do {
-            return Self.snapshot(from: try await draftStore.confirm(
+            try await draftStore.confirm(
                 draftID: command.draftID,
                 expectedRevision: command.expectedRevision,
                 record: record
-            ))
+            )
+            return AppSnapshot(header: try await reports.header())
         } catch {
-            if let reconciled = try? await vault.loadCatalog(),
-               reconciled.records.contains(record),
-               !reconciled.importDrafts.contains(where: { $0.id == command.draftID }) {
-                return Self.snapshot(from: reconciled)
+            if let disposition = try? await reports.draftDisposition(command.draftID),
+               disposition.record == record, disposition.draft == nil {
+                return AppSnapshot(header: try await reports.header())
             }
             throw error
         }
@@ -505,91 +528,70 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
 
     func updateRecord(_ command: UpdateRecordCommand) async throws -> AppSnapshot {
         try await requireStartup()
-        return try await mutateCatalog(
-            { catalog in
-                guard let index = catalog.records.firstIndex(where: {
-                    $0.id == command.recordID && $0.importState == .confirmed
-                }) else { throw AppServiceError.recordUnavailable }
-                let current = catalog.records[index]
-                guard current.revision == command.expectedRevision else {
-                    throw AppServiceError.recordChanged
-                }
-                let nextRevision = current.revision.addingReportingOverflow(1)
-                guard !nextRevision.overflow else { throw AppServiceError.recordChanged }
-                guard catalog.members.contains(where: {
-                    $0.id == command.memberID
-                        && (!$0.isArchived || $0.id == current.memberID)
-                }) else { throw AppServiceError.recordUnavailable }
-                let dateSelection = try resolvedTimelineDateSelection(
-                    candidates: current.dateCandidates,
-                    selection: command.timelineDateSelection
-                )
-                let notes = try updatedNotes(current.notes, text: command.userNote)
-                let updated = try HealthRecord(
-                    id: current.id,
-                    memberID: command.memberID,
-                    sources: current.sources,
-                    ocrDocumentObjectID: current.ocrDocumentObjectID,
-                    importState: .confirmed,
-                    revision: nextRevision.partialValue,
-                    title: try edited(current.title, value: command.title),
-                    organization: try edited(current.organization, value: command.organization),
-                    department: try edited(current.department, value: command.department),
-                    reportType: try edited(current.reportType, value: command.reportType),
-                    dateCandidates: dateSelection.candidates,
-                    timelineDateCandidateID: dateSelection.selectedID,
-                    reportedResults: try edited(current.reportedResults, value: command.reportedResults),
-                    conclusion: try edited(current.conclusion, value: command.conclusion),
-                    abnormalItems: try zip(current.abnormalItems, command.abnormalItems).compactMap {
-                        try edited($0.0, value: $0.1)
-                    },
-                    notes: notes
-                )
-                var records = catalog.records
-                records[index] = updated
-                return try catalog.next(records: records)
-            },
-            conflictError: { catalog, _ in
-                guard let current = catalog.records.first(where: {
-                    $0.id == command.recordID
-                }) else {
-                    return AppServiceError.recordUnavailable
-                }
-                return current.revision == command.expectedRevision
-                    ? nil
-                    : AppServiceError.recordChanged
-            },
-            isApplied: { catalog, intended in
-                guard let record = intended.records.first(where: { $0.id == command.recordID }) else {
-                    return false
-                }
-                return catalog.records.contains(record)
-            }
-        )
+        return try await withActiveReportOperation { [self] in
+            try await performUpdateRecord(command)
+        }
     }
 
-    func deleteRecord(id: HealthRecord.ID) async throws -> AppSnapshot {
-        try await requireStartup()
-        return try await mutateCatalog(
-            { catalog in
-                do {
-                    return try catalog.deletingRecord(id: id)
-                } catch CatalogDeletionError.recordNotFound {
-                    throw AppServiceError.recordUnavailable
-                }
-            },
-            isApplied: { catalog, _ in
-                !catalog.records.contains(where: { $0.id == id })
-            }
+    private func performUpdateRecord(_ command: UpdateRecordCommand) async throws -> AppSnapshot {
+        let current = try await reports.record(command.recordID)
+        guard current.revision == command.expectedRevision else { throw AppServiceError.recordChanged }
+        let nextRevision = current.revision.addingReportingOverflow(1)
+        guard !nextRevision.overflow else { throw AppServiceError.recordChanged }
+        let member = try await reports.member(command.memberID)
+        guard !member.isArchived || member.id == current.memberID else { throw AppServiceError.recordUnavailable }
+        let dateSelection = try resolvedTimelineDateSelection(
+            candidates: current.dateCandidates,
+            selection: command.timelineDateSelection
         )
+        let notes = try updatedNotes(current.notes, text: command.userNote)
+        let updated = try HealthRecord(
+            id: current.id,
+            memberID: command.memberID,
+            sources: current.sources,
+            ocrDocumentObjectID: current.ocrDocumentObjectID,
+            importState: .confirmed,
+            revision: nextRevision.partialValue,
+            title: try edited(current.title, value: command.title),
+            organization: try edited(current.organization, value: command.organization),
+            department: try edited(current.department, value: command.department),
+            reportType: try edited(current.reportType, value: command.reportType),
+            dateCandidates: dateSelection.candidates,
+            timelineDateCandidateID: dateSelection.selectedID,
+            reportedResults: try edited(current.reportedResults, value: command.reportedResults),
+            conclusion: try edited(current.conclusion, value: command.conclusion),
+            abnormalItems: try zip(current.abnormalItems, command.abnormalItems).compactMap {
+                try edited($0.0, value: $0.1)
+            },
+            notes: notes
+        )
+        do { try await reports.updateRecord(updated, expectedRevision: command.expectedRevision) }
+        catch LibraryReportError.staleRevision { throw AppServiceError.recordChanged }
+        return AppSnapshot(header: try await reports.header())
+    }
+
+    func deleteRecord(id: UUID) async throws -> AppSnapshot {
+        try await requireStartup()
+        return try await withActiveReportOperation { [self] in
+            try await performDeleteRecord(id: id)
+        }
+    }
+
+    private func performDeleteRecord(id: UUID) async throws -> AppSnapshot {
+        let record = try await reports.record(id)
+        try await reports.deleteRecord(id, expectedRevision: record.revision)
+        return AppSnapshot(header: try await reports.header())
     }
 
     func deferDraft(_ command: DeferDraftCommand) async throws {
         try await requireStartup()
-        let catalog = try await vault.loadCatalog()
-        guard let draft = catalog.importDrafts.first(where: { $0.id == command.draftID }) else {
-            throw AppServiceError.draftUnavailable
+        return try await withActiveReportOperation { [self] in
+            try await performDeferDraft(command)
         }
+    }
+
+    private func performDeferDraft(_ command: DeferDraftCommand) async throws {
+        let draft = try await reports.draft(command.draftID)
         let document = try refreshedDocument(
             try await draftStore.loadDocument(draftID: command.draftID),
             sources: draft.sources
@@ -625,45 +627,40 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
 
     func discardDraft(_ command: DiscardDraftCommand) async throws -> AppSnapshot {
         try await requireStartup()
+        return try await withActiveReportOperation { [self] in
+            try await performDiscardDraft(command)
+        }
+    }
+
+    private func performDiscardDraft(_ command: DiscardDraftCommand) async throws -> AppSnapshot {
         do {
-            return Self.snapshot(from: try await draftStore.discard(
+            try await draftStore.discard(
                 draftID: command.draftID,
                 expectedRevision: command.expectedRevision
-            ))
+            )
+            return AppSnapshot(header: try await reports.header())
         } catch {
-            if let reconciled = try? await vault.loadCatalog(),
-               !reconciled.importDrafts.contains(where: { $0.id == command.draftID }),
-               !reconciled.records.contains(where: { $0.id == command.draftID }) {
-                return Self.snapshot(from: reconciled)
+            if let disposition = try? await reports.draftDisposition(command.draftID),
+               disposition.draft == nil, disposition.record == nil {
+                return AppSnapshot(header: try await reports.header())
             }
             throw error
         }
     }
 
-    func loadOriginal(
-        recordID: HealthRecord.ID,
-        sourceID: ReportSource.ID
-    ) async throws -> OriginalDocumentPayload {
+    func loadOriginal(recordID: UUID, sourceID: UUID, expectedRevision: UInt64, expectedLibrary: LibraryRevision) async throws -> OriginalDocumentPayload {
         try await requireStartup()
-        let snapshot = try await vault.readSnapshot { catalog in
-            guard let record = catalog.records.first(where: {
-                $0.id == recordID && $0.importState == .confirmed
-            }), let source = record.sources.elements.first(where: { $0.id == sourceID }) else {
-                throw AppServiceError.recordUnavailable
-            }
-            return [VaultObjectReference(id: source.attachmentID, kind: .attachment)]
+        return try await withActiveReportOperation { [self] in
+            try await performLoadOriginal(recordID: recordID, sourceID: sourceID, expectedRevision: expectedRevision, expectedLibrary: expectedLibrary)
         }
-        let catalog = snapshot.catalog
-        guard let record = catalog.records.first(where: {
-            $0.id == recordID && $0.importState == .confirmed
-        }), let source = record.sources.elements.first(where: { $0.id == sourceID }) else {
-            throw AppServiceError.recordUnavailable
-        }
-        return try originalPayload(
-            source: source,
-            snapshot: snapshot,
-            unavailableError: .recordUnavailable
-        )
+    }
+
+    private func performLoadOriginal(recordID: UUID, sourceID: UUID, expectedRevision: UInt64, expectedLibrary: LibraryRevision) async throws -> OriginalDocumentPayload {
+        let selection = try await reports.recordSelection([recordID])
+        guard let record = selection.records.first, record.revision == expectedRevision,
+              let source = record.sources.elements.first(where: { $0.id == sourceID }) else { throw AppServiceError.recordUnavailable }
+        let value = try await reports.original(recordID: recordID, expectedRevision: expectedRevision, sourceID: sourceID, expectedLibrary: expectedLibrary)
+        return originalPayload(source: source, attachment: value.0, data: value.1)
     }
 
     func importDICOMDirectory(at url: URL) async throws -> DICOMAppImportOutcome {
@@ -676,7 +673,6 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
 #if DEBUG
         claimedDICOMImportWasActive = false
 #endif
-        let vault = self.vault
         let operationID = UUID()
         let task = Task { [self] in
             try await withActiveDICOMOperation { runtime in
@@ -685,7 +681,7 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
                     url,
                     securityScope: runtime.securityScope
                 )
-                return try await self.dicomImportOutcome(for: result, vault: vault)
+                return try await self.dicomImportOutcome(for: result)
             }
         }
         activeDICOMImportTask = task
@@ -784,15 +780,9 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
 #endif
 
     private func dicomImportOutcome(
-        for result: DICOMImportResult,
-        vault: any VaultStore
+        for result: DICOMImportResult
     ) async throws -> DICOMAppImportOutcome {
-        let catalog = try await vault.loadCatalog()
-        guard let study = catalog.dicomStudies.first(where: {
-            $0.id == result.studyID
-        }) else {
-            throw AppServiceError.dicomStudyUnavailable
-        }
+        let study = try await studies.details(result.studyID).study
         return DICOMAppImportOutcome(
             studyID: result.studyID,
             destination: study.state == .needsReview ? .review : .timeline,
@@ -804,194 +794,73 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
         )
     }
 
-    func loadDICOMStudyReview(
-        studyID: DICOMStudy.ID
-    ) async throws -> DICOMStudyReviewContent {
-        let vault = self.vault
-        return try await withActiveDICOMOperation { _ in
-            try await self.requireStartup()
-            let details = try await self.dicomStudyDetails(
-                studyID: studyID,
-                vault: vault
-            )
-            return DICOMStudyReviewContent(
-                viewerContent: details.viewerContent,
-                selectableMembers: details.selectableMembers
-            )
+    func loadDICOMStudyReview(studyID: UUID) async throws -> DICOMStudyReviewContent {
+        try await requireStartup()
+        return try await withActiveReportOperation { [self] in
+            try await performLoadDICOMStudyReview(studyID: studyID)
         }
     }
 
-    private func dicomStudyDetails(
-        studyID: DICOMStudy.ID,
-        vault: any VaultStore
-    ) async throws -> (
-        viewerContent: DICOMStudyViewerContent,
-        selectableMembers: [FamilyMember]
-    ) {
-        let snapshot = try await vault.readSnapshot { catalog in
-            guard let study = catalog.dicomStudies.first(where: { $0.id == studyID }) else {
-                throw AppServiceError.dicomStudyUnavailable
-            }
-            return [VaultObjectReference(id: study.indexObjectID, kind: .record)]
+    private func performLoadDICOMStudyReview(studyID: UUID) async throws -> DICOMStudyReviewContent {
+        try await withActiveDICOMOperation { _ in
+            try await self.requireStartup()
+            return try await self.dicomStudyDetails(studyID: studyID)
         }
-        let catalog = snapshot.catalog
-        guard let study = catalog.dicomStudies.first(where: {
-            $0.id == studyID
-        }) else {
-            throw AppServiceError.dicomStudyUnavailable
-        }
-        let data = try snapshot.data(for: VaultObjectReference(
-            id: study.indexObjectID,
-            kind: .record
-        ))
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .millisecondsSince1970
-        let index: DICOMStudyIndex
-        do {
-            index = try decoder.decode(DICOMStudyIndex.self, from: data)
-        } catch {
-            throw AppServiceError.dicomStudyUnavailable
-        }
-        let instancesByID = Dictionary(
-            uniqueKeysWithValues: index.instances.map { ($0.id, $0) }
-        )
-        let series = try index.series.sorted { $0.ordinal < $1.ordinal }.map { item in
-            guard let firstID = item.instanceIDs.first,
-                  let first = instancesByID[firstID] else {
-                throw AppServiceError.dicomStudyUnavailable
-            }
-            return DICOMSeriesSummary(
-                id: item.id,
-                ordinal: item.ordinal,
-                sliceCount: item.instanceIDs.count,
-                rows: first.attributes.rows,
-                columns: first.attributes.columns,
-                orderingProvenance: item.orderingProvenance
-            )
-        }
-        let selectableMembers = RecordQuery.selectableMembers(
-            from: catalog.members.filter {
-                !$0.isArchived || $0.id == study.confirmedMemberID
-            },
-            includeArchived: true
-        )
-        let memberLabels = RecordQuery.selectionLabels(for: selectableMembers)
-        return (
-            viewerContent: DICOMStudyViewerContent(
-                study: DICOMStudySummary(study: study),
-                confirmedMemberLabel: study.confirmedMemberID.flatMap { memberLabels[$0] },
-                viewableInstanceCount: index.instances.count,
-                inertObjectCount: index.retainedObjects.count {
-                    $0.kind == .inertAttachment
-                },
-                series: series
-            ),
-            selectableMembers: selectableMembers
-        )
+    }
+
+    private func dicomStudyDetails(studyID: UUID) async throws -> DICOMStudyReviewContent {
+        let details = try await studies.details(studyID)
+        let members = LibraryMemberSummary.selectable(try await reports.header().members.filter {
+            !$0.isArchived || $0.id == details.study.confirmedMemberID
+        }, includeArchived: true)
+        let labels = LibraryMemberSummary.labels(members)
+        return DICOMStudyReviewContent(viewerContent: DICOMStudyViewerContent(
+            study: DICOMStudySummary(study: details.study),
+            confirmedMemberLabel: details.study.confirmedMemberID.flatMap { labels[$0] },
+            viewableInstanceCount: details.study.viewableInstanceCount,
+            inertObjectCount: details.study.retainedObjectCount - details.study.viewableInstanceCount,
+            series: details.series.map { DICOMSeriesSummary(id: $0.id, ordinal: $0.ordinal, sliceCount: $0.sliceCount,
+                rows: $0.rows, columns: $0.columns, orderingProvenance: $0.orderingProvenance) }), selectableMembers: members)
     }
 
     func saveDICOMStudy(_ command: SaveDICOMStudyCommand) async throws -> AppSnapshot {
         guard command.effectiveDate.timeIntervalSinceReferenceDate.isFinite,
-              let effectiveDate = ReportDateSemantics.canonicalDate(
-                from: command.effectiveDate
-              ) else {
-            throw AppServiceError.invalidReview
-        }
+              let date = ReportDateSemantics.canonicalDate(from: command.effectiveDate) else { throw AppServiceError.invalidReview }
         return try await withActiveDICOMOperation { _ in
             try await self.requireStartup()
-            return try await self.mutateCatalog(
-                { current in
-                    guard current.members.contains(where: {
-                        $0.id == command.memberID && !$0.isArchived
-                    }), let index = current.dicomStudies.firstIndex(where: {
-                        $0.id == command.studyID
-                    }) else {
-                        throw AppServiceError.invalidReview
-                    }
-                    let existing = current.dicomStudies[index]
-                    if existing.state == .confirmed,
-                       existing.confirmedMemberID == command.memberID,
-                       existing.effectiveDate == effectiveDate {
-                        return current
-                    }
-                    var studies = current.dicomStudies
-                    studies[index] = try existing.reassigning(
-                        memberID: command.memberID,
-                        effectiveDate: effectiveDate
-                    )
-                    return try current.next(dicomStudies: studies)
-                },
-                isApplied: { catalog, _ in
-                    catalog.dicomStudies.contains(where: {
-                        $0.id == command.studyID
-                            && $0.state == .confirmed
-                            && $0.confirmedMemberID == command.memberID
-                            && $0.effectiveDate == effectiveDate
-                    })
-                }
-            )
+            let current = try await self.studies.details(command.studyID).study
+            if current.state == .confirmed, current.confirmedMemberID == command.memberID, current.effectiveDate == date {
+                return AppSnapshot(header: try await self.reports.header())
+            }
+            guard current.contentRevision == command.expectedRevision else { throw AppServiceError.recordChanged }
+            _ = try await self.studies.confirm(command.studyID, expectedRevision: command.expectedRevision, memberID: command.memberID, effectiveDate: date)
+            return AppSnapshot(header: try await self.reports.header())
         }
     }
-
-    func deleteDICOMStudy(id: DICOMStudy.ID) async throws -> AppSnapshot {
+    func deleteDICOMStudy(id: UUID) async throws -> AppSnapshot {
         try await withActiveDICOMOperation { _ in
             try await self.requireStartup()
-            return try await self.mutateCatalog(
-                { catalog in
-                    do {
-                        return try catalog.deletingDICOMStudy(id: id)
-                    } catch CatalogDeletionError.dicomStudyNotFound {
-                        throw AppServiceError.dicomStudyUnavailable
-                    }
-                },
-                removedDICOMStudyIDs: [id],
-                isApplied: { catalog, _ in
-                    !catalog.dicomStudies.contains(where: { $0.id == id })
-                }
-            )
+            let current = try await self.studies.details(id).study
+            try await self.studies.delete(id, expectedRevision: current.contentRevision)
+            return AppSnapshot(header: try await self.reports.header())
         }
     }
 
-    private func originalPayload(
-        source: ReportSource,
-        snapshot: VaultReadSnapshot,
-        unavailableError: AppServiceError
-    ) throws -> OriginalDocumentPayload {
-        let catalog = snapshot.catalog
-        guard let attachment = catalog.attachments.first(where: {
-            $0.id == source.attachmentID
-        }) else { throw unavailableError }
-        let data = try snapshot.data(for: VaultObjectReference(
-            id: attachment.id,
-            kind: .attachment
-        ))
-        return OriginalDocumentPayload(
-            data: data,
-            contentTypeIdentifier: attachment.contentTypeIdentifier,
-            sourceID: source.id,
-            attachmentID: source.attachmentID,
-            displayName: source.displayName,
-            pageCount: source.pageCount
-        )
+    private func originalPayload(source: ReportSource, attachment: Attachment, data: Data) -> OriginalDocumentPayload {
+        OriginalDocumentPayload(data: data, contentTypeIdentifier: attachment.contentTypeIdentifier,
+            sourceID: source.id, attachmentID: source.attachmentID, displayName: source.displayName, pageCount: source.pageCount)
     }
 
     private func recognizeDocument(
         for draft: ImportDraft
     ) async throws -> ImportDraftDocument {
+        let revision = try await reports.header().revision
         var attributedBlocks: [OCRBlock] = []
         for source in draft.sources.elements {
             try Task.checkCancellation()
-            let snapshot = try await vault.readSnapshot { catalog in
-                guard catalog.importDrafts.contains(draft) else {
-                    throw AppServiceError.invalidReview
-                }
-                return [VaultObjectReference(id: source.attachmentID, kind: .attachment)]
-            }
-            guard let attachment = snapshot.catalog.attachments.first(where: {
-                $0.id == source.attachmentID
-            }), let contentType = UTType(attachment.contentTypeIdentifier) else {
-                throw AppServiceError.invalidReview
-            }
+            let (attachment, data) = try await reports.original(draftID: draft.id, expectedRevision: draft.revision,
+                sourceID: source.id, expectedLibrary: revision)
+            guard let contentType = UTType(attachment.contentTypeIdentifier) else { throw AppServiceError.invalidReview }
             let kind: ImportedContentKind
             if contentType.conforms(to: .pdf) {
                 kind = .pdf
@@ -1000,10 +869,6 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
             } else {
                 throw AppServiceError.invalidReview
             }
-            let data = try snapshot.data(for: VaultObjectReference(
-                id: attachment.id,
-                kind: .attachment
-            ))
             let file = try ValidatedImportedFile(
                 data: data,
                 kind: kind,
@@ -1013,17 +878,7 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
             )
             let blocks = try await textExtractor.extractText(from: file)
             attributedBlocks.append(contentsOf: try blocks.map { block in
-                try OCRBlock(
-                    id: block.id,
-                    sourceID: source.id,
-                    attachmentID: source.attachmentID,
-                    filePageNumber: block.filePageNumber,
-                    text: block.text,
-                    boundingBox: block.boundingBox,
-                    confidence: block.confidence,
-                    method: block.method,
-                    engineVersion: block.engineVersion
-                )
+                try block.attributed(to: source, blockID: block.id)
             })
         }
         let candidates = try ReportCandidateExtractor().extract(
@@ -1053,35 +908,7 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
         return .detected(replacement.id)
     }
 
-    private func mutateCatalog(
-        _ transform: (VaultCatalog) throws -> VaultCatalog,
-        removedDICOMStudyIDs: Set<DICOMStudy.ID> = [],
-        conflictError: (VaultCatalog, VaultCatalog) -> (any Error)? = { _, _ in nil },
-        isApplied: (VaultCatalog, VaultCatalog) -> Bool
-    ) async throws -> AppSnapshot {
-        let current = try await vault.loadCatalog()
-        let next = try transform(current)
-        if next == current { return Self.snapshot(from: current) }
-        do {
-            let committed = try await vault.commit(try VaultCommitRequest(
-                expectedGeneration: current.generation,
-                catalog: next,
-                writes: [],
-                removedDICOMStudyIDs: removedDICOMStudyIDs
-            ))
-            return Self.snapshot(from: committed)
-        } catch {
-            if let reconciled = try? await vault.loadCatalog() {
-                if isApplied(reconciled, next) {
-                    return Self.snapshot(from: reconciled)
-                }
-                if let conflict = conflictError(reconciled, next) {
-                    throw conflict
-                }
-            }
-            throw error
-        }
-    }
+
 
     private func finishStartup(
         _ task: Task<AppSnapshot, Error>,
@@ -1089,6 +916,7 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
     ) async throws -> AppSnapshot {
         do {
             let snapshot = try await task.value
+            try await lifecycle?.requireActive()
             if startupAttemptID == attemptID {
                 startupCompleted = true
                 startupTask = nil
@@ -1107,6 +935,7 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
 
     private func requireStartup() async throws {
         try Task.checkCancellation()
+        try await lifecycle?.requireActive()
         guard !startupCompleted else { return }
         guard let startupTask, let startupAttemptID else {
             throw AppServiceError.vaultUnavailable
@@ -1168,8 +997,12 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
     }
 
     private func cancelAndWaitForReportOperations() async {
+        reportLifecycleRevoked = true
+        let startup = startupTask
+        startup?.cancel()
         let operations = Array(activeReportOperations.values)
         for operation in operations { operation.cancel() }
+        _ = try? await startup?.value
         await withTaskGroup(of: Void.self) { group in
             for operation in operations {
                 group.addTask { await operation.waitForCompletion() }
@@ -1189,24 +1022,7 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
         }
     }
 
-    private func startupIsReady() async -> Bool {
-        do {
-            try await requireStartup()
-            return true
-        } catch {
-            return false
-        }
-    }
 
-    private static func snapshot(from catalog: VaultCatalog) -> AppSnapshot {
-        AppSnapshot(
-            generation: catalog.generation,
-            members: catalog.members,
-            records: catalog.records.filter { $0.importState == .confirmed },
-            drafts: catalog.importDrafts.map(DraftSummary.init),
-            dicomStudies: catalog.dicomStudies.map(DICOMStudySummary.init)
-        )
-    }
 
     private func coordinatedValidation(of url: URL) throws -> ValidatedImportedFile {
         let didStartScope = url.startAccessingSecurityScopedResource()
@@ -1371,37 +1187,6 @@ private extension AppImportOutcome {
         case .existingDraft(let id): self = .existingDraft(id)
         case .failed: self = .failed(.importFailed)
         }
-    }
-}
-
-private extension VaultCatalog {
-    func next(members: [FamilyMember]) throws -> VaultCatalog {
-        try advancing(members: members)
-    }
-
-    func next(records: [HealthRecord]) throws -> VaultCatalog {
-        try advancing(records: records)
-    }
-
-    func next(dicomStudies: [DICOMStudy]) throws -> VaultCatalog {
-        try advancing(dicomStudies: dicomStudies)
-    }
-
-    private func advancing(
-        members: [FamilyMember]? = nil,
-        records: [HealthRecord]? = nil,
-        dicomStudies: [DICOMStudy]? = nil
-    ) throws -> VaultCatalog {
-        try VaultCatalog(
-            formatVersion: formatVersion,
-            vaultID: vaultID,
-            generation: try VaultGeneration.successor(of: generation),
-            members: members ?? self.members,
-            records: records ?? self.records,
-            attachments: attachments,
-            importDrafts: importDrafts,
-            dicomStudies: dicomStudies ?? self.dicomStudies
-        )
     }
 }
 

@@ -57,7 +57,7 @@ struct BackupRestoreServiceTests {
         ))
 
         #expect(try await service.reconcileBeforeStartingServices() == .committed)
-        #expect(await events.values == ["reconcile-preflights", "reconcile"])
+        #expect(await events.values == ["reconcile", "reconcile-preflights"])
     }
 
     @Test
@@ -290,7 +290,8 @@ private func makePreparedRestore(sequence: UInt64 = 1) throws -> BackupPreparedR
         recordCount: 0,
         inboxItemCount: 0,
         plaintextByteCount: 1,
-        formatVersion: .current
+        formatVersion: .current,
+        logicalDigest: Data(repeating: 0x5A, count: 32)
     )
     let base = URL(fileURLWithPath: "/synthetic-parent", isDirectory: true)
     var stagingMetadata = stat()

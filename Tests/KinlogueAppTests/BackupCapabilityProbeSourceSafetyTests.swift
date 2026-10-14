@@ -1,9 +1,11 @@
 import Foundation
 import Testing
 
+/// The installed-build restore probe is checked as text, because it only runs from a signed,
+/// installed bundle in a login session.
 struct BackupCapabilityProbeSourceSafetyTests {
     @Test
-    func isolatedProbeAndProductionUseOnlyTheirRequiredBookmarkCapabilities() throws {
+    func theProbeIsSandboxedAndNothingElse() throws {
         let package = try contents("Package.swift")
         let fixtureTargetStart = try #require(package.range(
             of: #"name: "KinlogueStorageProcessFixture""#
@@ -16,131 +18,93 @@ struct BackupCapabilityProbeSourceSafetyTests {
         let probeEntitlements = try propertyList(
             "packaging/KinlogueBackupCapabilityProbe.entitlements"
         )
-        let productionEntitlements = try propertyList("packaging/Kinlogue.entitlements")
 
-        #expect(!fixtureTarget.contains(#".linkedFramework("Security")"#))
-        #expect(fixtureTarget.contains(#".linkedFramework("CryptoKit")"#))
-        #expect(fixtureTarget.contains(#".linkedFramework("AppKit")"#))
-        #expect(Set(probeEntitlements.keys) == [
-            "com.apple.security.app-sandbox",
-            "com.apple.security.files.bookmarks.app-scope",
-            "com.apple.security.files.user-selected.read-write",
-        ])
+        // A restore inside the container needs no file access outside it and no extra framework.
+        #expect(Set(probeEntitlements.keys) == ["com.apple.security.app-sandbox"])
         #expect(probeEntitlements.values.allSatisfy { ($0 as? Bool) == true })
-        #expect(productionEntitlements[
-            "com.apple.security.files.bookmarks.app-scope"
-        ] as? Bool == true)
-        #expect(productionEntitlements["com.apple.security.network.client"] == nil)
+        #expect(!fixtureTarget.contains("linkedFramework"))
     }
 
     @Test
-    func noKeychainIdentityCryptoAndBookmarkProbeFailClosed() throws {
+    func theProbeReachesNeitherTheKeychainNorTheUsersFolders() throws {
         let source = try contents(
             "Sources/KinlogueStorageProcessFixture/BackupCapabilityProbe.swift"
         )
-        for required in [
-            "device-identity.json", "0o700", "0o600",
-            "Curve25519.Signing.PrivateKey",
-            "Curve25519.KeyAgreement.PrivateKey",
-            "HPKE.Sender", "HPKE.Recipient",
-            "crypto-public-writer", "crypto-public-decrypt", "crypto-seed-recover",
-            "recoveryMaterialUnavailable", "seedOnlyRecovered",
-            ".withSecurityScope",
-            "bookmarkDataIsStale",
-            ".withoutUI",
-            "startAccessingSecurityScopedResource",
-            "stopAccessingSecurityScopedResource",
-            "selected-target-publication",
-            ".kinlogue-backup-capability-u0",
-            "targetAvailableCapacityByteCount",
-            "privateRestoreAvailableCapacityByteCount",
-            "setActivationPolicy(.regular)",
-        ] {
-            #expect(source.contains(required))
-        }
         for forbidden in [
-            "import Security", "Security.framework", "SecItem",
-            "kSec", "Keychain",
-            "NSHomeDirectory",
-            "Documents",
-            "Downloads",
-            "setActivationPolicy(.accessory)",
+            "import Security", "Security.framework", "SecItem", "kSec", "Keychain",
+            "import AppKit", "import CryptoKit",
+            "NSHomeDirectory", "Documents", "Downloads",
+            "NSOpenPanel", "startAccessingSecurityScopedResource",
         ] {
             #expect(!source.contains(forbidden))
         }
-        #expect(!source.contains("publicOnlyCannotDecrypt: true"))
-        #expect(!source.contains("publicOnlyCannotDecrypt: false"))
+        for required in ["0o700", "0o600", "O_NOFOLLOW", "validateOwnedDirectory"] {
+            #expect(source.contains(required))
+        }
     }
 
     @Test
-    func activationAndChunkProbePreservesThePlannedSafetyBoundaries() throws {
+    func theProbeRunsTheProductionRestoreAndDeclaresNoneOfItsOwn() throws {
         let source = try contents(
             "Sources/KinlogueStorageProcessFixture/BackupCapabilityProbe.swift"
         )
         let transactionSource = try contents(
-            "Sources/KinloguePlatform/Backup/PlaintextVaultRestoreTransaction.swift"
+            "Sources/KinloguePlatform/Backup/BackupRestoreTransaction.swift"
         )
         let compositionSource = try contents("Sources/KinlogueApp/App/AppComposition.swift")
+        let startupSource = try contents("Sources/KinlogueApp/App/SQLiteAppStartup.swift")
 
         for required in [
             "BackupRestoreTransaction", ".activate(prepared:", ".reconcile()",
-            "BackupRestoreVerifier",
-            "activationSeedWriter", "createCommittedRoot",
-            "PlaintextLANInboxStore", "snapshotAndStorageSummary",
+            "BackupRestoreVerifier", "reconcileAbandonedPreflights",
+            "createCommittedRoot", "SQLiteLibraryOwner",
+            "SQLiteLANInboxStore", "validateStrict",
             "strictValidateCommittedRoot", "@_spi(Testing) import KinloguePlatform",
-            "64 * 1_024", "256 * 1_024", "1_024 * 1_024",
-            "2 * 1_024 * 1_024 * 1_024",
-            "peakRSSDeltaBytes", "cancellationLatencyMilliseconds",
-            "selectedChunkByteCount", "goldenVectorSHA256",
-            "named-dataset", "KLG-U0-DATASET-PROBE-1",
-            "maximumSourceObjectCount", "maximumSourceByteCount",
-            "backupBudgetMilliseconds", "restoreBudgetMilliseconds",
-            "fileDescriptorHighWaterCount", "allocatedByteCount",
-            "footerAuthenticated", "fullReaderVerified",
+            "Darwin.kill(getpid(), SIGKILL)",
         ] {
             #expect(source.contains(required))
         }
         for duplicatedActivationAlgorithm in [
             "struct ActivationReceipt", "enum ActivationPhase",
             "rollbackActivatedRoot", "cleanupCommitted(",
-            "KLG-U0-ACTIVATION-2",
+            "KLG-U0-ACTIVATION-2", "renameatx_np(parent",
         ] {
             #expect(!source.contains(duplicatedActivationAlgorithm))
+        }
+        // The groups that carried synthetic formats of their own are gone.
+        for removedOperation in [
+            "identity-create", "crypto-public-writer", "repository-publication",
+            "selected-target-publication", "bookmark-create", "named-dataset", "\"chunk\"",
+        ] {
+            #expect(!source.contains(removedOperation))
         }
         #expect(transactionSource.contains(
             "@_spi(Testing) public enum BackupRestoreTransactionFault"
         ))
-        #expect(transactionSource.contains("@_spi(Testing) public init("))
+        #expect(transactionSource.contains(
+            "package init(owner: SQLiteLibraryOwner, failureInjector: FailureInjector? = nil)"
+        ))
+        #expect(startupSource.contains("BackupRestoreTransaction(owner: owner)"))
         #expect(!compositionSource.contains("failureInjector"))
+        #expect(!startupSource.contains("failureInjector"))
         #expect(!source.contains("AppComposition"))
         #expect(!source.contains("root-state.json"))
-        for forbidden in [
-            "ftruncate(", "posix_fallocate(", "mmap(",
-            "Data(repeating: 0, count: maximumSourceByteCount)",
-            "Data(count: maximumSourceByteCount)",
-        ] {
-            #expect(!source.contains(forbidden))
-        }
+        #expect(!source.contains("fsync(descriptor) == 0 ||"))
     }
 
     @Test
-    func runnerChecksTheSignedArtifactAndKeepsMissingMatricesHonest() throws {
+    func runnerChecksTheSignedArtifactAndEveryRestoreCase() throws {
         let script = try contents("scripts/run-backup-capability-probe.sh")
-        let probeSource = try contents(
-            "Sources/KinlogueStorageProcessFixture/BackupCapabilityProbe.swift"
-        )
 
         for required in [
             "codesign -d --entitlements", "TeamIdentifier",
             "KinlogueBackupCapabilityProbe.entitlements",
+            "the signed artifact has an unexpected entitlement",
+            "installing changed the signed entitlement set",
             "notExecuted", "blocked", "Developer ID",
-            "--interactive-bookmark", "umask 077", "trap cleanup",
-            "sourceTreeDirty", "identityPermissionFailure", "macOS26",
-            "macOS27",
-            "EXPECTED_GOLDEN_VECTOR_SHA256",
-            "real_writer_activation_case", "holdCatalogCommit", "rootReplaced",
-            "after-intent", "after-writer-reset", "after-old-root-move",
-            "after-new-root-activation", "after-validation", "after-commit",
+            "umask 077", "trap cleanup EXIT", "sourceTreeDirty",
+            "PROBE_TIMEOUT_SECONDS", "FIXTURE_TIMEOUT_SECONDS",
+            "occupied_library_activation_case", "openSQLite", "libraryOccupied",
             "semanticValidated", "expected_root_state",
             #"activation_case existing after-intent old"#,
             #"activation_case existing after-writer-reset old"#,
@@ -156,52 +120,32 @@ struct BackupCapabilityProbeSourceSafetyTests {
             #"$(json_bool "$verify_out" receiptPresent)" == false"#,
             #"$(json_bool "$verify_out" stagingPresent)" == false"#,
             #"$(json_bool "$verify_out" rollbackPresent)" == false"#,
-            "PUBLIC_ONLY_STATUS", "SEED_ONLY_STATUS",
-            "REPOSITORY_PUBLICATION_STATUS", "CAPACITY_STATUS",
-            "IDENTITY_MECHANICS_STATUS", "CRYPTO_MECHANICS_STATUS",
-            "REPOSITORY_MECHANICS_STATUS", "CAPACITY_PREFLIGHT_STATUS",
-            "ACTIVATION_MECHANICS_STATUS", "MANDATORY_U0_STATUSES",
-            "FINAL_SIGNED_ENTITLEMENTS", "PROBE_TIMEOUT_SECONDS",
-            "IDENTITY_ADVERSARIAL_STATUS", "--case-id parent-replacement",
-            "--case-id leaf-replacement",
-            "REPOSITORY_ADVERSARIAL_STATUS", "--case-id final-replacement",
-            #"for owned_app in "$INSTALLED_APP" "$PREVIOUS_APP" "$UPGRADE_APP""#,
-            #"all_statuses_passed "${MANDATORY_U0_STATUSES[@]}""#,
-            "crypto-public-writer", "crypto-public-decrypt", "crypto-seed-recover",
-            "selected-target-publication", "ordinaryDirectoryTarget",
-            "ordinaryDirectoryCapacityPreflight",
-            "selectedTargetAvailableCapacityByteCount",
-            "appPrivateRestoreAvailableCapacityByteCount",
-            "FILE_PROVIDER_STATUS=\"notExecuted\"",
-            "named-dataset", "NAMED_DATASET_TIMEOUT_SECONDS",
-            "EXPECTED_NAMED_DATASET_SOURCE_SHA256",
-            "namedWorstCaseDataset", "backupWallClockBudget",
-            "restoreWallClockBudget", "namedDatasetPeakRSSDeltaBytes",
-            "namedDatasetFileDescriptorHighWaterCount",
-            #""$NAMED_DATASET_STATUS" == passed"#,
+            "activation-truncate-receipt", #"!= "receiptInvalid""#,
+            #"[[ "$ACTIVATION_STATUS" == passed ]] || exit 2"#,
         ] {
             #expect(script.contains(required))
         }
-        let exactUpgrade = try #require(script.range(
-            of: #"UPGRADE_APP="$INSTALLED_APP.upgrade""#
+        // Every way a case can go wrong lowers the one status the report carries.
+        #expect(script.components(separatedBy: #"ACTIVATION_STATUS="blocked""#).count - 1 == 14)
+        #expect(script.components(separatedBy: #"ACTIVATION_STATUS="passed""#).count - 1 == 1)
+        // The installed bundle is removed only at its exact run-specific path.
+        #expect(script.contains(#""$INSTALLED_APP" == "$USER_APPLICATIONS_DIRECTORY/$APP_BASENAME""#))
+        let installedPath = try #require(script.range(
+            of: #"INSTALLED_APP="$USER_APPLICATIONS_DIRECTORY/$APP_BASENAME""#
         ))
         let exitTrap = try #require(script.range(of: "trap cleanup EXIT"))
-        #expect(exactUpgrade.lowerBound < exitTrap.lowerBound)
-        #expect(!script.contains(
-            #"-replace "macOS$OS_MAJOR" -string passed"#
-        ))
-        #expect(!script.contains(
-            #"-replace "macOS$OS_MAJOR" -string "$OVERALL_STATUS""#
-        ))
-        #expect(!script.contains("$HOME"))
-        #expect(!script.contains("~/"))
-        #expect(!script.contains("legacy Keychain"))
-        #expect(!script.contains("local status"))
-        #expect(!script.contains(#"$root_state" == "old" || "$root_state" == "new"#))
-        #expect(!script.contains(#"$root_state" == "absent" || "$root_state" == "new"#))
-        #expect(!script.contains("Backup capability report: $FINAL_REPORT"))
-        #expect(script.contains(#"CAPACITY_STATUS="blocked""#))
-        #expect(!probeSource.contains("fsync(descriptor) == 0 ||"))
+        #expect(installedPath.lowerBound < exitTrap.lowerBound)
+        for forbidden in [
+            "$HOME", "~/", "legacy Keychain", "local status",
+            #"$root_state" == "old" || "$root_state" == "new"#,
+            #"$root_state" == "absent" || "$root_state" == "new"#,
+            "Backup capability report: $FINAL_REPORT",
+            "--interactive-bookmark", "identity-create", "crypto-public-writer",
+            "repository-publication", "selected-target-publication", "bookmark-",
+            "named-dataset", "MECHANICS",
+        ] {
+            #expect(!script.contains(forbidden))
+        }
     }
 
     private func contents(_ path: String) throws -> String {

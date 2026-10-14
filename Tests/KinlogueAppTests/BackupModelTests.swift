@@ -51,6 +51,48 @@ struct BackupModelTests {
     }
 
     @Test
+    func aFinishedManualBackupIsConfirmedUntilTheStatusIsReloaded() async {
+        let service = BackupModelService(status: .readyFixture())
+        let model = BackupModel(service: service)
+        await model.refresh()
+        #expect(model.completionText == nil)
+
+        await model.backUpNow()
+        #expect(model.completionText == AppLocalization.string("新的恢复点已创建并通过验证。"))
+
+        await model.refresh()
+        #expect(model.completionText == nil)
+    }
+
+    @Test
+    func aManualBackupThatLeavesCleanupPendingShowsOnlyThatNotice() async {
+        let service = BackupModelService(status: .readyFixture())
+        let model = BackupModel(service: service)
+        await model.refresh()
+        await service.finishNextManualBackup(with: .success(.deferred(.retentionDeferred)))
+
+        await model.backUpNow()
+
+        #expect(model.phase == .localCheckpointComplete)
+        #expect(model.failure == .semantic(.retentionDeferred))
+        #expect(model.completionText == nil)
+    }
+
+    @Test
+    func aManualBackupThatFailsIsNotConfirmed() async {
+        let service = BackupModelService(status: .readyFixture())
+        let model = BackupModel(service: service)
+        await model.refresh()
+        await service.finishNextManualBackup(with: .failure(.repositoryOffline))
+
+        await model.backUpNow()
+
+        #expect(model.phase == .failed)
+        #expect(model.failure == .semantic(.repositoryOffline))
+        #expect(model.completionText == nil)
+    }
+
+    @Test
     func showingBackupRepositoryRoutesThroughService() async {
         let service = BackupModelService(status: .readyFixture())
         let model = BackupModel(service: service)
@@ -273,6 +315,7 @@ private actor BackupModelService: BackupServicing {
     private(set) var automaticValues: [Bool] = []
     private(set) var retentionValues: [Int] = []
     private(set) var manualBackupCount = 0
+    private var nextManualBackupResult: Result<BackupCleanupOutcome, BackupSemanticError> = .success(.complete)
     private(set) var showRepositoryCount = 0
     private var setupContinuation: CheckedContinuation<Void, Never>?
     private var setupPaused = false
@@ -366,8 +409,15 @@ private actor BackupModelService: BackupServicing {
 
     func backUpNow() async throws -> BackupCleanupOutcome {
         manualBackupCount += 1
+        let result = nextManualBackupResult
+        nextManualBackupResult = .success(.complete)
+        let cleanup = try result.get()
         status = status.replacing(localState: .verified, verifiedAt: Date(timeIntervalSince1970: 1))
-        return .complete
+        return cleanup
+    }
+
+    func finishNextManualBackup(with result: Result<BackupCleanupOutcome, BackupSemanticError>) {
+        nextManualBackupResult = result
     }
 
     func showBackupRepository() async throws {

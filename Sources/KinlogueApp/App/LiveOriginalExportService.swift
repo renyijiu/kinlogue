@@ -16,8 +16,11 @@ actor LiveOriginalExportService: OriginalExportServicing {
     private var lifecycleIsRegistered = false
     private var cancelActiveOperation: (@Sendable () -> Bool)?
 
-    init(vault: PlaintextVault, lifecycle: LibraryLifecycleCoordinator) {
-        let exporter = PlaintextOriginalArchiveExporter(vault: vault)
+    init(store: SQLiteLibraryStore, lifecycle: LibraryLifecycleCoordinator) {
+        self.init(exporter: OriginalArchiveExporter(store: store), lifecycle: lifecycle)
+    }
+
+    private init(exporter: OriginalArchiveExporter, lifecycle: LibraryLifecycleCoordinator) {
         self.lifecycle = lifecycle
         prepareOperation = { undatedToken in
             do {
@@ -105,8 +108,9 @@ actor LiveOriginalExportService: OriginalExportServicing {
         guard cancelActiveOperation == nil else {
             throw OriginalExportServiceError.unavailable
         }
+        // Reading and archiving originals waits on storage and file I/O.
         let task = Task {
-            try await operation()
+            try await LibraryStorageExecutor.run(operation)
         }
         cancelActiveOperation = { cancellationGate.cancel(task) }
         defer {
@@ -140,7 +144,7 @@ actor LiveOriginalExportService: OriginalExportServicing {
     }
 
     nonisolated private static func appError(for error: Error) -> OriginalExportServiceError {
-        guard let error = error as? PlaintextOriginalArchiveExportError else {
+        guard let error = error as? OriginalArchiveExportError else {
             return .unavailable
         }
         switch error {
@@ -148,7 +152,6 @@ actor LiveOriginalExportService: OriginalExportServicing {
         case .invalidDestination: return .invalidDestination
         case .insufficientSpace: return .insufficientSpace
         case .destinationAccessDenied: return .destinationAccessDenied
-        case .vaultChanged: return .vaultChanged
         case .sourceIntegrityFailure: return .sourceIntegrityFailure
         case .archiveIntegrityFailure: return .archiveIntegrityFailure
         case .publicationIndeterminate: return .publicationIndeterminate

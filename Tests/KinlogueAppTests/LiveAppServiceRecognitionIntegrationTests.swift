@@ -16,9 +16,9 @@ struct LiveAppServiceRecognitionIntegrationTests {
 
         let result = try await service.recognizeReview(fixture.command)
 
-        #expect(await extractor.digests == fixture.attachments.map(\.sha256Digest))
+        #expect(await extractor.digests == fixture.digests)
         #expect(result.document.blocks.map(\.sourceID) == fixture.draft.sources.elements.map(\.id))
-        let persisted = try #require(try await fixture.vault.loadCatalog().importDrafts.first)
+        let persisted = try await fixture.store.draft(fixture.draft.id)
         #expect(persisted.revision == fixture.draft.revision + 1)
         #expect(try await fixture.store.loadDocument(draftID: persisted.id) == result.document)
     }
@@ -61,22 +61,26 @@ struct LiveAppServiceRecognitionIntegrationTests {
 }
 
 private struct RecognitionFixture: Sendable {
-    let root: URL
-    let vault: PlaintextVault
-    let store: VaultImportDraftStore
+    let base: URL
+    let library: SQLiteLibraryStore
+    let store: SQLiteReportRepository
+    let studies: SQLiteDICOMRepository
     let member: FamilyMember
     let draft: ImportDraft
-    let attachments: [KinlogueCore.Attachment]
+    let digests: [Data]
 
+    /// A draft waiting for review whose two sources are separate PDF originals.
     static func make(sourceByteCount: Int) async throws -> Self {
-        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+        let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
             .appendingPathComponent("kinlogue-recognition-\(UUID().uuidString)")
-        let vault = try PlaintextVault(rootURL: root)
-        let initial = try await vault.initialize()
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: false,
+                                                attributes: [.posixPermissions: 0o700])
+        let library = try SQLiteLibraryStore(rootURL: base.appendingPathComponent("Library"))
+        let store = SQLiteReportRepository(store: library)
         let member = try FamilyMember(displayName: "Synthetic member")
-        var attachments: [KinlogueCore.Attachment] = []
-        var sources: [ReportSource] = []
-        var writes: [VaultObjectWrite] = []
+        try await store.saveMember(member, replacing: nil)
+        var staged: [ImportDraft] = []
+        var digests: [Data] = []
         for marker in [UInt8(32), 10] {
             let output = NSMutableData()
             let consumer = try #require(CGDataConsumer(data: output))
@@ -88,49 +92,26 @@ private struct RecognitionFixture: Sendable {
             var bytes = output as Data
             bytes.append(Data(repeating: marker, count: max(0, sourceByteCount - bytes.count)))
             let file = try ImportedFileValidator().validate(data: bytes)
-            let attachment = try Attachment(
-                contentTypeIdentifier: file.contentTypeIdentifier,
-                byteCount: file.data.count,
-                sha256Digest: file.sha256Digest
-            )
-            attachments.append(attachment)
-            sources.append(try ReportSource(attachmentID: attachment.id, pageCount: file.pageCount))
-            writes.append(VaultObjectWrite(
-                reference: VaultObjectReference(id: attachment.id, kind: .attachment),
-                plaintext: file.data
-            ))
+            guard case .created(let id) = try await store.stage(file) else { throw LibraryReportError.invalidDocument }
+            staged.append(try await store.draft(id))
+            digests.append(file.sha256Digest)
         }
-        let documentID = UUID()
-        let draft = ImportDraft(
-            sources: try ReportSources(sources),
-            state: .needsReview,
-            documentObjectID: documentID
-        )
-        writes.append(VaultObjectWrite(
-            reference: VaultObjectReference(id: documentID, kind: .ocr),
-            plaintext: try CanonicalVaultJSON.encode(
-                ImportDraftDocument(blocks: [], candidates: ReportCandidates())
-            )
-        ))
-        _ = try await vault.commit(try VaultCommitRequest(
-            expectedGeneration: initial.generation,
-            catalog: VaultCatalog(
-                vaultID: initial.vaultID,
-                generation: initial.generation + 1,
-                members: [member],
-                attachments: attachments,
-                importDrafts: [draft]
-            ),
-            writes: writes
-        ))
-        return Self(
-            root: root,
-            vault: vault,
-            store: VaultImportDraftStore(vault: vault),
-            member: member,
-            draft: draft,
-            attachments: attachments
-        )
+        // Staging makes one draft per original. The draft under test owns both originals, as an
+        // archived phone selection does, and the two single drafts are then discarded.
+        let sources = try ReportSources(staged.map {
+            try ReportSource(attachmentID: $0.sources.first.attachmentID, pageCount: $0.sources.first.pageCount)
+        })
+        let draft = ImportDraft(sources: sources, state: .needsReview, documentObjectID: UUID())
+        try library.write { db in
+            let digest = try SQLiteReportRows.saveDocument(
+                ImportDraftDocument(blocks: [], candidates: ReportCandidates()),
+                id: draft.documentObjectID!, revision: draft.revision, sources: sources, db)
+            try SQLiteReportRows.saveDraft(draft, documentHash: digest, db, replaceSources: true)
+            try SQLiteLibraryState.advance(in: db)
+        }
+        for single in staged { try await store.discard(draftID: single.id, expectedRevision: single.revision) }
+        return Self(base: base, library: library, store: store, studies: try SQLiteDICOMRepository(store: library),
+                    member: member, draft: draft, digests: digests)
     }
 
     var command: RecognizeReviewCommand {
@@ -145,7 +126,8 @@ private struct RecognitionFixture: Sendable {
 
     func service(extractor: RecognitionExtractor) -> LiveAppService {
         LiveAppService(
-            vault: vault,
+            reports: store,
+            studies: studies,
             draftStore: store,
             workflow: ImportWorkflow(store: store, textExtractor: extractor),
             textExtractor: extractor,
@@ -153,7 +135,10 @@ private struct RecognitionFixture: Sendable {
         )
     }
 
-    func destroy() { try? FileManager.default.removeItem(at: root) }
+    func destroy() {
+        try? library.close()
+        try? FileManager.default.removeItem(at: base)
+    }
 }
 
 private actor RecognitionExtractor: TextExtractionService {

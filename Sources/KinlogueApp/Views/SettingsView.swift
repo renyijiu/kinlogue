@@ -11,6 +11,7 @@ struct SettingsView: View {
     let onRestoreBackup: () -> Void
     let onExportOriginals: () -> Void
     let onDeleteVault: () -> Void
+    var integrityCoordinator: AppIntegrityCoordinator? = nil
     @State private var isAbandonPendingBackupConfirmationPresented = false
 
     var body: some View {
@@ -71,6 +72,10 @@ struct SettingsView: View {
                     Label(AppLocalization.string("数据管理"), systemImage: "externaldrive")
                         .font(.title2.weight(.semibold))
                         .foregroundStyle(KinlogueTheme.primary)
+
+                    if let integrityCoordinator {
+                        settingsCard { LibraryIntegrityStatusView(inspector: integrityCoordinator) }
+                    }
 
                     settingsCard {
                         HStack(spacing: 24) {
@@ -226,7 +231,7 @@ struct SettingsView: View {
 
             if let verifiedAt = backupModel.status.lastLocalVerificationAt {
                 LabeledContent(AppLocalization.string("最近本地验证")) {
-                    Text(verifiedAt, style: .relative)
+                    Text(verifiedAt, format: Date.FormatStyle(date: .abbreviated, time: .shortened))
                 }
             }
             if let estimate = backupModel.status.estimate {
@@ -298,6 +303,12 @@ struct SettingsView: View {
             .buttonStyle(.kinlogueSecondary)
             .frame(maxWidth: .infinity, alignment: .trailing)
             .disabled(backupModel.phase == .backingUp)
+
+            if let completion = backupModel.completionText {
+                KinlogueStatusLabel(completion, tone: .success)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .accessibilityIdentifier("backup-status-complete")
+            }
         }
         .disabled(backupModel.isManualBackupInFlight)
     }

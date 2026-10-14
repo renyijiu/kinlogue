@@ -30,6 +30,7 @@ ACCENT_COLOR_NAME="AccentColor"
 APP_RESOURCE_BUNDLE_NAME="Kinlogue_KinlogueApp.bundle"
 PLATFORM_RESOURCE_BUNDLE_NAME="Kinlogue_KinloguePlatform.bundle"
 ZIP_FOUNDATION_RESOURCE_BUNDLE_NAME="ZIPFoundation_ZIPFoundation.bundle"
+GRDB_RESOURCE_BUNDLE_NAME="GRDB_GRDB.bundle"
 DICOM_HELPER_TARGET="KinlogueDICOMDecoderHelper"
 DICOM_HELPER_BUNDLE_NAME="KinlogueDICOMDecoderHelper.xpc"
 DICOM_HELPER_PROJECT="$REPO_DIR/packaging/KinlogueDICOMDecoderHelper.xcodeproj"
@@ -250,6 +251,19 @@ ZIP_FOUNDATION_RESOURCE_CONTENTS="$(swiftpm_resource_directory "$ZIP_FOUNDATION_
 /usr/bin/ditto \
   "$ZIP_FOUNDATION_RESOURCE_CONTENTS" \
   "$APP_BUNDLE/Contents/Resources/$ZIP_FOUNDATION_RESOURCE_BUNDLE_NAME"
+GRDB_RESOURCE_BUNDLE="$BIN_DIR/$GRDB_RESOURCE_BUNDLE_NAME"
+GRDB_RESOURCE_CONTENTS="$(swiftpm_resource_directory "$GRDB_RESOURCE_BUNDLE")"
+[[ -d "$GRDB_RESOURCE_BUNDLE" \
+    && ! -L "$GRDB_RESOURCE_BUNDLE" \
+    && -f "$GRDB_RESOURCE_CONTENTS/PrivacyInfo.xcprivacy" \
+    && ! -L "$GRDB_RESOURCE_CONTENTS/PrivacyInfo.xcprivacy" \
+    && -z "$(/usr/bin/find "$GRDB_RESOURCE_BUNDLE" -type l -print -quit)" ]] \
+  || fail "the GRDB SwiftPM privacy resource bundle is unavailable"
+# The native build system also places an Info.plist in this flat bundle; the
+# app ships only the privacy manifest.
+/bin/mkdir "$APP_BUNDLE/Contents/Resources/$GRDB_RESOURCE_BUNDLE_NAME"
+/bin/cp -- "$GRDB_RESOURCE_CONTENTS/PrivacyInfo.xcprivacy" \
+  "$APP_BUNDLE/Contents/Resources/$GRDB_RESOURCE_BUNDLE_NAME/PrivacyInfo.xcprivacy"
 APP_RESOURCE_BUNDLE="$BIN_DIR/$APP_RESOURCE_BUNDLE_NAME"
 [[ -d "$APP_RESOURCE_BUNDLE" && ! -L "$APP_RESOURCE_BUNDLE" ]] \
   || fail "the KinlogueApp SwiftPM resource bundle is unavailable"

@@ -297,7 +297,7 @@ public actor LANReceiver {
         let token: UUID
         let sessionID: LANSessionID
         let presentation: LANPairingPresentation
-        let store: PlaintextLANInboxStore
+        let store: any LANUploadStoring
         let publicationGuard: LANInboxPublicationGuard
         let transport: LANServerTransport
         let networkMonitor: LANNetworkMonitor?
@@ -312,7 +312,7 @@ public actor LANReceiver {
             token: UUID,
             sessionID: LANSessionID,
             presentation: LANPairingPresentation,
-            store: PlaintextLANInboxStore,
+            store: any LANUploadStoring,
             publicationGuard: LANInboxPublicationGuard,
             transport: LANServerTransport,
             networkMonitor: LANNetworkMonitor?,
@@ -336,7 +336,7 @@ public actor LANReceiver {
         case stopping(UUID)
     }
 
-    private let rootURL: URL
+    private let uploadStore: any LANUploadStoring
     private let session: LANSession
     private let idleDuration: Duration
     private let storeObserver: StoreObserver
@@ -348,20 +348,8 @@ public actor LANReceiver {
     private var phase: Phase = .inactive
     private var startStopWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
 
-    public init(rootURL: URL) {
-        self.rootURL = rootURL
-        session = LANSession()
-        idleDuration = .seconds(15 * 60)
-        storeObserver = { _ in }
-        postBindHook = { _, _ in }
-        storeInitializationHook = {}
-        preActivationHook = { _ in }
-        publicationRevocationHook = {}
-        fileUploadPublishedHook = {}
-    }
-
     init(
-        rootURL: URL,
+        store: any LANUploadStoring,
         session: LANSession,
         idleDuration: Duration = .seconds(15 * 60),
         storeObserver: @escaping StoreObserver = { _ in },
@@ -371,7 +359,7 @@ public actor LANReceiver {
         publicationRevocationHook: @escaping PublicationRevocationHook = {},
         fileUploadPublishedHook: @escaping FileUploadPublishedHook = {}
     ) {
-        self.rootURL = rootURL
+        uploadStore = store
         self.session = session
         self.idleDuration = idleDuration
         self.storeObserver = storeObserver
@@ -380,6 +368,14 @@ public actor LANReceiver {
         self.preActivationHook = preActivationHook
         self.publicationRevocationHook = publicationRevocationHook
         self.fileUploadPublishedHook = fileUploadPublishedHook
+    }
+
+    package init(store: any LANUploadStoring) {
+        uploadStore = store
+        session = LANSession()
+        idleDuration = .seconds(15 * 60)
+        storeObserver = { _ in }; postBindHook = { _, _ in }; storeInitializationHook = {}
+        preActivationHook = { _ in }; publicationRevocationHook = {}; fileUploadPublishedHook = {}
     }
 
     public func start(
@@ -464,17 +460,14 @@ public actor LANReceiver {
         phase = .starting(token)
 
         let pairing: LANPairingPresentation
-        let store: PlaintextLANInboxStore
+        let store: any LANUploadStoring
         let guardValue: LANInboxPublicationGuard
         do {
             pairing = try await session.startNewSession()
-            store = try PlaintextLANInboxStore(
-                rootURL: rootURL,
-                runtimeGeneration: UUID()
-            )
+            store = uploadStore
             try await storeInitializationHook()
             storeObserver(.initialize)
-            _ = try await store.initialize()
+            try await store.prepare()
             guardValue = try await store.publicationGuard()
         } catch {
             await session.stop()

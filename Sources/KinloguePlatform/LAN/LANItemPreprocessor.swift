@@ -140,14 +140,14 @@ private actor LANItemPreprocessingGate {
 public actor LANItemPreprocessor {
     public typealias IDGenerator = @Sendable () -> UUID
 
-    private let inbox: PlaintextLANInboxStore
+    private let inbox: SQLiteLANInboxStore
     private let validator: ImportedFileValidator
     private let textExtractor: any TextExtractionService
     private let candidateExtractor: ReportCandidateExtractor
     private let makeID: IDGenerator
 
-    public init(
-        inbox: PlaintextLANInboxStore,
+    package init(
+        inbox: SQLiteLANInboxStore,
         validator: ImportedFileValidator = ImportedFileValidator(),
         textExtractor: any TextExtractionService = OnDeviceTextExtractionService(),
         candidateExtractor: ReportCandidateExtractor = ReportCandidateExtractor(),
@@ -161,9 +161,9 @@ public actor LANItemPreprocessor {
     }
 
     @discardableResult
-    public func preprocess(itemID: LANInboxItem.ID) async throws -> LANInboxItem {
+    public func preprocess(itemID: LANInboxItem.ID, expectedRevision: UInt64? = nil) async throws -> LANInboxItem {
         try await LANItemPreprocessingGate.shared.run { [self] in
-            try await performPreprocessing(itemID: itemID)
+            try await performPreprocessing(itemID: itemID, expectedRevision: expectedRevision)
         }
     }
 
@@ -174,11 +174,9 @@ public actor LANItemPreprocessor {
               Set(itemIDs).count == itemIDs.count else {
             throw LANInboxError.invalidModel
         }
-        let initialSnapshot = try await inbox.loadSnapshot()
-        for itemID in itemIDs {
-            guard let item = initialSnapshot.item(id: itemID) else {
-                throw LANItemPreprocessorError.itemNotFound
-            }
+        let initialItems = try await inbox.loadItems(ids: itemIDs)
+        for item in initialItems {
+            let itemID = item.id
             switch item.state {
             case .stored:
                 _ = try await preprocess(itemID: itemID)
@@ -188,13 +186,7 @@ public actor LANItemPreprocessor {
                 continue
             }
         }
-        let snapshot = try await inbox.loadSnapshot()
-        return try itemIDs.map { itemID in
-            guard let item = snapshot.item(id: itemID) else {
-                throw LANItemPreprocessorError.itemNotFound
-            }
-            return item
-        }
+        return try await inbox.loadItems(ids: itemIDs)
     }
 
     public func preparedSelection(
@@ -207,35 +199,21 @@ public actor LANItemPreprocessor {
               canonicalReportDate.timeIntervalSinceReferenceDate.isFinite else {
             throw LANInboxError.invalidModel
         }
-        let snapshot = try await inbox.loadSnapshot()
-        let items = try itemIDs.map { itemID in
-            guard let item = snapshot.item(id: itemID) else {
-                throw LANItemPreprocessorError.itemNotFound
+        let items = try await inbox.loadItems(ids: itemIDs)
+        guard items.allSatisfy(\.isReviewable) else { throw LANInboxError.invalidState }
+        var retainedBytes = 0
+        for item in items {
+            guard let artifact = item.derivedArtifact else { throw LANInboxError.invalidState }
+            let next = retainedBytes.addingReportingOverflow(artifact.byteCount)
+            guard !next.overflow, next.partialValue <= LibraryReadSnapshotPolicy.maximumRetainedByteCount else {
+                throw LANItemPreprocessorError.sourceTooLarge
             }
-            guard item.isReviewable else { throw LANInboxError.invalidState }
-            return item
+            retainedBytes = next.partialValue
         }
         var sourceDocuments: [LANPreprocessedSourceDocument] = []
         sourceDocuments.reserveCapacity(items.count)
         for item in items {
-            let sourceDocument = try await inbox.withVerifiedItemDerivedContent(
-                itemID: item.id
-            ) { descriptor in
-                let data = try BoundedRegularFileReader.read(
-                    descriptor: descriptor,
-                    maximumByteCount: LANPreprocessedSourceDocument.maximumEncodedByteCount,
-                    oversizeError: LANItemPreprocessorError.sourceTooLarge,
-                    checksCancellation: true
-                )
-                do {
-                    return try CanonicalVaultJSON.decode(
-                        LANPreprocessedSourceDocument.self,
-                        from: data
-                    )
-                } catch {
-                    throw LANItemPreprocessorError.invalidDerivedDocument
-                }
-            }
+            let sourceDocument = try await inbox.loadPreprocessedDocument(itemID: item.id, expectedRevision: item.revision)
             sourceDocuments.append(sourceDocument)
         }
         let sources = try ReportSources(sourceDocuments.map(\.source))
@@ -266,13 +244,13 @@ public actor LANItemPreprocessor {
     }
 
     private func performPreprocessing(
-        itemID: LANInboxItem.ID
+        itemID: LANInboxItem.ID, expectedRevision: UInt64?
     ) async throws -> LANInboxItem {
         try Task.checkCancellation()
-        let snapshot = try await inbox.loadSnapshot()
-        guard let item = snapshot.item(id: itemID) else {
+        guard let item = try await inbox.loadItems(ids: [itemID]).first else {
             throw LANItemPreprocessorError.itemNotFound
         }
+        if let expectedRevision, item.revision != expectedRevision { throw LANInboxError.staleRevision }
         if item.isReviewable { return item }
         switch item.state {
         case .stored, .failed, .unsupported:
@@ -325,16 +303,11 @@ public actor LANItemPreprocessor {
             )
         }
 
-        guard let blob = snapshot.blobs.first(where: { $0.id == item.blobID }) else {
-            throw LANInboxError.invalidReference
-        }
+        // loadItems and the verified source read validate the item's original reference.
         let encoded: Data
         do {
             let sourceID = makeID()
-            let attachmentID = Self.attachmentID(
-                digest: blob.sha256Digest,
-                byteCount: blob.byteCount
-            )
+            let attachmentID = try await inbox.reportAttachmentID(for: item)
             let source = try ReportSource(
                 id: sourceID,
                 attachmentID: attachmentID,
@@ -342,17 +315,7 @@ public actor LANItemPreprocessor {
                 pageCount: validated.pageCount
             )
             let blocks = try rawBlocks.map { block in
-                try OCRBlock(
-                    id: makeID(),
-                    sourceID: sourceID,
-                    attachmentID: attachmentID,
-                    filePageNumber: block.filePageNumber,
-                    text: block.text,
-                    boundingBox: block.boundingBox,
-                    confidence: block.confidence,
-                    method: block.method,
-                    engineVersion: block.engineVersion
-                )
+                try block.attributed(to: source, blockID: makeID())
             }
             encoded = try CanonicalVaultJSON.encode(
                 try LANPreprocessedSourceDocument(
@@ -376,29 +339,12 @@ public actor LANItemPreprocessor {
             )
         }
 
-        let sink = try await inbox.beginItemDerivedArtifact(
-            itemID: itemID,
-            expectedRevision: item.revision
-        )
-        do {
-            try await sink.write(encoded).value
-            _ = try await sink.finish()
-        } catch {
-            await sink.abort()
-            throw error
-        }
-        return try await currentItem(itemID: itemID)
+        try Task.checkCancellation()
+        return try await inbox.savePreprocessedDocument(itemID: itemID, expectedRevision: item.revision,
+            document: CanonicalVaultJSON.decode(LANPreprocessedSourceDocument.self, from: encoded))
     }
 
-    private func currentItem(itemID: LANInboxItem.ID) async throws -> LANInboxItem {
-        let snapshot = try await inbox.loadSnapshot()
-        guard let item = snapshot.item(id: itemID) else {
-            throw LANItemPreprocessorError.itemNotFound
-        }
-        return item
-    }
-
-    private nonisolated static func attachmentID(
+    nonisolated static func attachmentID(
         digest: Data,
         byteCount: Int
     ) -> UUID {

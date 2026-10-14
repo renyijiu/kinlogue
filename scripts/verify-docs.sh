@@ -70,7 +70,7 @@ if [[ -n "${KINLOGUE_TEST_RESULT_FILE:-}" ]]; then
   [[ -f "$TEST_RESULT_FILE" && ! -L "$TEST_RESULT_FILE" ]] \
     || fail "the observed test result file is missing or linked"
   OBSERVED_TEST_SUMMARIES=("${(@f)$(/usr/bin/sed -nE \
-    's/.*Test run with ([0-9]+) tests in ([0-9]+) suites? passed.*/\1 \2/p' \
+    's/.*Test run with ([0-9]+) tests? in ([0-9]+) suites? passed.*/\1 \2/p' \
     "$TEST_RESULT_FILE")}")
   [[ "${#OBSERVED_TEST_SUMMARIES[@]}" -ge 1 \
       && -n "$OBSERVED_TEST_SUMMARIES[1]" ]] \

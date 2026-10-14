@@ -1,7 +1,7 @@
 import Foundation
 
 /// Transient import progress. None of these phases is persisted in a
-/// `DICOMStudy`; catalog publication creates a complete `.needsReview` study.
+/// study; publication creates a complete `.needsReview` study.
 public enum DICOMImportState: String, Equatable, Sendable {
     case ready
     case scanning

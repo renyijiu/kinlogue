@@ -5,525 +5,356 @@ import KinlogueCore
 import Testing
 @_spi(Testing) @testable import KinloguePlatform
 
+// Restore preparation and whole-root activation against the SQLite library. A restore that
+// reopens and edits every repository is in `SQLiteLogicalBackupTests`; real process deaths at
+// each activation phase are in `SQLiteLogicalRestoreProcessTests`.
+
 @Suite("Encrypted checkpoint restore", .serialized)
 struct EncryptedCheckpointRestoreTests {
     @Test
-    func cleanProfileRestoresWithoutBookmarkOrDeviceIdentityAndLeavesSourceUnchanged() async throws {
+    func readerRejectsTheFileTreeFormatBeforeStagingWithoutCallingItDamaged() async throws {
         try await withRestoreFixture { fixture in
-            let before = try Data(contentsOf: fixture.checkpointURL)
-            let destinationParent = fixture.base.appendingPathComponent("destination", isDirectory: true)
-            try makePrivateDirectory(destinationParent)
-            let activeRoot = destinationParent.appendingPathComponent("Vault", isDirectory: true)
-            let verifier = try BackupRestoreVerifier(
-                stableParentURL: destinationParent,
-                activeRootURL: activeRoot
-            )
+            let root = try fixture.destinationRoot("file-tree-format")
+            let parent = root.deletingLastPathComponent()
+            let owner = try SQLiteLibraryOwner(rootURL: root)
+            let store = try SQLiteLibraryStore(owner: owner)
+            defer { try? store.close() }
+            let member = try FamilyMember(displayName: "Synthetic preserved member")
+            try await SQLiteReportRepository(store: store).saveMember(member, replacing: nil)
+            let before = try restoreTreeSnapshot(at: root)
+            let names = try FileManager.default.contentsOfDirectory(atPath: parent.path).sorted()
+            let checkpointBytes = try Data(contentsOf: fixture.fileTreeCheckpointURL)
 
-            let prepared = try await verifier.prepare(
-                checkpointURL: fixture.checkpointURL,
-                recoveryCode: fixture.recoveryCode
-            )
-            #expect(!FileManager.default.fileExists(atPath: activeRoot.path))
-            #expect(prepared.summary.memberCount == 0)
-            #expect(prepared.summary.recordCount == 0)
-            #expect(prepared.summary.inboxItemCount == 0)
-            #expect(prepared.summary.revisionPair == fixture.revisionPair)
+            let verifier = try BackupRestoreVerifier(owner: owner)
+            await #expect(throws: BackupRestoreError.unsupportedFormat) {
+                _ = try await verifier.prepare(
+                    checkpointURL: fixture.fileTreeCheckpointURL,
+                    recoveryCode: fixture.recoveryCode
+                )
+            }
 
-            let result = try await BackupRestoreTransaction(activeRootURL: activeRoot)
-                .activate(prepared: prepared, resetWriter: {})
-            #expect(result.requiresApplicationRestart)
-            #expect(try Data(contentsOf: fixture.checkpointURL) == before)
-            #expect(try await PlaintextVault(rootURL: activeRoot).loadCatalog().vaultID
-                == fixture.sourceVaultID)
-            #expect(try await PlaintextLANInboxStore(rootURL: activeRoot).loadSnapshot().vaultID
-                == fixture.sourceVaultID)
+            #expect(try restoreTreeSnapshot(at: root) == before)
+            #expect(try FileManager.default.contentsOfDirectory(atPath: parent.path).sorted() == names)
+            #expect(try Data(contentsOf: fixture.fileTreeCheckpointURL) == checkpointBytes)
+            #expect(try await SQLiteReportRepository(store: store).member(member.id) == member)
         }
     }
 
     @Test
-    func existingLibraryIsReplacedAsOneRootAndOldRootSurvivesUntilRestartReconcile() async throws {
+    func wrongRecoveryCodeLeavesTheLibraryAndTheCheckpointUnchanged() async throws {
         try await withRestoreFixture { fixture in
-            let destinationParent = fixture.base.appendingPathComponent("replacement", isDirectory: true)
-            try makePrivateDirectory(destinationParent)
-            let activeRoot = destinationParent.appendingPathComponent("Vault", isDirectory: true)
-            let oldVault = try PlaintextVault(rootURL: activeRoot)
-            let oldCatalog = try await oldVault.initialize()
-            _ = try await PlaintextLANInboxStore(rootURL: activeRoot).initialize()
+            let root = try fixture.destinationRoot("wrong-code")
+            let owner = try SQLiteLibraryOwner(rootURL: root)
+            let store = try SQLiteLibraryStore(owner: owner)
+            defer { try? store.close() }
+            let member = try FamilyMember(displayName: "Synthetic preserved member")
+            try await SQLiteReportRepository(store: store).saveMember(member, replacing: nil)
+            let before = try restoreTreeSnapshot(at: root)
+            let checkpointBytes = try Data(contentsOf: fixture.checkpointURL)
 
-            let verifier = try BackupRestoreVerifier(
-                stableParentURL: destinationParent,
-                activeRootURL: activeRoot
-            )
-            let prepared = try await verifier.prepare(
-                checkpointURL: fixture.checkpointURL,
-                recoveryCode: fixture.recoveryCode
-            )
-            #expect(try await oldVault.loadCatalog().vaultID == oldCatalog.vaultID)
-
-            let transaction = try BackupRestoreTransaction(activeRootURL: activeRoot)
-            _ = try await transaction.activate(prepared: prepared, resetWriter: {})
-            #expect(try await PlaintextVault(rootURL: activeRoot).loadCatalog().vaultID
-                == fixture.sourceVaultID)
-            #expect(try transaction.rollbackIdentityForTesting() != nil)
-
-            #expect(try await transaction.reconcile() == .committed)
-            #expect(try transaction.rollbackIdentityForTesting() == nil)
-        }
-    }
-
-    @Test
-    func wrongCodeCapacityFailureAndMissingGraphLeaveCurrentAndCheckpointBytesUnchanged() async throws {
-        try await withRestoreFixture(includeVaultObjectInContainer: false) { fixture in
-            let destinationParent = fixture.base.appendingPathComponent("unchanged", isDirectory: true)
-            try makePrivateDirectory(destinationParent)
-            let activeRoot = destinationParent.appendingPathComponent("Vault", isDirectory: true)
-            let activeVault = try PlaintextVault(rootURL: activeRoot)
-            let activeCatalog = try await activeVault.initialize()
-            _ = try await PlaintextLANInboxStore(rootURL: activeRoot).initialize()
-            let activeManifestBefore = try Data(contentsOf: activeRoot.appendingPathComponent("library.json"))
-            let checkpointBefore = try Data(contentsOf: fixture.checkpointURL)
-            let verifier = try BackupRestoreVerifier(
-                stableParentURL: destinationParent,
-                activeRootURL: activeRoot
-            )
-
+            let verifier = try BackupRestoreVerifier(owner: owner)
             await #expect(throws: BackupRestoreError.authenticationFailed) {
                 _ = try await verifier.prepare(
                     checkpointURL: fixture.checkpointURL,
                     recoveryCode: try BackupRecoveryCode.encode(seed: Data(repeating: 0xEE, count: 32))
                 )
             }
-            await #expect(throws: BackupRestoreError.graphInvalid) {
-                _ = try await verifier.prepare(
-                    checkpointURL: fixture.checkpointURL,
-                    recoveryCode: fixture.recoveryCode
-                )
-            }
 
-            let capacityVerifier = try BackupRestoreVerifier(
-                stableParentURL: destinationParent,
-                activeRootURL: activeRoot,
-                availableCapacity: { 0 }
-            )
-            await #expect(throws: BackupRestoreError.capacityInsufficient) {
-                _ = try await capacityVerifier.prepare(
-                    checkpointURL: fixture.validCheckpointURL,
-                    recoveryCode: fixture.recoveryCode
-                )
-            }
-
-            let symlink = fixture.base.appendingPathComponent("alias.kinloguebackup")
-            try FileManager.default.createSymbolicLink(
-                at: symlink,
-                withDestinationURL: fixture.validCheckpointURL
-            )
-            await #expect(throws: BackupRestoreError.invalidSource) {
-                _ = try await verifier.prepare(
-                    checkpointURL: symlink,
-                    recoveryCode: fixture.recoveryCode
-                )
-            }
-            let hardlink = fixture.base.appendingPathComponent("hardlink.kinloguebackup")
-            #expect(link(fixture.validCheckpointURL.path, hardlink.path) == 0)
-            await #expect(throws: BackupRestoreError.invalidSource) {
-                _ = try await verifier.prepare(
-                    checkpointURL: hardlink,
-                    recoveryCode: fixture.recoveryCode
-                )
-            }
-            #expect(unlink(hardlink.path) == 0)
-
-            let tampered = fixture.base.appendingPathComponent("tampered.kinloguebackup")
-            try FileManager.default.copyItem(at: fixture.validCheckpointURL, to: tampered)
-            let tamperedDescriptor = Darwin.open(tampered.path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC)
-            #expect(tamperedDescriptor >= 0)
-            var byte: UInt8 = 0xFF
-            #expect(pwrite(tamperedDescriptor, &byte, 1, 64) == 1)
-            Darwin.close(tamperedDescriptor)
-            await #expect(throws: BackupRestoreError.self) {
-                _ = try await verifier.prepare(
-                    checkpointURL: tampered,
-                    recoveryCode: fixture.recoveryCode
-                )
-            }
-            #expect(try await activeVault.loadCatalog().vaultID == activeCatalog.vaultID)
-            #expect(try Data(contentsOf: activeRoot.appendingPathComponent("library.json"))
-                == activeManifestBefore)
-            #expect(try Data(contentsOf: fixture.checkpointURL) == checkpointBefore)
-            #expect(try restoreArtifacts(in: destinationParent).isEmpty)
+            #expect(try restoreTreeSnapshot(at: root) == before)
+            #expect(try restoreArtifacts(in: root.deletingLastPathComponent()).isEmpty)
+            #expect(try Data(contentsOf: fixture.checkpointURL) == checkpointBytes)
+            #expect(try await SQLiteReportRepository(store: store).member(member.id) == member)
         }
     }
 
     @Test
-    func restoresDerivedArtifactsRejectsLeafTamperingAndReconcilesPreprocessing() async throws {
-        try await withRestoreFixture(includeLANRecoveryEvidence: true) { fixture in
-            let evidence = try #require(fixture.lanEvidence)
-            let destinationParent = fixture.base.appendingPathComponent(
-                "lan-derived-destination",
-                isDirectory: true
-            )
-            try makePrivateDirectory(destinationParent)
-            let activeRoot = destinationParent.appendingPathComponent("Vault", isDirectory: true)
-            let verifier = try BackupRestoreVerifier(
-                stableParentURL: destinationParent,
-                activeRootURL: activeRoot
-            )
-            let prepared = try await verifier.prepare(
-                checkpointURL: fixture.checkpointURL,
-                recoveryCode: fixture.recoveryCode
-            )
-
-            #expect(prepared.summary.inboxItemCount == 2)
-            let stagingLayout = try LANInboxLayout(rootURL: prepared.stagingURL)
-            #expect(try Data(contentsOf: stagingLayout.derivedURL(evidence.artifactID))
-                == evidence.artifactBytes)
-            #expect(!FileManager.default.fileExists(
-                atPath: stagingLayout.partialURL(evidence.preprocessingAttemptID).path
-            ))
-            _ = try await PlaintextLANInboxStore(rootURL: prepared.stagingURL)
-                .strictRestoreValidation()
-
-            let transaction = try BackupRestoreTransaction(activeRootURL: activeRoot)
-            _ = try await transaction.activate(prepared: prepared, resetWriter: {})
-            #expect(try await transaction.reconcile() == .committed)
-            let activatedStore = try PlaintextLANInboxStore(rootURL: activeRoot)
-            _ = try await activatedStore.strictRestoreValidation()
-            let initialized = try await activatedStore.initialize()
-            let restoredReviewable = try #require(
-                initialized.item(id: evidence.reviewableItemID)
-            )
-            #expect(restoredReviewable.isReviewable)
-            #expect(restoredReviewable.derivedArtifact?.id == evidence.artifactID)
-            let restoredInterrupted = try #require(
-                initialized.item(id: evidence.preprocessingItemID)
-            )
-            guard case .failed(_, .storageFailure) = restoredInterrupted.state else {
-                Issue.record("Expected startup to make interrupted preprocessing retryable")
-                return
-            }
-            #expect(restoredInterrupted.attemptID == nil)
-            #expect(!FileManager.default.fileExists(
-                atPath: try LANInboxLayout(rootURL: activeRoot)
-                    .partialURL(evidence.preprocessingAttemptID).path
-            ))
-
-            let tamperParent = fixture.base.appendingPathComponent(
-                "lan-derived-tamper",
-                isDirectory: true
-            )
-            try makePrivateDirectory(tamperParent)
-            let tamperRoot = tamperParent.appendingPathComponent("Vault", isDirectory: true)
-            let tamperVerifier = try BackupRestoreVerifier(
-                stableParentURL: tamperParent,
-                activeRootURL: tamperRoot
-            )
-            let tamperPrepared = try await tamperVerifier.prepare(
-                checkpointURL: fixture.checkpointURL,
-                recoveryCode: fixture.recoveryCode
-            )
-            let tamperLayout = try LANInboxLayout(rootURL: tamperPrepared.stagingURL)
-            let artifactURL = tamperLayout.derivedURL(evidence.artifactID)
-            let descriptor = Darwin.open(
-                artifactURL.path,
-                O_WRONLY | O_NOFOLLOW | O_CLOEXEC
-            )
-            #expect(descriptor >= 0)
-            var replacement: UInt8 = 0xFF
-            #expect(pwrite(descriptor, &replacement, 1, 0) == 1)
-            Darwin.close(descriptor)
-            await #expect(throws: VaultError.integrityCheckFailed) {
-                _ = try await PlaintextLANInboxStore(
-                    rootURL: tamperPrepared.stagingURL
-                ).strictRestoreValidation()
-            }
-            try tamperVerifier.cancel(tamperPrepared)
-        }
-    }
-
-    @Test
-    func crashAfterOldRootMoveReconcilesToCompleteOldRoot() async throws {
+    func existingLibraryIsReplacedAsOneRootAndTheOldRootSurvivesUntilReconcile() async throws {
         try await withRestoreFixture { fixture in
-            let destinationParent = fixture.base.appendingPathComponent("rollback", isDirectory: true)
-            try makePrivateDirectory(destinationParent)
-            let activeRoot = destinationParent.appendingPathComponent("Vault", isDirectory: true)
-            let oldVault = try PlaintextVault(rootURL: activeRoot)
-            let oldCatalog = try await oldVault.initialize()
-            _ = try await PlaintextLANInboxStore(rootURL: activeRoot).initialize()
-            let prepared = try await BackupRestoreVerifier(
-                stableParentURL: destinationParent,
-                activeRootURL: activeRoot
-            ).prepare(
+            let root = try fixture.destinationRoot("replacement")
+            let owner = try SQLiteLibraryOwner(rootURL: root)
+            let old = try SQLiteLibraryStore(owner: owner)
+            let oldMember = try FamilyMember(displayName: "Synthetic previous member")
+            try await SQLiteReportRepository(store: old).saveMember(oldMember, replacing: nil)
+
+            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(
                 checkpointURL: fixture.checkpointURL,
                 recoveryCode: fixture.recoveryCode
             )
+            // Preparing touches nothing in the library that is still open.
+            #expect(try await SQLiteReportRepository(store: old).member(oldMember.id) == oldMember)
+
+            let transaction = try BackupRestoreTransaction(owner: owner)
+            // The root cannot be swapped under an open database.
+            await #expect(throws: SQLiteLibraryError.occupied) {
+                _ = try await transaction.activate(prepared: prepared, resetWriter: {})
+            }
+            try old.close()
+
+            _ = try await transaction.activate(prepared: prepared, resetWriter: {})
+            #expect(try transaction.rollbackIdentityForTesting() != nil)
+
+            #expect(try await transaction.reconcile() == .committed)
+            #expect(try transaction.rollbackIdentityForTesting() == nil)
+            #expect(try restoreArtifacts(in: root.deletingLastPathComponent()).isEmpty)
+            let restored = try SQLiteLibraryStore(owner: owner, mode: .strictExisting)
+            defer { try? restored.close() }
+            #expect(try await SQLiteReportRepository(store: restored).members() == [fixture.sourceMember])
+            #expect(try SQLiteLogicalBackupSource(store: restored).currentRevision() == fixture.revisionPair)
+        }
+    }
+
+    /// The second case rewrites the device numbers the receipts recorded before the next launch
+    /// reads them, which is what a restart that renumbers the volume leaves behind.
+    @Test(arguments: [false, true])
+    func interruptionAfterTheOldRootMoveReconcilesToTheCompleteOldRoot(afterTheVolumeWasRenumbered: Bool) async throws {
+        try await withRestoreFixture { fixture in
+            let root = try fixture.destinationRoot("rollback")
+            let owner = try SQLiteLibraryOwner(rootURL: root)
+            let oldMember = try await seedClosedLibrary(owner: owner)
+            let before = try restoreTreeSnapshot(at: root)
+            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(
+                checkpointURL: fixture.checkpointURL,
+                recoveryCode: fixture.recoveryCode
+            )
+
             let interrupted = try BackupRestoreTransaction(
-                activeRootURL: activeRoot,
+                owner: owner,
                 failureInjector: { $0 == .afterOldRootMove }
             )
             await #expect(throws: BackupRestoreError.injectedFailure) {
                 _ = try await interrupted.activate(prepared: prepared, resetWriter: {})
             }
+            if afterTheVolumeWasRenumbered { try renumberRecordedDevices(inReceiptsOf: root) }
 
-            let restarted = try BackupRestoreTransaction(activeRootURL: activeRoot)
-            #expect(try await restarted.reconcile() == .rolledBack)
-            #expect(try await PlaintextVault(rootURL: activeRoot).loadCatalog().vaultID
-                == oldCatalog.vaultID)
+            #expect(try await BackupRestoreTransaction(owner: owner).reconcile() == .rolledBack)
+            #expect(try restoreArtifacts(in: root.deletingLastPathComponent()).isEmpty)
+            #expect(try restoreTreeSnapshot(at: root) == before)
+            let reopened = try SQLiteLibraryStore(owner: owner, mode: .strictExisting)
+            defer { try? reopened.close() }
+            #expect(try await SQLiteReportRepository(store: reopened).members() == [oldMember])
         }
     }
 
     @Test
-    func corruptedPreparedStagingFailsActivationAndRestoresExactPriorRootOrAbsence() async throws {
+    func aRestoreInterruptedAfterActivationCommitsOnceTheVolumeHasBeenRenumbered() async throws {
         try await withRestoreFixture { fixture in
-            for startsWithExistingRoot in [true, false] {
-                let caseName = startsWithExistingRoot ? "existing" : "absent"
-                let destinationParent = fixture.base.appendingPathComponent(
-                    "post-prepare-corruption-\(caseName)",
-                    isDirectory: true
-                )
-                try makePrivateDirectory(destinationParent)
-                let activeRoot = destinationParent.appendingPathComponent(
-                    "Vault",
-                    isDirectory: true
-                )
-                let oldRootSnapshot: [String: RestoreTreeEntry]?
-                if startsWithExistingRoot {
-                    let oldVault = try PlaintextVault(rootURL: activeRoot)
-                    _ = try await oldVault.initialize()
-                    _ = try await PlaintextLANInboxStore(rootURL: activeRoot).initialize()
-                    oldRootSnapshot = try restoreTreeSnapshot(at: activeRoot)
-                } else {
-                    oldRootSnapshot = nil
-                }
-
-                let verifier = try BackupRestoreVerifier(
-                    stableParentURL: destinationParent,
-                    activeRootURL: activeRoot
-                )
-                let prepared = try await verifier.prepare(
-                    checkpointURL: fixture.checkpointURL,
-                    recoveryCode: fixture.recoveryCode
-                )
-                try corruptPreparedVaultObject(prepared)
-
-                let transaction = try BackupRestoreTransaction(activeRootURL: activeRoot)
-                await #expect(throws: BackupRestoreError.graphInvalid) {
-                    _ = try await transaction.activate(prepared: prepared, resetWriter: {})
-                }
-
-                if let oldRootSnapshot {
-                    #expect(try restoreTreeSnapshot(at: activeRoot) == oldRootSnapshot)
-                } else {
-                    #expect(!FileManager.default.fileExists(atPath: activeRoot.path))
-                }
-                #expect(try restoreArtifacts(in: destinationParent).isEmpty)
-            }
-        }
-    }
-
-    @Test
-    func startupReconciliationRemovesOnlyReceiptBoundAbandonedPlaintextStaging() async throws {
-        try await withRestoreFixture { fixture in
-            let destinationParent = fixture.base.appendingPathComponent(
-                "abandoned-preflight",
-                isDirectory: true
-            )
-            try makePrivateDirectory(destinationParent)
-            let activeRoot = destinationParent.appendingPathComponent("Vault", isDirectory: true)
-            let verifier = try BackupRestoreVerifier(
-                stableParentURL: destinationParent,
-                activeRootURL: activeRoot
-            )
-            _ = try await verifier.prepare(
+            let root = try fixture.destinationRoot("renumbered-forward")
+            let owner = try SQLiteLibraryOwner(rootURL: root)
+            _ = try await seedClosedLibrary(owner: owner)
+            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(
                 checkpointURL: fixture.checkpointURL,
                 recoveryCode: fixture.recoveryCode
             )
-            #expect(try !restoreArtifacts(in: destinationParent).isEmpty)
+            let interrupted = try BackupRestoreTransaction(
+                owner: owner,
+                failureInjector: { $0 == .afterNewRootActivation }
+            )
+            await #expect(throws: BackupRestoreError.injectedFailure) {
+                _ = try await interrupted.activate(prepared: prepared, resetWriter: {})
+            }
+            try renumberRecordedDevices(inReceiptsOf: root)
 
-            try BackupRestoreVerifier(
-                stableParentURL: destinationParent,
-                activeRootURL: activeRoot
-            ).reconcileAbandonedPreflights()
+            // The new root is in place and the old one set aside; the receipt has to recognize
+            // both by inode to finish the restore instead of refusing to converge.
+            #expect(try await BackupRestoreTransaction(owner: owner).reconcile() == .committed)
+            #expect(try restoreArtifacts(in: root.deletingLastPathComponent()).isEmpty)
+            let restored = try SQLiteLibraryStore(owner: owner, mode: .strictExisting)
+            defer { try? restored.close() }
+            #expect(try await SQLiteReportRepository(store: restored).members() == [fixture.sourceMember])
+        }
+    }
 
-            #expect(try restoreArtifacts(in: destinationParent).isEmpty)
-            #expect(!FileManager.default.fileExists(atPath: activeRoot.path))
+    @Test
+    func truncatedActivationReceiptFailsClosedAndLeavesTheOldRoot() async throws {
+        try await withRestoreFixture { fixture in
+            let root = try fixture.destinationRoot("truncated-receipt")
+            let parent = root.deletingLastPathComponent()
+            let owner = try SQLiteLibraryOwner(rootURL: root)
+            _ = try await seedClosedLibrary(owner: owner)
+            let before = try restoreTreeSnapshot(at: root)
+            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(
+                checkpointURL: fixture.checkpointURL,
+                recoveryCode: fixture.recoveryCode
+            )
+            let interrupted = try BackupRestoreTransaction(
+                owner: owner,
+                failureInjector: { $0 == .afterIntent }
+            )
+            await #expect(throws: BackupRestoreError.injectedFailure) {
+                _ = try await interrupted.activate(prepared: prepared, resetWriter: {})
+            }
+            let receipts = try restoreArtifacts(in: parent).filter {
+                $0.hasPrefix(".kinlogue-restore-transaction-") && $0.hasSuffix(".json")
+            }
+            let receipt = parent.appendingPathComponent(try #require(receipts.first))
+            #expect(receipts.count == 1)
+            try Data(#"{"magic":"truncated""#.utf8).write(to: receipt)
+            #expect(chmod(receipt.path, 0o600) == 0)
+
+            await #expect(throws: BackupRestoreError.receiptInvalid) {
+                _ = try await BackupRestoreTransaction(owner: owner).reconcile()
+            }
+            // Nothing is guessed from a receipt that cannot be read: the old root stays in place.
+            #expect(try restoreTreeSnapshot(at: root) == before)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func abandonedPreflightReconciliationRemovesOnlyReceiptBoundStaging(afterTheVolumeWasRenumbered: Bool) async throws {
+        try await withRestoreFixture { fixture in
+            let root = try fixture.destinationRoot("abandoned-preflight")
+            let parent = root.deletingLastPathComponent()
+            let owner = try SQLiteLibraryOwner(rootURL: root)
+            _ = try await BackupRestoreVerifier(owner: owner).prepare(
+                checkpointURL: fixture.checkpointURL,
+                recoveryCode: fixture.recoveryCode
+            )
+            #expect(try !restoreArtifacts(in: parent).isEmpty)
+            // A directory that only looks like staging has no receipt, so it is not ours to remove.
+            let unowned = parent.appendingPathComponent(
+                ".kinlogue-restore-\(UUID().uuidString.lowercased()).staging",
+                isDirectory: true
+            )
+            try makePrivateDirectory(unowned)
+            try Data("synthetic unowned file".utf8).write(to: unowned.appendingPathComponent("kept.bin"))
+            if afterTheVolumeWasRenumbered { try renumberRecordedDevices(inReceiptsOf: root) }
+
+            try BackupRestoreVerifier(owner: owner).reconcileAbandonedPreflights()
+
+            #expect(try restoreArtifacts(in: parent) == [unowned.lastPathComponent])
+            #expect(FileManager.default.fileExists(atPath: unowned.appendingPathComponent("kept.bin").path))
+            #expect(!FileManager.default.fileExists(atPath: root.path))
         }
     }
 }
 
 private struct RestoreFixture {
     let base: URL
+    /// A checkpoint of the source library in the logical format the App writes.
     let checkpointURL: URL
-    let validCheckpointURL: URL
+    /// A correctly signed and encrypted checkpoint in the earlier file-tree layout.
+    let fileTreeCheckpointURL: URL
     let recoveryCode: String
-    let sourceVaultID: UUID
+    let sourceMember: FamilyMember
     let revisionPair: BackupRevisionPair
-    let lanEvidence: RestoreLANEvidence?
+
+    /// The root path of a library inside its own private parent directory. Nothing is created
+    /// at the root itself.
+    func destinationRoot(_ name: String) throws -> URL {
+        let parent = base.appendingPathComponent(name, isDirectory: true)
+        try makePrivateDirectory(parent)
+        return parent.appendingPathComponent("Vault", isDirectory: true)
+    }
 }
 
-private struct RestoreLANEvidence {
-    let reviewableItemID: LANInboxItem.ID
-    let preprocessingItemID: LANInboxItem.ID
-    let preprocessingAttemptID: UUID
-    let artifactID: LANInboxDerivedArtifact.ID
-    let artifactBytes: Data
-}
-
-private func withRestoreFixture(
-    includeVaultObjectInContainer: Bool = true,
-    includeLANRecoveryEvidence: Bool = false,
-    _ body: (RestoreFixture) async throws -> Void
-) async throws {
-    let base = FileManager.default.temporaryDirectory.appendingPathComponent(
+private func withRestoreFixture(_ body: (RestoreFixture) async throws -> Void) async throws {
+    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(
         "KinlogueRestore-\(UUID().uuidString)",
         isDirectory: true
     )
     defer { try? FileManager.default.removeItem(at: base) }
     try makePrivateDirectory(base)
-    let sourceRoot = base.appendingPathComponent("SourceVault", isDirectory: true)
-    let vault = try PlaintextVault(rootURL: sourceRoot)
-    let initial = try await vault.initialize()
-    let payload = Data("synthetic restore object".utf8)
-    let attachment = try Attachment(
-        contentTypeIdentifier: "public.data",
-        byteCount: payload.count,
-        sha256Digest: Data(SHA256.hash(data: payload))
+    let sourceParent = base.appendingPathComponent("source", isDirectory: true)
+    try makePrivateDirectory(sourceParent)
+    let source = try SQLiteLibraryStore(rootURL: sourceParent.appendingPathComponent("Vault", isDirectory: true))
+    let member = try FamilyMember(displayName: "Synthetic restored member")
+    try await SQLiteReportRepository(store: source).saveMember(member, replacing: nil)
+    let original = Data("synthetic restore original".utf8)
+    let upload = try await SQLiteLANInboxStore(store: source).startItemUpload(
+        transport: .init(sessionID: UUID(), remoteFileID: UUID()),
+        metadata: try .init(displayName: .init(rawValue: "restore.bin"), declaredByteCount: original.count),
+        attemptRevision: 0
     )
-    _ = try await vault.commit(try VaultCommitRequest(
-        expectedGeneration: initial.generation,
-        catalog: VaultCatalog(
-            vaultID: initial.vaultID,
-            generation: try VaultGeneration.successor(of: initial.generation),
-            attachments: [attachment]
-        ),
-        writes: [.init(
-            reference: .init(id: attachment.id, kind: .attachment),
-            plaintext: payload
-        )]
-    ))
-    let inbox = try PlaintextLANInboxStore(rootURL: sourceRoot)
-    _ = try await inbox.initialize()
-    let seeded: (evidence: RestoreLANEvidence, preprocessingSink: LANDerivedArtifactSink)?
-    if includeLANRecoveryEvidence {
-        seeded = try await seedRestoreLANEvidence(in: inbox)
-    } else {
-        seeded = nil
-    }
-    let source = try PlaintextLibraryBackupSource(vault: vault, inboxStore: inbox)
-    let plan = try await source.prepare()
+    guard case let .sink(sink) = upload else { throw LANInboxError.invalidState }
+    try await sink.write(original).value
+    _ = try await sink.finish()
+
     let enrollment = try BackupKeyHierarchy.makeEnrollment()
-    let seed = try BackupRecoveryCode.decode(enrollment.recoveryCode)
     let signer = try BackupDeviceSigner(
         descriptor: enrollment.descriptor,
         authorization: enrollment.authorization,
         deviceSigningSeed: enrollment.deviceSigningSeed
     )
-
-    func makeCheckpoint(
-        at url: URL,
-        includeVaultObject: Bool
-    ) async throws {
+    func writeCheckpoint(
+        named name: String,
+        entries: [BackupContainerEntrySource],
+        revisionPair: BackupRevisionPair
+    ) async throws -> URL {
         let bytes = RestoreLockedBytes()
-        let entries = await source.containerSources(for: plan).filter {
-            includeVaultObject || $0.kind != .vaultObject
-        }
         _ = try await EncryptedBackupContainerWriter().write(
             entries: entries,
-            revisionPair: plan.revisionPair,
+            revisionPair: revisionPair,
             sequence: 1,
             signer: signer,
             sink: .init(write: bytes.append, readBackSource: bytes.source)
         )
+        let url = base.appendingPathComponent(name)
         try bytes.data.write(to: url, options: .withoutOverwriting)
         #expect(chmod(url.path, 0o600) == 0)
+        return url
     }
 
-    let checkpointURL = base.appendingPathComponent("selected.kinloguebackup")
-    try await makeCheckpoint(at: checkpointURL, includeVaultObject: includeVaultObjectInContainer)
-    let validCheckpointURL = base.appendingPathComponent("valid.kinloguebackup")
-    try await makeCheckpoint(at: validCheckpointURL, includeVaultObject: true)
-    _ = seed
-    let fixture = RestoreFixture(
+    let snapshot = try await SQLiteLogicalBackupSource(store: source).prepare()
+    let revisionPair = snapshot.revisionPair
+    let checkpointURL: URL
+    do {
+        defer { snapshot.release() }
+        checkpointURL = try await writeCheckpoint(
+            named: "logical.kinloguebackup",
+            entries: snapshot.sources(),
+            revisionPair: revisionPair
+        )
+    }
+    try source.close()
+    let fileTreeCheckpointURL = try await writeCheckpoint(
+        named: "file-tree.kinloguebackup",
+        entries: [
+            fileTreeEntry(.vaultCatalog, path: "library.json", bytes: Data("{}".utf8)),
+            fileTreeEntry(.lanInboxManifest, path: "lan-inbox/inbox.json", bytes: Data("{}".utf8)),
+            fileTreeEntry(.vaultObject, path: "objects/payload.bin", bytes: Data("synthetic file-tree object".utf8)),
+        ],
+        revisionPair: revisionPair
+    )
+
+    try await body(RestoreFixture(
         base: base,
         checkpointURL: checkpointURL,
-        validCheckpointURL: validCheckpointURL,
+        fileTreeCheckpointURL: fileTreeCheckpointURL,
         recoveryCode: enrollment.recoveryCode,
-        sourceVaultID: initial.vaultID,
-        revisionPair: plan.revisionPair,
-        lanEvidence: seeded?.evidence
-    )
+        sourceMember: member,
+        revisionPair: revisionPair
+    ))
+}
+
+private func fileTreeEntry(
+    _ kind: BackupManifestEntry.Kind,
+    path: String,
+    bytes: Data
+) -> BackupContainerEntrySource {
+    BackupContainerEntrySource(
+        kind: kind,
+        path: path,
+        plaintextByteCount: UInt64(bytes.count),
+        plaintextDigest: Data(SHA256.hash(data: bytes))
+    ) { offset, maximum in
+        guard offset <= UInt64(bytes.count) else { return Data() }
+        let start = Int(offset)
+        return Data(bytes[start..<min(bytes.count, start + maximum)])
+    }
+}
+
+/// Creates a library with one member under `owner` and leaves its database closed.
+private func seedClosedLibrary(owner: SQLiteLibraryOwner) async throws -> FamilyMember {
+    let store = try SQLiteLibraryStore(owner: owner)
+    let member = try FamilyMember(displayName: "Synthetic previous member")
     do {
-        try await body(fixture)
+        try await SQLiteReportRepository(store: store).saveMember(member, replacing: nil)
     } catch {
-        if let seeded { await seeded.preprocessingSink.abort() }
+        try? store.close()
         throw error
     }
-    if let seeded { await seeded.preprocessingSink.abort() }
-}
-
-private func seedRestoreLANEvidence(
-    in inbox: PlaintextLANInboxStore
-) async throws -> (evidence: RestoreLANEvidence, preprocessingSink: LANDerivedArtifactSink) {
-    let reviewable = try await uploadRestoreLANBlob(
-        Data("synthetic restore reviewable blob".utf8),
-        name: "restore-reviewable.bin",
-        to: inbox
-    )
-    let artifactBytes = Data("synthetic restore derived artifact".utf8)
-    let artifactSink = try await inbox.beginItemDerivedArtifact(
-        itemID: reviewable.id,
-        expectedRevision: reviewable.revision
-    )
-    try await artifactSink.write(artifactBytes).value
-    _ = try await artifactSink.finish()
-
-    let preprocessing = try await uploadRestoreLANBlob(
-        Data("synthetic restore preprocessing blob".utf8),
-        name: "restore-preprocessing.bin",
-        to: inbox
-    )
-    let preprocessingSink = try await inbox.beginItemDerivedArtifact(
-        itemID: preprocessing.id,
-        expectedRevision: preprocessing.revision
-    )
-    try await preprocessingSink.write(Data("excluded restore partial".utf8)).value
-
-    let snapshot = try await inbox.loadSnapshot()
-    let storedReviewable = try #require(snapshot.item(id: reviewable.id))
-    let artifact = try #require(storedReviewable.derivedArtifact)
-    let storedPreprocessing = try #require(snapshot.item(id: preprocessing.id))
-    let attemptID = try #require(storedPreprocessing.attemptID)
-    return (
-        RestoreLANEvidence(
-            reviewableItemID: reviewable.id,
-            preprocessingItemID: preprocessing.id,
-            preprocessingAttemptID: attemptID,
-            artifactID: artifact.id,
-            artifactBytes: artifactBytes
-        ),
-        preprocessingSink
-    )
-}
-
-private func uploadRestoreLANBlob(
-    _ bytes: Data,
-    name: String,
-    to inbox: PlaintextLANInboxStore
-) async throws -> LANInboxItem {
-    let outcome = try await inbox.startItemUpload(
-        transport: .init(sessionID: UUID(), remoteFileID: UUID()),
-        metadata: try .init(
-            displayName: .init(rawValue: name),
-            declaredByteCount: bytes.count
-        ),
-        attemptRevision: 0,
-        admissionGeneration: try await inbox.itemAdmissionGeneration()
-    )
-    guard case let .sink(sink) = outcome else { throw LANInboxError.invalidState }
-    try await sink.write(bytes).value
-    _ = try await sink.finish()
-    return try #require(try await inbox.loadSnapshot().items.first(where: {
-        $0.displayName.rawValue == name
-    }))
+    try store.close()
+    return member
 }
 
 private final class RestoreLockedBytes: @unchecked Sendable {
@@ -534,6 +365,7 @@ private final class RestoreLockedBytes: @unchecked Sendable {
     func source() -> BackupContainerByteSource {
         let snapshot = data
         return .init(byteCount: UInt64(snapshot.count)) { offset, count in
+            guard offset <= UInt64(snapshot.count) else { return Data() }
             let start = Int(offset)
             return Data(snapshot[start..<min(snapshot.count, start + count)])
         }
@@ -570,31 +402,6 @@ private func restoreTreeSnapshot(at root: URL) throws -> [String: RestoreTreeEnt
     return snapshot
 }
 
-private func corruptPreparedVaultObject(_ prepared: BackupPreparedRestore) throws {
-    let objectRoot = prepared.stagingURL.appendingPathComponent("objects", isDirectory: true)
-    let enumerator = try #require(FileManager.default.enumerator(
-        at: objectRoot,
-        includingPropertiesForKeys: [.isRegularFileKey],
-        options: [],
-        errorHandler: { _, _ in false }
-    ))
-    let objectURL = try #require(enumerator.compactMap { element -> URL? in
-        guard let url = element as? URL,
-              (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
-            return nil
-        }
-        return url
-    }.first)
-    let descriptor = Darwin.open(objectURL.path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC)
-    guard descriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
-    defer { Darwin.close(descriptor) }
-    var replacement: UInt8 = 0xFF
-    guard pwrite(descriptor, &replacement, 1, 0) == 1,
-          fsync(descriptor) == 0 else {
-        throw CocoaError(.fileWriteUnknown)
-    }
-}
-
 private func makePrivateDirectory(_ url: URL) throws {
     try FileManager.default.createDirectory(
         at: url,
@@ -602,6 +409,29 @@ private func makePrivateDirectory(_ url: URL) throws {
         attributes: [.posixPermissions: 0o700]
     )
     guard chmod(url.path, 0o700) == 0 else { throw CocoaError(.fileWriteUnknown) }
+}
+
+/// Adds three to every device number recorded in the restore receipts beside `root`, leaving the
+/// inodes alone: the directories are the same ones, named by a number the volume no longer has.
+private func renumberRecordedDevices(inReceiptsOf root: URL) throws {
+    let parent = root.deletingLastPathComponent()
+    let receipts = try restoreArtifacts(in: parent).filter { $0.hasSuffix(".json") }
+    #expect(!receipts.isEmpty)
+    let pattern = try NSRegularExpression(pattern: #""device":(\d+)"#)
+    for name in receipts {
+        let url = parent.appendingPathComponent(name)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        var renumbered = text
+        for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            let digits = try #require(Range(match.range(at: 1), in: renumbered))
+            renumbered.replaceSubrange(digits, with: String(try #require(Int(renumbered[digits])) + 3))
+        }
+        #expect(renumbered != text)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: 0)
+        try handle.write(contentsOf: Data(renumbered.utf8))
+        try handle.close()
+    }
 }
 
 private func restoreArtifacts(in parent: URL) throws -> [String] {

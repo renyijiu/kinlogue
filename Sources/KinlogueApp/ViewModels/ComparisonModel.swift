@@ -1,5 +1,6 @@
 import Foundation
 import KinlogueCore
+import KinloguePlatform
 
 enum ComparisonSelectionResult: Equatable {
     case selected(count: Int)
@@ -21,8 +22,8 @@ enum ComparisonSide: Equatable {
 }
 
 private enum ComparisonSideLoadResult: Sendable {
-    case left(OriginalDocumentPayload?)
-    case right(OriginalDocumentPayload?)
+    case left(Result<OriginalDocumentPayload, Error>)
+    case right(Result<OriginalDocumentPayload, Error>)
 }
 
 private enum ComparisonMessage: Equatable {
@@ -76,8 +77,12 @@ private enum ComparisonMessage: Equatable {
 
 @MainActor
 final class ComparisonModel: ObservableObject {
+    var onReadFailure: @MainActor (Error) -> Void = { _ in }
     private let service: any AppDataServicing
-    private var recordsByID: [HealthRecord.ID: HealthRecord] = [:]
+    private var comparisonRecords: [HealthRecord] = []
+    private var comparisonRevision: LibraryRevision?
+    private let reads = LibraryReadRegistry()
+    private var recordLoadTask: Task<LibraryRecordSelection, Error>?
     private var loadID: UUID?
     private var leftLoadID: UUID?
     private var rightLoadID: UUID?
@@ -109,13 +114,26 @@ final class ComparisonModel: ObservableObject {
         selectedRecordIDs.count == 2 && !isPresented && !isLoadingOriginals
     }
 
-    func updateAvailableRecords(_ records: [HealthRecord]) {
-        recordsByID = Dictionary(uniqueKeysWithValues: records
-            .filter { $0.importState == .confirmed }
-            .map { ($0.id, $0) })
-        selectedRecordIDs.removeAll { recordsByID[$0] == nil }
-        if comparison.map({ recordsByID[$0.left.recordID] == nil || recordsByID[$0.right.recordID] == nil }) == true {
-            closeComparison()
+    func reconcileSelection() async {
+        guard !selectedRecordIDs.isEmpty else { return }
+        let ids = selectedRecordIDs, selectionRequest = loadID
+        do {
+            let service = service
+            let current = try await reads.run { try await service.loadRecords(ids: ids) }
+            guard ids == selectedRecordIDs, selectionRequest == loadID else { return }
+            if let comparisonRevision,
+               (comparisonRevision.libraryID != current.revision.libraryID || comparisonRevision.openEpoch != current.revision.openEpoch
+                || (isPresented && current.records != comparisonRecords)) { closeComparison() }
+        } catch LibraryReportError.recordNotFound { if ids == selectedRecordIDs, selectionRequest == loadID { closeComparison() } }
+        catch AppServiceError.recordUnavailable { if ids == selectedRecordIDs, selectionRequest == loadID { closeComparison() } }
+        catch {
+            guard ids == selectedRecordIDs, selectionRequest == loadID else { return }
+            onReadFailure(error)
+            if error as? SQLiteLibraryError == .damaged {
+                closeComparison()
+                userErrorMessage = .recordsCannotBeCompared
+                announcementMessage = .recordsCannotBeCompared
+            }
         }
     }
 
@@ -126,14 +144,13 @@ final class ComparisonModel: ObservableObject {
     }
 
     @discardableResult
-    func toggle(_ record: HealthRecord) -> ComparisonSelectionResult {
-        guard isSelecting,
-              record.importState == .confirmed,
-              recordsByID[record.id] != nil else {
+    func toggle(_ record: LibraryReportSummary) -> ComparisonSelectionResult {
+        guard isSelecting else {
             announcementMessage = .onlyConfirmedRecords
             return .ineligible
         }
         if let index = selectedRecordIDs.firstIndex(of: record.id) {
+            cancelPendingRecordRead()
             selectedRecordIDs.remove(at: index)
             announcementMessage = .selectionRemoved(selectedCount: selectedRecordIDs.count)
             userErrorMessage = nil
@@ -144,6 +161,7 @@ final class ComparisonModel: ObservableObject {
             userErrorMessage = .selectionLimitReached
             return .limitReached
         }
+        cancelPendingRecordRead()
         selectedRecordIDs.append(record.id)
         announcementMessage = .recordSelected(
             ordinal: selectedRecordIDs.count,
@@ -158,6 +176,7 @@ final class ComparisonModel: ObservableObject {
     }
 
     func clearSelection() {
+        cancelPendingRecordRead()
         selectedRecordIDs = []
         announcementMessage = .selectionCleared
         userErrorMessage = nil
@@ -169,25 +188,49 @@ final class ComparisonModel: ObservableObject {
         announcementMessage = .selectionExited
     }
 
+    private func cancelPendingRecordRead() {
+        guard recordLoadTask != nil else { return }
+        recordLoadTask?.cancel(); recordLoadTask = nil
+        loadID = nil; isLoadingOriginals = false
+    }
+
     func openComparison() async {
         guard !isPresented, !isLoadingOriginals else {
             announcementMessage = .comparisonAlreadyOpen
             return
         }
-        guard selectedRecordIDs.count == 2,
-              let leftRecord = recordsByID[selectedRecordIDs[0]],
-              let rightRecord = recordsByID[selectedRecordIDs[1]] else {
-            announcementMessage = .chooseTwoConfirmedRecords
-            userErrorMessage = .chooseTwoConfirmedRecords
+        guard selectedRecordIDs.count == 2 else {
+            announcementMessage = .chooseTwoConfirmedRecords; userErrorMessage = .chooseTwoConfirmedRecords
             return
         }
+        let ids = selectedRecordIDs
+        let requestID = UUID(); loadID = requestID
+        isLoadingOriginals = true
+        let service = self.service
+        let recordsTask = Task { try await service.loadRecords(ids: ids) }
+        recordLoadTask = recordsTask
+        let recordsReadID = reads.register(recordsTask)
+        defer {
+            reads.end(recordsReadID)
+            if loadID == requestID, recordLoadTask != nil {
+                recordLoadTask = nil; isLoadingOriginals = false
+            }
+        }
+        let selection: LibraryRecordSelection
         do {
-            comparison = try RecordComparison(records: [leftRecord, rightRecord])
+            selection = try await recordsTask.value
+            guard loadID == requestID, ids == selectedRecordIDs else { return }
+            comparison = try RecordComparison(records: selection.records)
         } catch {
-            announcementMessage = .recordsCannotBeCompared
-            userErrorMessage = .recordsCannotBeCompared
+            guard loadID == requestID else { return }
+            recordLoadTask = nil; isLoadingOriginals = false
+            onReadFailure(error)
+            announcementMessage = .recordsCannotBeCompared; userErrorMessage = .recordsCannotBeCompared
             return
         }
+        recordLoadTask = nil
+        comparisonRecords = selection.records; comparisonRevision = selection.revision
+        let leftRecord = selection.records[0], rightRecord = selection.records[1]
 
         leftOriginal = nil
         rightOriginal = nil
@@ -196,17 +239,14 @@ final class ComparisonModel: ObservableObject {
         leftLoadState = .loading
         rightLoadState = .loading
         userErrorMessage = nil
-        let requestID = UUID()
-        loadID = requestID
         let leftSourceID = leftRecord.sources.first.id
         let rightSourceID = rightRecord.sources.first.id
         leftSelectedSourceID = leftSourceID
         rightSelectedSourceID = rightSourceID
-        let service = service
         let leftTask = Task {
             let payload = try await service.loadOriginal(
                 recordID: leftRecord.id,
-                sourceID: leftSourceID
+                sourceID: leftSourceID, expectedRevision: leftRecord.revision, expectedLibrary: selection.revision
             )
             try Task.checkCancellation()
             return payload
@@ -214,7 +254,7 @@ final class ComparisonModel: ObservableObject {
         let rightTask = Task {
             let payload = try await service.loadOriginal(
                 recordID: rightRecord.id,
-                sourceID: rightSourceID
+                sourceID: rightSourceID, expectedRevision: rightRecord.revision, expectedLibrary: selection.revision
             )
             try Task.checkCancellation()
             return payload
@@ -223,17 +263,23 @@ final class ComparisonModel: ObservableObject {
         rightLoadID = requestID
         leftLoadTask = leftTask
         rightLoadTask = rightTask
+        let leftReadID = reads.register(leftTask), rightReadID = reads.register(rightTask)
+        defer { reads.end(leftReadID); reads.end(rightReadID) }
         await withTaskGroup(of: ComparisonSideLoadResult.self) { group in
-            group.addTask { .left(try? await leftTask.value) }
-            group.addTask { .right(try? await rightTask.value) }
+            group.addTask { .left(await leftTask.result) }
+            group.addTask { .right(await rightTask.result) }
             for await result in group {
                 guard loadID == requestID else { return }
                 switch result {
-                case .left(let payload) where leftLoadID == requestID:
+                case .left(let value) where leftLoadID == requestID:
+                    if case .failure(let error) = value { onReadFailure(error) }
+                    let payload = try? value.get()
                     leftLoadTask = nil
                     leftOriginal = payload
                     leftLoadState = payload == nil ? .failed : .loaded
-                case .right(let payload) where rightLoadID == requestID:
+                case .right(let value) where rightLoadID == requestID:
+                    if case .failure(let error) = value { onReadFailure(error) }
+                    let payload = try? value.get()
                     rightLoadTask = nil
                     rightOriginal = payload
                     rightLoadState = payload == nil ? .failed : .loaded
@@ -248,7 +294,7 @@ final class ComparisonModel: ObservableObject {
     }
 
     func selectOriginalSource(_ sourceID: ReportSource.ID, side: ComparisonSide) async {
-        guard let comparison, isPresented else { return }
+        guard let comparison, let library = comparisonRevision, isPresented else { return }
         let pane = side == .left ? comparison.left : comparison.right
         let currentSourceID = side == .left
             ? leftSelectedSourceID
@@ -258,6 +304,7 @@ final class ComparisonModel: ObservableObject {
 
         let requestID = UUID()
         let recordID = pane.recordID
+        guard let record = comparisonRecords.first(where: { $0.id == recordID }) else { return }
         let service = service
         switch side {
         case .left:
@@ -277,7 +324,7 @@ final class ComparisonModel: ObservableObject {
         let task = Task {
             let payload = try await service.loadOriginal(
                 recordID: recordID,
-                sourceID: sourceID
+                sourceID: sourceID, expectedRevision: record.revision, expectedLibrary: library
             )
             try Task.checkCancellation()
             return payload
@@ -289,8 +336,12 @@ final class ComparisonModel: ObservableObject {
             rightLoadTask = task
         }
 
-        let payload = try? await task.value
-        guard isPresented else { return }
+        let readID = reads.register(task)
+        defer { reads.end(readID) }
+        let result = await task.result
+        guard isPresented, (side == .left ? leftLoadID : rightLoadID) == requestID else { return }
+        if case .failure(let error) = result { onReadFailure(error) }
+        let payload = try? result.get()
         switch side {
         case .left where leftLoadID == requestID:
             leftLoadTask = nil
@@ -318,7 +369,19 @@ final class ComparisonModel: ObservableObject {
         }
     }
 
+    func cancelAndDrain() async { for drain in cancelReads() { await drain() } }
+
+    /// Cancellation happens synchronously before any drain waits behind a storage read.
+    func cancelReads() -> [LibraryReadRegistry.Drain] {
+        let drains = reads.cancelAll()
+        closeComparison()
+        return drains
+    }
+
     func closeComparison() {
+        reads.cancelAll()
+        recordLoadTask?.cancel(); recordLoadTask = nil
+        comparisonRecords = []; comparisonRevision = nil
         loadID = nil
         leftLoadID = nil
         rightLoadID = nil

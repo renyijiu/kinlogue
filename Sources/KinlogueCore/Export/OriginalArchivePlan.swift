@@ -34,6 +34,34 @@ public struct OriginalArchiveEntry: Equatable, Sendable {
     }
 }
 
+/// Confirmed projections contain only data needed for the original-file namespace.
+package struct OriginalArchiveMemberProjection: Sendable {
+    package let id: UUID
+    fileprivate let stem: String
+    package init(member: FamilyMember) {
+        id = member.id
+        stem = OriginalArchivePlan.sanitizedComponent(member.disambiguationLabel.map { "\(member.displayName) - \($0)" } ?? member.displayName, fallback: "Member")
+    }
+}
+package struct OriginalArchiveReportProjection: Sendable {
+    package let id: UUID
+    package let memberID: UUID
+    fileprivate let sources: [(attachmentID: UUID, stem: String)]
+    package let timelineDate: Date?
+    package init(id: UUID, memberID: UUID, sources: ReportSources, timelineDate: Date?) {
+        self.id = id; self.memberID = memberID; self.sources = sources.elements.map { ($0.attachmentID, OriginalArchivePlan.sanitizedSourceStem($0.displayName)) }; self.timelineDate = timelineDate
+    }
+}
+package struct OriginalArchiveStudyProjection: Sendable {
+    package let id: UUID
+    package let confirmedMemberID: UUID?
+    package let effectiveDate: Date?
+    package let attachmentIDs: [UUID]
+    package init(id: UUID, memberID: UUID, date: Date, attachmentIDs: [UUID]) {
+        self.id = id; confirmedMemberID = memberID; effectiveDate = date; self.attachmentIDs = attachmentIDs
+    }
+}
+
 /// A deterministic, identifier-free archive namespace projected from one
 /// already validated catalog revision.
 public struct OriginalArchivePlan: Equatable, Sendable {
@@ -49,23 +77,24 @@ public struct OriginalArchivePlan: Equatable, Sendable {
         self.totalByteCount = totalByteCount
     }
 
-    public static func make(
-        catalog: VaultCatalog,
-        preferredExtensions: [Attachment.ID: String],
-        undatedToken: String
-    ) throws -> Self {
-        try catalog.validate()
+    package static func make(members: [OriginalArchiveMemberProjection], attachments: [Attachment], reports: [OriginalArchiveReportProjection],
+                             studies: [OriginalArchiveStudyProjection], preferredExtensions: [Attachment.ID: String], undatedToken: String) throws -> Self {
+        guard members.count <= 256, reports.count <= 20_000, studies.count <= 256,
+              Set(members.map(\.id)).count == members.count, Set(attachments.map(\.id)).count == attachments.count,
+              Set(reports.map(\.id)).count == reports.count, Set(studies.map(\.id)).count == studies.count,
+              reports.allSatisfy({ report in members.contains { $0.id == report.memberID } }),
+              studies.allSatisfy({ study in members.contains { $0.id == study.confirmedMemberID } }) else { throw DomainValidationError.invalidCatalogReference }
         guard !undatedToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw OriginalArchivePlanError.invalidUndatedToken
         }
 
-        let attachmentsByID = Dictionary(uniqueKeysWithValues: catalog.attachments.map { ($0.id, $0) })
+        let attachmentsByID = Dictionary(uniqueKeysWithValues: attachments.map { ($0.id, $0) })
         var pendingByMemberID: [FamilyMember.ID: [PendingItem]] = [:]
         var eligibleEntryCount = 0
 
-        for record in catalog.records where record.importState == .confirmed {
+        for record in reports {
             try reserveEntryCount(record.sources.count, total: &eligibleEntryCount)
-            for (sourceOrdinal, source) in record.sources.elements.enumerated() {
+            for (sourceOrdinal, source) in record.sources.enumerated() {
                 guard let attachment = attachmentsByID[source.attachmentID] else {
                     throw DomainValidationError.invalidCatalogReference
                 }
@@ -77,7 +106,7 @@ public struct OriginalArchivePlan: Equatable, Sendable {
                 pendingByMemberID[record.memberID, default: []].append(.report(
                     recordID: record.id,
                     sourceOrdinal: sourceOrdinal,
-                    sourceName: source.displayName,
+                    sourceName: source.stem,
                     attachment: attachment,
                     preferredExtension: preferredExtension,
                     date: record.timelineDate
@@ -85,7 +114,7 @@ public struct OriginalArchivePlan: Equatable, Sendable {
             }
         }
 
-        for study in catalog.dicomStudies where study.state == .confirmed {
+        for study in studies {
             guard let memberID = study.confirmedMemberID, let date = study.effectiveDate else {
                 throw DomainValidationError.invalidCatalogReference
             }
@@ -110,7 +139,7 @@ public struct OriginalArchivePlan: Equatable, Sendable {
             ))
         }
 
-        let orderedMembers = catalog.members
+        let orderedMembers = members
             .filter { pendingByMemberID[$0.id]?.isEmpty == false }
             .sorted(by: memberPrecedes)
         var memberNameAllocator = ComponentAllocator()
@@ -118,11 +147,7 @@ public struct OriginalArchivePlan: Equatable, Sendable {
         var totalByteCount = 0
 
         for member in orderedMembers {
-            let visibleMemberName = member.disambiguationLabel.map {
-                "\(member.displayName) - \($0)"
-            } ?? member.displayName
-            let memberStem = sanitizedComponent(visibleMemberName, fallback: "Member")
-            let memberDirectory = memberNameAllocator.allocate(stem: memberStem)
+            let memberDirectory = memberNameAllocator.allocate(stem: member.stem)
             var childNameAllocator = ComponentAllocator()
             let items = pendingByMemberID[member.id, default: []].sorted(by: pendingItemPrecedes)
             let reportOrdinals = stableOrdinals(
@@ -143,7 +168,7 @@ public struct OriginalArchivePlan: Equatable, Sendable {
                         throw OriginalArchivePlanError.unsafeArchivePath
                     }
                     let datePrefix = try date.map(dateString) ?? sanitizedComponent(undatedToken, fallback: "Undated")
-                    let sourceStem = sanitizedSourceStem(sourceName)
+                    let sourceStem = sourceName ?? "Report"
                     let fileStem = sanitizedComponent(
                         String(
                             format: "%@ - Report %04d - Source %04d - %@",
@@ -204,7 +229,7 @@ public struct OriginalArchivePlan: Equatable, Sendable {
     }
 }
 
-private extension OriginalArchivePlan {
+fileprivate extension OriginalArchivePlan {
     enum PendingItem {
         case report(
             recordID: HealthRecord.ID,
@@ -296,17 +321,8 @@ private extension OriginalArchivePlan {
         return value
     }
 
-    static func memberPrecedes(_ lhs: FamilyMember, _ rhs: FamilyMember) -> Bool {
-        let lhsVisible = sanitizedComponent(
-            lhs.disambiguationLabel.map { "\(lhs.displayName) - \($0)" } ?? lhs.displayName,
-            fallback: "Member"
-        )
-        let rhsVisible = sanitizedComponent(
-            rhs.disambiguationLabel.map { "\(rhs.displayName) - \($0)" } ?? rhs.displayName,
-            fallback: "Member"
-        )
-        let lhsKey = collisionKey(lhsVisible)
-        let rhsKey = collisionKey(rhsVisible)
+    static func memberPrecedes(_ lhs: OriginalArchiveMemberProjection, _ rhs: OriginalArchiveMemberProjection) -> Bool {
+        let lhsKey = collisionKey(lhs.stem), rhsKey = collisionKey(rhs.stem)
         if lhsKey != rhsKey { return lhsKey < rhsKey }
         return uuidPrecedes(lhs.id, rhs.id)
     }

@@ -5,6 +5,14 @@ import Testing
 
 struct AppLocalizationTests {
     @Test
+    func candidateStartupAndUninspectedStatusHaveBothLanguages() {
+        #expect(AppLocalization.string("尚未巡检", language: .english) == "Not inspected")
+        #expect(AppLocalization.string("尚未巡检", language: .simplifiedChinese) == "尚未巡检")
+        #expect(AppLocalization.string("资料库正由另一个续页进程使用。请关闭该进程后重试。", language: .english)
+            == "Another Kinlogue process is using this library. Close that process and try again.")
+    }
+
+    @Test
     func packagedAppDoesNotEvaluateTheSwiftPackageResourceBundle() {
         var packageBundleLookupCount = 0
 
@@ -378,6 +386,10 @@ struct AppLocalizationTests {
 
     @Test
     func localizesPendingQueueSummaryInBothLanguages() {
+        #expect(AppLocalization.string("\(2) 个唯一原件 · 原件内容 \("1 MB")", language: .simplifiedChinese) == "2 个唯一原件 · 原件内容 1 MB")
+        #expect(AppLocalization.string("\(1) 个唯一原件 · 原件内容 \("1 MB")", language: .english) == "Unique original: 1 · Source content: 1 MB")
+        #expect(AppLocalization.string("\(2) 个唯一原件 · 原件内容 \("1 MB")", language: .english) == "Unique originals: 2 · Source content: 1 MB")
+
         let itemCount = 2
         let size = "1 MB"
 

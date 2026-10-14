@@ -1191,6 +1191,7 @@
 - **修正**：只把独立 XPC 探针的恢复请求预算设为 30 秒；崩溃收敛仍要求 2 秒内失败，恢复仍必须返回精确像素，生产 transport 的 10 秒超时、Helper 的 9 秒硬 watchdog 和 hang 探针不变。不增加重试，不修改依赖或系统节流策略。扩展已有包装边界测试，检查恢复预算与原有时限；不新增测试计数。
 - **验证**：恢复预算断言已在旧源码上观察失败；`scripts/test.sh --filter DICOMPackagingBoundaryTests` 的 7 tests / 1 suite 通过。当前 Mac 的 `scripts/verify-dicom-xpc.sh` 通过真实 Release App/Helper 构建、签名、像素夹具、外部崩溃及恢复、hang watchdog、日志 canary 和零运行时 socket；文档、隐私与 diff 检查通过。本次是工作树验证；新提交远端 CI、clean-source bundle、独立系统安装、真实私有样本及人工矩阵尚未验证。
 
+
 ## [2026-10-10] import | 把 Go 预览的字段建议规则移回 Swift
 
 - **背景与依据**：评估后 Swift 版继续作为发布线，Go 预览（分支 `codex/go-native-rewrite`）冻结。本条只移植其 `internal/candidate/candidate.go` 在提交 `cc95d6e` 中按两份版式调整、Swift 尚不具备的规则；参考实现只读，没有新增 Go 代码，也没有改动 Vault 存储格式或备份格式。
@@ -1309,3 +1310,359 @@
 - **原因**：日志显示 tracer 下的第二次 `swift build` 从 `[42/94] Write swift-version-…` 起把整个构建重新执行了一遍，JXLSwift、J2KCodec、SwiftNIO 和 DicomCore 等第三方模块全部重编，用时 1374.67 秒；此前不带 tracer 的 265.82 秒预编译没有被复用。tracer 给后续步骤注入了 `DYLD_INSERT_LIBRARIES` 和 `SEMMLE_COPY_EXECUTABLES_ROOT` 等环境变量。推断是环境或工具路径的变化让 SwiftPM 判定全部产物失效，具体机制没有核实。另外，从 tracer 下的 `swift build` 启动到第一条编译输出之间约有 11 分钟没有构建输出，而这时已经没有依赖需要拉取。
 - **处理**：[`codeql.yml`](../.github/workflows/codeql.yml) 恢复为 init 之后单次 `swift build`，对应的测试断言和 [`testing-and-release.md`](testing-and-release.md) 里的说明一并恢复。上一条目中“CodeQL 只追踪第一方源码”的做法没有在远端成立，以本条为准；本机 `touch` 只重编第一方 target 的结论仅适用于不带 tracer 的构建。CI 矩阵调整和 bundle job 拆分保留。
 - **未执行**：撤回后的 workflow 还没有在远端运行；完整 `scripts/test.sh` 和 `verify-app.sh` 没有在本机运行。托管端 `Protect main` 规则写入本条时仍要求旧检查名。CodeQL 的耗时问题没有解决。
+
+## [2026-10-11] refactor | 首批存储修复、任务归属与 SQLite 内核
+
+- **基线与范围**：按用户授权开始实施修订后的 [统一计划](plans/2026-10-10-2322-refactor-sqlite-architecture-plan.md)，从 `origin/main@09f57b11143e05aa944c1b716e05737ccd813a12` 建立独立 `codex/sqlite-refactor` 工作树，保留原检出与已有文档改动。先落实 U1、U11–U13、U2 和 U3 的可独立验证部分；本记录不把后续领域事务、按需查询、逻辑备份与生产切换记为完成。
+- **生产链路修复**：备份 source 在准备与最终发布校验完整快照，逐项读取改用绑定根、目录头和文件身份的 token，加上流式摘要，消除逐条重解整库；恢复点增加 1.1 容量格式，联动 writer、reader、trust、repository、restore，保留 1.0 读取和版本化信任 transcript。导入去重在一次调用内共用附件索引，保持指纹、稳定 ID 与记录优先规则。
+- **任务归属**：App 级 processing coordinator 持有中断导入恢复及 LAN 预处理任务；JSON 完整校验通过后先进入 Ready，再恢复 OCR。页面销毁不取消 App 任务；失败等待显式重试，资料库撤销时取消、排空并拒绝迟到回调。现有 lifecycle 与 durable 状态继续作为依据。
+- **开发中内核**：新增 Platform-only 的 GRDB exact 7.11.1 / 系统 SQLite、连接防御配置、15 张 STRICT 表、库身份与格式检查、生命周期排他锁、可恢复初始化、staged/live/deleting 原件和 reader pin。真实进程测试覆盖第二 owner、持锁替换、SIGKILL、初始化及原件操作中断。`AppComposition` 仍使用 JSON；只有 library_state / originals 语义摘要已接通，其余 codec、领域命令和完整巡检属于后续单元。长原件 I/O 的 admission 边界与 macOS 26 engine 验收尚须补齐，U3 不标记整体完成。
+- **依赖与包边界**：锁定 GRDB revision、MIT 声明、privacy bundle 与资源白名单；Core、App、DICOM Helper 不直接依赖 GRDB，Helper 链接检查拒绝 SQLite。既有 DICOM 和 codec pin 不变。[依赖核查](sources/2026-10-11-grdb-engine-review.md) 保留官方来源和本机 engine 点时配置结果。
+- **规模实测**：复用独立 probe，报告近上限 stage 中位数从 48.707 s 降至 12.567 s，detector 8.841 ms；500 份报告完整发布从 243 s 降至 1.866 s，近上限完整发布 40.310 s。另完成 20,004 条目、10,485,760,000 bytes 原件组合的真实加密发布 86.707 s、严格恢复与激活 371.984 s。采样口径、容量命令成功及首次组合命令主动中止的边界见 [实测记录](storage-refactor-measurement-2026-10-11.md)。JSON 保存、启动和内存仍未达到最终 SQLite 目标；不把这些前置收益说成全部重构完成。
+- **审查与收尾修复**：完成独立代码审查（`20261011-011851-df45d60c`）及五项局部简化；唯一确认的 P2 为后台恢复失败后草稿无重试入口。先以真实 Vault / workflow / AppModel 链路复现，再把 processing 转换改为同一 mutation lease 内合并当前目录，保留完整原草稿与 attempt 校验；OCR 在提交前准备一次。App 提供绑定 attempt 的临时重试状态，失败不自动循环，discard 仍限既有 failed 状态。再次失败刷新后检查生命周期，拒绝撤销后的晚到提示。对应红绿回归及独立修复复核通过，未留本批审查阻塞项。跨模型审查因本机进程权限错误在发送代码前失败，采用 skill 规定的本地独立审查，不声称获得外部模型或安全审计结论。
+- **最终自动化**：macOS 27.0.1（26A434）/ M1 Max / Xcode 27 / Swift 6.4 上，收尾修复后的 `scripts/test.sh` 退出码 0；主清单与实际汇总为 1039 tests / 91 suites（Core 131/2，其余主分片 908/89）。另行隔离的 13 项 derived XCTest、14 项验收扫描、36 项跨进程存储、1 项大小写别名锁、18 项 DICOM 集成、安装式 LAN HTTP 和真实双流 RSS/背压均通过。最后一项的 RSS 增量 770,048 bytes、事件循环 p99 688,083 ns、停止监听 11.152 ms；不把这项 RSS 与规模 probe 的 footprint 混用。`scripts/lint.sh` 的 warnings-as-errors 构建与 package graph、LAN prerequisite、本地化、当前树隐私、文档及 diff 门禁通过。
+- **Release 包**：最终 `scripts/verify-dicom-xpc.sh` 退出码 0，实际 App / Helper 构建与 ad-hoc 签名、raw 像素、外部崩溃与恢复、hang watchdog、日志 canary 和零运行时 socket 全通过。另以实际包断言精确资源清单（App 13 文件、Helper 4 个顶层资源）、GRDB / ZIPFoundation privacy plist、两份许可副本、`codesign --verify --deep --strict`、arm64 及 plist / Mach-O 最低系统 26.0；Helper 无 GRDB / SQLite 符号或 libsqlite3 链接，主 App 无 DICOM codec。Xcode 输出已有 iOS Simulator 组件过旧提示，未阻止 macOS 构建与探针；没有修改系统组件。
+- **未执行与交付边界**：当前为未提交工作树，未运行要求 clean-source 的完整 `verify-app.sh`，不为通过门禁自动提交。未 push、创建 PR、发布或替换用户安装，原主检出与用户改动保留。macOS 26 engine / 独立系统安装、真实手机 / 私有 OCR 与 DICOM 样本、Powerbox / 网盘、键盘 / VoiceOver、独立安全审计和 Developer ID / notarization 未执行；当前候选仍为 `not-verified` / `pendingManual`。U3 的长 I/O admission、其余业务 codec 和后续 U4–U10 仍按计划继续，生产 SQLite 尚未切换。
+
+
+## [2026-10-11] refactor/sqlite | 继续拆开原件长 I/O 与数据库操作
+
+- **实际变化**：`SQLiteLibraryStore`/`SQLiteOriginalLifecycle` 按 original ID 登记活动操作，copy/hash/fsync 在 admission 外执行；重入核对 root、完整语义行、operation/lifecycle、named path 和取消。其他数据库操作继续，同原件竞争、关闭与整库替换返回固定语义错误；取消后的 owned staged 文件由现有恢复流程回收。生产仍使用 JSON，尚未切换报告、LAN 或 DICOM。
+- **行为证据**：修改前新增测试复现两处无关写入被阻塞及 rename 后取消仍提交，共 5 个预期失败；修正后同时验证根、行或路径在 I/O 期间改变均被拒绝。阻塞测试沿用独立 OS Thread + continuation，取消使用真实当前 Swift task，避免曾在 macOS 26 出现的 cooperative executor 饥饿。
+- **父级验证**：当前 Mac `scripts/test.sh --filter 'sqliteKernel|sqliteRealProcesses|sqliteOriginalsRecover|sqliteInitializationRecovers'` 通过 22 个内核声明和 3 个真实进程声明；测试线程调整后再次执行 `--filter 'sqliteKernelOriginalIO|sqliteKernelCancelledOriginalIO'`，3 个声明/10 个 case 通过。实际已构建 inventory 为 1042 tests / 91 suites；参数化 case 不重复计入主清单。文档/账本只更新当前证据，计划保留决策记录。
+- **待完成**：macOS 26 engine 与完整后续重构验收未执行；U4/U5 领域 codec、U8 按需 App 查询和 U6 逻辑备份仍须完成，不能把本次并发正确性证据当成数据库切换或性能目标通过。
+
+
+## [2026-10-11] refactor/sqlite | 报告、OCR 与窄查询事务
+
+- **范围与当前行为**：新增 `LibraryReportQuery`、`SQLiteReportRepository`、`SQLiteReportRows` 和真实数据库集成测试。成员、报告/详情、草稿、来源和完整 OCR/reviewState 已有局部数据库读写；`ImportDraftStore.confirm/discard` 改为无 catalog 返回值，同步所有旧实现、App、测试与规模探针调用者。生产 composition 仍使用 JSON，App 全量快照尚待 U8 替换，不把平台仓库完成写成统一切换。
+- **完整性与查询**：schema 增加独立 `report_search`，现有 16 张 STRICT 表；报告/草稿绑定来源数量/摘要和 OCR 摘要，详情复核查询投影与来源归属。OCR report/lanSource 分 kind、限制 16/32 MiB，报告 extraction version 可空。报告日期按 REAL 保留持久化精度。每页最多 100 个有界摘要，完整确认字段仍按原 Foundation 语义搜索；分页返回明确坏项 ID，每页身份与游标绑定 library/open epoch/commit，末页也保留完整 revision。严格备份仍须逐项校验，不能把普通分页的损坏隔离当成完整性通过。
+- **真实缺陷及修复**：新红测分别复现 actor 导入阻塞无关成员读写、带 pin 删除遗留 live 孤儿、取消后的搜索仍返回成功。仓库保留串行 stage，其余入口使用 `nonisolated @concurrent`；领域删除在同一事务登记 deleting，已有 pin 可消费，新 pin 拒绝，释放或恢复后回收。搜索通过跨 GRDB queue 的锁保护取消标志退出，不中断随后查询。每次开库更换 epoch，拒绝同库同 revision 重开后的旧游标/读取。原件发布统一保留语义错误、清除底层数据库参数信息。
+- **验证**：13 个新增报告测试和 118 个受影响回归通过，覆盖工作流、CAS/回滚、来源多重集、完整字段搜索与摘要上限、损坏候选不吞掉新原件、取消、epoch、无关操作并发和 pinned GC。父级独立运行 `scripts/test.sh --filter 'sqliteReport|sqliteKernel|sqliteRealProcesses|sqliteOriginalsRecover|sqliteInitializationRecovers'`，35 个 Platform 声明及 3 个真实进程声明通过；随后加强同一测试，明确断言 nullable extraction version 与完整用户 review document 在保存、确认及重开后保留，定向复验通过。warnings-as-errors 构建通过。实际已构建主 inventory 为 **1055 tests / 91 suites**，参数化 case 与隔离进程不重复计入。 使用该 inventory 的文档门禁、当前树隐私门禁及 diff 检查通过。
+- **后续边界**：U5 LAN/规范化 DICOM、U8 App 按需查询和提交观察、U6 逻辑快照/严格恢复/导出尚待完成；数据库规模性能、完整后续回归、macOS 26 engine、真机/人工与 clean-source 发布门禁尚未通过本单元验证。没有 commit、push、PR 或替换用户安装。
+
+
+## [2026-10-11] refactor/sqlite | LAN 上传、OCR 与单事务归档
+
+- **范围**：新增 SQLite LAN store、typed row codec、上传归属和归档事务；Receiver、Mac pending workflow、预处理与 LiveLANInboxService 共用注入的 owner/admission policy。schema 现为 18 张 STRICT 表，新增 inbox_uploads 与 inbox_archive_receipts。同步旧 JSON 调用者，生产 composition 尚未切换。
+- **持久化**：上传先登记 ownership，再接收字节；完成后校验、同 inode rename，在一事务中发布 original/item/receipt。sink 真正关闭 descriptor 后释放活动登记；响应丢失查询 durable receipt。OCR/source 文档与队列状态同事务，归档不复制原件；完整 command/intent/outcome 保留最近 5,000 个完成命令。LAN source 32 MiB、报告 16 MiB、组合读取 128 MiB 分别保持，上传不新增 100 MiB cap。
+- **红绿修复**：真实回归复现并修复缺失/硬链接原件未隔离、归档 session/content 笛卡尔积，以及 scope 撤销先于已经通过 token 检查的 SQL 提交返回。最后一项用现有 GRDB trace 暂停真实 receipt INSERT，无新增生产 hook；scope 创建/撤销与提交共用 admission，并通过 @concurrent 避免阻塞调用方执行器。局部原件 descriptor 错误映射不吞掉 owner/root/DB 全局身份错误。
+- **验证**：worker 定向回归 Process 1 个声明/5 个真实 crash case、Platform 76/8 suites、App 1 全过，含 JSON/SQLite 两条真实 HTTP 回压链路；后续局部原件错误映射及 scope 修复各有定向绿测。父级运行 `scripts/test.sh --filter 'sqliteLAN|sqliteKernel|sqliteOriginal|sqliteReport|LANReceiverFileLifecycleTests|LANReportArchiveTests'`：Process 2 个声明/12 个 case、Platform 59/2 suites、App 1 通过。SQLite socket 测得 RSS 增量 212,992 bytes、event-loop p99 390,917 ns、stop 4,054,667 ns；仅为当前 Mac 定向证据，不冒充 footprint、队列规模或真实手机验收。
+- **测试账本**：实际 executable inventory 派生为 1069 tests / 91 suites。首次派生因既有 socket 测试改为 `(sqlite:)` 参数后精确隔离选择器未同步而失败；同步分片脚本及其现有安全测试 fixture，保留精确选择与隔离规则；13 项 TestScriptSafetyTests 通过。使用实际 inventory 的文档门禁、当前树隐私与 diff 检查通过。参数化 case 与独立 storage-process 声明不重复计入主账。
+- **边界**：普通 LAN snapshot 仍读取有界全队列并严格处理关系错误，U8 须进一步验收按需 UI、单项损坏隔离、通知及近上限耗时；DICOM、逻辑备份/恢复、统一切换和全部性能门槛仍待完成。未跑全量后续回归、安装或 macOS 26/真机/人工矩阵；未 commit、push、PR 或触碰真实资料。
+
+
+## [2026-10-11] refactor/sqlite | 规范化 DICOM 图与目标序列读取
+
+- **范围**：新增 DICOMStudyHeader、SQLite DICOM repository/row codec、scanner 原件接管和 slice source；导入 workflow 与 Viewer 共用既有 scanner/indexer/decoder/scheduler。study、retained object、series、instance 的关系和图摘要写入既有 18 张 STRICT 表，不保存 index JSON/BLOB。生产 composition 仍为 JSON，尚未统一切换。
+- **原件与事务**：活动 operation 覆盖 scanner 到最终发布的全部间隙，恢复跳过活动操作，关闭/替换拒绝未结束导入。同卷接管沿真实 inode 登记、rename、同步目录；完整原件校验在 admission 外执行，提交前核对身份、大小和时间戳，一个事务发布完整图及一次 revision。响应丢失按 operation 和严格图收敛；替换 inode 保留并报告。真实 SIGKILL 覆盖 scanner、登记、接管、data rename 和最终 live commit 五个交接窗口。
+- **查询与完整性**：库头最多 256 个 study，详情只加载 series；Viewer 按目标 series 读取实例，以库 epoch、study revision、series ID/语义摘要围栏，原件 pin 跨异步 decode 保留。严格图验证覆盖连续 ordinal、引用闭合、指纹、UID 域、尺寸和几何顺序。局部坏图/原件只隔离目标，owner/root/DB 全局错误继续透传。
+- **红绿修复**：真实红测分别发现确认绕过严格图、同 revision 篡改 series 未使缓存失效、FIFO 阻塞、原件哈希后同 inode 改写仍提交、ordinal 缺口、非有限元数据错误分类和 cached hardlink 被误判全局错误；均有修复及定向绿测。异步 descriptor 在验证 closure 内立即交给 FileHandle 持有，避免后置校验抛错泄漏；没有新增 unchecked Sendable。
+- **验证**：worker 完整定向回归 Process 1 个声明/5 个真实 crash case、Platform 79 个声明/104 个 case、App 4 通过，之后 cached hardlink 微修复的 4 个声明/5 个 case 通过。父级独立组合回归 `scripts/test.sh --filter 'sqlite|DICOMImportWorkflowIntegrationTests|DICOMSliceVaultIntegrationTests|DICOMStudyIndexerTests|LiveDICOMAppServiceIntegrationTests'` 通过 Process 5 个声明、Platform 108/5 suites、App 5/1 suite；微修复后同 4 个声明/5 个 case 再次独立通过。
+- **资源证据与边界**：220 个合成原件导入测得最多 3 次受管读取、2 次写入，worker/队列各不超过 2，source/staging FD 不超过 8 且最终归零，磁盘峰值不超过 2S + 256 MiB。此口径仅覆盖导入；未缓存 Viewer 仍有 4 次 pin 哈希及 decoder 读取，首次切片/连续浏览延迟尚未规模实测。逻辑备份、App 按需查询、统一切换及完整后续回归继续推进；macOS 26、安装、真机和人工门禁未执行，未 commit、push、PR 或触碰真实资料。
+
+- **账本收口**：实际已构建 executable inventory 为 1093 tests / 91 suites；参数化 case 与隔离进程不重复计入主账。使用该 inventory 的文档门禁、当前树隐私与 diff 检查通过。
+
+
+## [2026-10-11] refactor/sqlite | 逻辑备份、严格恢复与原件导出
+
+- **范围**：新增版本化 logical-v1、严格领域流与冻结格式夹具、SQLite backup/ZIP source、共享 owner 的恢复服务链路；外部恢复点不保存 SQLite 文件或 schema。生产 composition 仍为 JSON；没有自动迁移或替换用户安装。
+- **一致性与资源**：同次 admission 获取 revision/可达原件 pin 并复制应用自有数据库，随后在副本上逐项校验逻辑图。该调整依据原实现在近上限的 5 秒超时，保留外部逻辑格式决策。临时副本 receipt 在 payload 前持久化，按确切 inode 清理；未知工件保留。spool 立即 unlink，分段读取，原件按需打开。恢复根据实际认证记录和关系数量计算空间预算，在本应用创建的新数据库中写入，准备与激活后都严格验证。
+- **错误与生命周期**：真实旧 JSON checkpoint 在 SQL reader 返回 unsupportedFormat，保持输入与当前库；取消/超时 progress guard 只作用于当前连接读取并保留语义，随后查询可用。恢复先排空真实 lifecycle，再关闭数据库，owner 持续保护 root transaction；启动先事务收敛，再清理 capture/preflight。捕获后的合法编辑/删除保留快照旧版本，释放时批量归还 pin。
+- **验证**：worker 先记录格式拒绝与缓存预算的实际红测并修复；最终定向回归 118 个声明通过。父级独立执行同组 `scripts/test.sh --filter`，Process 3、Platform 93、Core 16、App 6 全过；真实 process 包含 13 个 root 恢复/损坏场景、6 个内部 capture 崩溃/身份场景及第二 owner 拒绝。覆盖真实加密 publisher/readback/witness、恢复后继续编辑/DICOM/ZIP、两个独立冻结 wire 夹具、容量不足与取消。
+- **测量**：Release 近上限最终 capture 持锁 1.302 s、完整逻辑准备 22.598 s、进程峰值 24,183,480 bytes、增量 18.42 MiB、采样 FD 峰值 10。先前超内存来自系统 engine 的 dirty spill 阈值；修复只限临时副本，源码与点时证据见 [实测](storage-refactor-measurement-2026-10-11.md#sqlite-逻辑捕获)。单次 capture 不等于完整备份、p95 或最大理论资料库保证。
+- **账本与待办**：实际已构建 inventory 为 1116 tests / 91 suites，参数化 case 和隔离进程不重复计主账。继续补齐原件提交/失败清理、实体编码预算，随后 U8 按需 App 查询和 U7 统一切换；完整大规模备份/恢复、全量后续回归、macOS 26、安装与人工门禁待完成。用户确认当前没有可提供的 macOS 26 连接，本机为 macOS 27.0.1；未 commit、push 或创建 PR。
+
+
+## [2026-10-11] refactor/sqlite | 原件提交围栏与精确操作清理
+
+- **实证缺陷**：新增真实红测 5 个声明 / 9 个参数化场景，记录 22 个断言失败：报告/LAN 可以在完整 hash 后发布改写原件，stage 返回值未拒绝 fsync 后改写，pin 未发现消费中改写再恢复，以及 DICOM 成功/取消清理会删除另一项报告的 staged 原件。
+- **修复**：复用一个 stat snapshot，完整 hash 前后、rename 前后、live 提交前和 pin 消费前后保持身份/大小/时间戳一致；仅 rename 允许 ctime 改变，不增加完整 hash 次数。DICOM 运行期改为 exact operation 非 live 清理，启动仍全库恢复；活动、引用、pin 或未知 inode 保留并显式报告。
+- **验证**：worker SQLite 全域及真实进程定向回归共 111 个声明通过，含新增 5 个声明和强化的 active/unknown 清理断言。父级已检查实际共享 helper、报告/LAN/DICOM 调用方及保留 U6 owner/strict-open/batch-pin 契约，独立组合回归结果按本段后续账本记录。
+- **简化**：通过 ce-simplify-code 三个只读视角复核 U6，应用 1 项 quality 简化：普通捕获直接调用冻结副本路径，strict 恢复路径移除恒真的参数分支；不改变任何有效校验或错误语义。reuse 无建议；3 项效率建议暂不采用，避免为未证实瓶颈新增 rolling hash/metadata cache 状态或改变写后回读边界。另修复 2 处测试 warning；验证使用上述组合回归。
+- **边界**：本单元不切换生产，不自动迁移、不删除未知文件。U4 将复用精确清理入口处理失败报告导入；U8 与 U7 继续推进。macOS 26、完整规模和最终发布门禁仍未执行，无 commit/push/PR。
+
+- **父级收口**：独立组合命令 `scripts/test.sh --filter 'sqlite|SQLiteLogical|EncryptedCheckpointRestoreTests|BackupRestoreServiceTests'` 全部通过：Process 7、Platform 109 / 4 suites、App 7 / 1 suite，共 123 个声明。实际 executable inventory 为 1121 tests / 91 suites。简化后正常 capture 的 5 秒围栏和 strict 恢复的完整验证路径分别保留，没有扩宽时间或格式门槛。
+- **质量门禁**：父级 `scripts/lint.sh`（传入实际 inventory）通过，包含文档、全项目 warnings-as-errors 构建及 package graph；privacy guard 与 diff check 通过。ce-simplify-code 本阶段验证完成，后续 App/切换修改仍需最终全量审查。
+
+
+## 2026-10-11 — SQLite 实体预算与失败报告导入清理
+
+- **事实与范围**：新增 Core 的 16 MiB 单实体编码预算及 Platform 的实际转义字节预检；成员、草稿和完整来源集合的写入、读取和逻辑恢复共用 codec。Core 构造语义、存储内容和 logical-v1 数值上限不变；这是新 SQLite 格式约束，不冒充旧 JSON 清单规则。
+- **有界读取**：成员搜索使用 cursor，只保留匹配 ID；来源先 COUNT/SUM 字节预检再逐行验证。完整成员列表暂受已有 128 MiB 快照读取预算限制，合法更大资料库仍能按 ID 读取、搜索和逐项备份；U8 将接入 App 摘要，当前不声称已通过整机内存目标。
+- **导入清理**：捕获 staging 尚未返回 ID 的失败，按 operation 精确回收非 live 原件；已提交响应丢失先核实来源身份，即使草稿状态已前进也返回已创建。其他操作、live 引用和未知 inode 保留。
+- **proof-first**：原实现的实体超限和失败清理有 4 个声明、16 个断言的真实红测；另一真实红测证明已提交且进入 processing 的草稿曾被误报失败。修复后 worker 跨域回归 115 个声明、最终实体边界 12 个声明通过，含精确 16 MiB 逻辑恢复、135 MiB 成员库和失败清理；warnings-as-errors 构建、隐私与 diff 检查通过。
+- **未完成**：生产仍选择 JSON；U8 按需 App 查询、U7 统一接入、最终完整规模/全量回归与 macOS 26 门禁待完成。无 Git 提交或发布。
+
+- **父级收口**：独立运行 `scripts/test.sh --filter 'sqlite|SQLiteLogical|EncryptedCheckpointRestoreTests|BackupRestoreServiceTests'` 通过 Process 7、Platform 121 / 4 suites、App 7 / 1 suite，共 135 个声明；actual executable inventory 为 1133 tests / 91 suites。实体边界、原件故障和既有逻辑备份/恢复、LAN、DICOM 链路均在这次回归内。
+
+
+## 2026-10-11 — U8 按需 App 查询与文本保真集成
+
+- App 使用 header、混合时间线/草稿分页、按 ID 复核/详情及最多两项比较；补齐请求/epoch 围栏、取消排空、提交流重建和 Viewer 目标失效。生产仍选 JSON 临时适配器，未进行 U7 selector 切换。
+- SQL 热投影在返回前检查字节预算，搜索保持完整 Foundation 语义与 confirmed-only。近上限 20 次采样的完整搜索 p50 为 64–121 ms，LAN 4,990 项热队列 p95 为 157 ms，均有未通过门槛；原始口径和边界见 [实测](storage-refactor-measurement-2026-10-11.md#sqlite-按需查询)。这些采样早于下述文本修复，不能作为最终源码复测。
+- 固定 GRDB 的 C 字符串绑定/行拷贝导致合法 NUL 文本被截断，成员、摘要和真实加密恢复三项回归先失败。现以完整 UTF-8 字节绑定并在 cursor 内复制，保留 NULL/空串、Unicode 和 NUL；原件 metadata、来源、编辑、搜索、导出与 logical-v1 恢复使用相同边界。非法 UTF-8 在实体 codec 中拒绝，正常项不被隐藏，未变更 schema/hash/wire。
+- 强化已有 active partial inode 替换测试，先复现整屏 integrityCheckFailed；随后在物理检查中隔离该 upload，返回前重新验证 root/epoch，未知文件保留。该回归不等于最大活动上传队列性能验证。
+- 父级 `scripts/test.sh -Xswiftc -warnings-as-errors --filter 'sqlite|SQLite|LibraryQuery|ComparisonModelTests|AppModelTests|LiveAppServiceTests|ImportReviewModelTests|DICOMAppModelTests|DICOMLibraryModelTests|DICOMStudyReviewModelTests|LANInboxModelTests|BackupCompositionTests|BackupRestoreServiceTests|AppLocalizationTests'` 通过：Process 7、Platform 128 / 4 suites、App 203 / 17 suites，共 338 个测试声明，参数化 case 另计。实际 executable inventory 为 1160 tests / 93 suites，账本保持 not-verified / pendingManual。
+- SQLite 开库、整库替换写操作排空和后台完整巡检的最终组装仍由 U7 完成；macOS 26 当前没有可用连接，未获得替代验收豁免。安装、真实手机、人工 OCR/VoiceOver 和完整 SQLite 容量/性能矩阵未据本次回归判定通过。
+
+- 本阶段简化采用 ce-simplify-code 的复用、质量和效率三个只读检查，应用两处等价复用（既有原件 payload 映射、成员字节表达式）；不改写完整性验证、匹配语义或刷新时序。简化后定向回归 Platform 6、App 57 / 3 suites 通过，完整 lint（含 warnings-as-errors、文档及 package graph）通过；privacy guard、文档链接和 diff 检查通过。最终全分支审查仍待余下单元完成。
+
+### U8 文本保真后规模复测
+
+- 独立 Release fixture warnings-as-errors 构建通过；同一合成 SQLite 报告库与 LAN 库按预热一次、20 次采样串行复测，完整有序搜索结果保持 Core 原谓词一致。
+- 搜索稀有词完整结果 p50 / p95 为 118.965 / 134.626 ms，LAN 屏幕快照 p50 / p95 为 196.265 / 207.082 ms，均仍未满足计划门槛；全部词集、最大值及测量边界见 [规模报告](storage-refactor-measurement-2026-10-11.md#文本保真修复后复测)。不以本机正确性回归替代性能、macOS 26 或安装验收。
+- U8 简化后 63 项相关测试通过，完整 lint 通过；生产仍为 JSON。后续仅推进可测试的统一启动、恢复和生命周期候选，实际生产选择切换仍受计划门禁约束。
+
+
+## 2026-10-11 — U7 SQLite 候选启动与完整性链路
+
+- 构造保持惰性，接受明文说明后依次取得单 owner、收敛恢复/capture/preflight/删除 receipt、打开 SQLite，再组装全部角色。占用可重试；未知库保留字节并提供同 owner 的恢复入口，未知 receipt 不作为破坏性操作授权。默认生产入口仍为 JSON。
+- 普通命令和按需读取纳入共享 lifecycle，撤销后拒绝新任务并等待真实终态；已持久提交的响应不因随后 revoke 被误报失败。空闲巡检可取消，前台操作与并发等待者均等待同一任务排空；巡检按实体检查，局部损坏隔离目标，结构/owner 失败撤销全局活动。
+- 已发现的原件损坏传播到相关报告/草稿/inbox/study，覆盖预览、DICOM 缓存命中、ZIP 与加密备份。真实 RED 证明备份外层摘要失败曾未隔离记录；小型 reader 回调复用现有完整 hash，writer 和 strict 两条参数均验证只读一次原件。
+- Worker 最后串行 warnings-as-errors 定向回归 Process 3、Platform 69、App 65，共 137 个测试声明通过；新增 25 个声明、3 suites，实际 executable inventory 为 1185 / 96。先前未显式串行的 DICOM 共享运行时测试失败保留在原始证据中，未修改生产调度来掩盖；最终串行重跑通过。父级独立跨域回归另行登记。
+- 合成单报告 Debug 实际 App candidate Ready 25.6095 ms、此前原件读取 0 bytes；该入口还覆盖 service DTO、ZIP 与删除。不是 Release、安装或规模门槛，不能推广到近 5,000 项 LAN 冷启动。并发账本更新为 82 个 unchecked / 45 files，新项仅为加锁的原件读取计数。
+- 生产 selector、搜索/队列性能、完整规模备份与恢复、macOS 26、安装、真实设备及人工门禁未据此通过；未 commit、push、创建 PR 或操作真实资料库。
+
+- 父级独立跨域运行：Process 7、App 241 / 23 suites 通过；Platform 154 / 4 suites 中，既有 LAN 缺失原件/异常硬链接的两个参数失败。根因是 pin 先隔离目标，随后持久写入 integrityFailed 又被普通读取禁令拦截。仅该损坏状态转换改用严格行 codec，保留 epoch/目标相等检查及所有正常读取禁令；原测试加强为真实关闭/重开。强化测试先 RED，修复后 Process 1、Platform 17、App 35 / 2 suites，共 53 个声明通过。未将首次失败命令登记为全绿。
+- 父级检查实际源代码与共享调用方，文档链接、privacy guard、本地化资源和 diff 检查通过；实际库存与严格 lint 的结果另行登记。
+
+- U7 父级收口：实际 executable inventory 1185 tests / 96 suites；传入该库存的 `scripts/lint.sh` 通过（含 warnings-as-errors 构建、文档与 package graph）。本机证据仍未绑定不可变发布 source ref，账本保持 not-verified / pendingManual。
+
+
+## 2026-10-11 — U8 LAN 分页与真实调用链
+
+- 新增独立队列页/游标，SQL 首批最多 100 项，全队列 metadata 数量和内容字节独立聚合；损坏行推进游标，原件/冷 OCR 保持按需验证，活动 partial 继续在 admission 外检查物理身份。初始化、预览和删除避开丢弃的全量快照。
+- App 可跨页保留选择，32 项限制仅约束单次严格查询与归档来源，不缩减原有批量删除。后台处理独立遍历工作页，未显示项仍会执行，完整扫描后才清理尝试记录。真实 SQL/service/model 测试覆盖隐藏第 201 项只处理一次、页外选择、陈旧 revision 与迟到页面。
+- 强化坏邻居预览测试先得到两参数 RED；父级另发现临时 JSON 适配器将 lastWriter 标识误用为 open epoch，真实双 writer/service/model 测试先得到列表不刷新与 staleCursor RED，再以读取实例稳定标识修复。未削弱 SQLite 的 root/epoch 围栏。
+- Worker 最终显式串行 warnings-as-errors 回归通过：Process 1、Platform 78、Core 8、App 75，共 162 个声明。实际 executable inventory 为 1190 / 96，非完整主账运行；并发库存仍为 82 / 45 files。父级独立回归与 lint 收口另行记录。
+- 最终 Release 同库预热一次、20 次采样，Platform 首批 100 项 p50 / p95 / max 为 7.151 / 7.648 / 7.705 ms，峰值 footprint 14,910,160 bytes；精确边界和原始样本见[规模报告](storage-refactor-measurement-2026-10-11.md#lan-首批-100-项分页复测)。生产仍为 JSON，搜索、完整规模备份/恢复、macOS 26 与安装/人工门禁未据此通过。
+- U7 的三类只读简化复核没有复用/质量必改项；两项效率提议（原件二次 admission、UI 巡检进度合并）尚无性能和行为证据，本轮未改变它们的验证与通知时序。完整分支审查仍待余下单元完成。
+
+- 父级独立串行回归通过：Process 1、Platform 78、Core 8、App 92 / 11 suites，共 179 个声明；实际重新发现库存 1190 / 96，并以该库存运行严格 lint 通过。privacy、本地化、文档和 diff 检查通过。
+- 父级另强化既有分页测试：刷新失败后“重试载入”曾误取下一页（201 项而非刷新后的 100 项），真实 RED 后改为按语义错误重试初始化/刷新/翻页，仅读取错误显示该按钮；没有添加自动重试。修复后相关模型、界面、本地化与真实 SQL/JSON 服务链路 60 个声明 / 4 suites 通过，测试库存不变。
+
+- 上述重试修复后的最终严格 lint 再次通过（实际库存 1190 / 96，warnings-as-errors、文档和 package graph）；Platform 性能路径未改变，不重复运行已完成的 20 次测量。
+
+
+## 2026-10-11：SQLite 独立规模闭环复核
+
+- 扩展独立 `StorageScaleProbe` 的四个 logical 模式，没有加入主测试清单或更改生产存储。真实仓库生成、加密发布及严格恢复覆盖近上限报告、实际约 9.76 GiB 原件，以及 20,001 原件 / 容器条目推导下界 20,002；完整数值和不确定性见 [测量页](storage-refactor-measurement-2026-10-11.md#sqlite-完整规模闭环)。搜索 RED 保留，生产 selector 仍为 JSON。
+- 父级复核实现差异、原始样本及独立统计后，在新的私有临时目录重新执行 50 报告生成、启动、20 次短操作、完整发布/恢复及 20 草稿加 LAN 容量闭环，五个命令均退出 0。首次受工具 sandbox 限制的容量属性查询未取得可用值，探针保守退出 75；获得本机执行权限后同一源码/二进制通过，未放宽空间门禁。
+- 单元最终 Release warnings-as-errors 构建、七项 CLI 边界检查、严格 lint、privacy、文档与 diff 检查通过。完整主测试、安装 App Ready/可见更新/交互内存、混合 OCR/LAN/备份、macOS 26 和人工矩阵未由本探针覆盖。保存计时证明 reviewState 持久化；探针确认用原 candidates，不替代 App 采纳用户修订的真实 service 测试。
+
+
+## 2026-10-11：LAN 分页简化与验收指标命名
+
+- 按三路静态审查，采用两项等价简化：`LANInboxModel` 从已发布 page 推导游标/hasMore；`SQLiteLANInboxStore` 共享相同的有界 upload SQL/codec。原件身份检查、取消、损坏隔离和读取 epoch 围栏保持原位置。复用既有行为测试，没有添加镜像实现的单元测试。
+- 父级串行 warnings-as-errors 定向回归通过，覆盖 LAN 数据库/Receiver/真实 service、分页选择、失败重试、隐藏队列、生命周期及本地化；测试声明库存不变。未采用会改变处理任务再唤醒语义的建议，也未因已达标的首屏查询引入额外批处理；仅由测试使用的旧快照 helper 留待统一清理时连同调用方处理。
+- 候选验收探针的 `lanFullSnapshotMilliseconds` 更名为 `lanFirstPageMilliseconds`，对应实际首屏服务调用。这是内部尚未发布的测量字段更名，没有改变载入范围或用户界面。
+
+
+## 2026-10-11：共享 OCR 来源归属与候选验证同步
+
+- 将本地重新识别、LAN 预处理和 Core 单来源 fallback 的同一 `OCRBlock` 构造收敛到一个方法，生产代码净减少 15 行；保留各入口的来源权威、ID 分配顺序、文件页码及已有归属的严格校验。复用既有校验、抽取和候选机制，没有新增通用 pipeline 或未经测量的 Data lease。
+- 先补真实 SQLite 本地/LAN 对照与失败重试的两项声明，并强化已有 Core 来源测试，在改动生产代码前观察到 GREEN；修改后 worker 的 52 项定向声明执行通过。父级独立复核实际五个文件后，串行 warnings-as-errors 再验 Platform 10、Core 12、App 6 个声明，全部通过；覆盖大于 128 MiB 的逐原件识别、途中 revision 变化、取消、LAN 缓存/重排及保存边界。
+- 实际已构建 executable 清单经主测试 planner 得到 1192 tests / 97 suites，验收账本按观察值更新；没有把参数化 case 重复计为声明。修正 storage 专题仍把已接通的按需查询、逻辑备份与导出写成待实现的旧句子。生产仍使用 JSON，macOS 26、安装 App 及混合 OCR/LAN/备份资源门禁未完成。
+- 额外搜索 scratch 在完整摘要和行摘要都实际比较、完整 ID 对照一致的条件下，测试预先解码/native UTF-16 与流式行摘要；稀有词/日期的纯 CPU 成本仍约 41–48 ms，未含 SQL/copy/cold cache，三次样本不作为门禁证据。没有据此加入永久缓存、索引或并发流水线，原正式搜索 RED 保留。
+
+
+- 完整候选回归首次运行在主题源码测试发现两条过期断言：共享存储说明已移到 `StorageDisclosureView`，测试仍在 `AppShellView` 搜索主/次按钮样式。保留失败日志，核实组件仍有原样式后，将断言对齐实际组件，并检查 JSON/SQLite 两个启动入口都使用它；保留禁止默认样式的旧入口扫描。定向主题、启动与本地化 45 项声明通过，库存不变；随后重新运行完整套件，不把此前已通过分片冒充全量成功。
+
+
+- 修复共享组件断言后的完整 `scripts/test.sh --no-parallel -Xswiftc -warnings-as-errors` 退出 0：主清单 1192 tests / 97 suites，另有 13 个独立 derived-artifact XCTest、14 个验收扫描测试、40 个 storage process 测试、1 个本卷别名锁、18 个 DICOM 导入集成测试、安装身份 LAN HTTP 测试及真实双流 LAN 测试通过。Swift Testing 的 target platform 字串不是运行系统证明；本次环境仍为 macOS 27。
+- 本次双流 socket 校准，SQLite 路径 RSS 增量 278,528 bytes、event-loop p99 530,167 ns、listener stop 5,266,542 ns；JSON 对照也通过。数字仅属于 socket fixture，不替代 App 512 MiB 或混合 OCR/LAN/备份 608 MiB 门槛。完整重构的源代码检查通过不自动成为绑定 clean-source 的发布验收。
+
+
+## 2026-10-11：候选复核与故障链路收口
+
+- 完成整个未提交候选（含未跟踪源码）的独立审查，确认三项必改：损坏目标仍有已打开的缓存页面、数据库基础设施错误未撤销 LAN/lifecycle，以及 DICOM study 的不受限 domain 字段先复制后验证。文件长度类建议没有可复现后果，未据此重写模块。
+- DICOM 复用 SQL 有界投影，列表/详情/逻辑备份/导出共用。现有损坏测试增加超长字段参数及连接长度上限，真实 RED 曾使整个列表返回 databaseUnavailable；修复后 98 项关联声明通过，坏项 ID 保留而健康邻居可读。
+- App 回归先复现已打开报告、比较和草稿残留，以及巡检已完成后报告表失效仍能接收 LAN。修复将基础设施错误接入独立持有的停机任务，先关闭任务 admission，再并行排空 UI/服务，等待 Viewer 释放后要求重启；局部损坏只关闭相应页面并保留语义错误。详情、提交观察、巡检三条真实链路回归通过。测试中 Viewer 的关闭通知发生在 drain 之后，相关断言放在 gate 释放后，未改变生产时序来满足测试。
+- 既有命令撤销测试改用已注册 revocation hook 的信号，去掉依赖 30 ms 调度间隔的假设。页面重开补充请求身份和同一复核实例检查；最终完整回归和 lint 单独登记。
+- 复核前的本机 dirty-source Release/XPC 构建、deep/strict 签名、精确资源、GRDB privacy、最低系统及 helper/main 依赖隔离通过；复核修复后的工件另行验证。未执行要求 clean-source 的完整 verify-app，也未安装、启动或操作真实资料库。生产仍为 JSON；搜索、macOS 26、安装和混合负载门禁继续保留。
+
+- 复核后已构建 executable 的主测试 planner 实测 1194 tests / 97 suites，比前一轮增加两项集成声明；参数化故障入口不重复计数。最终完整重跑前发现复核实例 ID 仍为 private 的编译错误，改为模块内只读 let 后重新构建，未将编译失败记作行为 RED。privacy guard 与 diff 检查通过。
+
+- 复核修复后的完整 `scripts/test.sh --no-parallel -Xswiftc -warnings-as-errors` 退出 0：1194 tests / 97 suites，13 derived XCTest、14 验收扫描、40 storage process、本卷别名锁、18 DICOM 导入、安装身份 LAN HTTP 与真实双流 LAN 全部通过。本次 SQLite socket fixture RSS 增量 344,064 bytes、event-loop p99 698,250 ns、listener stop 5,212,583 ns，仍只代表该 socket fixture。
+- 全量通过后额外核对取消语义：刷新抛 CancellationError 曾触发一次全局停机，参数化旧测试得到实际 RED；补充取消分支后，App/SQLite 启动、查询、比较、复核及故障链路 109 tests / 9 suites 通过。全局故障参数另覆盖比较错误回调所创建的受跟踪任务，证明不会等待自身；该参数最初漏启比较选择模式，已修正测试前置条件并断言选中 ID，不将它记为产品缺陷。主声明库存仍为 1194 / 97。
+
+- 最终严格 `scripts/lint.sh` 传入实际主清单后通过；随后 `scripts/build-app.sh` 重建 App/XPC 成功，构建期间 206 个变更文件 hash 保持一致。对最终工件额外检查 deep/strict 签名、13 项精确资源、GRDB privacy/许可、arm64 与最低 macOS 26.0、Helper 不链接 GRDB/SQLite、主程序不含 DICOM codec，全部通过。上述是 dirty-source 本机静态证据，未执行 clean-source verify-app、安装或运行候选 App；生产仍 JSON，搜索与系统/安装/混合负载门禁仍未通过。
+
+## [2026-10-12] merge | 把 main 的时间线、配色、品牌与 CI 更新并入 SQLite 重构分支
+
+- **范围**：先把此前只存在于工作树的 206 个文件固定为 `8aec3f5`，再把 `origin/main@7b41ced`（PR #16–#20）合入 `codex/sqlite-refactor`。16 个文件、30 处文本冲突；另有不产生冲突标记的语义差异，按下列方式处理。生产 composition 在本次合并后仍选择 JSON。
+- **时间线筛选接到分页查询**：main 的“全部 / 报告 / 影像”原先在内存里过滤整份目录。现在“全部”走混合时间线分页，“报告”走空查询的报告分页（两条存储路径都按时间线次序返回全部已确认报告），“影像”直接使用库头里已有的已确认检查，不发起分页读取；影像筛选下的搜索结果为空。筛选变化与成员、搜索词一样重置游标和请求身份。
+- **进入时间线自动打开最新记录**：分页是异步的，[`AppModel.openNewestRecordIfNothingIsOpen`](../Sources/KinlogueApp/App/AppModel.swift) 先等当前页，再按 ID 读取记录；自动打开失败不弹提示，手动打开同一条仍会提示。
+- **切换成员清空已打开的记录**：重构分支曾把这一行为改成保留，main 及重构前都是清空，自动打开最新记录也依赖它。按 main 恢复，并把对应断言改回。
+- **待确认草稿显示文件名**：`LibraryDraftSummary` 增加首个来源的文件名。SQLite 草稿分页读取 `report_sources` 中 position 0 的一行并校验该行摘要；超过 1,024 字节的合法名称不进入列表投影，草稿仍然列出；该行摘要不符时只把这一份草稿记为损坏。旧 JSON 适配器取同一字段。
+- **侧栏计数**：草稿队列按页载入，“待确认（N）”只在整个队列载入完成后显示数量，载入中、失败或还有下一页时显示不带数量的标题。
+- **其余**：main 删除的影像侧栏分区和 `DICOMLibraryView` 不再保留；`verify-app.sh` 的精确资源清单同时包含 `Assets.car` 与 GRDB privacy manifest；String Catalog 按 key 合并（采用 main 的 11 个新增和 4 个删除，保留仍在使用的“待确认”），英文运行时资源由 `compile-localizations.sh --write` 重新生成；重构新增的载入更多 / 重试按钮改用共享按钮样式。
+- **测试**：main 新增的 App 测试改用只携带库头的 `AppSnapshot` 加完整合成状态的测试替身，并在筛选、成员或搜索变化后等待当前页。新增 [`sqliteDraftPagesNameAWaitingDraftAfterItsFirstOriginal`](../Tests/KinloguePlatformTests/SQLiteLANInboxTests.swift)，用真实数据库覆盖有文件名、无文件名、名称过长和来源行被改四种情况。
+- **验证**：macOS 27.0.1 / Xcode 27 上，合并后的完整 `scripts/test.sh` 退出码 0，主清单 1242 tests / 98 suites，隔离的 derived XCTest、验收扫描、storage process、本卷别名锁、DICOM 导入集成、安装身份 LAN HTTP 与真实双流 LAN 用例全部通过。传入实际清单的 `scripts/lint.sh`（warnings-as-errors 构建、文档、package graph）、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。
+- **未执行**：合并后没有重新构建或验证 App bundle（`verify-app.sh`、`verify-dicom-xpc.sh`），因此新图标资源与 GRDB 资源同时存在的精确清单只有源码断言，没有实际包证据；没有重跑规模探针；macOS 26、安装验收、真实手机和人工门禁未执行。搜索门槛未通过、生产 selector 未切换的状态不变。
+
+## [2026-10-12] perf/sqlite | 搜索改用不漏结果的预筛键并按摘要缓存解码结果
+
+- **基线与定位**：在合并 main 之后的源码上重新生成近上限合成库（9,990 份报告 / 9,791 条已确认），旧实现的完整结果为稀有词 119.2 / 137.7 ms、无匹配 91.5 / 158.2 ms、中文短词 58.7 / 61.3 ms，与此前记录一致。其中约 34 ms 是按时间线次序连接两张表的 SQL 读取，其余主要是每次查询对全部行做 JSON 解码和 Core Foundation 子串查找。
+- **实现**：[扫描](../Sources/KinloguePlatform/Storage/SQLiteReportSearch.swift) 改为按存储顺序读报告目录并在内存排序，再顺序读全部搜索行；每行字节仍然每次重算两个摘要。新增 [预筛键](../Sources/KinloguePlatform/Storage/SQLiteReportSearchKey.swift)：逐标量兼容分解、大写再小写映射到稳定、只保留字母与数字，用来跳过不可能命中的字段，命中仍只由 Foundation 谓词决定。解码后的字段和键按行缓存在打开的数据库对象上，只有本次读到的字节摘要相同才使用，预算 64 MiB，关闭或替换数据库时清空。连接页缓存设为 32 MiB。没有改 schema、行摘要或 logical-v1。
+- **不漏结果的证据**：[`SQLiteReportSearchKeyTests`](../Tests/KinloguePlatformTests/SQLiteReportSearchKeyTests.swift) 对照运行系统上的真实 Foundation：穷举全部标量的大小写与规范等价变体，要求键完全相同，并要求 Foundation 能匹配的变体对键也能匹配；另有多文字、九个 locale 的语料和固定种子的生成文本。把键里的大小写映射故意改成只转小写后，两个穷举测试都失败并报出 ß、ı、ς、U+0345 等字符，恢复后通过。设计依据记在 [实现核对](sources/2026-10-12-corefoundation-find-implementation.md)，它不替代上述测试。
+- **顺带修复的 Foundation 缺陷**：搜索词以 NUL 结尾时，带 locale 的 Foundation 搜索越过文本末尾读取；macOS 27.0.1 上 `"ungla"` 被报告包含 `"A\0"`，`"合成"` 搜索 `"成\0"` 会以 `String index is out of bounds` 终止进程。main 上的 JSON 搜索同样受影响。[`RecordQuery.localizedContains`](../Sources/KinlogueCore/Domain/RecordQuery.swift) 在这种词下给被搜索文本补一个非 NUL 单元，两条存储路径共用，并有 Core 测试。
+- **测量**：同一资料库、Release warnings-as-errors 探针、预热一次后 20 次采样：完整结果 p50 / p95 为无匹配 28.8 / 30.5 ms、稀有词 28.2 / 28.9 ms、日期 28.5 / 29.3 ms、中文短词 28.1 / 29.2 ms、成员 27.8 / 28.6 ms；首页 p50 不超过 35.2 ms、p95 不超过 36.5 ms。另一轮无匹配查询的 p95 为 41.7 ms（首页 44.2 ms）。全部低于计划的 p50 50 ms / p95 100 ms，完整有序 ID 与不使用键和缓存的参考路径相同。新进程第一次搜索约 50 ms，峰值 footprint 从 23.1 MB 升到 79.8 MB。口径、基线和未测范围见 [搜索复测](storage-search-measurement-2026-10-12.md)。
+- **行为变化**：搜索首页不再提前结束扫描，命中很多的查询首页从约 12 ms 变为约 35 ms。报告缺少搜索行、字节与摘要不符时仍作为损坏项返回。
+- **测试**：新增 9 项声明（预筛键 5 项、Core 的 NUL 结尾词 1 项、缓存有效性 / 结果次序 / 缓存预算 3 项），既有取消测试改为在新的搜索行语句上暂停。主清单 1251 tests / 98 suites；改动后的完整 `scripts/test.sh` 在 macOS 27.0.1 上退出码 0，隔离的 derived XCTest、验收扫描、storage process、DICOM 导入集成和两条 LAN 用例全部通过。传入实际清单的 `scripts/lint.sh`（warnings-as-errors 构建、文档、package graph）、`scripts/privacy-guard.sh` 与 `git diff --check` 通过。
+- **未执行**：macOS 26、安装后的 App 计时、OS 冷缓存、不含字母或数字的搜索词、超过缓存预算的资料库都没有测量。生产 composition 在本条记录时仍选择 JSON。
+
+## [2026-10-12] feat/sqlite | 正式界面入口切换到 SQLite 资料库
+
+- **用户决定与范围**：用户要求在固定提交、合入 main 和解决搜索性能之后切换 selector。本次只切换界面入口：[`KinlogueApp`](../Sources/KinlogueApp/App/KinlogueApp.swift) 持有 `AppStartupCoordinator.makeDefault()`，主窗口以 [`SQLiteAppLaunchView`](../Sources/KinlogueApp/Views/SQLiteAppLaunchView.swift) 为根，影像查看窗口从同一协调器取模型。界面不再构造 JSON composition；`AppComposition` 里解析当前用户身份的无参 JSON 入口已删除，只留给定身份的版本供测试和验收阶段使用。没有改 schema、存储格式或 entitlement。
+- **启动行为**：接受存储说明之前不访问资料库；之后取得单实例 owner、收敛恢复与删除 receipt、打开数据库并发布 composition。取不到可信运行时身份时协调器报告资料库不可用，不解析其他位置。启动页补上共享外观、背景和按钮样式。
+- **对已有资料的影响**：已有的 JSON 资料库不会被转换、清空或写入，启动页显示“资料库格式不受支持或已损坏”，旧格式恢复点也被新 reader 拒绝。这是计划里 current-only 的既定取舍；本分支没有离线转换，已有 JSON 资料只能由切换前的构建读取。
+- **没有随入口一起切换的部分**：`SyntheticAcceptanceRunner` 的 seed、restart、强制终止和 cleanup，以及安装 LAN 探针和 DICOM 安装验收，仍然运行 JSON 服务；`run-acceptance.sh` 没有调用 SQLite 验收入口。因此安装验收目前不覆盖界面实际使用的存储。JSON 生产代码、旧 manifest 路径和临时查询适配器也没有删除。计划中 U7 的这部分和 U10 仍未完成。
+- **测试**：新增三项声明：两次启动之间 SQLite 资料库持久存在且根目录只有 `library.sqlite` 与 `originals`；没有运行时身份时报告不可用且不创建任何东西；源码断言界面入口只经由启动协调器、不引用 JSON composition，并且存储说明先于任何打开动作。既有测试继续覆盖第二实例被拒后重试、坏数据库保留字节并提供同 owner 恢复、旧 JSON 原样保留。用临时测试把存储说明、旧资料库失败页、不可用页和空资料库主界面离屏渲染后目视检查，随后删除该测试。
+- **验证**：macOS 27.0.1 / Xcode 27 上，切换后的完整 `scripts/test.sh` 退出码 0，主清单 1254 tests / 98 suites，隔离的 derived XCTest、验收扫描、storage process、DICOM 导入集成和两条 LAN 用例全部通过。传入实际清单的 `scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。
+- **未执行**：切换后的 App bundle 没有重新构建、安装或运行；界面只做了离屏渲染，没有真实窗口、键盘或 VoiceOver 检查；macOS 26 的 SQLite engine、安装后的 Ready 时间与内存、真实手机和人工 OCR 门禁都没有执行。计划把这些列为切换的前置门禁，本次是在它们缺失的情况下按用户要求完成代码切换，验收账本保持 `not-verified` / `pendingManual`。
+
+## [2026-10-12] release-check | 切换后的 App bundle 在干净源码上通过静态验证
+
+- **命令与结果**：在提交 `a595f8234c23a3455cfcfbdf149ce8506b1c5f3a` 的干净工作树上运行 `scripts/verify-app.sh --require-clean-source`，退出码 0。报告记录 `source.dirty = false`、macOS 27.0.1、Xcode 27.0（27A266a）、Swift 6.4、arm64、最低系统 26.0，bundle 内容摘要 `44b1c86a4e062c3edef8b70a0afc211401fc95dc6904f67d69da0026af3c1b1e`。
+- **通过的门禁**：Release 构建、ad-hoc 签名与签名完整性、bundle metadata 与 Info.plist、应用图标、精确资源清单（这是合并 main 之后 `Assets.car` 与 GRDB privacy manifest 第一次一起出现在实际包里）、第三方声明、依赖锁定、entitlement 白名单、LAN composition、DICOM Helper 结构 / 签名 / entitlement 与主进程隔离、无 Security framework、Keychain 或旧加密运行时依赖。
+- **未执行**：报告中的 `installedAcceptance`、`syntheticSmoke`、`canaryScan` 和 `overall` 仍是 `notExecuted`；`verify-dicom-xpc.sh` 的真实 XPC 探针没有在该提交上重跑；App 没有安装或启动；Developer ID 与 notarization 未执行。该提交尚未推送，产物在被忽略的 `dist/` 下，不进入 Git。此前切换记录里“bundle 没有重新构建”的说法由本条更新，其余未执行项不变。
+
+## [2026-10-12] review/app | 刷新不再清空列表，并修复评审发现的四处问题
+
+- **起因**：用户要求以技术栈重构为目标评审当前实现。对 `origin/main...HEAD` 的生产代码做了一轮评审，发现 12 项，本条记录其中已修的 6 项；其余是结构性问题，列在本条末尾，未改代码。
+- **刷新清空列表**：重构后每次刷新都先清空时间线、搜索结果和草稿队列再从第一页重载，而刷新在每次提交通知、切回应用和唤醒时都会发生，旧 JSON 实现是原地重建。现在 [`AppModel`](../Sources/KinlogueApp/App/AppModel.swift) 刷新时保留已显示的行，按原来已加载的行数读完再一次替换；草稿各状态在新一页到达后才替换，四个状态并行读取。只有切换成员、筛选或搜索词才清空列表。
+- **重复刷新**：界面自己发起的修改会收到两次相同的 revision（服务返回的 header 和同一次提交的通知），各触发一轮完整重载。提交通知、激活、唤醒以及修改返回的 header 现在遇到已显示的 revision 时不重载列表，只重新核对已打开的记录和草稿；这一步保留下来，是因为没有改变 revision 的数据库故障原本靠它在激活时被发现，对应的既有测试继续通过。显式刷新仍然总是重载，因为草稿的重试资格可以不经提交而变化。
+- **陈旧游标**：游标绑定 commitID，任何提交都会让“载入更多”失败，原实现随即清空并回到第一页。现在按“已显示行数加一页”的深度重读一次；提交持续到来时退回只读第一页。游标与 commitID 的绑定没有改。
+- **搜索缓存**：某一行的新条目放不进预算时，旧条目原先留在缓存里，摘要已不匹配却一直占着预算。现在先移除旧条目。
+- **LAN 预处理调度**：读取队列页出错时循环直接返回，期间到达的调度请求被丢掉。现在这种请求会得到一次自己的扫描；没有新请求时仍然结束，不会对同一个错误空转。
+- **测试**：新增 4 项声明并强化 1 项，主清单 1258 tests / 98 suites。把这几处临时改回原行为后，5 项测试全部失败（列表被清空、深度回到 100、队列出现空值、未变化的 revision 仍触发分页读取、调度请求丢失、陈旧条目残留），恢复后通过。测试替身的 revision 现在随内容变化，与真实提交一致。
+- **验证**：macOS 27.0.1 上，修改后的完整 `scripts/test.sh` 退出码 0，主清单 1258 tests / 98 suites，隔离门禁全部通过；传入实际清单的 `scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 和 `git diff --check` 通过。界面行为只由模型测试证明，没有在真实窗口里检查滚动位置；macOS 26、安装与人工门禁未执行。
+- **已提出、未修改的结构性问题**：空闲完整性巡检在任何提交后都从头重跑，包括重新计算全部原件的摘要；存储内核的 read / write 是持锁的同步调用，却在并发线程池上的 async 函数里执行；JSON 存储栈和临时查询适配器在界面入口切换后只剩验收阶段和测试使用；本机导入把原件先写临时文件再复制一次；`AppStartupCoordinator` 一个类型承担两个角色且仍沿用 candidate 命名；`AppModel` 用八个字典分别跟踪读取任务。这些需要单独决定方案，本次没有动。
+
+## [2026-10-12] review/storage | 处理评审留下的结构性问题，并把安装验收迁到 SQLite
+
+- **起因**：用户要求按上一条记录末尾的建议处理六项结构性问题。五项已完成；第六项（删除 JSON 存储栈）完成了前置部分，JSON 实现本身没有删除，原因见本条末尾。
+- **本机导入写盘一次**：[`SQLiteReportRepository.stage`](../Sources/KinloguePlatform/Storage/SQLiteReportRepository.swift) 原先把导入字节先写进临时文件，再由内核从临时文件复制到 staged 原件。内核现在可以直接暂存内存中的字节，登记、同步、回读校验和提交前复核与从 descriptor 复制的入口共用。
+- **空闲巡检续跑**：巡检原先在任何提交、切回应用和唤醒之后都从头重做，每个原件每轮读两遍。现在一次打开期间保留[进度记录](../Sources/KinloguePlatform/Storage/SQLiteIntegrityProgress.swift)：资料库状态与 SQLite `data_version` 未变时从断点继续，已完成的同一 revision 只重新核对原件的文件身份；提交后行检查从头开始，但字节校验通过的原件在行内容哈希与文件的设备、inode、长度、修改和状态变更时间都未变时不再重读，每次校验只读一遍。行检查仍绑定单一 revision，“revision 变化只算未完成”的语义没有改。身份信息不变而字节损坏的情况要到下次读取该原件或重新打开资料库后才发现；读原件时的校验不受影响。
+- **读取登记表**：`AppModel` 的九个任务字典和 `ComparisonModel` 的两个字典合并为 [`LibraryReadRegistry`](../Sources/KinlogueApp/ViewModels/LibraryReadRegistry.swift)，取消与排空各只有一处实现。行为不变。
+- **启动协调器拆分**：原先一个 `AppStartupCoordinator` 靠布尔标志兼任“持有本次启动的资料库”和“排定 composition 内各服务的启动次序”。前者现在是 [`LibraryLaunchCoordinator`](../Sources/KinlogueApp/App/LibraryLaunchCoordinator.swift)，后者保留原名；相关成员不再叫 candidate。
+- **阻塞调用离开并发线程池**：存储内核是持锁的同步调用，原先在 Swift 并发线程池的线程上执行，admission 被长时间持有时等待的读取会把线程池占满。现在存储层的异步入口经 [`LibraryStorageExecutor`](../Sources/KinloguePlatform/Storage/LibraryStorageExecutor.swift) 移到允许阻塞的专用线程，四个会等存储的 actor 各用自己的串行队列，备份、恢复激活、恢复收敛和原件导出在任务根部切换；细节见 [SQLite 存储专题](sqlite-storage.md#阻塞调用所在的线程)。内核的同步 API 没有改成异步。排查时给 admission 临时加了调用栈记录并跑了一遍全量测试，据此补上了批量改造没有覆盖的路径；该记录工具已删除。
+- **安装验收迁到 SQLite**：[`SyntheticAcceptanceRunner`](../Sources/KinlogueApp/App/SyntheticAcceptanceRunner.swift) 的 seed、restart、强制终止和 cleanup，以及 LAN 与 DICOM 安装验收，都改为经 `LibraryLaunchCoordinator` 打开 SQLite 资料库并走数据服务；事件的字段和 `run-acceptance.sh` 没有改。场景不再预先决定记录和原件的 ID（由资料库在暂存时分配），报告靠原件摘要对应，`summarySHA256` 改为资料库身份加各报告原件摘要。强制终止阶段现在让进程带着 owner 和打开的数据库等待被杀。单独的 `sqlite-candidate` 阶段与探针已并入这些阶段并删除。
+- **App 不再能组装 JSON 资料库**：删除了 `AppComposition.makeDefault(identity:)`、`LiveAppServiceEnvironment.makeDefault`、JSON 的备份运行时组装、`PlaintextVaultDestroyService` 和导出服务的 JSON 构造入口。对应的五项测试所验证的性质（构造不触碰磁盘、父目录权限、首次启动、不创建备份身份、旧格式原样拒绝）已由 SQLite 启动测试覆盖，其中父目录权限、恢复状态和备份身份三处是这次补上的断言。
+- **未完成：JSON 实现的删除**。`PlaintextVault`、`PlaintextLANInboxStore`、JSON 备份源与恢复事务、`LegacyLibraryQueryAdapter` 以及 `LiveAppService`、`LiveLANInboxService`、`LiveBackupService` 的 JSON 构造入口仍在，现在只被测试和跨进程 fixture 使用。删除它们需要先处置约 130 项以 JSON 资料库或 `VaultStore` 替身为夹具的测试（`LiveAppServiceTests`、`ImportWorkflowIntegrationTests`、`DICOMImportWorkflowIntegrationTests`、LAN 归档与 inbox、加密恢复点的写入与恢复、跨进程协调等），逐项判断移植到 SQLite 夹具还是随实现删除；计划的 U10 把这一步估为 3–5 人日，并要求保留第二实例、crash、根替换和备份 repository 竞争的测试。本次没有在未提交的大改动之上继续做这一步。
+- **测试**：新增 11 项声明（内存字节暂存 1、巡检续跑 3、读取登记表 4、存储执行器 3），删除 7 项（candidate 阶段 2、JSON 组装 5），改写验收场景、进程内全阶段运行和 LAN 探针 3 项。主清单 1262 tests / 100 suites。反向验证：去掉 `data_version` 围栏后“其他连接提交”一项失败；去掉执行器切换后线程池在 admission 被持有的 5 秒内无法运行其他任务，两项测试失败；恢复后通过。
+- **验证**：macOS 27.0.1 上，全部改动完成后的完整 `scripts/test.sh` 退出码 0，主清单 1262 tests / 100 suites，隔离的 derived XCTest、验收扫描、storage process、DICOM 导入集成和 LAN 用例通过；传入实际清单摘要的 `scripts/lint.sh`（含 warnings-as-errors 构建与文档校验）、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：迁移后的 `run-acceptance.sh` 没有运行，DICOM 验收阶段因此没有任何执行证据；App 没有安装或启动；提交后行检查在大库上的耗时、专用线程上的调用开销都没有测量；macOS 26、真实手机和人工门禁未执行。
+
+## [2026-10-13] storage/cleanup | 删除 JSON 清单存储，资料库只剩 SQLite 一种实现
+
+- **起因**：上一条记录末尾留下的第六项。用户同意继续，按“先把测试移植到 SQLite、再删实现”的次序执行。决策登记见 [`decisions.md`](decisions.md)。
+- **删除的实现**：Platform 的 `PlaintextVault` 及其初始化事务、`VaultMutationCoordinator`、`VaultMutationCapabilityLock`、`VaultRootBinding`、`VaultImportDraftStore`、`VaultReportSelectionStaging`、`PlaintextLANInboxStore`、`LANInboxChangeMonitor`、`LANDerivedArtifactSink`、`PlaintextLibraryBackupSource`、`CheckpointLibrarySource` 和 `LegacyLibraryQueryAdapter`；Core 的 `VaultCatalog`、`VaultStore` 协议及其请求/快照类型、`DuplicateDetector` 和 `OriginalArchivePlan.make(catalog:)`。`Sources/` 净减约一万一千行。
+- **收敛为单一后端的共享类型**：恢复事务（文件改名为 [`BackupRestoreTransaction.swift`](../Sources/KinloguePlatform/Backup/BackupRestoreTransaction.swift)）和 [恢复校验器](../Sources/KinloguePlatform/Backup/EncryptedCheckpointRestore.swift) 现在必须由资料库的 owner 构造：原先叠加在上面的 JSON 跨进程写锁删除，跨进程互斥只靠 owner 锁，同一进程内对同一根目录的事务另由一个小的门闩串行；文件树格式的恢复点在写入任何暂存之前以“格式不受支持”拒绝。`EncryptedCheckpointWriter`、`PlaintextOriginalArchiveExporter`、`LANReceiver`、`LANItemPreprocessor`、`LANPendingQueueWorkflow`、`LANReportArchiveCoordinator`、`DICOMImportWorkflow`、`DICOMSliceService` 以及 App 的 `LiveAppService`、`LiveLANInboxService`、`LiveBackupService` 各自去掉了 JSON 的构造入口和分支。锁文件类型不再带 `fcntl` 租约，只剩命名和安全打开。
+- **仍沿用旧名字的共享基础设施**：`PlaintextVaultDeletionTransaction`、`PlaintextVaultLayout`、`VaultDICOMImportJournal`、`VaultDICOMStudyStaging`、`VaultProcessLock`、`VaultCanonicalRootPath`、`VaultError`、`VaultRevision` 和 `PlaintextOriginalArchiveExporter` 都被 SQLite 资料库使用，这次没有改名；其中只删掉了确认无人调用的成员。Core 的 `DICOMStudy` 结构现在只剩它的 ID 类型和指纹还在用，也没有处理。
+- **移植测试时发现并修复的两处行为**：一、重新识别进行中草稿被别处改动时，仓库抛出的“尝试已过期”没有被 App 服务映射，界面得到的是一般性错误；现在映射为“复核内容已过期”。二、被取消的处理会把“失败”写进草稿，使一次中断的导入变成需要手动重试的失败项；[`failProcessing`](../Sources/KinloguePlatform/Storage/SQLiteReportRepository.swift) 现在先检查取消，草稿留在处理中，由下次启动继续。两处都有回归测试。另外记录一个与 JSON 实现不同、但没有改动的行为：自动恢复按草稿 ID 的顺序进行，不按导入的先后。
+- **跨进程夹具与探针**：[`KinlogueStorageProcessFixture`](../Sources/KinlogueStorageProcessFixture/KinlogueStorageProcessFixture.swift) 去掉了全部 JSON 命令。备份仓库并发发布的测试改为两个进程各持一个资料库、争用同一个仓库，因为一个资料库只能有一个 owner。[`BackupCapabilityProbe`](../Sources/KinlogueStorageProcessFixture/BackupCapabilityProbe.swift) 的整根激活探针改用 SQLite 资料库作种子和校验；原先“激活等待另一个进程的写入完成”的用例在单 owner 下不再成立，改为“另一个进程持有资料库时激活在准备任何暂存之前被拒绝，对方放手后同一次激活成功”。[`StorageScaleProbe`](../Sources/KinlogueStorageProcessFixture/StorageScaleProbe.swift) 只保留 SQLite 的各项命令。
+- **测试基础设施**：`LANDerivedArtifactSinkTests` 是仓库里唯一的 XCTest 套件，`scripts/test.sh` 为它单独构建 bundle 并逐 case 启动；随该类型删除后，这条通道、`discover-derived-xctest-cases.rb` 和 CI 的专用 job 一并移除，测试分区由 `0/3`、`1/3`、`2/3` 改为 `0/2`、`1/2`。隔离运行的 `DICOMImportWorkflowIntegrationTests` 门禁随该套件删除；仅在大小写不敏感卷上运行的别名锁门禁改指向新的 SQLite owner 测试。删除专用 job 时核对过 `main` 没有分支保护规则；托管平台若另有要求该检查的规则，需要在那里移除。
+- **测试的移植与退役**：
+  - 移植到 SQLite 资料库：`LiveAppServiceTests`（重写为 37 项）、`LiveBackupServiceTests`、`LiveAppServiceRecognitionIntegrationTests`、`LiveDICOMAppServiceIntegrationTests`、`ImportWorkflowIntegrationTests`、`PlaintextOriginalArchiveExporterTests`、`EncryptedCheckpointWriterTests`、`EncryptedCheckpointRestoreTests`（重写为 6 项：文件树格式拒绝、错误恢复码、整根替换、旧根移走后中断的回滚、截断的事务收据、只清理有收据的废弃预检）、`LANPendingItemStoreTests` 的 5 项通用用例、LAN Receiver 的三个套件、`BackupPublicationProcessCoordinationTests`、`BackupCapabilityActivationProbeTests` 的激活用例和 `OriginalArchivePlanTests`。
+  - 新增：SQLite owner 经符号链接父目录和大小写别名到达同一个库时争用同一把锁、锁路径被替换成符号链接时失败关闭；排队中的数百文件 DICOM 导入在一秒内取消；验收清理拒绝不属于资料库 owner 的锁文件。
+  - 随实现退役：`PlaintextVaultTests`、`PlaintextVaultCurrentFormatTests`、`PlaintextVaultStagedReportGenerationTests`、`VaultMutationCoordinatorTests`、`VaultRootBindingTests`、`VaultReadOptimizationMeasurementTests`、`PlaintextLibraryBackupSourceTests`、`LANInboxChangeMonitorTests`、`LANDerivedArtifactSinkTests`、`CatalogProcessCoordinationTests`、`DICOMSliceVaultIntegrationTests`、`VaultCatalogDeletionTests`，以及 `DICOMImportWorkflowIntegrationTests`、`LANReportArchiveTests` 和若干 Core 套件里针对 catalog 的用例。DICOM 导入、切片读取和 LAN 归档的对应性质由 `SQLiteDICOMTests`、`SQLiteLANInboxTests` 和真实进程测试覆盖。
+  - 没有找到 SQLite 对等测试的性质：资料库级的 DICOM 数量上限（256 个 study、10,000 个对象、4,096 个 Series）由 [`SQLiteDICOMRepository`](../Sources/KinloguePlatform/Storage/SQLiteDICOMRepository.swift) 的提交前检查执行，但原先 catalog 层的边界测试没有对应物。
+- **账本核对脚本的缺陷**：[`verify-docs.sh`](../scripts/verify-docs.sh) 汇总实测结果的正则只匹配复数的 “tests”，恰好只含一个测试的分片输出的是 “1 test”，不被计入。分片组成变化后第一次出现这样的分片，完整运行在全部分片通过之后因合计少 1 而失败。正则改为同时接受单数，并在文档校验器的测试里补了这一情形。
+- **测试计数**：`@Test` 声明由 1337 个减为 1194 个，XCTest 用例由 13 个减为 0；主清单由 1262 tests / 100 suites 变为 1146 tests / 96 suites。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，全部源码和测试改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1146 tests / 96 suites，隔离运行的验收扫描（14 项）、storage process（31 项）、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只改了文档。传入实际清单摘要的 `scripts/lint.sh`（含 warnings-as-errors 构建与文档校验）、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。改写后的 `run-storage-scale-probe.sh --tier reports-100` 实跑退出码 0，生成、三次启动、搜索、短操作、逻辑捕获和备份/严格恢复各阶段都有输出；其余档位没有重跑。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：`run-acceptance.sh` 仍没有运行，DICOM 验收阶段因此仍没有任何执行证据；`run-backup-capability-probe.sh` 里改写的“资料库被占用时拒绝激活”用例只做过脚本语法检查，同一性质由源码层的真实进程测试覆盖，安装探针需要已签名并安装的工件；App 没有安装或启动；CI 工作流的改动没有在托管平台上运行过；macOS 26、真实手机和人工门禁未执行。
+
+## [2026-10-13] review/follow-up | 评审后续：草稿按导入先后排列，清掉删除后的残留
+
+- **起因**：删除 JSON 存储之后，用户要求再评审一遍当前实现并按建议修复。评审列出七项和一个待确认事项；本条处理其中六项。备份可行性探针是否继续作为发布门禁保留，等用户决定；用户本机的真实资料库是否仍是 JSON 格式，也待用户确认。
+- **草稿顺序**：草稿表没有排序列，待确认列表、导入状态和启动时的自动恢复都按 `draft_id` 翻页，而 ID 原先是随机 UUID，新导入的文件会出现在列表的任意位置，超过一页时可能不在第一页。新草稿的 ID 现在由 [`LibraryOrderedIDGenerator`](../Sources/KinloguePlatform/Storage/LibraryOrderedID.swift) 分配，按创建时刻递增（UUID 第 7 版的布局）；表结构、已冻结的逻辑备份格式和游标都没有变。本机导入和 LAN 归档创建的草稿都使用它。此前用随机 ID 创建的草稿不重排。
+- **取消规则回到 workflow**：上一条在仓库的 `failProcessing` 里加了取消检查，而 [`ImportWorkflow`](../Sources/KinlogueCore/Import/ImportWorkflow.swift) 仍写着“取消时记一条失败”，两层说法不一致。规则现在只写在 workflow 里：处理所在的任务被取消时不记录失败，草稿留在处理中；识别服务自己放弃而任务仍在运行时，记为“已取消”的失败。仓库不再检查取消，对外行为与上一条相同。
+- **文件树格式的恢复点更早被拒绝**：[`BackupContainerReader`](../Sources/KinloguePlatform/Backup/BackupContainerReader.swift) 的 `read` 增加一个在清单通过认证之后、解密任何条目之前调用的检查，恢复校验器用它拒绝文件树格式，不再先把全部条目解密一遍。容器解析和公钥侧校验仍在这之前进行。
+- **残留清理**：上次删除之后变成无人引用的 `LANPendingWriteAdmission.swift`（整个文件，含 3 处 `@unchecked Sendable`）、`LANArchivePreparationOutcome`、`AtomicFileStore` 的两个方法及其临时文件名判断、`DICOMImportMetrics` 的两个 promotion 计数、`DICOMStudy.reassigning`，以及启动时已不可达的 `catch is VaultError`。另外删除了早于本分支就没有引用的声明：`startupIsReady`、`chooseParentDirectory`、`LocalDirectoryCheckpointCreator`、`BackupOperationKind`、`BackupOperationPhase`、两个 `…IfPresent` 解码辅助、`LANItemPreprocessor.currentItem`、`recordSourceDescriptorsOpened` 和 `LANInboxSnapshot` 的四个查找方法。并发审计清单随之变为 67 处 / 36 个文件。
+- **LAN 存储协议**：删除只有一个实现的 `LANPendingItemStoring`、Core 的 `LANInboxRepository` 与 `LANInboxAccessState`，以及无人调用的 `inspect()`；`LANUploadStoring` 去掉返回整份快照的 `initialize()`，只剩 Receiver 实际使用的方法。预处理、队列 workflow 和 App 服务直接持有 `SQLiteLANInboxStore`。没有处理的部分：`loadSnapshot`、`initialize`、`deleteItem`、`snapshotAndStorageSummary` 这些返回整份快照的方法仍被测试和安装探针使用，留在具体类型上；Core 的 `LANInboxSnapshot` 里在 SQLite 下永远为空的 `archiveIntents` / `archiveTerminals` 及其校验没有删除。
+- **脚本安全测试**：`TestScriptSafetyTests` 和 `GitHubActionsWorkflowTests` 里“某个字符串恰好出现 N 次”的断言改为结构断言：每条运行测试的命令都串行并受期限约束；CI 中运行测试的各个 job 恰好覆盖全部分区。
+- **测试**：新增 6 项声明（有序 ID 3、草稿按导入先后列出与恢复 1、识别服务自行放弃时记为失败 1、清单被拒时不解密任何条目 1）；“被取消的处理留在处理中”一项改为经 workflow 驱动。反向验证：把本机导入的 ID 换回随机 UUID 后，排序测试的两处断言都失败，恢复后通过。`@Test` 声明 1200 个，主清单 1152 tests / 96 suites。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，源码和测试改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1152 tests / 96 suites，隔离运行的验收扫描、storage process、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只改了文档。传入实际清单摘要的 `scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：与上一条相同——`run-acceptance.sh`、`run-backup-capability-probe.sh`、安装或启动 App、托管平台上的 CI、macOS 26、真实手机和人工门禁都没有执行。按导入先后排列只有仓库和 workflow 层的测试，没有在界面上看过。
+
+## [2026-10-13] storage/verification | 旧格式目录上的恢复有了端到端测试；一次性转换工具放在独立的本地分支
+
+- **起因**：用户确认按上一条之后的建议处理。只核对文件名、没有读取任何内容之后确认：用户本机现有的资料库仍是 JSON 清单格式，目录里有 `library.json`，没有 `library.sqlite`。本分支的 App 打不开它，只会在启动页提供从恢复点恢复的入口。
+- **本分支的改动**：只有一项测试和文档。[`SQLiteAppStartupTests`](../Tests/KinlogueAppTests/SQLiteAppStartupTests.swift) 新增 `restoringOverAnOldFormatLibraryReplacesItAndTheNextLaunchOpensTheRestoredOne`：资料库目录是旧格式时，启动以“格式不受支持”失败；经启动页的恢复服务校验一个逻辑格式的恢复点不改动目录，确认恢复后旧目录被整根替换，下一次启动打开恢复后的资料库。此前这条路径只有“旧目录被保留、恢复入口存在”的测试，没有执行过恢复本身。
+- **测试确认的行为**：被替换的旧目录在恢复提交后仍以 `.kinlogue-restore-rollback-…` 留在资料库旁，下一次启动收敛这笔恢复时删除，此后不再保留。[`storage.md`](storage.md) 和 [`backup-and-restore.md`](backup-and-restore.md) 已补上这一点。
+- **转换工具（不在本分支）**：写在本地分支 `codex/json-library-converter` 上，基于同时保有两套实现的提交 `32bbb18`；没有提交和推送，也不打算合入，本分支“不提供迁移”的说法不变。它用旧实现打开 JSON 资料库的副本并逐个对象核对摘要，用恢复所用的行编解码写入一个临时 SQLite 资料库并做严格校验，再写出一个逻辑格式的恢复点，随后用生产的恢复校验器和恢复事务把它恢复到第二个临时资料库，与源逐项比对。恢复码写入仅所有者可读的文件，不输出到终端；失败时只报告所在阶段和错误类型。三类内容按设计不原样带过去：处理中的草稿变成可重试的失败草稿；手机 inbox 里已做过机器识别的条目回到“已接收”，由新版重新识别；手机会话期间的回执和终态记录不带过去，因为会话随旧 App 结束，而新表结构要求“已归档/已删除”的回执有同一会话的终态记录。
+- **转换工具的验证**：只用合成数据。该分支上的测试建立一个含成员、已确认报告、待确认草稿、两个中断草稿、三个手机文件和一个已确认影像检查的 JSON 资料库，在它的副本上执行完整流程，再把恢复点恢复一次并逐项核对；另有目标非空、归档未完成和原件损坏三种拒绝情形。命令行在一份合成资料库的副本上实跑退出码 0，并拒绝了已存在的输出目录和位于 App 容器内的源路径。**没有在用户的真实资料库或它的副本上运行过。**
+- **测试计数**：本分支新增 1 项声明，`@Test` 声明 1201 个，主清单 1153 tests / 96 suites。转换分支上的 4 项测试不计入本分支。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，测试改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1153 tests / 96 suites，隔离运行的验收扫描、storage process、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只追加了本条日志。传入实际清单摘要的 `scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：真实资料库的转换和随后的恢复都还没有做，需要用户确认后在副本上进行；新测试在源码层驱动启动协调器和恢复服务，没有经过界面，也没有安装或启动 App。其余与上一条相同：`run-acceptance.sh`、`run-backup-capability-probe.sh`、托管平台上的 CI、macOS 26、真实手机和人工门禁都没有执行。
+
+## [2026-10-13] storage/fix | 真实迁移暴露的三处缺陷：失效的备份配置挡住恢复、原件身份依赖设备号、“退出续页”无效
+
+- **起因**：用户在自己资料库的副本上运行了转换工具并得到恢复点，随后在本分支构建的 App 启动页执行恢复。界面停在“资料库替换未完成”，“退出续页”按钮没有反应。只读核对了目录里的文件名、大小和收据的 `phase` 字段，没有读取任何资料内容：旧资料库原样未动，恢复事务的收据停在 `intent`，暂存目录完整。应用户要求结束了那个进程。
+- **缺陷一，恢复被旧备份配置挡住**：恢复在替换资料库之前要移除本机备份配置，[`removeForDestructiveReset`](../Sources/KinloguePlatform/Backup/BackupLocalConfigurationStore.swift) 原先先完整读取并校验这份配置。用户机器上的配置写于八月，记录的目录 inode 与现在一致，设备号不同（当时 1,18，现在 1,15）；macOS 不保证卷的设备号跨重启或系统更新不变。校验失败使移除失败，恢复停在登记意向之后。现在移除时不读取内容，只确认同名位置是当前用户私有的普通文件。
+- **缺陷二，原件身份依赖设备号**：同一原因会让迁移后的资料库在卷被重新编号后把每个原件判为无效——原件行记录设备号和 inode，读取、备份捕获和回收都要求两者一致。现在记录下来的身份只比较 inode（`SQLiteFileIdentity.isFile(recordedAs:)`），用于原件的打开校验、回收、逻辑备份来源和进行中上传的取消与恢复；同一进程内刚取得的身份之间仍比较设备号。决策与没有处理的同类依赖登记在 [`decisions.md`](decisions.md)。
+- **缺陷三，“退出续页”无效**：恢复面板在“正在替换”“需要重启”“替换未完成”三种状态下不允许关闭，而 AppKit 在窗口挂着模态面板时直接拒绝 `terminate`，不询问任何代理。恢复成功之后的同一个按钮也有这个问题。新增 [`RestartRequiredQuit`](../Sources/KinlogueApp/App/RestartRequiredQuit.swift)：先解除窗口对退出的拦截，再走正常终止；仍被拒绝时结束进程。
+- **测试**：新增 5 项声明，并把上一条的启动恢复测试扩成三种情形。配置存储：设备号被改写的配置可以被移除（先断言它确实读不出来）、同名位置权限不对时仍拒绝。资料库内核与逻辑捕获：把行里记录的设备号改成另一个值后重新打开，核对读取、捕获、删除回收和中断导入的清理。启动恢复：旧格式目录上没有其他情况、留有失效的备份配置、留有一次停在 `intent` 的恢复，三种情形都要恢复成功，第三种还要求启动先撤销旧事务并保持旧目录不变。退出：解除拦截发生在终止之前，终止返回后才结束进程。一处读取视图源码的断言随按钮的调用改了写法。
+- **反向验证**：把身份比较改回连设备号一起比，两项重新编号测试分别以“原件无效”和“来源已变化”失败；把配置移除改回先校验，配置存储测试和启动恢复的第二种情形以“记录无效”失败，与用户遇到的现象一致。两处都已恢复为修复后的写法。
+- **退出修法的依据**：用一个与本项目数据无关的临时小程序实测：带 `interactiveDismissDisabled` 的面板挂着时 `terminate` 直接返回；清除窗口的 `preventsApplicationTerminationWhenModal` 后 `terminate` 正常进行并发出将要终止的通知。小程序用完即删，不在仓库里。Kinlogue 自己的界面上还没有点过这个按钮。
+- **测试计数**：`@Test` 声明 1206 个，主清单 1158 tests / 96 suites。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，全部源码和测试改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1158 tests / 96 suites，隔离运行的验收扫描、storage process、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此前一次完整运行因那处读取视图源码的断言没有同步而失败，改正后重跑通过。此后只追加了本条日志。传入实际清单摘要的 `scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。`scripts/build-app.sh` 用修复后的源码重新构建了本机的 `dist/Kinlogue.app`（ad-hoc 签名，未提交）。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：修复后的恢复还没有在用户的真实资料库上重做；真实的卷重新编号没有在重启前后实测，只通过改写记录的设备号模拟；“退出续页”没有在 Kinlogue 界面上点过。备份配置自身、备份目标目录以及恢复和删除收据对设备号的依赖没有处理，已另行登记为后续任务。其余与上一条相同：`run-acceptance.sh`、`run-backup-capability-probe.sh`、托管平台上的 CI、macOS 26、真实手机和人工门禁都没有执行。
+
+## [2026-10-13] migration/result | 修复后的恢复在用户的资料库上完成
+
+- **经过**：上一条的三处修复构建进本机的 `dist/Kinlogue.app` 之后，用户重新启动它并再次从转换得到的恢复点恢复。启动先撤销了此前停在 `intent` 的恢复：核对时暂存目录和收据已经清掉，旧格式资料库仍在原位。随后的恢复完成，用户退出并重新打开了 App。
+- **核对到的状态**（只看文件名、数量和进程启动时间，没有读取资料内容）：资料库目录现在是 `library.sqlite` 加 `originals`；恢复的收据、暂存目录和被替换的旧目录都不在了；旧版留下的备份配置已被移除；重新打开后的进程是新启动的，没有崩溃报告。这也是“退出续页”修复后第一次在 Kinlogue 界面上实际使用。
+- **没有核对的**：恢复后的成员、报告和影像在界面上是否与迁移前一致，由用户自己查看，这里没有记录结论。卷的设备号变化仍然只有改写记录值的模拟，没有重启前后的实测。
+- **遗留**：转换工具所在的本地分支不合入本分支；备份需要用户重新启用；备份配置和事务收据对设备号的依赖见上一条登记的后续任务。
+
+## [2026-10-13] backup/fix | 备份配置、备份目录和各类收据不再依赖卷的设备号
+
+- **起因**：前两条登记的后续任务，用户要求继续。原件行已经只按 inode 比对，但备份配置、备份目标目录、验证记录的摘要，以及恢复、整库删除、初始化、备份捕获的收据和 DICOM 导入日志仍然记录并比较设备号。
+- **改动之前的表现**（按代码路径确认，没有在界面上复现）：卷被重新编号后，备份配置读取以“记录无效”失败，状态页进入失败状态，自动备份停止；重新设置要先确认没有现成配置，同样因为读取失败而无法开始，只剩恢复或删除资料库两条出路。中断的操作更糟：恢复事务的收据不再认得旧根和暂存目录，启动以“收据无效”失败；DICOM 导入日志里的暂存目录对不上，影像仓库无法打开；初始化收据被当成别的目录的收据，报“格式不受支持”；备份捕获留下的数据库副本永远不被清理。
+- **改动**：[`BackupFilesystemIdentity`](../Sources/KinloguePlatform/Backup/BackupLocalConfigurationStore.swift) 和 [`BackupRestoreDirectoryIdentity`](../Sources/KinloguePlatform/Backup/EncryptedCheckpointRestore.swift) 的相等性改为只比较 inode，设备号照原样记录。验证记录的摘要收敛为一个函数，取配置里登记的设备号代替文件当前的设备号，已有的验证记录因此不变；repository 列举和恢复点发布原先各有一份相同的实现，现在共用它。整库删除收据、初始化收据、捕获归属收据和 DICOM 暂存归属的比较去掉设备号。决策、代价和仍含设备号的地方登记在 [`decisions.md`](decisions.md)；[`backup-and-restore.md`](backup-and-restore.md) 新增“目录身份与设备号”一节，[`sqlite-storage.md`](sqlite-storage.md) 补了收据和锁文件命名的说明。
+- **测试**：新增 8 项声明，并把 4 项已有测试扩成带“卷已被重新编号”的参数化用例。配置：改写登记的设备号后仍能读取和更新、不被改写成当前值；目录被换成另一个时仍然拒绝；摘要与第一版算法在未重新编号时逐字节相同，并且不随文件当前的设备号变化；读不出来的配置在恢复时仍被移除（原先用设备号改写来制造“无效配置”的两处测试改为截断文件，因为那种配置现在是有效的）。备份服务：配置里登记的设备号与实际不同的情况下完成设置之后的两次备份，核对恢复点、验证记录及其摘要和状态。恢复：旧根移走后的回滚、新根就位后的提交、废弃预检的清理。整库删除：收据写入后和资料库移走后两处中断。另有初始化收据、捕获残留和 DICOM 导入残留各一项。
+- **反向验证**：把备份目录身份的比较改回连设备号一起比，配置读取和端到端备份测试以“记录无效”失败；把五处收据的比较改回去，七类重新编号用例分别以“收据无效”“完整性失败”“格式不受支持”“来源已变化”和启动失败告终。两次都已恢复为修复后的写法。
+- **测试计数**：`@Test` 声明 1214 个，主清单 1166 tests / 96 suites。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，全部源码和测试改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1166 tests / 96 suites，隔离运行的验收扫描、storage process、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只追加了本条日志。传入实际清单摘要的 `scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：卷重新编号仍然只通过改写记录里的设备号模拟，没有在重启或系统更新前后实测；备份目录位于外接卷或网盘同步目录时的表现没有实测；改动之前的界面表现是读代码得出的，没有在界面上复现；修复后的设置页也没有在界面上看过。owner 锁文件的命名和安装验收运行的归属收据仍含设备号，没有改动。其余与前几条相同：`run-acceptance.sh`、`run-backup-capability-probe.sh`、托管平台上的 CI、macOS 26、真实手机和人工门禁都没有执行。
+
+## [2026-10-13] probe/cleanup | 备份可行性探针只保留整根激活
+
+- **起因**：早先评审时登记的后续任务，用户决定保留激活这一组、删除其余，这次要求继续处理。[`BackupCapabilityProbe`](../Sources/KinlogueStorageProcessFixture/BackupCapabilityProbe.swift) 写于生产备份代码出现之前，用自带的合成格式（魔数以 `KLG-U0-` 开头）证明设备身份存储、公钥写入与种子恢复的分离、repository 发布与容量、security-scoped bookmark、分块大小和 20,000 对象 / 2 GiB 数据集在沙盒里可行。这些性质现在各有生产实现和测试；只有整根激活这一组调用的是生产的恢复校验器和恢复事务。
+- **删除**：身份、密钥、repository 发布、所选目录发布、bookmark、命名数据集和分块这七组操作及其结果类型、参数和辅助函数，探针由 4313 行减为 874 行；[探针测试](../Tests/KinlogueStorageProcessTests/BackupCapabilityActivationProbeTests.swift)里对应的 14 项（保留 4 项激活测试）；[安装脚本](../scripts/run-backup-capability-probe.sh)里对应的段落、`--interactive-bookmark` 参数、升级安装的第二个包和报告字段，脚本由 1162 行减为 496 行；entitlement 里的 bookmark 和用户选择文件两项；fixture target 不再需要的 AppKit 与 CryptoKit 链接设置。
+- **保留并调整**：被另一个进程占用时拒绝激活、十一个故障点各自收敛到确定的根、截断收据失败关闭，这三类用例和它们的断言没有变。脚本的报告只剩环境、签名、已安装工件的摘要和一个 `activation` 状态，schema 版本记为 3；原先“机制通过”和“证明通过”两个状态里后者从未被置为通过，合并为一个。安装后的 entitlement 和签名信息改为直接从已安装的包取得（原先取自升级后的包）。[源码检查测试](../Tests/KinlogueAppTests/BackupCapabilityProbeSourceSafetyTests.swift)重写为只断言仍然存在的内容：探针只有 App Sandbox 一项 entitlement、不触及 Keychain 和用户目录、调用生产事务且不自带激活算法、脚本包含全部用例并且每种失败都会拉低那个状态。
+- **历史证据**：[`backup-and-restore.md`](backup-and-restore.md) 里“20,000 对象、2 GiB 流式备份”那句保留为历史，并注明产生它的工具已删除。
+- **未执行**：改写后的安装脚本只做了 `zsh -n` 语法检查，没有运行；它需要登录会话里已签名并安装的沙盒包。
+
+## [2026-10-13] storage/rename | 给仍带 JSON 时期名字的存储类型改名，清掉 Core 里的遗留
+
+- **起因**：删除 JSON 清单存储时登记的后续任务，用户要求继续处理。SQLite 资料库仍在用的一批共享类型保留着 `PlaintextVault…`、`VaultDICOM…` 之类的名字，Core 里还有几处只为旧实现存在的内容。
+- **改名**（只改标识符和源文件名，行为与落盘内容不变）：`PlaintextVaultDeletionTransaction` → `LibraryDeletionTransaction`，它的故障枚举 → `LibraryDeletionFault`；`PlaintextVaultLayout` → `DICOMImportLayout` 并移到 DICOM 目录，因为它只剩 DICOM 导入的暂存和日志路径；`VaultDICOMImportJournal`、`VaultDICOMStudyStaging`、`VaultDICOMStagingOwnership`、`VaultDICOMStagedObject`、`VaultDICOMOperationDescriptorLease` 去掉 `Vault` 前缀；`VaultProcessLock`、`VaultProcessLockLocation`、`VaultCanonicalRootPath`、`VaultParentDirectoryPreparation` 改为 `Library…`，`VaultMutationLockNaming` → `LibraryLockNaming`；`DICOMVaultSessionToken` → `DICOMLibrarySessionToken`；`PlaintextOriginalArchive…` 七个类型去掉 `Plaintext` 前缀；`VaultReadSnapshotPolicy` → `LibraryReadSnapshotPolicy`。两个测试文件随类型改名。锁文件名 `.kinlogue-mutation-<digest>.lock`、删除收据的魔数、DICOM 暂存与日志目录名和各收据的 JSON 键都没有变；改动后的源码里只有一处字符串插值的标识符变了，值不变。
+- **没有改名的**：Core 的 `VaultError`（145 处引用）、`VaultRevision`（逻辑备份格式和归档意图里的字段类型）、`VaultObjectKind` / `VaultObjectReference`、`CanonicalVaultJSON`（83 处引用），以及 App 层以 Vault 指代资料库的一组名字（`DeleteVaultView`、`VaultDestroyServicing`、`RuntimeVaultIdentity` 等）。前者改动面大，后者是界面层的既有用语，都不在这次范围内。
+- **清掉的遗留**：一、[`LANInboxSnapshot`](../Sources/KinlogueCore/LAN/LANInboxSnapshot.swift) 的 `archiveIntents` 与 `archiveTerminals` 及其校验、排序、上限和编解码键；SQLite inbox 从不填充它们，归档是一次数据库事务。随之无人使用的 `LANArchiveTerminal` 一并删除，`LANArchiveIntent` 仍被逻辑备份和归档使用，保留。二、原件导出的错误 `vaultChanged`、它在 App 的映射和那条文案；导出读取的是已固定的原件，没有任何代码会产生这个错误。字符串目录和英文运行时资源已同步。三、Core 的 `DICOMStudy` 结构体缩成只含 `ID` 和附件数量上限的命名空间；真正在用的是 `DICOMStudyHeader`，它有同样的校验却没有直接的测试，原先针对旧结构体的状态与附件校验测试改为针对它。四、`BackupRestoreSummary.logicalDigest` 和恢复事务收据里的同名字段改为非可选：它们总是有值，恢复事务里对 `nil` 的防御分支随之删除，收据的 JSON 不变。
+- **决定不动的一处**：DICOM 导入日志收据里的 `promotedReferences` 现在总是空数组，`reconcile(retaining:)` 也总是传空集合。这份收据是落盘的临时格式，去掉字段会改变进行中收据的解码方式，而它所在的恢复路径刚补上重新编号的处理，收益不抵风险；`VaultObjectKind` 和 `VaultObjectReference` 因此仍留在 Core。
+- **测试计数**（本条与上一条合计）：`@Test` 声明由 1214 个减为 1200 个，减少的 14 项都是隔离运行的探针测试；主清单仍是 1166 tests / 96 suites。Core 里一项针对旧结构体方法的测试换成了一项针对 `DICOMStudyHeader` 附件校验的测试。并发审计清单为 66 处 / 36 个文件。
+- **验证**（本条与上一条的改动合在一起）：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，全部源码和测试改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1166 tests / 96 suites，隔离运行的验收扫描、storage process（含 4 项探针激活测试）、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只追加了这两条日志。传入实际清单摘要的 `scripts/lint.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：`run-backup-capability-probe.sh` 没有运行（见上一条）；改名没有另做逐文件的人工复核，依据是编译、完整测试和对落盘字符串的检索。其余与前几条相同：`run-acceptance.sh`、托管平台上的 CI、macOS 26、真实手机和人工门禁都没有执行。
+
+## [2026-10-13] backup/ui | 手动备份完成后给出提示，“最近本地验证”不再跳动
+
+- **起因**：用户在迁移后的真实资料库上重新启用备份并点了“立即备份”，反馈“看起来没有反应，时间在一直走”。按文件名、大小和修改时间核对备份目录：专用 repository 里在点击后多了第二个 `.kinloguebackup` 文件，大小与第一个相同，备份实际已经完成。问题在界面：完成后按钮变回“立即备份”，没有任何完成提示；“最近本地验证”用的是相对时间，每秒跳动且不带“前”字，读起来像仍在进行的计时。
+- **改动**：[`BackupModel`](../Sources/KinlogueApp/ViewModels/BackupModel.swift) 增加 `completionText`，只在手动备份刚完成且没有其他说明时返回“新的恢复点已创建并通过验证。”；[`SettingsView`](../Sources/KinlogueApp/Views/SettingsView.swift) 在两个按钮下方显示它，状态下一次重新读取（刷新、调度事件）时消失。旧恢复点暂未清理时仍只显示原有的那句说明，备份失败时只显示失败原因。“最近本地验证”改为显示日期和时刻，由 Foundation 按当前界面语言格式化。新文案已加入 String Catalog 并重新生成英文资源。
+- **测试**：新增 3 项声明（完成后有提示且刷新后消失、清理推迟时只显示那句说明、失败时不提示）；设置页的源码断言增加完成提示的标识符，并要求不再使用相对时间。`@Test` 声明 1203 个，主清单 1169 tests / 96 suites。
+- **界面核对**：用临时测试把设置页（合成状态，不接触真实资料库）离屏渲染成图片看过：提示出现在按钮下方靠右，验证时间为固定的日期时刻；临时测试随后删除。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，源码和测试改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1169 tests / 96 suites，隔离运行的验收扫描、storage process、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只改了本条日志。传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：改动后的构建没有在界面上实际点过“立即备份”；英文界面没有渲染核对；`run-acceptance.sh`、托管平台上的 CI、macOS 26、真实手机和人工门禁与前几条相同，都没有执行。
+
+## [2026-10-14] ci/fix | 托管 CI 上的 bundle 资源清单多出 GRDB 的 Info.plist，CodeQL 超时
+
+- **起因**：PR #21 第一次远端运行时，`Verify bundle and DICOM XPC` 在 macOS 26 / Xcode 26.6 / Swift 6.3.3 上以“the application bundle resource allow-list does not match exactly”失败；本机 Xcode 27 / Swift 6.4 构建的 bundle 清单完全一致。
+- **原因**：Swift 6.3 默认使用 native 构建系统，资源包是扁平目录。本机用 `swift build -c release --build-system native --target GRDB` 复现：`GRDB_GRDB.bundle` 里除 `PrivacyInfo.xcprivacy` 外还有一个 `Info.plist`，同样方式构建的 `ZIPFoundation_ZIPFoundation.bundle` 只有隐私清单。[`build-app.sh`](../scripts/build-app.sh) 原先用 `ditto` 复制整个 GRDB 资源目录，多出的文件不在 [`verify-app.sh`](../scripts/verify-app.sh) 的精确清单里。
+- **改动**：GRDB 资源包只复制 `PrivacyInfo.xcprivacy`；精确清单不变。
+- **验证**：用 native 与本机默认两种构建系统产出的 GRDB 资源包分别模拟新的复制步骤，结果都只有 `GRDB_GRDB.bundle/PrivacyInfo.xcprivacy`；`zsh -n scripts/build-app.sh` 通过；`scripts/test.sh --filter 'Safety|GitHubActions|Documentation|Packaging|PrivacyGuard|Localization|Presentation|Layout|AcceptanceScan'` 通过。
+- **CodeQL**：同一次运行里必需检查 `Analyze Swift` 在 45 分钟上限处被取消：traced build 用了 43 分钟（main 最近一次成功为 32 分钟），分析步骤开始约 1 分钟后到时；main 上分析步骤约 3.5 分钟。多出的时间来自本分支加入的 GRDB 依赖。[`codeql.yml`](../.github/workflows/codeql.yml) 的上限改为 60 分钟，构建方式和权限不变。
+- **未执行**：本机没有 Xcode 26，没有完整运行 native 构建下的 `verify-app.sh`；两处修复是否让托管 CI 的 bundle job 和 CodeQL 通过，要看推送后的远端运行。

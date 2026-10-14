@@ -65,20 +65,33 @@ struct TimelineView: View {
     @ObservedObject var comparisonModel: ComparisonModel
     @ObservedObject var dicomLibraryModel: DICOMLibraryModel
     let sections: [AppTimelineSection]
-    let searchResults: [HealthRecord]
+    let searchResults: [LibraryReportSummary]
     let isSearching: Bool
     let filter: AppTimelineFilter
     let selectedRecordID: HealthRecord.ID?
     /// False on one member's timeline, where every card would repeat the
     /// member the window title already names.
     let showsMemberLabels: Bool
-    let memberLabel: (HealthRecord) -> String
+    let memberLabel: (LibraryReportSummary) -> String
     let onSelect: (HealthRecord.ID) -> Void
     let onSelectDICOM: (DICOMStudy.ID) -> Void
     let onImport: () -> Void
+    let pageState: AppPageState
+    let hasMore: Bool
+    let hasDamage: Bool
+    let onLoadMore: () -> Void
+    let onRetry: () -> Void
 
     var body: some View {
-        if displayedEntriesAreEmpty {
+        if displayedEntriesAreEmpty && pageState == .loading {
+            ProgressView(AppLocalization.string("正在载入记录…"))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if displayedEntriesAreEmpty && (pageState == .failed || hasDamage || hasMore) {
+            VStack(spacing: 12) {
+                Text(pageState == .failed ? AppLocalization.string("无法载入记录") : AppLocalization.string("部分资料无法读取"))
+                pageControls
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if displayedEntriesAreEmpty {
             ContentUnavailableView {
                 Label(emptyTitle, systemImage: emptySystemImage)
             } description: {
@@ -93,6 +106,7 @@ struct TimelineView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    if hasDamage { Text(AppLocalization.string("部分资料无法读取")).foregroundStyle(KinlogueTheme.onVariant) }
                     if isSearching {
                         ForEach(searchResults) { record in
                             TimelineCard(
@@ -135,10 +149,25 @@ struct TimelineView: View {
                             }
                         }
                     }
+                    pageControls.padding(.top, 16)
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
             }
+        }
+    }
+
+    @ViewBuilder private var pageControls: some View {
+        if pageState == .loading {
+            ProgressView(AppLocalization.string("正在载入记录…"))
+        } else if pageState == .failed {
+            Button(AppLocalization.string("重试载入"), action: onRetry)
+                .buttonStyle(.kinlogueSecondary)
+                .accessibilityHint(AppLocalization.string("重新载入当前查询"))
+        } else if hasMore {
+            Button(AppLocalization.string("载入更多记录"), action: onLoadMore)
+                .buttonStyle(.kinlogueSecondary)
+                .accessibilityHint(AppLocalization.string("载入下一页记录"))
         }
     }
 
@@ -234,7 +263,7 @@ private struct DICOMTimelineCard: View {
 }
 
 private struct TimelineCard: View {
-    let record: HealthRecord
+    let record: LibraryReportSummary
     let memberLabel: String
     let showsMemberLabel: Bool
     let isSelected: Bool
@@ -265,7 +294,7 @@ private struct TimelineCard: View {
                                 .foregroundStyle(KinlogueTheme.primary)
                                 .accessibilityHidden(true)
                         }
-                        Text(record.title?.transcription ?? record.reportType?.transcription ?? AppLocalization.string("健康记录"))
+                        Text(record.title ?? record.reportType ?? AppLocalization.string("健康记录"))
                             .font(.headline)
                         Spacer()
                         if showsMemberLabel {
@@ -276,13 +305,13 @@ private struct TimelineCard: View {
                                 .kinlogueChip()
                         }
                     }
-                    if let organization = record.organization?.transcription {
+                    if let organization = record.organization {
                         Label(organization, systemImage: "building.2")
                             .font(.subheadline)
                             .foregroundStyle(KinlogueTheme.onVariant)
                             .lineLimit(1)
                     }
-                    Text(record.conclusion?.transcription ?? AppLocalization.string("原报告未提供结论"))
+                    Text(record.conclusion ?? AppLocalization.string("原报告未提供结论"))
                         .font(.subheadline)
                         .foregroundStyle(.primary)
                         .lineLimit(2)
@@ -300,7 +329,7 @@ private struct TimelineCard: View {
     }
 
     private var localizedAccessibilityLabel: String {
-        let recordType = record.reportType?.transcription
+        let recordType = record.reportType
             ?? AppLocalization.string("健康记录")
         return AppLocalization.string("\(memberLabel)，\(recordType)")
     }

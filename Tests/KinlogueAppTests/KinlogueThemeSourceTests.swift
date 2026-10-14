@@ -138,6 +138,7 @@ struct KinlogueThemeSourceTests {
             "Sources/KinlogueApp/Views/AppShellView.swift",
             "Sources/KinlogueApp/Views/DICOMStudyViewer.swift",
             "Sources/KinlogueApp/Views/LocalizedDatePicker.swift",
+            "Sources/KinlogueApp/Views/SQLiteAppLaunchView.swift",
         ] {
             #expect(try read(path).contains(".kinlogueAppearance()"), "missing: \(path)")
         }
@@ -493,7 +494,7 @@ struct KinlogueThemeSourceTests {
     @Test
     func primaryActionsUseTheSharedInteractionStyle() throws {
         let primaryActionPaths = [
-            "Sources/KinlogueApp/Views/AppShellView.swift",
+            "Sources/KinlogueApp/Views/StorageDisclosureView.swift",
             "Sources/KinlogueApp/Views/ComparisonView.swift",
             "Sources/KinlogueApp/Views/ImportReviewView.swift",
             "Sources/KinlogueApp/Views/LANInboxView.swift",
@@ -517,6 +518,7 @@ struct KinlogueThemeSourceTests {
             "Sources/KinlogueApp/Views/RecordDetailView.swift",
             "Sources/KinlogueApp/Views/RecordEditView.swift",
             "Sources/KinlogueApp/Views/SettingsView.swift",
+            "Sources/KinlogueApp/Views/StorageDisclosureView.swift",
         ]
         // Every in-content destructive action shares one look; system
         // confirmation dialogs keep their native destructive role.
@@ -541,7 +543,14 @@ struct KinlogueThemeSourceTests {
             #expect(try read(path).contains(".buttonStyle(.kinlogueDestructive)"), "missing: \(path)")
         }
 
-        let sources = try primaryActionPaths.map(read).joined(separator: "\n")
+        let launchPaths = [
+            "Sources/KinlogueApp/Views/AppShellView.swift",
+            "Sources/KinlogueApp/Views/SQLiteAppLaunchView.swift",
+        ]
+        for path in launchPaths {
+            #expect(try read(path).contains("StorageDisclosureView {"), "missing disclosure: \(path)")
+        }
+        let sources = try (primaryActionPaths + launchPaths).map(read).joined(separator: "\n")
         #expect(!sources.contains(".buttonStyle(.borderedProminent)"))
         #expect(!sources.contains(".tint(KinlogueTheme.sage)"))
     }

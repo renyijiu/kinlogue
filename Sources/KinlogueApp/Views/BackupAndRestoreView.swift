@@ -216,7 +216,7 @@ struct RestoreBackupView: View {
                 tone: .success
             )
             Button(AppLocalization.string("退出续页")) {
-                NSApplication.shared.terminate(nil)
+                RestartRequiredQuit.perform()
             }
             .buttonStyle(.kinloguePrimary)
             .keyboardShortcut(.defaultAction)
@@ -230,7 +230,7 @@ struct RestoreBackupView: View {
             Text(AppLocalization.string("资料库替换已进入收敛阶段。请退出并重新打开续页；在重新启动前不要继续使用当前窗口。"))
                 .foregroundStyle(KinlogueTheme.onVariant)
             Button(AppLocalization.string("退出续页")) {
-                NSApplication.shared.terminate(nil)
+                RestartRequiredQuit.perform()
             }
             .buttonStyle(.kinloguePrimary)
             .keyboardShortcut(.defaultAction)

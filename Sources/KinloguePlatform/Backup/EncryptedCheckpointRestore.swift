@@ -25,6 +25,8 @@ public struct BackupRestoreSummary: Equatable, Sendable {
     public let inboxItemCount: Int
     public let plaintextByteCount: UInt64
     public let formatVersion: BackupFormatVersion
+    /// The digest of the logical stream this summary was validated against.
+    package let logicalDigest: Data
 
     public init(
         checkpointID: BackupCheckpointID,
@@ -34,7 +36,8 @@ public struct BackupRestoreSummary: Equatable, Sendable {
         recordCount: Int,
         inboxItemCount: Int,
         plaintextByteCount: UInt64,
-        formatVersion: BackupFormatVersion
+        formatVersion: BackupFormatVersion,
+        logicalDigest: Data
     ) {
         self.checkpointID = checkpointID
         self.revisionPair = revisionPair
@@ -44,6 +47,7 @@ public struct BackupRestoreSummary: Equatable, Sendable {
         self.inboxItemCount = inboxItemCount
         self.plaintextByteCount = plaintextByteCount
         self.formatVersion = formatVersion
+        self.logicalDigest = logicalDigest
     }
 }
 
@@ -56,9 +60,17 @@ public struct BackupPreparedRestore: Sendable {
     let activeRootName: String
 }
 
+/// A directory beside the library, as a restore or capture receipt recorded it.
+///
+/// Receipts are read again by the launch after an interrupted operation, and macOS can give the
+/// volume another device number in between. The device number is therefore kept but not
+/// compared: the directories a receipt names are found by a fixed name under the library's
+/// pinned parent, so the inode is what tells the recorded directory from a replacement.
 struct BackupRestoreDirectoryIdentity: Codable, Equatable, Sendable {
     let device: UInt64
     let inode: UInt64
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.inode == rhs.inode }
 
     init(_ metadata: stat) throws {
         guard (metadata.st_mode & S_IFMT) == S_IFDIR,
@@ -75,8 +87,7 @@ struct BackupRestoreDirectoryIdentity: Codable, Equatable, Sendable {
     }
 
     func matches(_ metadata: stat) -> Bool {
-        device == UInt64(metadata.st_dev)
-            && inode == UInt64(metadata.st_ino)
+        inode == UInt64(metadata.st_ino)
             && (metadata.st_mode & S_IFMT) == S_IFDIR
             && metadata.st_uid == geteuid()
             && (metadata.st_mode & 0o777) == S_IRWXU
@@ -103,11 +114,11 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
     public typealias AvailableCapacity = @Sendable () throws -> UInt64
 
     fileprivate static let maximumContainerByteCount =
-        BackupFormatLimits.maximumPlaintextByteCount
-            + BackupFormatLimits.targetFormatAllowanceByteCount
+        BackupFormatLimits.maximumContainerByteCount(for: .current)
     private let stableParentURL: URL
     private let activeRootURL: URL
     private let availableCapacity: AvailableCapacity
+    private let owner: SQLiteLibraryOwner
 
     private static func stagingName(for operationID: UUID) -> String {
         ".kinlogue-restore-\(operationID.uuidString.lowercased()).staging"
@@ -117,36 +128,28 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
         ".kinlogue-restore-\(operationID.uuidString.lowercased()).preflight.json"
     }
 
-    public convenience init(stableParentURL: URL, activeRootURL: URL) throws {
-        try self.init(
-            stableParentURL: stableParentURL,
-            activeRootURL: activeRootURL,
-            availableCapacity: {
-                var information = statfs()
-                guard statfs(stableParentURL.path, &information) == 0,
-                      information.f_bavail >= 0,
-                      information.f_bsize > 0 else {
-                    throw BackupRestoreError.ioFailure(errno)
-                }
-                let blocks = UInt64(information.f_bavail)
-                let size = UInt64(information.f_bsize)
-                let bytes = blocks.multipliedReportingOverflow(by: size)
-                guard !bytes.overflow else { return UInt64.max }
-                return bytes.partialValue
+    package convenience init(owner: SQLiteLibraryOwner) throws {
+        let parent = owner.rootURL.standardizedFileURL.deletingLastPathComponent()
+        try self.init(owner: owner, availableCapacity: {
+            var information = statfs()
+            guard statfs(parent.path, &information) == 0,
+                  information.f_bavail >= 0,
+                  information.f_bsize > 0 else {
+                throw BackupRestoreError.ioFailure(errno)
             }
-        )
+            let blocks = UInt64(information.f_bavail)
+            let size = UInt64(information.f_bsize)
+            let bytes = blocks.multipliedReportingOverflow(by: size)
+            guard !bytes.overflow else { return UInt64.max }
+            return bytes.partialValue
+        })
     }
 
-    init(
-        stableParentURL: URL,
-        activeRootURL: URL,
-        availableCapacity: @escaping AvailableCapacity
-    ) throws {
-        let parent = stableParentURL.standardizedFileURL
-        let root = activeRootURL.standardizedFileURL
+    init(owner: SQLiteLibraryOwner, availableCapacity: @escaping AvailableCapacity) throws {
+        let root = owner.rootURL.standardizedFileURL
+        let parent = root.deletingLastPathComponent()
         guard parent.isFileURL,
               root.isFileURL,
-              root.deletingLastPathComponent() == parent,
               !root.lastPathComponent.isEmpty,
               !root.lastPathComponent.hasPrefix(".") else {
             throw BackupRestoreError.stagingConflict
@@ -156,13 +159,26 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
         self.stableParentURL = parent
         self.activeRootURL = root
         self.availableCapacity = availableCapacity
+        self.owner = owner
+        try owner.validate()
     }
 
-    public func prepare(
+    @concurrent public func prepare(checkpointURL: URL, recoveryCode: String) async throws -> BackupPreparedRestore {
+        try await LibraryStorageExecutor.run {
+            let cancellation = SQLiteLogicalCancellation()
+            return try await withTaskCancellationHandler {
+                try await prepare(checkpointURL: checkpointURL, recoveryCode: recoveryCode, cancellation: cancellation)
+            } onCancel: { cancellation.cancel() }
+        }
+    }
+
+    private func prepare(
         checkpointURL: URL,
-        recoveryCode: String
+        recoveryCode: String,
+        cancellation: SQLiteLogicalCancellation
     ) async throws -> BackupPreparedRestore {
         try Task.checkCancellation()
+        try owner.validate()
         let source = try BackupRestoreSource(url: checkpointURL)
         defer { source.close() }
         let sourceIdentity = try source.identity()
@@ -176,7 +192,9 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
             firstPass = try reader.read(
                 source: source.byteSource,
                 recoverySeed: recoverySeed,
-                sink: .init { _ in { _ in } }
+                sink: .init { _ in { _ in } },
+                // A file-tree checkpoint cannot be restored; say so before decrypting all of it.
+                acceptManifest: { guard $0.isLogical else { throw BackupRestoreError.unsupportedFormat } }
             )
         } catch is CancellationError {
             throw CancellationError()
@@ -184,8 +202,12 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
             throw Self.map(error)
         }
         let capacity = try availableCapacity()
+        let logicalBytes = firstPass.manifest.entries.filter { $0.kind == .logicalSegment }.reduce(UInt64(0)) { $0 + $1.plaintextByteCount }
+        // First reserve streamed originals, the input logical spool and the later
+        // strict-validation spool. The App-schema budget is checked from authenticated
+        // per-domain records below, before inserting any rows.
         let required = firstPass.manifest.totalPlaintextByteCount.addingReportingOverflow(
-            BackupFormatLimits.capacityHeadroomByteCount
+            BackupFormatLimits.capacityHeadroomByteCount + logicalBytes + (logicalBytes > 0 ? 1_024 * 1_024 : 0)
         )
         guard !required.overflow, capacity >= required.partialValue else {
             throw BackupRestoreError.capacityInsufficient
@@ -234,10 +256,15 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
         }
 
         do {
+            try owner.validate()
+            let logicalSpool = try SQLiteLogicalSpool(parent: stableParentURL, maximumByteCount: Int(logicalBytes))
+            defer { logicalSpool.release() }
+            let stagingStore = try SQLiteLibraryStore(rootURL: stagingURL)
+            defer { try? stagingStore.close() }
             let output = try BackupRestoreOutput(
                 parentDescriptor: parentDescriptor,
                 stagingName: stagingName,
-                expectedIdentity: stagingIdentity
+                expectedIdentity: stagingIdentity, logicalSpool: logicalSpool
             )
             let secondPass = try reader.read(
                 source: source.byteSource,
@@ -251,28 +278,24 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
                   try source.identity() == sourceIdentity else {
                 throw BackupRestoreError.sourceChanged
             }
-            let vaultValidation = try await PlaintextVault(rootURL: stagingURL)
-                .strictRestoreValidation()
-            let inboxValidation = try await PlaintextLANInboxStore(rootURL: stagingURL)
-                .strictRestoreValidation()
-            guard vaultValidation.vaultID == inboxValidation.vaultID,
-                  try BackupRevisionPair(
-                    vault: vaultValidation.revision,
-                    lanInbox: inboxValidation.revision
-                  ) == secondPass.manifest.revisionPair else {
-                throw BackupRestoreError.graphInvalid
-            }
+            let databaseBytes = try SQLiteLogicalRestore.databaseBudget(spool: logicalSpool, check: cancellation.check)
+            let remaining = databaseBytes.addingReportingOverflow(logicalBytes + BackupFormatLimits.capacityHeadroomByteCount)
+            guard !remaining.overflow, try availableCapacity() >= remaining.partialValue else { throw BackupRestoreError.capacityInsufficient }
+            let validation = try SQLiteLogicalRestore.restore(spool: logicalSpool, manifest: secondPass.manifest,
+                store: stagingStore, check: cancellation.check)
+            try stagingStore.close()
+            try owner.validate()
             try BackupRestoreFilesystem.sync(parentDescriptor)
             return BackupPreparedRestore(
                 summary: .init(
                     checkpointID: secondPass.publicVerification.checkpoint.checkpointID,
                     revisionPair: secondPass.manifest.revisionPair,
                     sequence: secondPass.publicVerification.checkpoint.sequence,
-                    memberCount: vaultValidation.memberCount,
-                    recordCount: vaultValidation.recordCount,
-                    inboxItemCount: inboxValidation.itemCount,
+                    memberCount: validation.memberCount,
+                    recordCount: validation.recordCount,
+                    inboxItemCount: validation.inboxItemCount,
                     plaintextByteCount: secondPass.manifest.totalPlaintextByteCount,
-                    formatVersion: secondPass.manifest.formatVersion
+                    formatVersion: secondPass.manifest.formatVersion, logicalDigest: validation.digest
                 ),
                 operationID: operationID,
                 stagingURL: stagingURL,
@@ -297,6 +320,7 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
     }
 
     public func cancel(_ prepared: BackupPreparedRestore) throws {
+        try owner.validate()
         guard prepared.activeRootName == activeRootURL.lastPathComponent,
               prepared.stagingURL.deletingLastPathComponent() == stableParentURL,
               prepared.preflightReceiptURL.deletingLastPathComponent() == stableParentURL else {
@@ -322,6 +346,8 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
     /// or identity-mismatched receipt fails closed and never authorizes a
     /// recursive removal.
     public func reconcileAbandonedPreflights() throws {
+        try owner.validate()
+        try SQLiteLogicalBackupSource.reconcileTemporaryCaptures(owner: owner)
         let parentDescriptor = try BackupRestoreFilesystem.openStrictDirectory(stableParentURL)
         defer { Darwin.close(parentDescriptor) }
         let candidates = try BackupRestoreFilesystem.directChildNames(
@@ -419,7 +445,17 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
     }
 
     private static func map(_ error: Error) -> BackupRestoreError {
+        if case BackupRestoreError.ioFailure(ENOSPC) = error { return .capacityInsufficient }
+        if case SQLiteLibraryError.ioFailure(ENOSPC) = error { return .capacityInsufficient }
         if let error = error as? BackupRestoreError { return error }
+        if let error = error as? SQLiteLogicalBackupError {
+            switch error {
+            case .unsupportedVersion: return .unsupportedFormat
+            case .resourceLimit, .capacityInsufficient: return .capacityInsufficient
+            default: return .graphInvalid
+            }
+        }
+        if error is SQLiteLibraryError || error is LibraryReportError || error is DICOMImportError || error is DICOMSliceServiceError { return .graphInvalid }
         guard let error = error as? BackupContainerError else {
             if error is VaultError || error is LANInboxError { return .graphInvalid }
             return .ioFailure(EIO)
@@ -519,12 +555,15 @@ private final class BackupRestoreOutput: @unchecked Sendable {
     private let lock = NSLock()
     private var activeWriter: (path: String, writer: RestoreFileWriter)?
     private var finished = false
+    private let logicalSpool: SQLiteLogicalSpool
+    private var activeLogical: (path: String, remaining: UInt64)?
 
     init(
         parentDescriptor: Int32,
         stagingName: String,
-        expectedIdentity: BackupRestoreDirectoryIdentity
+        expectedIdentity: BackupRestoreDirectoryIdentity, logicalSpool: SQLiteLogicalSpool
     ) throws {
+        self.logicalSpool = logicalSpool
         let descriptor = stagingName.withCString {
             openat(parentDescriptor, $0, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         }
@@ -536,18 +575,24 @@ private final class BackupRestoreOutput: @unchecked Sendable {
             throw BackupRestoreError.stagingConflict
         }
         rootDescriptor = descriptor
-        do {
-            try Self.createDirectoryPath(["lan-inbox", "blobs"], rootDescriptor: descriptor)
-            try Self.createDirectoryPath(["lan-inbox", "partials"], rootDescriptor: descriptor)
-            try Self.createDirectoryPath(["lan-inbox", "derived"], rootDescriptor: descriptor)
-        } catch {
-            Darwin.close(descriptor)
-            throw error
-        }
     }
 
     lazy var sink = BackupContainerEntrySink({ [weak self] entry in
         guard let self else { throw BackupRestoreError.ioFailure(EIO) }
+        if entry.kind == .logicalSegment {
+            try lock.withLock {
+                guard !finished, activeWriter == nil, activeLogical == nil else { throw BackupRestoreError.stagingConflict }
+                activeLogical = (entry.path, entry.plaintextByteCount)
+            }
+            return { bytes in
+                try self.lock.withLock {
+                    guard let active = self.activeLogical, active.path == entry.path, UInt64(bytes.count) <= active.remaining else { throw BackupRestoreError.graphInvalid }
+                    try self.logicalSpool.append(bytes)
+                    self.activeLogical = (active.path, active.remaining - UInt64(bytes.count))
+                }
+            }
+        }
+        guard entry.kind == .original else { throw BackupRestoreError.graphInvalid }
         let writer = try RestoreFileWriter(rootDescriptor: rootDescriptor, entry: entry)
         do {
             try lock.withLock {
@@ -563,6 +608,13 @@ private final class BackupRestoreOutput: @unchecked Sendable {
         return { bytes in try writer.append(bytes) }
     }, finish: { [weak self] entry in
         guard let self else { throw BackupRestoreError.ioFailure(EIO) }
+        if entry.kind == .logicalSegment {
+            try lock.withLock {
+                guard let activeLogical, activeLogical.path == entry.path, activeLogical.remaining == 0 else { throw BackupRestoreError.graphInvalid }
+                self.activeLogical = nil
+            }
+            return
+        }
         let writer = try lock.withLock { () throws -> RestoreFileWriter in
             guard !finished,
                   let activeWriter,
@@ -578,40 +630,17 @@ private final class BackupRestoreOutput: @unchecked Sendable {
     func finish() throws {
         let shouldSync = try lock.withLock { () throws -> Bool in
             guard !finished else { return false }
-            guard activeWriter == nil else { throw BackupRestoreError.graphInvalid }
+            guard activeWriter == nil, activeLogical == nil else { throw BackupRestoreError.graphInvalid }
             finished = true
             return true
         }
-        if shouldSync { try BackupRestoreFilesystem.sync(rootDescriptor) }
+        if shouldSync { try logicalSpool.seal(); try BackupRestoreFilesystem.sync(rootDescriptor) }
     }
 
     deinit {
         let current = lock.withLock { activeWriter?.writer }
         current?.close()
         Darwin.close(rootDescriptor)
-    }
-
-    private static func createDirectoryPath(
-        _ components: [String],
-        rootDescriptor: Int32
-    ) throws {
-        var current = dup(rootDescriptor)
-        guard current >= 0 else { throw BackupRestoreError.ioFailure(errno) }
-        for component in components {
-            do {
-                let child = try BackupRestoreFilesystem.openOrCreatePrivateDirectory(
-                    named: component,
-                    parentDescriptor: current
-                )
-                Darwin.close(current)
-                current = child
-            } catch {
-                Darwin.close(current)
-                throw error
-            }
-        }
-        try BackupRestoreFilesystem.sync(current)
-        Darwin.close(current)
     }
 }
 

@@ -122,7 +122,7 @@ product_signature() {
 }
 
 package_dependency_count="$(array_count dependencies)"
-[[ "$package_dependency_count" -eq 3 ]] \
+[[ "$package_dependency_count" -eq 4 ]] \
   || fail "package dependencies do not match the exact allow-list"
 package_dependency_identities=()
 for ((index = 0; index < package_dependency_count; index++)); do
@@ -134,7 +134,7 @@ for ((index = 0; index < package_dependency_count; index++)); do
   )
 done
 [[ "$(sorted_lines "${package_dependency_identities[@]}")" \
-    == $'dicom-swift\nswift-nio\nzipfoundation' ]] \
+    == $'dicom-swift\ngrdb.swift\nswift-nio\nzipfoundation' ]] \
   || fail "package dependencies do not match the exact allow-list"
 
 product_count="$(array_count products)"
@@ -158,6 +158,7 @@ done
 actual_targets="$(sorted_lines "${target_signatures[@]}")"
 expected_targets="$(sorted_lines \
   'KinlogueCore|regular' \
+  'KinlogueSQLiteConfiguration|regular' \
   'KinlogueDICOMIPC|regular' \
   'KinlogueDICOMDecoderHelper|executable' \
   'KinlogueDICOMTestSupport|regular' \
@@ -212,6 +213,7 @@ verify_target_dependencies() {
 }
 
 verify_target_dependencies KinlogueCore
+verify_target_dependencies KinlogueSQLiteConfiguration
 verify_target_dependencies KinlogueDICOMIPC
 verify_target_dependencies KinlogueDICOMDecoderHelper \
   'target:KinlogueDICOMIPC' \
@@ -225,6 +227,8 @@ verify_target_dependencies KinlogueDICOMAcceptanceFixtureGenerator \
   'target:KinlogueDICOMTestSupport'
 verify_target_dependencies KinloguePlatform \
   'target:KinlogueCore' \
+  'target:KinlogueSQLiteConfiguration' \
+  'product:GRDB@GRDB.swift' \
   'target:KinlogueDICOMIPC' \
   'product:NIOCore@swift-nio' \
   'product:NIOHTTP1@swift-nio' \

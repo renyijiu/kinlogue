@@ -200,6 +200,9 @@ struct DeleteVaultViewSafetyTests {
         #expect(settings.contains("\"settings-delete-local-data\""))
         #expect(settings.contains("\"backup-show-in-finder\""))
         #expect(settings.contains("AppLocalization.string(\"正在准备加密备份…\")"))
+        #expect(settings.contains("\"backup-status-complete\""))
+        // A relative date keeps counting up beside the button and reads as a backup still running.
+        #expect(!settings.contains("style: .relative"))
     }
 
     private var sourceURL: URL {
@@ -274,6 +277,31 @@ struct AppShellPresentationSafetyTests {
     }
 
     @Test
+    func guiEntryOpensTheSQLiteLibraryAndNeverBuildsTheJSONComposition() throws {
+        func source(_ path: String) throws -> String {
+            try String(contentsOf: appShellURL.deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent(path), encoding: .utf8)
+        }
+        let entry = try source("App/KinlogueApp.swift")
+        let composition = try source("App/AppComposition.swift")
+        let launch = try source("Views/SQLiteAppLaunchView.swift")
+
+        #expect(entry.contains("LibraryLaunchCoordinator.makeDefault()"))
+        #expect(entry.contains("SQLiteAppLaunchView(startup: startup"))
+        #expect(entry.contains("startup.composition?.appModel"))
+        #expect(!entry.contains("AppComposition"))
+        #expect(!entry.contains("SQLiteLibraryStore"))
+        // The JSON composition exists only for an explicit identity, never the user's own library.
+        #expect(!composition.contains("static func makeDefault() -> Self"))
+        #expect(!composition.contains("AppRuntimeIdentity.current()"))
+        // Nothing opens before the disclosure is accepted.
+        let disclosure = try #require(launch.range(of: "StorageDisclosureView { acknowledged = true }"))
+        let start = try #require(launch.range(of: "startup.acknowledgeStorageDisclosure()"))
+        #expect(disclosure.lowerBound < start.lowerBound)
+        #expect(launch.contains("guard acknowledged else { return }"))
+    }
+
+    @Test
     func modalWorkflowsUseStablePresentationOwners() throws {
         let source = try String(contentsOf: appShellURL, encoding: .utf8)
         let backupAndRestore = try String(contentsOf: backupAndRestoreURL, encoding: .utf8)
@@ -323,7 +351,9 @@ struct AppShellPresentationSafetyTests {
         let terminalFailure = source[failureStart.lowerBound..<genericFailureStart.lowerBound]
 
         #expect(terminalFailure.contains("restore-failure-quit"))
-        #expect(terminalFailure.contains("NSApplication.shared.terminate(nil)"))
+        // A plain `terminate` is refused while this sheet is up, so the button did nothing.
+        #expect(terminalFailure.contains("RestartRequiredQuit.perform()"))
+        #expect(!source.contains("NSApplication.shared.terminate(nil)"))
         #expect(!terminalFailure.contains("当前资料库不会因验证失败而被替换"))
     }
 

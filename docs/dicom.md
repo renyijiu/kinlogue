@@ -30,13 +30,13 @@ App 不解释像素、不生成测量或医学结论。DICOM 自由文本和像�
 
 ## 导入与持久化
 
-`DICOMFolderScanner` 使用 descriptor-relative、`O_NOFOLLOW` 的有界遍历，把候选复制到同卷 opaque staging。扫描、索引和发布共用 Vault mutation lease；ownership receipt 在第一份 staged bytes 前持久化。对象与 index 先发布，`library.json` 最后原子替换。
+`DICOMFolderScanner` 使用 descriptor-relative、`O_NOFOLLOW` 的有界遍历，把候选复制到同卷的 opaque staging；归属收据在第一份暂存字节出现之前持久化。源文件以 `O_NONBLOCK` 打开后再次校验 regular-file 类型与 inode/大小/时间戳，避免扫描期间被替换成 FIFO 后阻塞打开和取消。
 
-源文件以 `O_NONBLOCK` 打开后再次校验 regular-file 类型与 inode/大小/时间戳，避免扫描期间被替换成 FIFO 后阻塞打开、取消和资料库 mutation lease。
+[SQLite DICOM 仓库](sqlite-storage.md#规范化-dicom-与按序列读取)把影像图规范化为 study、object、series、instance 四张表，复用同一套 scanner/indexer 与 decoder，不保存 index 文件或整份 study BLOB。导入先登记活动操作，覆盖扫描、索引和原件交接的间隙；暂存文件按 inode 接管为资料库原件，完整校验之后，一个事务发布全部原件、完整影像图和一次业务 revision。同卷接管保持既有的导入 I/O 与磁盘预算。
 
-取消必须等待真实事务终态。manifest commit 之前可以返回取消；之后只有在 catalog 中证明相同 study ID、fingerprint、index 和附件图已提交时才返回成功。无法证明提交时，cleanup 或 commit 错误保持失败，不能把可能已提交的检查误报为取消。
+取消必须等待真实的事务终态：提交之前可以返回取消；提交之后只有按操作、study 和严格图校验确认同一份检查已经入库时才返回成功。无法证明提交时，清理或提交错误保持失败，不把可能已经提交的检查误报为取消。
 
-每次 reopen 都实读并验证 index 版本、study ID、Series/instance 顺序、attachment 集合、fingerprint 和 UID digest 冲突。缺失、digest/length 不符、图不闭合或未知版本都 fail closed，不暴露部分检查。更完整的布局和恢复规则见 [`storage.md`](storage.md)。
+列表、详情和序列读取按用途分开，坏的 header 显式返回 ID；严格读取和确认之前验证完整的目标图，缺失、摘要或长度不符、图不闭合或未知版本都失败关闭，不暴露部分检查。Viewer 的会话绑定资料库的 open epoch、study 的内容 revision 和目标 series 的语义哈希：目标发生变化时拒绝继续，无关的报告提交不使它失效；异常的文件类型不会阻塞打开。未缓存的解码目前执行 4 次 pin 哈希加 decoder 读取，首切片与连续浏览的性能以及真实 XPC 的安装矩阵尚未验证。布局和上限见 [`storage.md`](storage.md)。
 
 ## XPC 解码边界
 
@@ -76,7 +76,7 @@ Viewer 的 metadata、decode 和 canvas publish 都带 generation/session/render
 
 ## 当前版本边界
 
-当前实现只接受 ordering policy v2，并在 reopen 时验证已持久化顺序和 Series geometry/layout；policy v1 或其他版本均失败关闭，不会被静默重排或改写。Vault 同样只接受 catalog v3。除恢复先前由用户明确发起、且已写入有效 durable deletion receipt 的整库删除外，未知版本、未知非空目录和损坏图继续非破坏性失败关闭；旧开发资料需要由用户在仓库外自行导出或重置，App 不提供自动迁移。
+当前实现只接受 ordering policy v2，并在 reopen 时验证已持久化顺序和 Series geometry/layout；policy v1 或其他版本均失败关闭，不会被静默重排或改写。除恢复先前由用户明确发起、且已写入有效 durable deletion receipt 的整库删除外，未知版本、未知非空目录和损坏图继续非破坏性失败关闭；旧开发资料需要由用户在仓库外自行导出或重置，App 不提供自动迁移。
 
 这一 current-only 方针已按 [决策登记](decisions.md) 落地；历史 predecessor/rollback 契约只保留在 `docs/plans/`、`docs/sources/` 和追加式日志中，不定义当前能力。
 
@@ -87,3 +87,5 @@ Viewer 的 metadata、decode 和 canvas publish 都带 generation/session/render
 - 文件夹导入契约：[`sources/2026-08-07-dicom-folder-import-contract.md`](sources/2026-08-07-dicom-folder-import-contract.md)
 - Slice service 契约：[`sources/2026-08-07-dicom-slice-service-contract.md`](sources/2026-08-07-dicom-slice-service-contract.md)
 - App flow 与 Viewer：[`sources/2026-08-07-dicom-app-flow-contract.md`](sources/2026-08-07-dicom-app-flow-contract.md)、[`sources/2026-08-07-dicom-viewer-ui-contract.md`](sources/2026-08-07-dicom-viewer-ui-contract.md)
+
+SQLite 导入成功收尾和取消只回收本 operation 的非 live 原件；真实交错测试验证另一份报告已 staged、尚未 publish 的原件继续可发布。活动导入及替换 inode 的文件保留，未知文件不作为清理所有权。细节见 [SQLite 原件生命周期](sqlite-storage.md#原件事务与恢复)。

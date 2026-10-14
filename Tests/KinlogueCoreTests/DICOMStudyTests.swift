@@ -4,18 +4,16 @@ import Testing
 
 @Test
 func needsReviewStudyCannotPersistConfirmationFields() throws {
-    let indexID = UUID()
     let attachment = try syntheticAttachment()
     let fingerprint = try DICOMStudyFingerprint(objects: [
         .init(sha256Digest: attachment.sha256Digest, byteCount: attachment.byteCount),
     ])
 
     #expect(throws: DomainValidationError.invalidStateTransition) {
-        _ = try DICOMStudy(
+        _ = try DICOMStudyHeader(
             id: UUID(),
             state: .needsReview,
             fingerprint: fingerprint,
-            indexObjectID: indexID,
             attachmentIDs: [attachment.id],
             confirmedMemberID: UUID(),
             effectiveDate: Date(timeIntervalSince1970: 0)
@@ -31,10 +29,10 @@ func confirmedStudyRequiresMemberAndEffectiveDateTogether() throws {
     ])
 
     #expect(throws: DomainValidationError.invalidStateTransition) {
-        _ = try DICOMStudy(
+        _ = try DICOMStudyHeader(
+            id: UUID(),
             state: .confirmed,
             fingerprint: fingerprint,
-            indexObjectID: UUID(),
             attachmentIDs: [attachment.id],
             confirmedMemberID: UUID(),
             effectiveDate: nil
@@ -43,25 +41,25 @@ func confirmedStudyRequiresMemberAndEffectiveDateTogether() throws {
 }
 
 @Test
-func reconfirmingPreservesStudyIdentityAndImmutableGraph() throws {
+func studyHeaderRequiresOneDistinctAttachmentPerFingerprintObject() throws {
     let attachment = try syntheticAttachment()
     let fingerprint = try DICOMStudyFingerprint(objects: [
         .init(sha256Digest: attachment.sha256Digest, byteCount: attachment.byteCount),
     ])
-    let study = try DICOMStudy(
-        state: .needsReview,
-        fingerprint: fingerprint,
-        indexObjectID: UUID(),
-        attachmentIDs: [attachment.id]
-    )
     let memberID = UUID()
-    let confirmed = try study.confirmed(memberID: memberID, effectiveDate: Date(timeIntervalSince1970: 0))
+    let date = Date(timeIntervalSince1970: 0)
 
-    #expect(confirmed.id == study.id)
-    #expect(confirmed.fingerprint == study.fingerprint)
-    #expect(confirmed.indexObjectID == study.indexObjectID)
-    #expect(confirmed.attachmentIDs == study.attachmentIDs)
+    let confirmed = try DICOMStudyHeader(
+        id: UUID(), state: .confirmed, fingerprint: fingerprint, attachmentIDs: [attachment.id],
+        confirmedMemberID: memberID, effectiveDate: date
+    )
     #expect(confirmed.confirmedMemberID == memberID)
+    #expect(confirmed.effectiveDate == date)
+    for attachmentIDs in [[], [attachment.id, attachment.id], [attachment.id, UUID()]] {
+        #expect(throws: DomainValidationError.invalidCatalogReference) {
+            _ = try DICOMStudyHeader(id: UUID(), state: .needsReview, fingerprint: fingerprint, attachmentIDs: attachmentIDs)
+        }
+    }
 }
 
 @Test
@@ -88,19 +86,6 @@ func fingerprintIsVersionedAndOrderIndependentButRejectsDuplicates() throws {
 }
 
 @Test
-func catalogRejectsDuplicateDICOMStudyFingerprint() throws {
-    let attachment = try syntheticAttachment()
-    let fingerprint = try DICOMStudyFingerprint(objects: [
-        .init(sha256Digest: attachment.sha256Digest, byteCount: attachment.byteCount),
-    ])
-    let first = try DICOMStudy(state: .needsReview, fingerprint: fingerprint, indexObjectID: UUID(), attachmentIDs: [attachment.id])
-    let second = try DICOMStudy(state: .needsReview, fingerprint: fingerprint, indexObjectID: UUID(), attachmentIDs: [attachment.id])
-    #expect(throws: DomainValidationError.duplicateIdentifier) {
-        _ = try VaultCatalog(vaultID: UUID(), generation: 1, attachments: [attachment], dicomStudies: [first, second])
-    }
-}
-
-@Test
 func studyObjectLimitAcceptsTwoThousandAndRejectsTheNextObject() throws {
     let digests = try (0..<DICOMStudy.maximumAttachmentCount).map {
         try DICOMStudyFingerprint.ObjectDigest(
@@ -118,53 +103,6 @@ func studyObjectLimitAcceptsTwoThousandAndRejectsTheNextObject() throws {
     }
 }
 
-@Test
-func catalogStudyLimitAcceptsTwoHundredFiftySixAndRejectsTheNextStudy() throws {
-    let graph = try syntheticStudyGraph(studyCount: VaultCatalog.maximumDICOMStudyCount)
-    let boundary = try VaultCatalog(
-        vaultID: UUID(),
-        generation: 1,
-        attachments: graph.attachments,
-        dicomStudies: graph.studies
-    )
-    #expect(boundary.dicomStudies.count == 256)
-
-    let extra = try syntheticStudyGraph(
-        studyCount: 1,
-        startingOrdinal: VaultCatalog.maximumDICOMStudyCount
-    )
-    #expect(throws: DomainValidationError.invalidCatalogReference) {
-        _ = try VaultCatalog(
-            vaultID: UUID(),
-            generation: 1,
-            attachments: graph.attachments + extra.attachments,
-            dicomStudies: graph.studies + extra.studies
-        )
-    }
-}
-
-@Test
-func catalogRetainedDICOMObjectLimitAcceptsTenThousandAndRejectsTheNextObject() throws {
-    let boundaryGraph = try syntheticStudyGraph(studyCount: 5, objectsPerStudy: 2_000)
-    let boundary = try VaultCatalog(
-        vaultID: UUID(),
-        generation: 1,
-        attachments: boundaryGraph.attachments,
-        dicomStudies: boundaryGraph.studies
-    )
-    #expect(Set(boundary.dicomStudies.flatMap(\.attachmentIDs)).count == 10_000)
-
-    let extra = try syntheticStudyGraph(studyCount: 1, startingOrdinal: 10_000)
-    #expect(throws: DomainValidationError.invalidCatalogReference) {
-        _ = try VaultCatalog(
-            vaultID: UUID(),
-            generation: 1,
-            attachments: boundaryGraph.attachments + extra.attachments,
-            dicomStudies: boundaryGraph.studies + extra.studies
-        )
-    }
-}
-
 private func syntheticAttachment() throws -> KinlogueCore.Attachment {
     try KinlogueCore.Attachment(
         contentTypeIdentifier: "application/dicom",
@@ -173,43 +111,6 @@ private func syntheticAttachment() throws -> KinlogueCore.Attachment {
     )
 }
 
-private func syntheticStudyGraph(
-    studyCount: Int,
-    objectsPerStudy: Int = 1,
-    startingOrdinal: Int = 0
-) throws -> (attachments: [KinlogueCore.Attachment], studies: [DICOMStudy]) {
-    var attachments: [KinlogueCore.Attachment] = []
-    var studies: [DICOMStudy] = []
-    attachments.reserveCapacity(studyCount * objectsPerStudy)
-    studies.reserveCapacity(studyCount)
-    for studyOrdinal in 0..<studyCount {
-        let firstObjectOrdinal = startingOrdinal + studyOrdinal * objectsPerStudy
-        var owned: [KinlogueCore.Attachment] = []
-        owned.reserveCapacity(objectsPerStudy)
-        for offset in 0..<objectsPerStudy {
-            let ordinal = firstObjectOrdinal + offset
-            owned.append(try KinlogueCore.Attachment(
-                contentTypeIdentifier: "application/dicom",
-                byteCount: ordinal + 1,
-                sha256Digest: syntheticDigest(ordinal)
-            ))
-        }
-        let fingerprint = try DICOMStudyFingerprint(objects: owned.map {
-            try DICOMStudyFingerprint.ObjectDigest(
-                sha256Digest: $0.sha256Digest,
-                byteCount: $0.byteCount
-            )
-        })
-        studies.append(try DICOMStudy(
-            state: .needsReview,
-            fingerprint: fingerprint,
-            indexObjectID: UUID(),
-            attachmentIDs: owned.map(\.id)
-        ))
-        attachments.append(contentsOf: owned)
-    }
-    return (attachments, studies)
-}
 
 private func syntheticDigest(_ ordinal: Int) -> Data {
     var digest = Data(repeating: 0, count: 32)

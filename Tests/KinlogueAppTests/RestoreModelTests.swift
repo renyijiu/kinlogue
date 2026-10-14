@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import KinlogueCore
 import KinloguePlatform
@@ -7,6 +8,28 @@ import Testing
 @Suite("Restore model")
 @MainActor
 struct RestoreModelTests {
+    @Test
+    func quittingForARequiredRestartLiftsTheSheetsVetoBeforeTerminating() {
+        // AppKit refuses `terminate` while a window that prevents it has a modal sheet, which is
+        // the state the restore sheet is in when it asks the user to quit.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
+            styleMask: [.titled], backing: .buffered, defer: true
+        )
+        window.isReleasedWhenClosed = false
+        window.preventsApplicationTerminationWhenModal = true
+        var steps: [String] = []
+
+        RestartRequiredQuit.perform(
+            windows: [window],
+            terminate: { steps.append(window.preventsApplicationTerminationWhenModal ? "terminate refused" : "terminate") },
+            exit: { steps.append("exit \($0)") }
+        )
+
+        // The exit is the way out when termination returns, which it does only when refused.
+        #expect(steps == ["terminate", "exit 0"])
+    }
+
     @Test(arguments: [false, true], [false, true])
     func compositionRevokesUIAndDrainsViewersBeforeActivation(
         unavailable: Bool,
@@ -18,7 +41,7 @@ struct RestoreModelTests {
             attachmentID: UUID(),
             importState: .confirmed
         )
-        let snapshot = AppSnapshot(members: [member], records: [record], drafts: [])
+        let snapshot = TestLibrarySnapshot(members: [member], records: [record], drafts: [])
         let dataService: any AppDataServicing = unavailable
             ? UnavailableAppService()
             : AppServiceSpy(snapshot: snapshot, originals: [record.id: OriginalDocumentPayload(
@@ -258,6 +281,7 @@ private func restoreModelSummary() -> BackupRestoreSummary {
         recordCount: 3,
         inboxItemCount: 4,
         plaintextByteCount: 5,
-        formatVersion: .current
+        formatVersion: .current,
+        logicalDigest: Data(repeating: 0x5A, count: 32)
     )
 }

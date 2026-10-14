@@ -14,21 +14,14 @@ public enum DICOMSliceServiceError: Error, Equatable, Sendable {
     case closed
 }
 
-public struct DICOMVaultSessionToken: Hashable, Sendable {
-    public let vaultID: UUID
-    public let generation: UInt64
-    public let commitID: UUID
-    public let catalogDigest: Data
-
-    public init(vaultID: UUID, revision: VaultRevision) throws {
-        guard revision.catalogDigest.count == 32 else {
-            throw DICOMSliceServiceError.integrityFailure
-        }
-        self.vaultID = vaultID
-        generation = revision.generation
-        commitID = revision.commitID
-        catalogDigest = revision.catalogDigest
-    }
+/// Identifies one series as one open library saw it; decoded slices are cached under it.
+public struct DICOMLibrarySessionToken: Hashable, Sendable {
+    let libraryID: UUID
+    let epoch: UUID
+    let studyID: UUID
+    let contentRevision: UInt64
+    let seriesID: UUID
+    let seriesHash: Data
 }
 
 public struct DICOMSliceInstanceDescriptor: Equatable, Sendable {
@@ -57,14 +50,14 @@ public struct DICOMSliceInstanceDescriptor: Equatable, Sendable {
 }
 
 public struct DICOMSliceSeriesSession: Equatable, Sendable {
-    public let token: DICOMVaultSessionToken
+    public let token: DICOMLibrarySessionToken
     public let studyID: DICOMStudy.ID
     public let seriesID: DICOMStudyIndex.Series.ID
     public let orderingProvenance: DICOMStudyIndex.OrderingProvenance
     public let instances: [DICOMSliceInstanceDescriptor]
 
     public init(
-        token: DICOMVaultSessionToken,
+        token: DICOMLibrarySessionToken,
         studyID: DICOMStudy.ID,
         seriesID: DICOMStudyIndex.Series.ID,
         orderingProvenance: DICOMStudyIndex.OrderingProvenance,
@@ -180,31 +173,12 @@ protocol DICOMVerifiedSliceSource: Sendable {
     ) async throws -> DICOMVerifiedDecodedFrame
 }
 
-struct PlaintextVaultDICOMSliceSource: DICOMVerifiedSliceSource, Sendable {
-    let vault: PlaintextVault
-    let decoder: any DICOMFrameDecoding
-
-    func openSeries(
-        studyID: DICOMStudy.ID,
-        seriesID: DICOMStudyIndex.Series.ID
-    ) async throws -> DICOMSliceSeriesSession {
-        try await vault.openVerifiedDICOMSeries(studyID: studyID, seriesID: seriesID)
-    }
-
-    func decode(
-        _ instance: DICOMSliceInstanceDescriptor,
-        in session: DICOMSliceSeriesSession
-    ) async throws -> DICOMVerifiedDecodedFrame {
-        try await vault.decodeVerifiedDICOMInstance(
-            instance,
-            in: session,
-            decoder: decoder
-        )
-    }
-}
-
 public actor DICOMSliceService {
     private static let maximumPrefetchWorkingSet = 64 * 1_024 * 1_024
+    /// Rendering validates its target against storage and may wait there, so the actor runs
+    /// on a queue of its own instead of on the cooperative pool.
+    private let isolationQueue = DispatchSerialQueue(label: "com.kinlogue.dicom-slice-service")
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { isolationQueue.asUnownedSerialExecutor() }
 
     private struct ScheduledDecode {
         let id: UUID
@@ -244,15 +218,10 @@ public actor DICOMSliceService {
         retainedRender?.reservation.release()
     }
 
-    public init(
-        vault: PlaintextVault,
-        decoder: any DICOMFrameDecoding = DICOMDecoderAdapter()
-    ) {
+    package init(repository: SQLiteDICOMRepository, decoder: any DICOMFrameDecoding = DICOMDecoderAdapter()) {
         let runtime = DICOMSliceRuntime.shared
-        source = PlaintextVaultDICOMSliceSource(vault: vault, decoder: decoder)
-        budget = runtime.budget
-        cache = runtime.cache
-        scheduler = runtime.scheduler
+        source = SQLiteDICOMSliceSource(repository: repository, decoder: decoder)
+        budget = runtime.budget; cache = runtime.cache; scheduler = runtime.scheduler
     }
 
     init(
@@ -714,7 +683,14 @@ public actor DICOMSliceService {
         )
     }
 
-    private func map(_ error: Error) -> DICOMSliceServiceError {
+    private func map(_ error: Error) -> Error {
+        if let error = error as? SQLiteLibraryError {
+            return error == .invalidOriginal ? DICOMSliceServiceError.integrityFailure : error
+        }
+        return mapSliceError(error)
+    }
+
+    private func mapSliceError(_ error: Error) -> DICOMSliceServiceError {
         if let error = error as? DICOMSliceServiceError { return error }
         if error is CancellationError { return .cancelled }
         if let error = error as? DICOMDecoderAdapterError {

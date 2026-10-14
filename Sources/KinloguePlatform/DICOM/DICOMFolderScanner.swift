@@ -24,7 +24,7 @@ protocol DICOMFolderScannerControl: Sendable {
 }
 
 public struct DICOMFolderScanResult: Equatable, Sendable {
-    public let stagedObjects: [VaultDICOMStagedObject]
+    public let stagedObjects: [DICOMStagedObject]
     public let inspectedEntryCount: Int
     public let ignoredNonDICOMCount: Int
     public let ignoredNonRegularCount: Int
@@ -63,8 +63,8 @@ public struct DICOMFolderScanner: Sendable {
         directoryURL: URL,
         operationID: UUID,
         securityScope: DICOMSecurityScopeRequirement = .required,
-        staging: VaultDICOMStudyStaging,
-        ownership: VaultDICOMStagingOwnership
+        staging: DICOMStudyStaging,
+        ownership: DICOMStagingOwnership
     ) async throws -> DICOMFolderScanResult {
         try await scan(
             directoryURL: directoryURL,
@@ -80,8 +80,8 @@ public struct DICOMFolderScanner: Sendable {
         directoryURL: URL,
         operationID: UUID,
         securityScope: DICOMSecurityScopeRequirement,
-        staging: VaultDICOMStudyStaging,
-        ownership: VaultDICOMStagingOwnership,
+        staging: DICOMStudyStaging,
+        ownership: DICOMStagingOwnership,
         willBeginStaging: (@Sendable () async -> Void)?
     ) async throws -> DICOMFolderScanResult {
         guard ownership.operationID == operationID else {
@@ -104,7 +104,7 @@ public struct DICOMFolderScanner: Sendable {
         guard root >= 0 else { throw DICOMImportError.invalidDirectory }
         await metrics?.recordSourceDescriptorOpened()
 
-        let operationLease: VaultDICOMOperationDescriptorLease
+        let operationLease: DICOMOperationDescriptorLease
         do {
             // openOperationDirectory transiently owns Vault root + staging +
             // operation descriptors and returns only the operation descriptor.
@@ -162,9 +162,9 @@ public struct DICOMFolderScanner: Sendable {
     /// the previous component immediately.
     private func traverse(
         rootDescriptor: Int32,
-        staging: VaultDICOMStudyStaging,
-        ownership: VaultDICOMStagingOwnership,
-        operationLease: VaultDICOMOperationDescriptorLease,
+        staging: DICOMStudyStaging,
+        ownership: DICOMStagingOwnership,
+        operationLease: DICOMOperationDescriptorLease,
         willBeginStaging: (@Sendable () async -> Void)?,
         accumulator: inout Accumulator
     ) async throws {
@@ -271,9 +271,9 @@ public struct DICOMFolderScanner: Sendable {
         name: String,
         metadata: stat,
         parentDescriptor: Int32,
-        staging: VaultDICOMStudyStaging,
-        ownership: VaultDICOMStagingOwnership,
-        operationLease: VaultDICOMOperationDescriptorLease,
+        staging: DICOMStudyStaging,
+        ownership: DICOMStagingOwnership,
+        operationLease: DICOMOperationDescriptorLease,
         willBeginStaging: (@Sendable () async -> Void)?,
         accumulator: inout Accumulator
     ) async throws {
@@ -327,9 +327,9 @@ public struct DICOMFolderScanner: Sendable {
 
     private func flush(
         parentDescriptor: Int32,
-        staging: VaultDICOMStudyStaging,
-        ownership: VaultDICOMStagingOwnership,
-        operationLease: VaultDICOMOperationDescriptorLease,
+        staging: DICOMStudyStaging,
+        ownership: DICOMStagingOwnership,
+        operationLease: DICOMOperationDescriptorLease,
         willBeginStaging: (@Sendable () async -> Void)?,
         accumulator: inout Accumulator
     ) async throws {
@@ -394,9 +394,9 @@ public struct DICOMFolderScanner: Sendable {
     private func stage(
         _ admission: Admission,
         parentDescriptor: Int32,
-        staging: VaultDICOMStudyStaging,
-        ownership: VaultDICOMStagingOwnership,
-        operationLease: VaultDICOMOperationDescriptorLease,
+        staging: DICOMStudyStaging,
+        ownership: DICOMStagingOwnership,
+        operationLease: DICOMOperationDescriptorLease,
         uniqueByteCountBeforeBatch: Int
     ) async throws -> StagedAdmission {
         await metrics?.recordWorkerStarted()
@@ -426,7 +426,7 @@ public struct DICOMFolderScanner: Sendable {
                 throw DICOMImportError.sourceChanged
             }
             await metrics?.recordStagingDescriptorOpened()
-            let object: VaultDICOMStagedObject
+            let object: DICOMStagedObject
             do {
                 object = try staging.stageDeduplicationCandidate(
                     sourceDescriptor: source,
@@ -504,7 +504,7 @@ public struct DICOMFolderScanner: Sendable {
     }
 
     private struct Accumulator {
-        var stagedObjects: [VaultDICOMStagedObject] = []
+        var stagedObjects: [DICOMStagedObject] = []
         var contentKeys: Set<DICOMContentIdentity> = []
         var pending: [Admission] = []
         var inspectedEntryCount = 0
@@ -593,5 +593,5 @@ private struct Admission: Sendable {
 
 private struct StagedAdmission: Sendable {
     let ordinal: Int
-    let object: VaultDICOMStagedObject
+    let object: DICOMStagedObject
 }

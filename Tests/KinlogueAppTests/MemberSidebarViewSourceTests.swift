@@ -69,7 +69,10 @@ struct MemberSidebarViewSourceTests {
     func waitingDraftsAreCountedAndNamedAfterTheirFirstOriginal() throws {
         let source = try String(contentsOf: memberSidebarURL, encoding: .utf8)
 
-        #expect(source.contains("Section(AppLocalization.string(\"待确认（\\(reviewQueue.count)）\"))"))
+        // The count is the whole queue only once every page is loaded.
+        #expect(source.contains("Section(reviewSectionTitle)"))
+        #expect(source.contains("? AppLocalization.string(\"待确认（\\(reviewQueue.count)）\")"))
+        #expect(source.contains(": AppLocalization.string(\"待确认\")"))
         #expect(source.contains("draft.displayName ?? draftLabel(draft)"))
         #expect(source.contains(".truncationMode(.middle)"))
         #expect(source.contains(

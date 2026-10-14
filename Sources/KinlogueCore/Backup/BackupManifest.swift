@@ -10,6 +10,8 @@ public struct BackupManifestEntry: Hashable, Sendable {
         case lanInboxBlob = 4
         case lanInboxDerivedArtifact = 5
         case lanInboxReceipt = 6
+        case logicalSegment = 7
+        case original = 8
     }
 
     public let kind: Kind
@@ -44,6 +46,19 @@ public struct BackupManifestEntry: Hashable, Sendable {
         self.plaintextDigest = plaintextDigest
         self.firstFrameIndex = firstFrameIndex
         self.frameCount = frameCount
+    }
+
+    public static func requiredFrameCount(for byteCount: UInt64) throws -> UInt32 {
+        guard byteCount <= BackupFormatLimits.maximumPlaintextByteCount else {
+            throw BackupContractError.resourceLimit
+        }
+        let chunk = UInt64(BackupFormatLimits.maximumFramePlaintextByteCount)
+        let count = byteCount == 0 ? 1 : (byteCount - 1) / chunk + 1
+        guard count <= UInt64(BackupFormatLimits.maximumFrameCount),
+              let encoded = UInt32(exactly: count) else {
+            throw BackupContractError.resourceLimit
+        }
+        return encoded
     }
 
     public var canonicalBytes: Data {
@@ -117,6 +132,7 @@ public struct BackupManifest: Hashable, Sendable {
     public let entryCount: Int
     public let totalPlaintextByteCount: UInt64
     public let totalFrameCount: UInt64
+    public let maximumContainerByteCount: UInt64
     public let entries: [BackupManifestEntry]
 
     public init(
@@ -125,13 +141,16 @@ public struct BackupManifest: Hashable, Sendable {
         revisionPair: BackupRevisionPair,
         entries: some Collection<BackupManifestEntry>
     ) throws {
-        guard entries.count <= BackupFormatLimits.maximumEntryCount else {
+        guard entries.count <= BackupFormatLimits.maximumEntryCount(for: formatVersion) else {
             throw BackupContractError.resourceLimit
         }
         let ordered = entries.sorted { lhs, rhs in lhs.path < rhs.path }
         guard Set(ordered.map(\.path)).count == ordered.count else {
             throw BackupContractError.duplicateEntry
         }
+        if ordered.contains(where: { $0.kind == .logicalSegment || $0.kind == .original }) {
+            try Self.validateLogicalEntries(ordered)
+        } else {
         guard ordered.filter({ $0.kind == .vaultCatalog }).count == 1,
               ordered.filter({ $0.kind == .lanInboxManifest }).count == 1,
               ordered.contains(where: { $0.kind == .vaultCatalog && $0.path == "library.json" }),
@@ -139,24 +158,34 @@ public struct BackupManifest: Hashable, Sendable {
             throw BackupContractError.invalidField
         }
 
+        }
+
         var totalBytes: UInt64 = 0
         var nextFrame: UInt64 = 0
         for entry in ordered {
             let bytes = totalBytes.addingReportingOverflow(entry.plaintextByteCount)
             guard !bytes.overflow,
-                  bytes.partialValue <= BackupFormatLimits.maximumPlaintextByteCount,
+                  bytes.partialValue <= BackupFormatLimits.maximumPlaintextByteCount(for: formatVersion),
+                  entry.frameCount == (try BackupManifestEntry.requiredFrameCount(for: entry.plaintextByteCount)),
                   entry.firstFrameIndex == nextFrame else {
                 throw BackupContractError.resourceLimit
             }
             totalBytes = bytes.partialValue
             let frames = nextFrame.addingReportingOverflow(UInt64(entry.frameCount))
             guard !frames.overflow,
-                  frames.partialValue <= UInt64(BackupFormatLimits.maximumFrameCount) else {
+                  frames.partialValue <= UInt64(BackupFormatLimits.maximumFrameCount(for: formatVersion)) else {
                 throw BackupContractError.resourceLimit
             }
             nextFrame = frames.partialValue
         }
 
+        let manifestLength = ordered.reduce(148) { $0 + 8 + $1.canonicalBytes.count }
+        guard manifestLength <= BackupFormatLimits.maximumCanonicalManifestByteCount(for: formatVersion) else {
+            throw BackupContractError.resourceLimit
+        }
+        maximumContainerByteCount = try BackupFormatLimits.containerByteCount(
+            plaintextByteCount: totalBytes, frameCount: nextFrame, manifestByteCount: manifestLength
+        )
         self.formatVersion = formatVersion
         self.suite = suite
         self.revisionPair = revisionPair
@@ -164,10 +193,6 @@ public struct BackupManifest: Hashable, Sendable {
         totalPlaintextByteCount = totalBytes
         totalFrameCount = nextFrame
         self.entries = ordered
-
-        guard canonicalBytes.count <= BackupFormatLimits.maximumCanonicalManifestByteCount else {
-            throw BackupContractError.resourceLimit
-        }
     }
 
     public var canonicalBytes: Data {
@@ -198,6 +223,9 @@ public struct BackupManifest: Hashable, Sendable {
         try reader.requireMagic(magic)
         let version = try reader.readCurrentVersion()
         let suite = try reader.readCurrentSuite()
+        guard data.count <= BackupFormatLimits.maximumCanonicalManifestByteCount(for: version) else {
+            throw BackupContractError.resourceLimit
+        }
         let pair = try BackupRevisionPair(
             vault: .init(
                 generation: reader.readUInt64(),
@@ -211,13 +239,13 @@ public struct BackupManifest: Hashable, Sendable {
             )
         )
         let encodedEntryCount = Int(try reader.readUInt32())
-        guard encodedEntryCount <= BackupFormatLimits.maximumEntryCount else {
+        guard encodedEntryCount <= BackupFormatLimits.maximumEntryCount(for: version) else {
             throw BackupContractError.resourceLimit
         }
         let encodedPlaintextByteCount = try reader.readUInt64()
         let encodedFrameCount = try reader.readUInt64()
-        guard encodedPlaintextByteCount <= BackupFormatLimits.maximumPlaintextByteCount,
-              encodedFrameCount <= UInt64(BackupFormatLimits.maximumFrameCount) else {
+        guard encodedPlaintextByteCount <= BackupFormatLimits.maximumPlaintextByteCount(for: version),
+              encodedFrameCount <= UInt64(BackupFormatLimits.maximumFrameCount(for: version)) else {
             throw BackupContractError.resourceLimit
         }
 
@@ -243,5 +271,24 @@ public struct BackupManifest: Hashable, Sendable {
             throw BackupContractError.nonCanonicalOrdering
         }
         return value
+    }
+}
+
+public extension BackupManifest {
+    var isLogical: Bool { entries.first?.kind == .logicalSegment }
+    static func validateLogicalEntries(_ entries: [BackupManifestEntry]) throws {
+        let segments = entries.filter { $0.kind == .logicalSegment }
+        guard !segments.isEmpty, segments.count <= 4_096,
+              entries.allSatisfy({ $0.kind == .logicalSegment || $0.kind == .original }) else { throw BackupContractError.invalidField }
+        for (index, entry) in segments.enumerated() {
+            guard entry.path == String(format: "logical/%08d.data", index), entry.plaintextByteCount > 0,
+                  entry.plaintextByteCount <= 1_024 * 1_024 * 1_024 else { throw BackupContractError.invalidField }
+        }
+        let originals = entries.filter { $0.kind == .original }
+        guard originals.count <= 25_000 else { throw BackupContractError.resourceLimit }
+        for entry in originals {
+            let name = String(entry.path.dropFirst("originals/".count).dropLast(".data".count))
+            guard let id = UUID(uuidString: name), entry.path == "originals/" + id.uuidString.lowercased() + ".data" else { throw BackupContractError.invalidField }
+        }
     }
 }

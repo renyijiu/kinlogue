@@ -1,9 +1,9 @@
 import Foundation
 
-/// The only GUI startup order: restore receipts converge before the first
-/// storage-backed service call, and automatic backup starts only after the
-/// normal library is confirmed ready. This prevents a stale writer or root
-/// object from being exposed across restore activation.
+/// The order in which one composition starts its services: restore receipts converge before the
+/// first storage-backed service call, and automatic backup starts only after the library is
+/// confirmed ready. This prevents a stale writer or root object from being exposed across
+/// restore activation.
 @MainActor
 final class AppStartupCoordinator {
     typealias ReconcileRestore = () async -> Bool
@@ -13,6 +13,8 @@ final class AppStartupCoordinator {
     private let reconcileRestore: ReconcileRestore
     private let startStorage: StartStorage
     private let startScheduler: StartScheduler
+    private let startProcessing: StartScheduler
+    private let reconcileLibrary: StartScheduler
     private var state = State.idle
 
     private enum State {
@@ -24,11 +26,20 @@ final class AppStartupCoordinator {
     init(
         reconcileRestore: @escaping ReconcileRestore,
         startStorage: @escaping StartStorage,
-        startScheduler: @escaping StartScheduler
+        startProcessing: @escaping StartScheduler = {},
+        startScheduler: @escaping StartScheduler,
+        reconcileLibrary: @escaping StartScheduler = {}
     ) {
         self.reconcileRestore = reconcileRestore
         self.startStorage = startStorage
         self.startScheduler = startScheduler
+        self.startProcessing = startProcessing
+        self.reconcileLibrary = reconcileLibrary
+    }
+
+    func reconcile() async {
+        guard case .started = state else { return }
+        await reconcileLibrary()
     }
 
     @discardableResult
@@ -49,6 +60,7 @@ final class AppStartupCoordinator {
             state = .idle
             return false
         }
+        await startProcessing()
         await startScheduler()
         state = .started
         return true

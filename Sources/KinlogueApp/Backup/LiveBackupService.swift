@@ -96,7 +96,7 @@ actor LiveBackupService: BackupServicing {
     private let activeVaultURL: URL
     private let setupService: BackupSetupService
     private let destinationAuthority: BackupDestinationAuthority
-    private let source: PlaintextLibraryBackupSource
+    private let source: SQLiteLogicalBackupSource
     private let scheduler: BackupScheduler
     private let selectedDirectoryScope: any BackupSelectedDirectorySecurityScope
     private let requiresSelectedDirectoryScope: Bool
@@ -105,21 +105,26 @@ actor LiveBackupService: BackupServicing {
     private let clock: @Sendable () -> Date
     private var setupSession: BackupSetupSession?
     #if DEBUG
-    private var sourcePreparationCount = 0
+    private var sourceRevisionReadCount = 0
     #endif
 
-    init(
-        activeVaultURL: URL,
-        configurationStore: BackupLocalConfigurationStore,
-        vault: PlaintextVault,
-        inboxStore: PlaintextLANInboxStore? = nil,
+    init(store: SQLiteLibraryStore, configurationStore: BackupLocalConfigurationStore,
         requiresSelectedDirectoryScope: Bool,
         destinationAuthority: BackupDestinationAuthority = BackupDestinationAuthority(),
-        selectedDirectoryScope: any BackupSelectedDirectorySecurityScope =
-            SystemBackupSelectedDirectorySecurityScope(),
+        selectedDirectoryScope: any BackupSelectedDirectorySecurityScope = SystemBackupSelectedDirectorySecurityScope(),
         repositoryOpener: any BackupRepositoryOpening = SystemBackupRepositoryOpener(),
-        clock: @escaping @Sendable () -> Date = { Date() }
-    ) throws {
+        clock: @escaping @Sendable () -> Date = { Date() }) {
+        self.init(source: SQLiteLogicalBackupSource(store: store), activeVaultURL: store.rootURL, configurationStore: configurationStore,
+            requiresSelectedDirectoryScope: requiresSelectedDirectoryScope, destinationAuthority: destinationAuthority,
+            selectedDirectoryScope: selectedDirectoryScope, repositoryOpener: repositoryOpener, clock: clock)
+    }
+
+    private init(source: SQLiteLogicalBackupSource, activeVaultURL: URL, configurationStore: BackupLocalConfigurationStore,
+        requiresSelectedDirectoryScope: Bool,
+        destinationAuthority: BackupDestinationAuthority = BackupDestinationAuthority(),
+        selectedDirectoryScope: any BackupSelectedDirectorySecurityScope = SystemBackupSelectedDirectorySecurityScope(),
+        repositoryOpener: any BackupRepositoryOpening = SystemBackupRepositoryOpener(),
+        clock: @escaping @Sendable () -> Date = { Date() }) {
         self.activeVaultURL = activeVaultURL.standardizedFileURL
         self.configurationStore = configurationStore
         self.destinationAuthority = destinationAuthority
@@ -127,14 +132,7 @@ actor LiveBackupService: BackupServicing {
         self.requiresSelectedDirectoryScope = requiresSelectedDirectoryScope
         self.repositoryOpener = repositoryOpener
         self.clock = clock
-        if let inboxStore {
-            source = try PlaintextLibraryBackupSource(vault: vault, inboxStore: inboxStore)
-        } else {
-            source = try PlaintextLibraryBackupSource(
-                vault: vault,
-                deferredInboxRootURL: activeVaultURL
-            )
-        }
+        self.source = source
         setupService = BackupSetupService(
             configurationStore: configurationStore,
             destinationAuthority: destinationAuthority
@@ -294,7 +292,7 @@ actor LiveBackupService: BackupServicing {
         guard enabled else {
             return try await scheduler.disableAutomaticBackup()
         }
-        let pair = try await prepareSource().revisionPair
+        let pair = try await currentRevision()
         return try await scheduler.setAutomaticBackupEnabled(
             true,
             currentPair: pair,
@@ -351,7 +349,7 @@ actor LiveBackupService: BackupServicing {
             where error == .repositoryOffline {
             return try await scheduler.recordDestinationOffline(at: clock())
         }
-        let pair = try await prepareSource().revisionPair
+        let pair = try await currentRevision()
         do {
             let outcome = try await scheduler.handle(
                 event,
@@ -390,16 +388,18 @@ actor LiveBackupService: BackupServicing {
         )
     }
 
-    private func prepareSource() async throws -> PlaintextLibraryBackupPlan {
+    private func currentRevision() async throws -> BackupRevisionPair {
         #if DEBUG
-        sourcePreparationCount += 1
+        sourceRevisionReadCount += 1
         #endif
-        return try await source.prepare()
+        // A short read, but one that waits for the library's admission lock.
+        return try await LibraryStorageExecutor.run { try source.currentRevision() }
     }
 
     #if DEBUG
-    func sourcePreparationCountForTesting() -> Int {
-        sourcePreparationCount
+    /// How often the library's current revision was read from the source.
+    func sourceRevisionReadCountForTesting() -> Int {
+        sourceRevisionReadCount
     }
     #endif
 
@@ -450,7 +450,7 @@ private func makeRepository(
 
 private struct BookmarkScopedCheckpointCreator: BackupCheckpointCreating {
     let authority: BackupDestinationAuthority
-    let source: PlaintextLibraryBackupSource
+    let source: SQLiteLogicalBackupSource
     let configurationStore: BackupLocalConfigurationStore
     let bookmarkRefreshObserver: BookmarkRefreshObserver
 

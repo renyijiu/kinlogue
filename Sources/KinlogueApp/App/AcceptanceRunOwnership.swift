@@ -113,14 +113,14 @@ struct AcceptanceRunOwnership: Sendable {
         guard receiptData == (try Self.canonicalData(receipt)) else {
             throw SyntheticAcceptanceError.unsafeCleanupTarget
         }
-        let lockNames = Self.expectedVaultLockNames(runRoot: runRoot)
+        let lockNames = Self.expectedLibraryLockNames(runRoot: runRoot)
         let names = Set(try FileManager.default.contentsOfDirectory(atPath: runRoot.path))
         let permittedNames = lockNames.union([Self.receiptName])
         guard names.contains(Self.receiptName),
               names.isSubset(of: permittedNames) else {
             throw SyntheticAcceptanceError.unsafeCleanupTarget
         }
-        try Self.removeIdleVaultLocks(
+        try Self.removeIdleLibraryLocks(
             names.intersection(lockNames).sorted().map {
                 runRoot.appendingPathComponent($0)
             }
@@ -316,14 +316,15 @@ struct AcceptanceRunOwnership: Sendable {
         }
     }
 
-    private static func expectedVaultLockNames(runRoot: URL) -> Set<String> {
+    private static func expectedLibraryLockNames(runRoot: URL) -> Set<String> {
         let sourceVault = runRoot.resolvingSymlinksInPath()
             .appendingPathComponent("SourceVault", isDirectory: true)
             .standardizedFileURL
-        return VaultMutationLockNaming.filenames(forRootURL: sourceVault)
+        return SQLiteLibraryOwner.lockFilenames(rootURL: sourceVault)
     }
 
-    private static func removeIdleVaultLocks(_ urls: [URL]) throws {
+    /// Removes the library's owner lock files, and only while no process holds them.
+    private static func removeIdleLibraryLocks(_ urls: [URL]) throws {
         var descriptors: [(url: URL, descriptor: Int32)] = []
         defer {
             for entry in descriptors.reversed() {
@@ -343,16 +344,16 @@ struct AcceptanceRunOwnership: Sendable {
                   metadata.st_nlink == 1 else {
                 throw SyntheticAcceptanceError.unsafeCleanupTarget
             }
-            var request = Darwin.flock()
-            request.l_type = Int16(F_WRLCK)
-            request.l_whence = Int16(SEEK_SET)
-            request.l_start = 0
-            request.l_len = 0
-            guard fcntl(descriptor, F_SETLK, &request) == 0 else {
+            guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
                 throw SyntheticAcceptanceError.unsafeCleanupTarget
             }
         }
         for entry in descriptors {
+            var opened = stat(), current = stat()
+            guard fstat(entry.descriptor, &opened) == 0, lstat(entry.url.path, &current) == 0,
+                  opened.st_dev == current.st_dev, opened.st_ino == current.st_ino else {
+                throw SyntheticAcceptanceError.unsafeCleanupTarget
+            }
             guard Darwin.unlink(entry.url.path) == 0 else {
                 throw SyntheticAcceptanceError.unsafeCleanupTarget
             }

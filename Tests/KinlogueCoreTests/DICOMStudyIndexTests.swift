@@ -47,8 +47,6 @@ func indexRejectsDuplicateSeriesDigestAndMissingGeometryProjectionFields() throw
 func strictDecodersRejectOneUnknownKeyOnOtherwiseValidEverySchema() throws {
     let index = try sampleIndex(includingInertObject: false)
     let fingerprint = try DICOMStudyFingerprint(objects: [.init(sha256Digest: digest(7), byteCount: 5)])
-    let study = try DICOMStudy(state: .needsReview, fingerprint: fingerprint, indexObjectID: UUID(), attachmentIDs: [UUID()])
-    let catalog = try VaultCatalog(vaultID: UUID(), generation: 1)
     let object = try #require(fingerprint.objects.first)
     let vector = try DICOMStudyIndex.Vector3(x: 1, y: 2, z: 3)
     let attrs = try attributes()
@@ -59,7 +57,6 @@ func strictDecodersRejectOneUnknownKeyOnOtherwiseValidEverySchema() throws {
 
     try assertUnknownKeyRejected(DICOMStudyFingerprint.self, value: fingerprint)
     try assertUnknownKeyRejected(DICOMStudyFingerprint.ObjectDigest.self, value: object)
-    try assertUnknownKeyRejected(DICOMStudy.self, value: study)
     try assertUnknownKeyRejected(DICOMStudyIndex.self, value: index)
     try assertUnknownKeyRejected(DICOMStudyIndex.UIDDigest.self, value: uid)
     try assertUnknownKeyRejected(DICOMStudyIndex.Vector3.self, value: vector)
@@ -67,7 +64,6 @@ func strictDecodersRejectOneUnknownKeyOnOtherwiseValidEverySchema() throws {
     try assertUnknownKeyRejected(DICOMStudyIndex.RetainedObject.self, value: retained)
     try assertUnknownKeyRejected(DICOMStudyIndex.Instance.self, value: instance)
     try assertUnknownKeyRejected(DICOMStudyIndex.Series.self, value: series)
-    try assertUnknownKeyRejected(VaultCatalog.self, value: catalog)
 }
 
 @Test

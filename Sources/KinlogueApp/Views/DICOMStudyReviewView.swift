@@ -124,8 +124,7 @@ struct DICOMStudyReviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 if let content = model.content {
-                    let selectionLabels = RecordQuery.selectionLabels(
-                        for: content.selectableMembers
+                    let selectionLabels = LibraryMemberSummary.labels( content.selectableMembers
                     )
                     VStack(alignment: .leading, spacing: 10) {
                         Text(AppLocalization.string("检查内容"))

@@ -13,6 +13,10 @@ let package = Package(
     ],
     dependencies: [
         .package(
+            url: "https://github.com/groue/GRDB.swift.git",
+            exact: "7.11.1"
+        ),
+        .package(
             url: "https://github.com/ThalesMMS/DICOM-Swift.git",
             exact: "1.5.0"
         ),
@@ -27,6 +31,10 @@ let package = Package(
     ],
     targets: [
         .target(name: "KinlogueCore"),
+        .target(
+            name: "KinlogueSQLiteConfiguration",
+            linkerSettings: [.linkedLibrary("sqlite3")]
+        ),
         .target(name: "KinlogueDICOMIPC"),
         .executableTarget(
             name: "KinlogueDICOMDecoderHelper",
@@ -51,6 +59,8 @@ let package = Package(
             name: "KinloguePlatform",
             dependencies: [
                 "KinlogueCore",
+                "KinlogueSQLiteConfiguration",
+                .product(name: "GRDB", package: "GRDB.swift"),
                 "KinlogueDICOMIPC",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
@@ -101,11 +111,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "KinlogueStorageProcessFixture",
-            dependencies: ["KinlogueCore", "KinlogueDICOMIPC", "KinloguePlatform"],
-            linkerSettings: [
-                .linkedFramework("AppKit"),
-                .linkedFramework("CryptoKit"),
-            ]
+            dependencies: ["KinlogueCore", "KinlogueDICOMIPC", "KinloguePlatform"]
         ),
         .executableTarget(
             name: "KinlogueExportWriterProbe",

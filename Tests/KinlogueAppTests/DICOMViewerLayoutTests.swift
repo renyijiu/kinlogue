@@ -11,7 +11,7 @@ struct DICOMViewerSourceSafetyTests {
         let combined = viewer + canvas + controls
 
         for forbidden in [
-            "PlaintextVault", "DICOMDecoderAdapter", "FileHandle", "lastPathComponent",
+            "SQLiteLibraryStore", "DICOMDecoderAdapter", "FileHandle", "lastPathComponent",
             "studyInstanceUID", "seriesInstanceUID", "sopInstanceUID", "getAllTags",
             "ShareLink", "NSPasteboard", "draggable(",
         ] {

@@ -36,9 +36,10 @@ EXPECTED_ACCENT_COLOR_NAME="AccentColor"
 EXPECTED_ACCENT_COLOR_RGB="30 98 84"
 EXPECTED_PLATFORM_RESOURCE_BUNDLE="Kinlogue_KinloguePlatform.bundle"
 EXPECTED_ZIP_FOUNDATION_RESOURCE_BUNDLE="ZIPFoundation_ZIPFoundation.bundle"
+EXPECTED_GRDB_RESOURCE_BUNDLE="GRDB_GRDB.bundle"
 EXPECTED_LOCALIZATIONS='["zh-Hans","en"]'
 EXPECTED_THIRD_PARTY_NOTICE_FILE="THIRD_PARTY_NOTICES.md"
-EXPECTED_THIRD_PARTY_NOTICE_SHA256="85441747704719ba0ccf59f4833141ce21631433db58e4273243c7601c693e1a"
+EXPECTED_THIRD_PARTY_NOTICE_SHA256="1863b78c677c4f07b4f344097b09153d9f00446fcbdbf1d07d3d3a4c06facace"
 EXPECTED_LAN_PURPOSE="仅在您主动开启接收时，允许同一局域网中的设备向这台 Mac 上传资料。"
 EXPECTED_EN_LAN_PURPOSE="When you explicitly start receiving, allow devices on the same local network to upload documents to this Mac."
 EXPECTED_SWIFT_NIO_REVISION="0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b"
@@ -390,6 +391,7 @@ verify_release_prerequisites() {
   [[ "$graph_version" == "2.101.3" ]] \
     || fail "the resolved SwiftPM dependency graph is not SwiftNIO 2.101.3"
 
+  verify_grdb_prerequisites "$manifest_json" "$resolution" "$graph_json"
   verify_dicom_helper_prerequisites "$root" "$manifest_json"
 
   if [[ "$resolved_only" == true ]]; then
@@ -413,6 +415,52 @@ verify_release_prerequisites() {
     com.apple.security.files.user-selected.read-write \
     com.apple.security.files.bookmarks.app-scope \
     com.apple.security.network.server
+}
+
+verify_grdb_prerequisites() {
+  local manifest_json="$1" resolution="$2" graph_json="$3"
+  local index=0 identity="" match_count=0
+  while identity="$(/usr/bin/plutil -extract "dependencies.$index.sourceControl.0.identity" raw \
+      -expect string "$manifest_json" 2>/dev/null)"; do
+    if [[ "$identity" == "grdb.swift" ]]; then
+      match_count=$((match_count + 1))
+      [[ "$(/usr/bin/plutil -extract "dependencies.$index.sourceControl.0.location.remote.0.urlString" raw \
+          -expect string "$manifest_json")" == "https://github.com/groue/GRDB.swift.git" \
+          && "$(/usr/bin/plutil -extract "dependencies.$index.sourceControl.0.requirement.exact.0" raw \
+          -expect string "$manifest_json")" == "7.11.1" ]] \
+        || fail "GRDB must use the reviewed official repository and exact version"
+    fi
+    index=$((index + 1))
+  done
+  [[ "$match_count" -eq 1 ]] || fail "the manifest must contain exactly one GRDB dependency"
+  index=0
+  match_count=0
+  while identity="$(/usr/bin/plutil -extract "pins.$index.identity" raw \
+      -expect string "$resolution" 2>/dev/null)"; do
+    if [[ "$identity" == "grdb.swift" ]]; then
+      match_count=$((match_count + 1))
+      [[ "$(/usr/bin/plutil -extract "pins.$index.location" raw -expect string "$resolution")" \
+          == "https://github.com/groue/GRDB.swift.git" \
+          && "$(/usr/bin/plutil -extract "pins.$index.state.revision" raw -expect string "$resolution")" \
+          == "b83108d10f42680d78f23fe4d4d80fc88dab3212" \
+          && "$(/usr/bin/plutil -extract "pins.$index.state.version" raw -expect string "$resolution")" == "7.11.1" ]] \
+        || fail "the reviewed GRDB resolution drifted"
+    fi
+    index=$((index + 1))
+  done
+  [[ "$match_count" -eq 1 ]] || fail "Package.resolved must contain exactly one GRDB dependency"
+  index=0
+  match_count=0
+  while identity="$(/usr/bin/plutil -extract "dependencies.$index.identity" raw \
+      -expect string "$graph_json" 2>/dev/null)"; do
+    if [[ "$identity" == "grdb.swift" ]]; then
+      match_count=$((match_count + 1))
+      [[ "$(/usr/bin/plutil -extract "dependencies.$index.version" raw -expect string "$graph_json")" == "7.11.1" ]] \
+        || fail "the resolved graph must use GRDB 7.11.1"
+    fi
+    index=$((index + 1))
+  done
+  [[ "$match_count" -eq 1 ]] || fail "the resolved graph must contain exactly one GRDB dependency"
 }
 
 verify_swiftnio_checkout() {
@@ -670,6 +718,7 @@ RESOURCE_FILES="$(
   /usr/bin/find . -type f -print | LC_ALL=C /usr/bin/sort
 )"
 EXPECTED_RESOURCE_FILES="./$EXPECTED_ASSET_ARCHIVE_FILE
+./$EXPECTED_GRDB_RESOURCE_BUNDLE/PrivacyInfo.xcprivacy
 ./$EXPECTED_ICON_FILE
 ./$EXPECTED_PLATFORM_RESOURCE_BUNDLE/Info.plist
 ./$EXPECTED_PLATFORM_RESOURCE_BUNDLE/LANUpload/app.js
@@ -691,6 +740,13 @@ ZIP_FOUNDATION_PRIVACY_MANIFEST="$APP_BUNDLE/Contents/Resources/$EXPECTED_ZIP_FO
   || fail "the main App ZIPFoundation privacy manifest is missing or unsafe"
 /usr/bin/plutil -lint "$ZIP_FOUNDATION_PRIVACY_MANIFEST" >/dev/null \
   || fail "the main App ZIPFoundation privacy manifest is invalid"
+GRDB_PRIVACY_MANIFEST="$APP_BUNDLE/Contents/Resources/$EXPECTED_GRDB_RESOURCE_BUNDLE/PrivacyInfo.xcprivacy"
+[[ -f "$GRDB_PRIVACY_MANIFEST" \
+    && ! -L "$GRDB_PRIVACY_MANIFEST" \
+    && -s "$GRDB_PRIVACY_MANIFEST" ]] \
+  || fail "the main App GRDB privacy manifest is missing or unsafe"
+/usr/bin/plutil -lint "$GRDB_PRIVACY_MANIFEST" >/dev/null \
+  || fail "the main App GRDB privacy manifest is invalid"
 
 [[ -f "$THIRD_PARTY_NOTICE_SOURCE" \
     && ! -L "$THIRD_PARTY_NOTICE_SOURCE" \
@@ -834,6 +890,14 @@ HELPER_EXECUTABLE_SYMBOLS="$(/usr/bin/nm "$DICOM_HELPER_EXECUTABLE" 2>/dev/null)
   || fail "the DICOM Helper symbols could not be inspected"
 [[ "$HELPER_EXECUTABLE_SYMBOLS" == *DCMDecoder* ]] \
   || fail "the DICOM Helper executable does not contain the approved decoder"
+case "$HELPER_EXECUTABLE_SYMBOLS" in
+  *GRDB*|*_sqlite3_*)
+    fail "the DICOM Helper must not link the SQLite storage kernel"
+    ;;
+esac
+if /usr/bin/otool -L "$DICOM_HELPER_EXECUTABLE" | /usr/bin/grep -Fq 'libsqlite3'; then
+  fail "the DICOM Helper must not directly link SQLite"
+fi
 LEGACY_RUNTIME_PATTERN='(^|[^[:alnum:]_])(EncryptedVault|VaultCipher)([^[:alnum:]_]|$)'
 if LC_ALL=C /usr/bin/grep -r -n -E -- \
     "$LEGACY_RUNTIME_PATTERN" "$REPO_DIR/Sources" >/dev/null 2>&1; then

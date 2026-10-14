@@ -125,7 +125,8 @@ private func reviewPrepared(sequence: UInt64) throws -> BackupPreparedRestore {
         checkpointID: try BackupCheckpointID(bytes: Data(repeating: UInt8(sequence), count: 16)),
         revisionPair: try BackupRevisionPair(vault: revision, lanInbox: revision),
         sequence: sequence, memberCount: 0, recordCount: 0, inboxItemCount: 0,
-        plaintextByteCount: 1, formatVersion: .current
+        plaintextByteCount: 1, formatVersion: .current,
+        logicalDigest: Data(repeating: 0x5A, count: 32)
     )
     var metadata = stat()
     metadata.st_mode = mode_t(S_IFDIR | S_IRWXU)

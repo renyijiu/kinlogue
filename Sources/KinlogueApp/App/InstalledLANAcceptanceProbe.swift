@@ -223,22 +223,32 @@ struct InstalledLANAcceptanceProbe: Sendable {
         Data("synthetic-lan-page-b".utf8),
     ]
 
-    let rootURL: URL
+    let identity: AppRuntimeIdentity
     let runID: String
     let executableURL: URL
 
     func run() async throws -> InstalledLANAcceptanceEvent {
-        let receiver = LANReceiver(rootURL: rootURL)
+        let session = AcceptanceLibrarySession()
         do {
-            return try await exercise(receiver: receiver)
+            let inbox = try SQLiteLANInboxStore(store: try await session.library(identity: identity).store)
+            let receiver = LANReceiver(store: inbox)
+            do {
+                let event = try await exercise(receiver: receiver, inbox: inbox)
+                await session.close()
+                return event
+            } catch {
+                await receiver.stop()
+                throw error
+            }
         } catch {
-            await receiver.stop()
+            await session.close()
             throw (error as? InstalledLANAcceptanceProbeError) ?? .dependencyFailure
         }
     }
 
     private func exercise(
-        receiver: LANReceiver
+        receiver: LANReceiver,
+        inbox: SQLiteLANInboxStore
     ) async throws -> InstalledLANAcceptanceEvent {
         let reserved = try reserveLoopbackEndpoint()
         let listenerAbsentBeforeStart = !canConnect(to: reserved)
@@ -421,9 +431,8 @@ struct InstalledLANAcceptanceProbe: Sendable {
         try sendAll(Data(repeating: 0x31, count: 7), through: partialDescriptor)
         _ = Darwin.close(partialDescriptor)
 
-        let observationStore = try PlaintextLANInboxStore(rootURL: rootURL)
         try await waitUntil {
-            let summary = try await observationStore.storageSummary()
+            let summary = try await inbox.snapshotAndStorageSummary().storage
             let response = try request(
                 endpoint: endpoint,
                 bytes: authenticatedGetRequest(
@@ -451,9 +460,7 @@ struct InstalledLANAcceptanceProbe: Sendable {
         _ = Darwin.close(slowDescriptor)
         let listenerAbsentAfterStop = !canConnect(to: endpoint)
 
-        let store = try PlaintextLANInboxStore(rootURL: rootURL)
-        _ = try await store.initialize()
-        let snapshot = try await store.loadSnapshot()
+        let snapshot = try await inbox.initialize()
         let expectedIdentities = try Self.completedFixtureBytes.map { data in
             try LANInboxContentIdentity(
                 sha256Digest: Data(SHA256.hash(data: data)),
@@ -467,7 +474,7 @@ struct InstalledLANAcceptanceProbe: Sendable {
                 == Self.completedFixtureBytes.count
             && uploadResponses.allSatisfy { $0.outcome == .saved }
         let interruptedUploadCleanupVerified =
-            (try await store.storageSummary()).partialObjectCount == 0
+            (try await inbox.snapshotAndStorageSummary()).storage.partialObjectCount == 0
 
         let restarted = try await receiver.startInstalledAcceptanceProbe(
             port: endpoint.port
@@ -504,30 +511,37 @@ struct InstalledLANAcceptanceProbe: Sendable {
     }
 
     func verifyAfterProcessRestart() async throws -> InstalledLANRestartEvent {
-        let store = try PlaintextLANInboxStore(rootURL: rootURL)
-        _ = try await store.initialize()
-        let snapshot = try await store.loadSnapshot()
-        let completedFilesAfterProcessRestart =
-            try Self.completedFixtureBytes.allSatisfy { data in
-                let identity = try LANInboxContentIdentity(
-                    sha256Digest: Data(SHA256.hash(data: data)),
-                    byteCount: data.count
-                )
-                return snapshot.items.contains(where: {
-                    $0.contentIdentity == identity
-                })
-            }
-        let receiver = LANReceiver(rootURL: rootURL)
+        let session = AcceptanceLibrarySession()
         do {
-            let presentation = try await receiver.startInstalledAcceptanceProbe()
-            await receiver.stop()
-            return try InstalledLANRestartEvent(
-                executableSHA256: try executableSHA256(),
-                completedFilesAfterProcessRestart: completedFilesAfterProcessRestart,
-                listenerAbsentAfterRestartStop: !canConnect(to: presentation.endpoint)
-            )
+            let inbox = try SQLiteLANInboxStore(store: try await session.library(identity: identity).store)
+            let snapshot = try await inbox.initialize()
+            let completedFilesAfterProcessRestart =
+                try Self.completedFixtureBytes.allSatisfy { data in
+                    let identity = try LANInboxContentIdentity(
+                        sha256Digest: Data(SHA256.hash(data: data)),
+                        byteCount: data.count
+                    )
+                    return snapshot.items.contains(where: {
+                        $0.contentIdentity == identity
+                    })
+                }
+            let receiver = LANReceiver(store: inbox)
+            do {
+                let presentation = try await receiver.startInstalledAcceptanceProbe()
+                await receiver.stop()
+                let event = try InstalledLANRestartEvent(
+                    executableSHA256: try executableSHA256(),
+                    completedFilesAfterProcessRestart: completedFilesAfterProcessRestart,
+                    listenerAbsentAfterRestartStop: !canConnect(to: presentation.endpoint)
+                )
+                await session.close()
+                return event
+            } catch {
+                await receiver.stop()
+                throw error
+            }
         } catch {
-            await receiver.stop()
+            await session.close()
             throw (error as? InstalledLANAcceptanceProbeError) ?? .dependencyFailure
         }
     }

@@ -14,6 +14,7 @@ enum DICOMStudyReviewPhase: Equatable {
 final class DICOMStudyReviewModel: ObservableObject {
     let studyID: DICOMStudy.ID
     private let service: any DICOMAppServicing
+    private let onReadFailure: @MainActor (Error) -> Void
     private let onSnapshotChanged: @MainActor @Sendable (AppSnapshot) async -> Void
     private let onStudyMetadataChanged: @MainActor @Sendable (DICOMStudy.ID) async -> Void
     private let onStudyDeletionBegan: @MainActor @Sendable (DICOMStudy.ID) async -> Void
@@ -29,12 +30,14 @@ final class DICOMStudyReviewModel: ObservableObject {
     init(
         studyID: DICOMStudy.ID,
         service: any DICOMAppServicing,
+        onReadFailure: @escaping @MainActor (Error) -> Void = { _ in },
         onSnapshotChanged: @escaping @MainActor @Sendable (AppSnapshot) async -> Void = { _ in },
         onStudyMetadataChanged: @escaping @MainActor @Sendable (DICOMStudy.ID) async -> Void = { _ in },
         onStudyDeletionBegan: @escaping @MainActor @Sendable (DICOMStudy.ID) async -> Void = { _ in }
     ) {
         self.studyID = studyID
         self.service = service
+        self.onReadFailure = onReadFailure
         self.onSnapshotChanged = onSnapshotChanged
         self.onStudyMetadataChanged = onStudyMetadataChanged
         self.onStudyDeletionBegan = onStudyDeletionBegan
@@ -65,6 +68,7 @@ final class DICOMStudyReviewModel: ObservableObject {
             phase = .ready
         } catch {
             guard isCurrent(generation) else { return }
+            onReadFailure(error)
             content = nil
             operationFailed = true
             phase = .failed
@@ -87,6 +91,7 @@ final class DICOMStudyReviewModel: ObservableObject {
         do {
             let snapshot = try await service.saveDICOMStudy(SaveDICOMStudyCommand(
                 studyID: studyID,
+                expectedRevision: content.study.contentRevision,
                 memberID: selectedMemberID,
                 effectiveDate: effectiveDate
             ))
@@ -100,13 +105,12 @@ final class DICOMStudyReviewModel: ObservableObject {
                 await onStudyMetadataChanged(studyID)
                 guard isCurrent(generation) else { return false }
             }
-            let selectableMembers = RecordQuery.selectableMembers(
-                from: snapshot.members.filter {
+            let selectableMembers = LibraryMemberSummary.selectable( snapshot.members.filter {
                     !$0.isArchived || $0.id == updated.confirmedMemberID
                 },
                 includeArchived: true
             )
-            let memberLabels = RecordQuery.selectionLabels(for: selectableMembers)
+            let memberLabels = LibraryMemberSummary.labels( selectableMembers)
             self.content = DICOMStudyReviewContent(
                 viewerContent: DICOMStudyViewerContent(
                     study: updated,

@@ -12,9 +12,9 @@
 2. 续页创建专用 repository，生成一个 256-bit 随机恢复码，并要求完整回输和确认已经独立保存。
 3. 自动备份默认关闭。设置完成后可以手动“立即备份”，或再开启自动备份。
 
-专用 repository 的名称以 `.` 开头，Finder 默认不会在父目录列表中显示它。设置页提供“在访达中显示”，直接打开实际保存 `.kinloguebackup` 文件的 repository；手动备份运行期间显示明确的创建中状态，完成后才刷新“最近本地验证”。
+专用 repository 的名称以 `.` 开头，Finder 默认不会在父目录列表中显示它。设置页提供“在访达中显示”，直接打开实际保存 `.kinloguebackup` 文件的 repository；手动备份运行期间显示明确的创建中状态，完成后才刷新“最近本地验证”，并在按钮下方显示“新的恢复点已创建并通过验证。”；这条提示在状态下一次重新读取时消失，旧恢复点暂未清理或备份失败时不显示，只显示对应的说明。“最近本地验证”显示验证完成的日期和时刻，不显示随时间跳动的相对时间。
 
-已配置目录的授权失效时，可在设置页选择“重新授权原备份目录…”，重新选择原父目录。该操作核对父目录与 repository 的原设备/inode 身份，只更新持久 bookmark，不创建目录、不生成恢复码、不更换 writer，也不修改既有恢复点；选错目录或原 repository 已被替换时拒绝授权。手动备份运行期间，设置控件保持禁用；激活事件和状态刷新不会提前结束创建中状态或允许重复提交。
+已配置目录的授权失效时，可在设置页选择“重新授权原备份目录…”，重新选择原父目录。该操作核对父目录与 repository 的原 inode 身份（设备号不参与比较，见下文“目录身份与设备号”），只更新持久 bookmark，不创建目录、不生成恢复码、不更换 writer，也不修改既有恢复点；选错目录或原 repository 已被替换时拒绝授权。手动备份运行期间，设置控件保持禁用；激活事件和状态刷新不会提前结束创建中状态或允许重复提交。
 
 恢复码及其恢复私钥不会写入 Keychain、UserDefaults、配置文件或 repository。本机只保存不能解密恢复点的加密公钥和设备签名身份；遗失恢复码时续页无法找回或解密既有恢复点。
 
@@ -44,6 +44,18 @@
 4. 用户再次确认后，恢复会替换而不是合并当前资料库；durable receipt 保护 whole-root 切换、回滚和下次启动收敛。
 5. 成功后必须退出并重新打开 App。本机备份配置会移除，外部恢复点保持不变，也不会被自动采用为新的备份目标。
 
+移除本机备份配置时不读取也不校验配置的内容，只确认那个名字下是当前用户私有的普通文件，因此一份已经通不过校验的配置不会挡住恢复。[存储回归](../Tests/KinloguePlatformTests/BackupLocalConfigurationStoreTests.swift)和[启动测试](../Tests/KinlogueAppTests/SQLiteAppStartupTests.swift)覆盖带着一份读不出来的配置做恢复，以及同名位置不是私有普通文件时仍然拒绝。
+
+#### 目录身份与设备号
+
+备份配置记录用设备号加 inode 标识三个目录：配置自己所在的目录、用户选择的父目录和其中的 repository。macOS 不保证同一个卷的设备号跨重启或系统更新保持不变。早先这些身份连设备号一起比较，卷被重新编号后配置读取即被判为无效：状态页进入失败状态，自动备份停止，重新设置也因为读不出现有配置而无法开始，只剩恢复或删除资料库两条出路（这是按代码路径确认的，没有在界面上复现）。
+
+现在 [`BackupFilesystemIdentity`](../Sources/KinloguePlatform/Backup/BackupLocalConfigurationStore.swift) 只按 inode 判断是不是同一个目录，设备号照原样记录、不参与比较，也不会被改写成当前值。目录总是经由固定的父目录或解析出的 bookmark 到达，被替换的目录 inode 不同，仍然被拒绝；需要两个目录在同一个卷上的地方（首次设置时父目录与 repository）仍显式比较同一次取得的设备号。验证记录（witness）里绑定 repository 与恢复点文件的摘要改为取配置里登记的设备号，而不是文件当前的设备号：文件就在 repository 目录里，登记时两者相同，所以已有的验证记录不变，卷被重新编号之后也继续匹配，保留策略不会因此停摆。记录格式和摘要的 `v1` 域都没有变。
+
+恢复事务和废弃预检的收据（[`BackupRestoreDirectoryIdentity`](../Sources/KinloguePlatform/Backup/EncryptedCheckpointRestore.swift)）同样只比较 inode：收据由中断之后的下一次启动读取，中间卷可能已被重新编号，而连设备号一起比较会让那次启动以“收据无效”失败，资料库停在替换的中途。[配置回归](../Tests/KinloguePlatformTests/BackupLocalConfigurationStoreTests.swift)、[备份服务回归](../Tests/KinlogueAppTests/LiveBackupServiceTests.swift)和[恢复回归](../Tests/KinloguePlatformTests/EncryptedCheckpointRestoreTests.swift)把记录里的设备号改成另一个值，核对配置读取与更新、完整的两次备份及其验证记录、旧根移走后的回滚、新根就位后的提交和废弃预检的清理；目录被换成另一个时仍然拒绝。
+
+恢复成功或替换未完成时，界面只留下“退出续页”。这两种状态下恢复面板不允许关闭，而 AppKit 在有模态面板时会直接拒绝退出、不询问任何代理，按钮因此曾经不起作用。按钮现在先解除窗口对退出的拦截再走正常的终止流程（[`RestartRequiredQuit`](../Sources/KinlogueApp/App/RestartRequiredQuit.swift)）；终止仍被拒绝时直接结束进程，此时资料库的服务已经撤销，磁盘上的状态由下一次启动收敛。
+
 确认替换后，`LibraryLifecycleCoordinator` 会取消并等待已经进入的普通报告导入、重试和重新 OCR，以及 LAN、DICOM 与原件导出操作；这些任务到达终态后才允许 whole-root 切换。取消验证或重新选择恢复点会取消当前 preparation，并等待任务退出、完成本次 staging 清理尝试后再完成取消或开始下一次准备。operation generation 继续隔离迟到结果，较旧的 preparation 不能覆盖或取消较新的已验证恢复点。
 
 恢复 ViewModel 在文件授权返回后再次检查 generation，并冻结本次恢复码。释放授权后的迟到结果只丢弃自身 UI 发布；staging 清理由 `LiveRestoreService` 按 preparation generation 负责，不能在 ViewModel 中用全局 cancel 清理另一次恢复。对应组合回归见 [`BackupConcurrencyRegressionTests`](../Tests/KinlogueAppTests/BackupConcurrencyRegressionTests.swift)，目录授权持久化与身份拒绝见 [`LiveBackupServiceTests`](../Tests/KinlogueAppTests/LiveBackupServiceTests.swift)。
@@ -52,7 +64,14 @@
 
 ## 格式与安全边界
 
-- 一个恢复点覆盖 exact `VaultRevision` 与 exact durable LAN inbox revision，以及两者的完整 committed reachable graph；不包含 LAN partial、进程内任务、未提交 staging 或 App 偏好。
+当前写入容量版本为 `1.1`（minimum reader `1`）；旧身份、恢复根派生和设备签名契约保持兼容。容器层仍能解析并验证 `1.0` 和早先按文件树组织的恢复点，但恢复只接受逻辑格式：文件树格式的恢复点在清单通过认证之后、解密任何条目和写入任何暂存之前以“格式不受支持”被拒绝，不会被报成损坏，输入文件和当前资料库都保持不变。容器最多 30,002 条目（逻辑记录段，加上每个原件一项）、2²⁴ 个 payload frames、每 frame 256 KiB、32 MiB canonical manifest。名义明文预算 4 TiB；逐条向上取整和空条目也占 frame，实际容量由两个预算共同限制。超过预算在写入前返回 resource limit；这不是扩大 LAN 准入，也不代表无限大小的资料库均能备份。
+
+空间预检使用实际 plaintext、36 bytes/frame、实际 manifest 与至多 4 KiB 固定记录开销，并保留 256 MiB 空间余量。reader 逐帧扫描而不保存全部 frame 的位置数组。旧 reader 明确拒绝新版，不能用旧 App 恢复新恢复点。
+
+备份 source 在一次 admission 内固定 revision、pin 住可达原件并取得数据库的内部副本，随后在副本上逐项严格验证并输出逻辑记录，期间不阻塞普通读写。原件在流读取时核对 device/inode/长度/纳秒 mtime/ctime 组成的身份 token 并保留 SHA-256，发布前再整体核对一次 pin。这里没有全局缓存，也没有降低恢复时的完整图和原件校验。
+
+
+- 一个恢复点覆盖资料库的一个确切提交，以及它的完整已提交可达图：成员、报告及其 OCR 复核、草稿、LAN 队列与历史回执、DICOM 图和原件；不包含进行中的 LAN 上传、进程内任务、未提交的 staging 或 App 偏好。
 - 每次使用新的 DEK；CryptoKit HPKE `Curve25519/SHA-256/ChaChaPoly` 封装 DEK，payload 使用 AES-256-GCM、最多 256 KiB 的认证 frame。manifest 加密，footer 由 recovery-root 授权的设备 Ed25519 身份签名。
 - repository 只接受固定 opaque 叶名、regular file、单硬链接和有界大小；读取、发布与删除均基于 no-follow descriptor 和 identity 复核。正式叶排他发布，不覆盖同名文件。
 - publication mutex 是 app-private configuration root 的固定目录 inode；同步 repository 中遗留或外部创建的 `.kinlogue-publication.lock` 只作为兼容保留项忽略，不能参与互斥或替换真实 lease。保留清理与发布采用相同 lease 和 `repository → app-private configuration` 锁顺序，避免 scan/delete 与 publish 交错。
@@ -63,8 +82,15 @@
 
 ## 当前验证边界
 
-Core/Platform/App 自动化覆盖 canonical 格式、pending enrollment 重启恢复与显式放弃、错误恢复码、篡改/截断、资源上限、目录替换、稳定 writer 配置变化、真实双进程线性 publication、保留策略、私有 staging、whole-root 回滚、设置模型和降级恢复。LAN 图证据通过真实 store upload 与 `LANDerivedArtifactSink` 同时形成 reviewable derived artifact 和 durable `.preprocessing`：权威 source plan/container 包含前者的真实字节、排除 transient partial；生产 `BackupRestoreVerifier`/transaction 恢复后 strict validator 接受完整图，派生叶被逐字节篡改时拒绝，正常启动又把没有 partial 的 preprocessing 收敛为可重试 `.failed(.storageFailure)`，不会伪装成 reviewable。跨进程恢复探针不再维护第二套 activation 状态机：seed 只生成合成 checkpoint，execute 与 relaunch reconcile 直接调用生产 `BackupRestoreVerifier` 和 `BackupRestoreTransaction`。当前 Mac 的真实子进程矩阵会在 existing root 的 intent、writer reset、old-root move、new-root activation、validation、commit 六个 durable phase，以及 absent root 适用的五个 phase 触发 `SIGKILL`；新进程必须收敛到精确旧根、空根或新根，并由真实 Vault 与 durable LAN inbox strict validator 证明 receipt、staging 与 rollback 已清理。隔离的 ad-hoc probe 还完成了 20,000 对象、2 GiB 合成数据的流式备份和完整读取。
+Core/Platform/App 自动化覆盖 canonical 格式、pending enrollment 重启恢复与显式放弃、错误恢复码、篡改/截断、资源上限、目录替换、稳定 writer 配置变化、真实双进程线性 publication、保留策略、私有 staging、whole-root 回滚、设置模型和降级恢复。[逻辑备份测试](../Tests/KinloguePlatformTests/SQLiteLogicalBackupTests.swift)用真实的仓库和 LAN 上传建立资料库，恢复后逐项核对成员、报告及其 OCR、LAN 预处理结果、DICOM 图和原件导出；冻结时仍在处理中的草稿和 LAN 项以可重试的失败状态进入恢复点，进行中的上传不进入。[恢复测试](../Tests/KinloguePlatformTests/EncryptedCheckpointRestoreTests.swift)覆盖错误恢复码、文件树格式的拒绝、已有资料库的整根替换、旧根移走之后中断的回滚、截断的事务收据失败关闭，以及只清理有收据的废弃预检。[启动测试](../Tests/KinlogueAppTests/SQLiteAppStartupTests.swift)另外覆盖启动页的恢复入口：资料库目录是不受支持的旧格式时，经它恢复一个逻辑格式的恢复点会整根替换该目录，下一次启动打开恢复后的资料库并删除移走的旧目录。跨进程恢复探针不再维护第二套 activation 状态机：seed 只生成合成 checkpoint，execute 与 relaunch reconcile 直接调用生产 `BackupRestoreVerifier` 和 `BackupRestoreTransaction`。当前 Mac 的真实子进程矩阵会在 existing root 的 intent、writer reset、old-root move、new-root activation、validation、commit 六个 durable phase，以及 absent root 适用的五个 phase 触发 `SIGKILL`；新进程必须收敛到精确旧根、空根或新根，由对资料库的严格打开和逻辑校验确认内容，并证明 receipt、staging 与 rollback 已清理。另一个进程持有资料库时，恢复在准备任何暂存之前被拒绝；它放手之后同一次恢复成功。早先一个隔离的 ad-hoc probe 完成过 20,000 对象、2 GiB 合成数据的流式备份和完整读取；那是生产备份代码出现之前用探针自带的合成格式取得的可行性证据，产生它的那部分探针已经删除，同一性质现在由生产代码的逻辑备份测试和 [`run-storage-scale-probe.sh`](../scripts/run-storage-scale-probe.sh) 覆盖。
 
-activation 的安装探针按生产事务契约逐 phase 固定终态，不再把任意旧根或新根都视为成功：existing root 在 intent、writer reset、old-root move 后必须恢复精确旧根，后续三 phase 必须保留新根；absent root 在 intent、writer reset 后必须保持无根，后续三 phase 必须保留新根，且每项都要求 transaction/preflight receipt、staging 与 rollback 全部不存在。另一个 production integration case 在 preparation 已通过后定长破坏 staging 中的 committed Vault object；`BackupRestoreTransaction.activate` 的 activation 后 strict validation 必须返回 `graphInvalid`，并立即恢复逐文件相同的旧根或原本的无根状态，同时清空上述事务工件。
+[安装探针](../Sources/KinlogueStorageProcessFixture/BackupCapabilityProbe.swift)现在只剩整根激活这一组：[`run-backup-capability-probe.sh`](../scripts/run-backup-capability-probe.sh) 把 fixture 以只含 App Sandbox 的 entitlement 做 ad-hoc 签名、安装到用户的 Applications 目录，在沙盒容器里运行。原先用自带合成格式验证设备身份、密钥分离、repository 发布、bookmark、分块大小和大数据集的各组操作，连同脚本里对应的段落和 bookmark、用户选择文件两项 entitlement 一起删除，因为生产代码已有自己的实现和测试。它按生产事务契约逐 phase 固定终态，不再把任意旧根或新根都视为成功：existing root 在 intent、writer reset、old-root move 后必须恢复精确旧根，后续三 phase 必须保留新根；absent root 在 intent、writer reset 后必须保持无根，后续三 phase 必须保留新根，且每项都要求 transaction/preflight receipt、staging 与 rollback 全部不存在。[真实进程测试](../Tests/KinlogueStorageProcessTests/SQLiteLogicalRestoreProcessTests.swift)另有两个场景在新根激活之后破坏其中一个原件：下一个进程的 reconcile 必须发现校验失败，恢复逐文件相同的旧根或原本的无根状态，并清空上述事务工件。
 
 当前 Mac 已人工完成真实 Powerbox 目录设置和多次“立即备份”，并在 Finder 中核对专用 repository 内存在多个完整 `.kinloguebackup` 文件；该证据只覆盖本机已安装开发候选，不代替正式分发门禁。尚未执行的人工/分发门禁包括：手动恢复、真实阿里云盘/百度网盘客户端传播、外置盘/NAS、macOS 26/27 独立机器、Developer ID/notarization，以及键盘/VoiceOver 恢复流程。准确状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
+
+
+## 逻辑恢复点
+
+备份与恢复使用 [logical-v1](sqlite-storage.md#逻辑恢复点与原件导出)：恢复点保存 schema 解耦的领域记录和原件，完整保留 OCR 复核、LAN 历史回执及 DICOM 图。短暂持锁生成的应用自有数据库副本只是内部捕获工件，不进入恢复点。后续合法编辑不使已捕获版本失效；外部容器继续使用既有流式加密、回读、排他发布和 witness。
+
+恢复在本应用创建的新库中重建并严格验证逻辑记录和原件，整库事务由资料库的单实例 owner 持有；文件树格式的旧恢复点被明确拒绝，不自动迁移或改写。真实 service、冻结 wire 夹具和 19 个 root/capture 故障场景已通过本机定向回归。独立探针已完成近上限、约 9.76 GiB 原件与 20,001 个原件的真实加密发布及严格恢复；三档分别用时 35.393/86.389/15.710 秒和 173.388/293.429/160.168 秒。每档只运行一次完整闭环，不声称 p95。实际条目下界、内存、FD、admission 与验证边界见 [实测记录](storage-refactor-measurement-2026-10-11.md#sqlite-完整规模闭环)；App/系统及 macOS 26 验证仍待完成。

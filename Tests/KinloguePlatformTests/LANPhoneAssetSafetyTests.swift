@@ -923,7 +923,7 @@ struct LANPhoneAssetSafetyTests {
             .joined()
 
         #expect(
-            digest == "85441747704719ba0ccf59f4833141ce21631433db58e4273243c7601c693e1a"
+            digest == "1863b78c677c4f07b4f344097b09153d9f00446fcbdbf1d07d3d3a4c06facace"
         )
         for requiredText in [
             "SwiftNIO 2.101.3",
@@ -939,6 +939,9 @@ struct LANPhoneAssetSafetyTests {
             "Copyright 2026 Raster Images Private Limited",
             "Swift Argument Parser 1.8.2",
             "ZIPFoundation 0.9.20",
+            "GRDB 7.11.1",
+            "b83108d10f42680d78f23fe4d4d80fc88dab3212",
+            "Copyright (C) 2015-2025 Gwendal Roué",
             "Copyright 2025 Thales Matheus Mendonça Santos",
             "Copyright (c) 2017-2025 Thomas Zoechling",
             "The SwiftNIO Project",
@@ -960,6 +963,7 @@ struct LANPhoneAssetSafetyTests {
         )
 
         #expect(script.contains("Kinlogue_KinloguePlatform.bundle"))
+        #expect(script.contains("GRDB_GRDB.bundle"))
         #expect(script.contains("Contents/Resources"))
         #expect(script.contains("/usr/bin/ditto"))
         #expect(script.contains("THIRD_PARTY_NOTICES.md"))
@@ -984,8 +988,10 @@ struct LANPhoneAssetSafetyTests {
         #expect(verifier.contains(
             "EXPECTED_PLATFORM_RESOURCE_BUNDLE=\"Kinlogue_KinloguePlatform.bundle\""
         ))
+        #expect(verifier.contains("GRDB_GRDB.bundle"))
         for resource in [
             "./$EXPECTED_ASSET_ARCHIVE_FILE",
+            "./$EXPECTED_GRDB_RESOURCE_BUNDLE/PrivacyInfo.xcprivacy",
             "./$EXPECTED_ICON_FILE",
             "./$EXPECTED_PLATFORM_RESOURCE_BUNDLE/Info.plist",
             "./$EXPECTED_PLATFORM_RESOURCE_BUNDLE/LANUpload/app.js",
@@ -999,7 +1005,7 @@ struct LANPhoneAssetSafetyTests {
             "EXPECTED_THIRD_PARTY_NOTICE_FILE=\"THIRD_PARTY_NOTICES.md\""
         ))
         #expect(verifier.contains(
-            "EXPECTED_THIRD_PARTY_NOTICE_SHA256=\"85441747704719ba0ccf59f4833141ce21631433db58e4273243c7601c693e1a\""
+            "EXPECTED_THIRD_PARTY_NOTICE_SHA256=\"1863b78c677c4f07b4f344097b09153d9f00446fcbdbf1d07d3d3a4c06facace\""
         ))
         #expect(verifier.contains(
             "/usr/bin/cmp -s \"$THIRD_PARTY_NOTICE_SOURCE\" \"$THIRD_PARTY_NOTICE_FILE\""

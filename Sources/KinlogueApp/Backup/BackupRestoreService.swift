@@ -30,7 +30,8 @@ actor BackupRestoreService {
         transaction: BackupRestoreTransaction,
         configurationStore: BackupLocalConfigurationStore,
         operationCoordinator: BackupOperationCoordinator,
-        lifecycle: LibraryLifecycleCoordinator
+        lifecycle: LibraryLifecycleCoordinator,
+        database: SQLiteLibraryStore? = nil
     ) {
         operations = Operations(
             prepare: { checkpointURL, recoveryCode in
@@ -45,7 +46,8 @@ actor BackupRestoreService {
             },
             revokeLifecycle: { await lifecycle.revoke() },
             activate: { prepared, resetWriter in
-                try await transaction.activate(
+                try database?.closeDatabaseForReplacement()
+                return try await transaction.activate(
                     prepared: prepared,
                     resetWriter: resetWriter
                 )
@@ -85,8 +87,11 @@ actor BackupRestoreService {
     ) async throws -> BackupRestoreActivationResult {
         try await operations.destructiveFence {
             await self.operations.revokeLifecycle()
-            return try await self.operations.activate(prepared) {
-                try await self.operations.removeWriterConfiguration()
+            // Activation replaces the root and strictly validates it; both wait on storage.
+            return try await LibraryStorageExecutor.run {
+                try await self.operations.activate(prepared) {
+                    try await self.operations.removeWriterConfiguration()
+                }
             }
         }
     }
@@ -95,7 +100,10 @@ actor BackupRestoreService {
     /// committed restore keeps `requiresApplicationRestart`; this method is
     /// for next-launch convergence, never hot service rebinding.
     func reconcileBeforeStartingServices() async throws -> BackupRestoreReconciliationOutcome {
-        try await operations.reconcilePreflights()
-        return try await operations.reconcile()
+        try await LibraryStorageExecutor.run {
+            let outcome = try await operations.reconcile()
+            try await operations.reconcilePreflights()
+            return outcome
+        }
     }
 }

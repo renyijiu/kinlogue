@@ -14,9 +14,7 @@ struct LANRealSocketBackpressureTests {
     private static let maximumEventLoopP99Nanoseconds = UInt64(250_000_000)
 
     @Test
-    func productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect()
-        async throws
-    {
+    func productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect() async throws {
         let fixture = try await LANInboxStoreTestFixture.make()
         defer { fixture.destroy() }
 
@@ -24,7 +22,7 @@ struct LANRealSocketBackpressureTests {
         let eventLoopCapture = RealEventLoopCapture()
         let storeOperations = RealReceiverOperationCapture()
         let receiver = LANReceiver(
-            rootURL: fixture.rootURL,
+            store: fixture.store,
             session: LANSession(),
             storeObserver: { storeOperations.record($0) }
         )
@@ -321,7 +319,7 @@ struct LANRealSocketBackpressureTests {
             _ = Darwin.close(abruptDescriptor)
             try await realWaitUntilAsync(timeout: .seconds(3)) {
                 guard let snapshot = try? await fixture.store.loadSnapshot(),
-                      let summary = try? await fixture.store.storageSummary() else {
+                      let summary = try? await fixture.store.snapshotAndStorageSummary().storage else {
                     return false
                 }
                 return snapshot.items.count == 2
@@ -345,11 +343,11 @@ struct LANRealSocketBackpressureTests {
             let finalSnapshot = try await fixture.store.loadSnapshot()
             #expect(finalSnapshot.items.count == 2)
             #expect(finalSnapshot.blobs.count == 2)
-            let summary = try await fixture.store.storageSummary()
+            let summary = try await fixture.store.snapshotAndStorageSummary().storage
             #expect(summary.partialObjectCount == 0)
 
             print(
-                "LAN_REAL_SOCKET_CALIBRATION "
+                "LAN_REAL_SOCKET_CALIBRATION backend=sqlite "
                     + "fixture_a_bytes=\(Self.firstLargeFixtureByteCount) "
                     + "fixture_b_bytes=\(Self.secondLargeFixtureByteCount) "
                     + "abrupt_fixture_bytes=\(Self.abruptFixtureByteCount) "

@@ -324,20 +324,20 @@ private func policy(
 private struct IndexerFixture {
     let base: URL
     let vault: URL
-    let staging: VaultDICOMStudyStaging
+    let staging: DICOMStudyStaging
     let operationID = UUID()
     let vaultID = UUID()
-    let ownership: VaultDICOMStagingOwnership
+    let ownership: DICOMStagingOwnership
 
     init() throws {
         base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         vault = base.appendingPathComponent("vault", isDirectory: true)
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
-        staging = try VaultDICOMStudyStaging(rootURL: vault)
+        staging = try DICOMStudyStaging(rootURL: vault)
         ownership = try staging.prepare(operationID: operationID)
     }
 
-    func stage(_ data: Data) throws -> VaultDICOMStagedObject {
+    func stage(_ data: Data) throws -> DICOMStagedObject {
         let url = base.appendingPathComponent(UUID().uuidString)
         try data.write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }

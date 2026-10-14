@@ -72,6 +72,10 @@ OCR 输出预算：最多 4,096 blocks；单 block UTF-8 最多 64 KiB；总文�
 
 ## 候选字段与来源
 
+本地重新识别、LAN 预处理与 Core 单来源兼容归属共用 [`OCRBlock.attributed(to:blockID:)`](../Sources/KinlogueCore/Domain/OCRBlock.swift) 的字段构造。本地保留 extractor block ID，LAN 按既有顺序生成新 ID；两者用持久来源覆盖 extractor 自带的归属，保留文件内页码并清除临时报告页投影。已有归属的 Core 校验仍拒绝身份不符或越界，不重新指派。文件验证、平台 OCR 和候选抽取原本就已共享，各入口继续拥有各自提交和失败规则。
+
+[真实 SQLite 对照测试](../Tests/KinlogueAppTests/SQLiteOCRAttributionIntegrationTests.swift) 覆盖相同合成 PDF 的本地导入/重新识别及 LAN 上传/预处理/归档，核对文本、来源引用、ID 分配、手工日期/备注和失败后的显式重试。这是行为与维护性证据，不是 OCR 性能或混合任务内存达标证据。
+
 `ReportCandidateExtractor` 只做可重复的候选抽取，例如成员名、机构、科室、报告类型、标题、日期候选、reported results、conclusion 和 abnormal items。它不生成 OCR 中不存在的 conclusion。当前 extraction version 5 在保留既有标签的基础上，覆盖以下保守别名：
 
 | 候选字段 | 支持的常见标签示例 |
@@ -128,9 +132,9 @@ Vision 常把“查”识别成异体字“査”，使“检査所见”一类�
 
 ## 失败、重试和幂等
 
-`ImportDraft` 的 processing 使用 `revision + attemptID` lease：旧任务完成、失败或取消后，不能覆盖一个新 attempt。启动时只自动恢复 `.staging` 和中断的 `.processing`；失败 draft 保持失败状态，只有用户显式 retry 才回到 processing，无法处理的 draft 可以明确 discard。待确认页的手动 OCR 只接受当前 `needsReview` revision，并通过 `saveReview` 原子发布新的 OCR document；过期页面不能覆盖较新的保存结果。
+`ImportDraft` 的 processing 使用 `revision + attemptID` lease：旧任务完成、失败或取消后，不能覆盖一个新 attempt。资料库打开并发布 Ready 后，App-owned `AppProcessingCoordinator` 在后台只自动恢复 `.staging` 和中断的 `.processing`，每个终态自动刷新 App snapshot；durable `.failed` 只有用户显式 retry 才回到 processing，并允许显式 discard。若开始或完成处理的持久化失败，App 保留绑定原 draft/attempt 的内存失败标记，在 durable `.staging` / `.processing` 上提供现有重试入口，不伪造持久状态、不自动循环、不放宽 discard。新 attempt、成功终态或删除使旧失败标记失效；取消和 lifecycle 撤销不添加重试标记。待确认页的手动 OCR 只接受当前 `needsReview` revision，并通过 `saveReview` 原子发布新的 OCR document；过期页面不能覆盖较新的保存结果。
 
-存储侧先持久化原件/草稿，再写 OCR document，最后把引用完整的 catalog generation 原子发布。重启读取会保留结构完整的 `.needsReview` / `.failed` 供用户处理，只把 `.staging` / `.processing` 交给自动恢复，不返回 dangling source reference。
+存储侧先持久化原件并登记草稿，OCR 文档和草稿的新 revision 在同一个数据库事务里保存。重启读取会保留结构完整的 `.needsReview` / `.failed` 供用户处理，只把 `.staging` / `.processing` 交给自动恢复，不返回 dangling source reference。草稿 ID 按创建时刻递增，待确认列表和自动恢复都按导入的先后排列。处理所在的任务被取消时不记成失败：草稿留在 `.processing`，由下一次启动继续，这条规则在 [`ImportWorkflow`](../Sources/KinlogueCore/Import/ImportWorkflow.swift) 里；识别服务自己放弃而任务仍在运行时，记为“已取消”的失败，需要手动重试；处理期间草稿已被别处改动时，重新识别以“复核内容已过期”的错误结束，而不是一般性失败。
 
 App 层把 Finder 报告导入、失败草稿重试和“重新识别并覆盖”三条可持久化路径纳入共享 `LibraryLifecycleCoordinator`。整库恢复或删除撤销 lifecycle 时，注册 hook 会取消这些 admitted OCR/import task 并等待它们结束；已经取消但仍处于 `.processing` 的 draft 由下一次正常启动按既有 lease 恢复，迟到 task 不能在 whole-root 切换后发布旧 generation。只读的复核快照、原件加载和查询不进入该 fence。
 
@@ -139,10 +143,10 @@ App 层把 Finder 报告导入、失败草稿重试和“重新识别并覆盖�
 - `ImportedFileValidatorTests`：类型、锁定 PDF、页/像素/大小边界、坏内容和多帧图片。
 - `TextExtractionTests`：PDF text layer、Vision 路径、页顺序、orientation、预算和 provenance。
 - `ReportCandidateExtractorTests`、`ImportDraftTests`、`ImportWorkflowIntegrationTests`：候选、标签与取值配对、医院抬头与表单名称、异体字匹配且不改写 OCR、叙述段落边界、提取版本刷新、状态转移、lease、重试、确认和落盘。
-- `LiveAppServiceRecognitionIntegrationTests`、`LANReportArchiveTests`：真实 Vault 的多原件总量超过快照预算、识别中草稿变化，以及目的原件/OCR 损坏时保留完好的 inbox 副本。
-- `DICOMFolderScannerTests`、`DICOMStudyIndexerTests`、`DICOMImportWorkflowIntegrationTests` 与 `CatalogProcessCoordinationTests`：有界目录 intake、staged-byte authority、atomic publication、journal recovery、取消、并发、强制终止和 Vault destroy 竞争。
-- `DICOMSeriesGeometryTests`、`DICOMDisplayTransformTests`、`DICOMSliceServiceTests` 与 `DICOMSliceVaultIntegrationTests`：policy-v2 顺序、stored sample 到 grayscale、进程级预算/cache/scheduler、取消/失效和 verified descriptor/destroy fence。
-- `DICOMImportModelTests`、`DICOMStudyReviewModelTests`、`DICOMAppModelTests`、`DICOMViewSafetyTests` 与 `LiveDICOMAppServiceIntegrationTests`：文件夹入口、晚到结果 fence、明确确认/删除、时间线内选中与类型筛选、报告查询隔离和生成式真实 Vault 链路。
+- `LiveAppServiceRecognitionIntegrationTests`、`LANItemPreprocessorTests`、`SQLiteLANInboxTests`：真实资料库上多原件总量超过单次读取预算的重新识别、识别中草稿变化、逐项预处理的失败与重试，以及目的原件/OCR 损坏时保留完好的 inbox 副本。
+- `DICOMFolderScannerTests`、`DICOMStudyIndexerTests`、`SQLiteDICOMTests` 与 `SQLiteProcessCoordinationTests`：有界目录 intake、staged-byte authority、整图原子发布、原件交接窗口的恢复、取消、并发和强制终止。
+- `DICOMSeriesGeometryTests`、`DICOMDisplayTransformTests`、`DICOMSliceServiceTests` 与 `SQLiteDICOMTests`：policy-v2 顺序、stored sample 到 grayscale、进程级预算/cache/scheduler、取消/失效，以及 verified descriptor 和目标变更的围栏。
+- `DICOMImportModelTests`、`DICOMStudyReviewModelTests`、`DICOMAppModelTests`、`DICOMViewSafetyTests` 与 `LiveDICOMAppServiceIntegrationTests`：文件夹入口、晚到结果 fence、明确确认/删除、时间线内选中与类型筛选、报告查询隔离和生成式真实资料库链路。
 - `LiveAppServiceTests`、`RecordDetailViewLayoutTests`、`ComparisonModelTests`：真实 App service 链路、原件展示和 verbatim comparison。
 
 Vision 输出可能随 macOS 版本变化；测试应优先断言 anchor、顺序、方法和来源引用，不使用对整段 OCR 字节的脆弱快照。真实样本 OCR 抽检必须在仓库外完成。
@@ -150,3 +154,9 @@ Vision 输出可能随 macOS 版本变化；测试应优先断言 anchor、顺�
 ## 系统写作工具边界
 
 报告复核中的逐字转录编辑器通过 SwiftUI `writingToolsBehavior(.disabled)` 禁用系统写作工具；已确认记录的原生多行编辑器（结果、结论与个人备注）设置 `NSTextView.writingToolsBehavior = .none`。用户仍可手动编辑和撤销，原件及确认门不变。这只限制这些编辑器的系统写作入口，不承诺阻止用户复制、截图或在其他应用处理内容。实现见 [`ImportReviewView`](../Sources/KinlogueApp/Views/ImportReviewView.swift)、[`RecordEditView`](../Sources/KinlogueApp/Views/RecordEditView.swift)，回归见 [`ImportReviewViewSafetyTests`](../Tests/KinlogueAppTests/ImportReviewViewSafetyTests.swift)、[`RecordEditViewLayoutTests`](../Tests/KinlogueAppTests/RecordEditViewLayoutTests.swift)。
+
+精确去重按完整来源多重集（摘要和长度）匹配。候选的来源字节、OCR 和目标 revision 都经过验证，损坏的候选不会吞掉新导入的完好副本。
+
+## 存储链路
+
+[报告/OCR 数据库仓库](sqlite-storage.md#报告ocr-与窄查询) 已实现 `ImportDraftStore` 的处理、复核、确认和丢弃事务。`confirm` / `discard` 只返回结果；App 通过目的型查询接口读取有界 header、草稿页和单项复核。完整的 `ImportDraftDocument` 与用户 `reviewState` 保存在独立表，复核修改不写新 OCR 文件；原件仍是受 pin 和引用保护的文件。[真实数据库测试](../Tests/KinloguePlatformTests/LibraryQueryIntegrationTests.swift) 与 [workflow 测试](../Tests/KinloguePlatformTests/ImportWorkflowIntegrationTests.swift) 覆盖该路径。

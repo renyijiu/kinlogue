@@ -29,14 +29,16 @@ struct AppModelTests {
         await model.selectRecord(fixture.confirmed.id)
 
         model.searchText = "Confirmed anchor"
+        await model.waitForCurrentPage()
 
         #expect(model.searchResults.map(\.id) == [fixture.confirmed.id])
         model.searchText = "Unconfirmed anchor"
+        await model.waitForCurrentPage()
         #expect(model.searchResults.isEmpty)
     }
 
     @Test
-    func searchTracksTheSelectedFamilyMemberAndClearsThePreviousDetail() async throws {
+    func searchTracksTheSelectedFamilyMemberAndRetainsAnOpenedTarget() async throws {
         let firstMember = try FamilyMember(displayName: "First synthetic member")
         let secondMember = try FamilyMember(displayName: "Second synthetic member")
         let firstRecord = try HealthRecord(
@@ -52,7 +54,7 @@ struct AppModelTests {
             conclusion: try SourceField(originalTranscription: "Shared synthetic conclusion")
         )
         let service = AppServiceSpy(
-            snapshot: AppSnapshot(
+            snapshot: TestLibrarySnapshot(
                 members: [firstMember, secondMember],
                 records: [firstRecord, secondRecord],
                 drafts: []
@@ -67,18 +69,22 @@ struct AppModelTests {
         let model = AppModel(service: service)
         await model.start()
         model.searchText = "Shared"
+        await model.waitForCurrentPage()
         #expect(Set(model.searchResults.map(\.id)) == Set([firstRecord.id, secondRecord.id]))
 
         model.selectedMemberID = firstMember.id
+        await model.waitForCurrentPage()
         #expect(model.searchResults.map(\.id) == [firstRecord.id])
         await model.selectRecord(firstRecord.id)
         #expect(model.selectedRecord?.id == firstRecord.id)
 
         model.selectedMemberID = secondMember.id
+        await model.waitForCurrentPage()
         #expect(model.searchResults.map(\.id) == [secondRecord.id])
         #expect(model.selectedRecord == nil)
 
         model.selectedMemberID = nil
+        await model.waitForCurrentPage()
         #expect(Set(model.searchResults.map(\.id)) == Set([firstRecord.id, secondRecord.id]))
     }
 
@@ -99,7 +105,7 @@ struct AppModelTests {
             contentTypeIdentifier: "com.adobe.pdf"
         )
         let service = AppServiceSpy(
-            snapshot: AppSnapshot(
+            snapshot: TestLibrarySnapshot(
                 members: [member, otherMember],
                 records: [older, undated, newestOverall, newer],
                 drafts: []
@@ -136,7 +142,7 @@ struct AppModelTests {
             importState: .confirmed
         )
         let service = AppServiceSpy(
-            snapshot: AppSnapshot(members: [member, emptyMember], records: [undated], drafts: []),
+            snapshot: TestLibrarySnapshot(members: [member, emptyMember], records: [undated], drafts: []),
             originals: [undated.id: OriginalDocumentPayload(
                 data: Data([0x25, 0x50, 0x44, 0x46]),
                 contentTypeIdentifier: "com.adobe.pdf"
@@ -331,23 +337,23 @@ struct AppModelTests {
         let model = AppModel(service: AppServiceSpy(snapshot: fixture.snapshot))
         await model.start()
 
-        model.presentReviewDraft(UUID())
+        await model.presentReviewDraft(UUID())
         #expect(model.reviewingDraft == nil)
 
         model.presentNewMemberEditor()
         #expect(model.isMemberEditorPresented)
-        model.presentReviewDraft(fixture.draft.id)
+        await model.presentReviewDraft(fixture.draft.id)
         #expect(model.reviewingDraft == nil)
 
         model.isMemberEditorPresented = false
-        model.presentReviewDraft(fixture.draft.id)
+        await model.presentReviewDraft(fixture.draft.id)
         #expect(model.reviewDraftID == fixture.draft.id)
         model.presentImporter()
         #expect(!model.isImporterPresented)
 
         model.reviewingDraft = nil
         model.isVaultDeletionPresented = true
-        model.presentReviewDraft(fixture.draft.id)
+        await model.presentReviewDraft(fixture.draft.id)
         #expect(model.reviewingDraft == nil)
         model.presentImporter()
         #expect(!model.isImporterPresented)
@@ -498,7 +504,7 @@ struct AppModelTests {
     @Test
     func refreshRemovingAQueuedDraftDismissesItsReviewPresentation() async throws {
         let fixture = try AppFixture()
-        let refreshed = AppSnapshot(
+        let refreshed = TestLibrarySnapshot(
             generation: fixture.snapshot.generation + 1,
             members: fixture.snapshot.members,
             records: fixture.snapshot.records,
@@ -509,7 +515,7 @@ struct AppModelTests {
             refreshedSnapshot: refreshed
         ))
         await model.start()
-        model.presentReviewDraft(fixture.draft.id)
+        await model.presentReviewDraft(fixture.draft.id)
         #expect(model.reviewDraftID == fixture.draft.id)
 
         await model.refresh()
@@ -589,7 +595,7 @@ struct AppModelTests {
         let firstBytes = Data([1])
         let secondBytes = Data([2])
         let service = AppServiceSpy(
-            snapshot: AppSnapshot(
+            snapshot: TestLibrarySnapshot(
                 members: [firstMember, secondMember],
                 records: [firstRecord, secondRecord],
                 drafts: []
@@ -658,15 +664,24 @@ struct AppModelTests {
         #expect(model.originalDocument == nil)
     }
 
-    @Test
-    func anOlderRefreshCannotUnlockTheUIAfterANewerRefreshFails() async throws {
+    @Test(arguments: [false, true])
+    func refreshCancellationKeepsReadyAndOlderSuccessCannotUndoFailure(cancelled: Bool) async throws {
         let fixture = try AppFixture()
         let service = OutOfOrderRefreshService(snapshot: fixture.snapshot)
         let model = AppModel(service: service)
         await model.start()
 
+        var shutdownRequests = 0
+        if cancelled { model.onLibraryUnavailable = { shutdownRequests += 1 } }
         let olderRefresh = Task { await model.refresh() }
         while await service.refreshCallCount == 0 { await Task.yield() }
+        if cancelled {
+            await service.completeOlderRefresh(cancelled: true)
+            await olderRefresh.value
+            #expect(model.phase == .ready && !model.members.isEmpty)
+            #expect(shutdownRequests == 0)
+            return
+        }
 
         await model.refresh()
         #expect(model.phase == .locked)
@@ -680,29 +695,39 @@ struct AppModelTests {
         #expect(model.timelineSections.isEmpty)
     }
 
-    @Test
-    func beginningWholeVaultLifecycleClearsDataAndRejectsLateSnapshots() async throws {
+    @Test(arguments: [false, true])
+    func beginningWholeVaultLifecycleClearsDataAndRejectsLateSnapshots(fromFailedRetry: Bool) async throws {
         let fixture = try AppFixture()
         let service = OutOfOrderRefreshService(snapshot: fixture.snapshot)
         let model = AppModel(service: service)
         await model.start()
 
-        let refresh = Task { await model.refresh() }
+        let refresh = Task {
+            if fromFailedRetry { await model.retryDraft(fixture.draft.id) }
+            else { await model.refresh() }
+        }
         while await service.refreshCallCount == 0 { await Task.yield() }
 
-        await model.beginDestructiveVaultLifecycle()
+        var drained = false
+        let changing = Task { await model.beginDestructiveVaultLifecycle(); drained = true }
+        for _ in 0..<100 where model.phase != .changingVault { await Task.yield() }
+        #expect(!drained)
         #expect(model.phase == .changingVault)
         #expect(model.members.isEmpty)
         #expect(model.timelineSections.isEmpty)
+        #expect(model.banner == nil)
         #expect(model.selectedRecord == nil)
         #expect(model.originalDocument == nil)
 
         await service.completeOlderRefresh()
         await refresh.value
+        await changing.value
+        #expect(drained)
 
         #expect(model.phase == .changingVault)
         #expect(model.members.isEmpty)
         #expect(model.timelineSections.isEmpty)
+        #expect(model.banner == nil)
 
         model.requireRestartAfterVaultLifecycle()
         #expect(model.phase == .restartRequired)
@@ -736,7 +761,7 @@ struct AppModelTests {
             revision: 1,
             failureCode: .textExtractionFailed
         )
-        let service = AppServiceSpy(snapshot: AppSnapshot(
+        let service = AppServiceSpy(snapshot: TestLibrarySnapshot(
             members: [],
             records: [],
             drafts: [DraftSummary(draft: failed)]
@@ -758,7 +783,7 @@ struct AppModelTests {
             revision: 1,
             failureCode: .textExtractionFailed
         )
-        let snapshot = AppSnapshot(
+        let snapshot = TestLibrarySnapshot(
             members: [],
             records: [],
             drafts: [DraftSummary(draft: failed)]
@@ -785,7 +810,7 @@ struct AppModelTests {
             revision: 1,
             failureCode: .textExtractionFailed
         )
-        let snapshot = AppSnapshot(
+        let snapshot = TestLibrarySnapshot(
             members: [],
             records: [],
             drafts: [DraftSummary(draft: failed)]
@@ -820,7 +845,7 @@ struct AppModelTests {
             revision: 7,
             failureCode: .textExtractionFailed
         )
-        let service = AppServiceSpy(snapshot: AppSnapshot(
+        let service = AppServiceSpy(snapshot: TestLibrarySnapshot(
             members: [],
             records: [],
             drafts: [DraftSummary(draft: first), DraftSummary(draft: second)]
@@ -843,13 +868,13 @@ struct AppModelTests {
     @Test
     func anOlderSnapshotCannotOverwriteNewerVisibleState() async throws {
         let fixture = try AppFixture()
-        let newer = AppSnapshot(
+        let newer = TestLibrarySnapshot(
             generation: 3,
             members: fixture.snapshot.members,
             records: fixture.snapshot.records,
             drafts: fixture.snapshot.drafts
         )
-        let older = AppSnapshot(generation: 2, members: [], records: [], drafts: [])
+        let older = TestLibrarySnapshot(generation: 2, members: [], records: [], drafts: [])
         let service = AppServiceSpy(snapshot: newer, refreshedSnapshot: older)
         let model = AppModel(service: service)
         await model.start()
@@ -863,13 +888,13 @@ struct AppModelTests {
     @Test
     func aNewDurableCatalogGenerationTriggersBackupSchedulingAfterBootstrap() async throws {
         let fixture = try AppFixture()
-        let initial = AppSnapshot(
+        let initial = TestLibrarySnapshot(
             generation: 7,
             members: fixture.snapshot.members,
             records: fixture.snapshot.records,
             drafts: fixture.snapshot.drafts
         )
-        let refreshed = AppSnapshot(
+        let refreshed = TestLibrarySnapshot(
             generation: 8,
             members: fixture.snapshot.members,
             records: fixture.snapshot.records,
@@ -933,7 +958,7 @@ struct AppModelTests {
         )
         let service = AppServiceSpy(
             snapshot: fixture.snapshot,
-            refreshedSnapshot: AppSnapshot(
+            refreshedSnapshot: TestLibrarySnapshot(
                 generation: fixture.snapshot.generation + 1,
                 members: fixture.snapshot.members,
                 records: [latest],
@@ -967,7 +992,7 @@ struct AppModelTests {
         )
         let service = AppServiceSpy(
             snapshot: fixture.snapshot,
-            refreshedSnapshot: AppSnapshot(
+            refreshedSnapshot: TestLibrarySnapshot(
                 generation: fixture.snapshot.generation + 1,
                 members: fixture.snapshot.members,
                 records: [fixture.draftRecord, latest],
@@ -1000,7 +1025,7 @@ struct AppModelTests {
 
         #expect(await model.updateRecord(command) == .recordChanged(latest: latest))
         #expect(model.editingRecord?.id == fixture.confirmed.id)
-        #expect(model.timelineSections.flatMap(\.records).first { $0.id == latest.id } == latest)
+        #expect(model.timelineSections.flatMap(\.records).first { $0.id == latest.id } == LibraryReportSummary(record: latest))
         #expect(model.selectedRecord == latest)
         #expect(await service.updatedCommands == [command])
     }
@@ -1037,7 +1062,7 @@ struct AppModelTests {
     @Test
     func deletingTheSelectedRecordReleasesItsOriginalBeforeTheServiceReturns() async throws {
         let fixture = try AppFixture()
-        let deletedSnapshot = AppSnapshot(
+        let deletedSnapshot = TestLibrarySnapshot(
             generation: fixture.snapshot.generation + 1,
             members: fixture.snapshot.members,
             records: [fixture.draftRecord],
@@ -1082,7 +1107,7 @@ struct AppModelTests {
         )
         let model = AppModel(service: service)
         await model.start()
-        model.requestDeleteMember(fixture.member)
+        model.requestDeleteMember(LibraryMemberSummary(fixture.member))
 
         await model.confirmDeleteMember(id: fixture.member.id)
 
@@ -1100,14 +1125,14 @@ struct AppModelTests {
     @Test
     func unreferencedMemberDeletionAppliesTheReturnedSnapshot() async throws {
         let fixture = try AppFixture()
-        let deletedSnapshot = AppSnapshot(
+        let deletedSnapshot = TestLibrarySnapshot(
             generation: fixture.snapshot.generation + 1,
             members: [],
             records: [],
             drafts: []
         )
         let service = AppServiceSpy(
-            snapshot: AppSnapshot(
+            snapshot: TestLibrarySnapshot(
                 generation: fixture.snapshot.generation,
                 members: [fixture.member],
                 records: [],
@@ -1118,7 +1143,8 @@ struct AppModelTests {
         let model = AppModel(service: service)
         await model.start()
         model.selectedMemberID = fixture.member.id
-        model.requestDeleteMember(fixture.member)
+        await model.waitForCurrentPage()
+        model.requestDeleteMember(LibraryMemberSummary(fixture.member))
 
         await model.confirmDeleteMember(id: fixture.member.id)
 
@@ -1154,7 +1180,7 @@ struct AppModelTests {
             contentTypeIdentifier: "public.png"
         )
         let service = AppServiceSpy(
-            snapshot: AppSnapshot(
+            snapshot: TestLibrarySnapshot(
                 members: [member],
                 records: [record],
                 drafts: []
@@ -1202,13 +1228,13 @@ struct AppModelTests {
             importState: .confirmed,
             title: try .manualEntry("Updated title")
         )
-        let initialSnapshot = AppSnapshot(
+        let initialSnapshot = TestLibrarySnapshot(
             generation: 1,
             members: [member],
             records: [record],
             drafts: []
         )
-        let updatedSnapshot = AppSnapshot(
+        let updatedSnapshot = TestLibrarySnapshot(
             generation: 2,
             members: [member],
             records: [updatedRecord],
@@ -1259,9 +1285,32 @@ struct AppModelTests {
     }
 }
 
-actor AppServiceSpy: AppDataServicing {
-    private var currentSnapshot: AppSnapshot
-    private let refreshedSnapshot: AppSnapshot?
+actor AppServiceSpy: TestLibraryServing {
+    private var pageGate: OriginalLoadGate?
+    private var gatedQuery: String?
+    private var gatedMember: UUID?
+    private var failPage = false
+    private var stalePage = false
+    private(set) var pageCalls = 0
+    func gatePage(_ gate: OriginalLoadGate, query: String? = nil, member: UUID? = nil) {
+        pageGate = gate; gatedQuery = query; gatedMember = member
+    }
+    func failNextPage() { failPage = true }
+    func staleNextPage() { stalePage = true }
+    func beforePage(query: String?, memberID: UUID?, cursor: LibraryQueryCursor?) async throws {
+        pageCalls += 1
+        if failPage { failPage = false; throw AppServiceError.recordUnavailable }
+        if stalePage { stalePage = false; throw LibraryReportError.staleCursor }
+        if let pageGate, (gatedQuery != nil && query == gatedQuery) || (gatedMember != nil && memberID == gatedMember) {
+            await pageGate.wait()
+        }
+    }
+    private let draftPageGate: OriginalLoadGate?
+    private(set) var nextDraftPageCalls = 0
+    private let recordLoadGate: OriginalLoadGate?
+    private var recordLoadCalls = 0
+    private var currentSnapshot: TestLibrarySnapshot
+    private let refreshedSnapshot: TestLibrarySnapshot?
     private let refreshError: AppServiceError?
     private var outcomes: [AppImportOutcome]
     private let documents: [ImportDraft.ID: ImportReviewContent]
@@ -1278,11 +1327,11 @@ actor AppServiceSpy: AppDataServicing {
     private let originalLoadGate: OriginalLoadGate?
     private let originalLoadGates: [HealthRecord.ID: OriginalLoadGate]
     private let sourceOriginalLoadGates: [ReportSource.ID: OriginalLoadGate]
-    private let recordDeletionSnapshot: AppSnapshot?
-    private let recordUpdateSnapshot: AppSnapshot?
+    private let recordDeletionSnapshot: TestLibrarySnapshot?
+    private let recordUpdateSnapshot: TestLibrarySnapshot?
     private let recordUpdateError: AppServiceError?
     private let recordDeletionDelay: Duration?
-    private let memberDeletionSnapshot: AppSnapshot?
+    private let memberDeletionSnapshot: TestLibrarySnapshot?
     private let memberDeletionError: AppServiceError?
     private let deferError: AppServiceError?
     private let importGate: OriginalLoadGate?
@@ -1300,9 +1349,11 @@ actor AppServiceSpy: AppDataServicing {
     private(set) var deletedMemberIDs: [FamilyMember.ID] = []
 
     init(
-        snapshot: AppSnapshot,
+        snapshot: TestLibrarySnapshot,
+        recordLoadGate: OriginalLoadGate? = nil,
+        draftPageGate: OriginalLoadGate? = nil,
         importOutcomes: [AppImportOutcome] = [],
-        refreshedSnapshot: AppSnapshot? = nil,
+        refreshedSnapshot: TestLibrarySnapshot? = nil,
         refreshError: AppServiceError? = nil,
         documents: [ImportDraft.ID: ImportReviewContent] = [:],
         originals: [HealthRecord.ID: OriginalDocumentPayload] = [:],
@@ -1318,16 +1369,18 @@ actor AppServiceSpy: AppDataServicing {
         originalLoadGate: OriginalLoadGate? = nil,
         originalLoadGates: [HealthRecord.ID: OriginalLoadGate] = [:],
         sourceOriginalLoadGates: [ReportSource.ID: OriginalLoadGate] = [:],
-        recordUpdateSnapshot: AppSnapshot? = nil,
+        recordUpdateSnapshot: TestLibrarySnapshot? = nil,
         recordUpdateError: AppServiceError? = nil,
-        recordDeletionSnapshot: AppSnapshot? = nil,
+        recordDeletionSnapshot: TestLibrarySnapshot? = nil,
         recordDeletionDelay: Duration? = nil,
-        memberDeletionSnapshot: AppSnapshot? = nil,
+        memberDeletionSnapshot: TestLibrarySnapshot? = nil,
         memberDeletionError: AppServiceError? = nil,
         deferError: AppServiceError? = nil,
         importGate: OriginalLoadGate? = nil
     ) {
         currentSnapshot = snapshot
+        self.recordLoadGate = recordLoadGate
+        self.draftPageGate = draftPageGate
         self.outcomes = importOutcomes
         self.refreshedSnapshot = refreshedSnapshot
         self.refreshError = refreshError
@@ -1355,17 +1408,42 @@ actor AppServiceSpy: AppDataServicing {
         self.importGate = importGate
     }
 
-    func bootstrap() async throws -> AppSnapshot { currentSnapshot }
+    func loadRecords(ids: [UUID]) async throws -> LibraryRecordSelection {
+        let fixture = currentSnapshot
+        recordLoadCalls += 1
+        if recordLoadCalls == 1, let recordLoadGate { await recordLoadGate.wait() }
+        return LibraryRecordSelection(revision: fixture.revision, records: try ids.map { id in
+            guard let record = fixture.records.first(where: { $0.id == id && $0.importState == .confirmed }) else {
+                throw AppServiceError.recordUnavailable
+            }
+            return record
+        })
+    }
+    func draftPage(states: [ImportState], cursor: LibraryQueryCursor?) async throws -> AppDraftPage {
+        let fixture = currentSnapshot
+        let drafts = fixture.drafts.filter { states.contains($0.state) }.sorted { $0.id.uuidString < $1.id.uuidString }
+        let start = cursor.flatMap { value in drafts.firstIndex { $0.id == value.lastID } }.map { $0 + 1 } ?? 0
+        if cursor != nil { nextDraftPageCalls += 1; if let draftPageGate { await draftPageGate.wait() } }
+        let items = Array(drafts.dropFirst(start).prefix(100))
+        let next = start + items.count < drafts.count ? items.last.map {
+            LibraryQueryCursor(libraryID: fixture.revision.libraryID, commitID: fixture.revision.commitID,
+                openEpoch: fixture.revision.openEpoch, scope: "drafts", memberID: nil, lastID: $0.id, lastDate: nil)
+        } : nil
+        return AppDraftPage(revision: fixture.revision, items: items, nextCursor: next, damagedIDs: [])
+    }
+    func queryFixture() -> TestLibrarySnapshot { currentSnapshot }
+    func replaceFixture(_ fixture: TestLibrarySnapshot) { currentSnapshot = fixture }
+    func bootstrap() async throws -> AppSnapshot { currentSnapshot.header }
     func refresh() async throws -> AppSnapshot {
         if let refreshError { throw refreshError }
         if let refreshedSnapshot { currentSnapshot = refreshedSnapshot }
-        return currentSnapshot
+        return currentSnapshot.header
     }
     func createMember(displayName: String, disambiguationLabel: String?) async throws -> AppSnapshot {
-        currentSnapshot
+        currentSnapshot.header
     }
-    func updateMember(_ member: FamilyMember) async throws -> AppSnapshot { currentSnapshot }
-    func archiveMember(id: FamilyMember.ID) async throws -> AppSnapshot { currentSnapshot }
+    func updateMember(_ member: FamilyMember, replacing expected: FamilyMember) async throws -> AppSnapshot { currentSnapshot.header }
+    func archiveMember(id: FamilyMember.ID) async throws -> AppSnapshot { currentSnapshot.header }
     func importFile(at url: URL) async throws -> AppImportOutcome {
         importCallCount += 1
         if let importGate { await importGate.wait() }
@@ -1390,7 +1468,7 @@ actor AppServiceSpy: AppDataServicing {
     }
     func loadReviewOriginal(
         draftID: ImportDraft.ID,
-        sourceID: ReportSource.ID
+        sourceID: ReportSource.ID, expectedRevision: UInt64, expectedLibrary: LibraryRevision
     ) async throws -> OriginalDocumentPayload {
         reviewSourceOriginalLoadCallIDs.append(sourceID)
         guard documents[draftID]?.draft.sources.elements.contains(where: {
@@ -1404,25 +1482,25 @@ actor AppServiceSpy: AppDataServicing {
     }
     func confirmDraft(_ command: ConfirmDraftCommand) async throws -> AppSnapshot {
         confirmedCommands.append(command)
-        return currentSnapshot
+        return currentSnapshot.header
     }
     func updateRecord(_ command: UpdateRecordCommand) async throws -> AppSnapshot {
         updatedCommands.append(command)
         if let recordUpdateError { throw recordUpdateError }
         if let recordUpdateSnapshot { currentSnapshot = recordUpdateSnapshot }
-        return currentSnapshot
+        return currentSnapshot.header
     }
     func deleteRecord(id: HealthRecord.ID) async throws -> AppSnapshot {
         deletedRecordIDs.append(id)
         if let recordDeletionDelay { try await Task.sleep(for: recordDeletionDelay) }
         if let recordDeletionSnapshot { currentSnapshot = recordDeletionSnapshot }
-        return currentSnapshot
+        return currentSnapshot.header
     }
     func deleteMember(id: FamilyMember.ID) async throws -> AppSnapshot {
         deletedMemberIDs.append(id)
         if let memberDeletionError { throw memberDeletionError }
         if let memberDeletionSnapshot { currentSnapshot = memberDeletionSnapshot }
-        return currentSnapshot
+        return currentSnapshot.header
     }
     func deferDraft(_ command: DeferDraftCommand) async throws {
         if let deferError { throw deferError }
@@ -1430,7 +1508,7 @@ actor AppServiceSpy: AppDataServicing {
     }
     func discardDraft(_ command: DiscardDraftCommand) async throws -> AppSnapshot {
         discardedDraftCommands.append(command)
-        return currentSnapshot
+        return currentSnapshot.header
     }
     private func loadFallbackOriginal(
         recordID: HealthRecord.ID
@@ -1451,7 +1529,7 @@ actor AppServiceSpy: AppDataServicing {
     }
     func loadOriginal(
         recordID: HealthRecord.ID,
-        sourceID: ReportSource.ID
+        sourceID: ReportSource.ID, expectedRevision: UInt64, expectedLibrary: LibraryRevision
     ) async throws -> OriginalDocumentPayload {
         sourceOriginalLoadCallIDs.append(sourceID)
         if let value = sourceOriginals[sourceID] {
@@ -1512,16 +1590,17 @@ actor OriginalLoadGate {
     }
 }
 
-private actor OutOfOrderRefreshService: AppDataServicing {
-    private let snapshot: AppSnapshot
+private actor OutOfOrderRefreshService: TestLibraryServing {
+    private let snapshot: TestLibrarySnapshot
     private var olderRefresh: CheckedContinuation<AppSnapshot, any Error>?
     private(set) var refreshCallCount = 0
 
-    init(snapshot: AppSnapshot) {
+    init(snapshot: TestLibrarySnapshot) {
         self.snapshot = snapshot
     }
 
-    func bootstrap() async throws -> AppSnapshot { snapshot }
+    func queryFixture() -> TestLibrarySnapshot { snapshot }
+    func bootstrap() async throws -> AppSnapshot { snapshot.header }
 
     func refresh() async throws -> AppSnapshot {
         refreshCallCount += 1
@@ -1533,18 +1612,19 @@ private actor OutOfOrderRefreshService: AppDataServicing {
         throw AppServiceError.vaultUnavailable
     }
 
-    func completeOlderRefresh() {
-        olderRefresh?.resume(returning: snapshot)
+    func completeOlderRefresh(cancelled: Bool = false) {
+        if cancelled { olderRefresh?.resume(throwing: CancellationError()) }
+        else { olderRefresh?.resume(returning: snapshot.header) }
         olderRefresh = nil
     }
 
     func createMember(displayName: String, disambiguationLabel: String?) async throws -> AppSnapshot {
-        snapshot
+        snapshot.header
     }
-    func updateMember(_ member: FamilyMember) async throws -> AppSnapshot { snapshot }
-    func archiveMember(id: FamilyMember.ID) async throws -> AppSnapshot { snapshot }
+    func updateMember(_ member: FamilyMember, replacing expected: FamilyMember) async throws -> AppSnapshot { snapshot.header }
+    func archiveMember(id: FamilyMember.ID) async throws -> AppSnapshot { snapshot.header }
     func importFile(at url: URL) async throws -> AppImportOutcome { .failed(.importFailed) }
-    func retryDraft(id: ImportDraft.ID) async throws -> AppImportOutcome { .failed(.importFailed) }
+    func retryDraft(id: ImportDraft.ID) async throws -> AppImportOutcome { throw AppServiceError.importFailed }
     func loadReview(draftID: ImportDraft.ID) async throws -> ImportReviewContent {
         throw AppServiceError.draftUnavailable
     }
@@ -1553,19 +1633,19 @@ private actor OutOfOrderRefreshService: AppDataServicing {
     }
     func loadReviewOriginal(
         draftID: ImportDraft.ID,
-        sourceID: ReportSource.ID
+        sourceID: ReportSource.ID, expectedRevision: UInt64, expectedLibrary: LibraryRevision
     ) async throws -> OriginalDocumentPayload {
         throw AppServiceError.draftUnavailable
     }
-    func confirmDraft(_ command: ConfirmDraftCommand) async throws -> AppSnapshot { snapshot }
-    func updateRecord(_ command: UpdateRecordCommand) async throws -> AppSnapshot { snapshot }
-    func deleteRecord(id: HealthRecord.ID) async throws -> AppSnapshot { snapshot }
-    func deleteMember(id: FamilyMember.ID) async throws -> AppSnapshot { snapshot }
+    func confirmDraft(_ command: ConfirmDraftCommand) async throws -> AppSnapshot { snapshot.header }
+    func updateRecord(_ command: UpdateRecordCommand) async throws -> AppSnapshot { snapshot.header }
+    func deleteRecord(id: HealthRecord.ID) async throws -> AppSnapshot { snapshot.header }
+    func deleteMember(id: FamilyMember.ID) async throws -> AppSnapshot { snapshot.header }
     func deferDraft(_ command: DeferDraftCommand) async throws {}
-    func discardDraft(_ command: DiscardDraftCommand) async throws -> AppSnapshot { snapshot }
+    func discardDraft(_ command: DiscardDraftCommand) async throws -> AppSnapshot { snapshot.header }
     func loadOriginal(
         recordID: HealthRecord.ID,
-        sourceID: ReportSource.ID
+        sourceID: ReportSource.ID, expectedRevision: UInt64, expectedLibrary: LibraryRevision
     ) async throws -> OriginalDocumentPayload {
         throw AppServiceError.recordUnavailable
     }
@@ -1599,7 +1679,7 @@ private struct AppFixture {
     let draftRecord: HealthRecord
     let attachment: KinlogueCore.Attachment
     let draft: ImportDraft
-    let snapshot: AppSnapshot
+    let snapshot: TestLibrarySnapshot
 
     init() throws {
         member = try FamilyMember(displayName: "Synthetic member")
@@ -1621,7 +1701,7 @@ private struct AppFixture {
             conclusion: try SourceField(originalTranscription: "Unconfirmed anchor")
         )
         draft = ImportDraft(attachmentID: attachment.id, state: .needsReview, documentObjectID: UUID())
-        snapshot = AppSnapshot(
+        snapshot = TestLibrarySnapshot(
             members: [member],
             records: [draftRecord, confirmed],
             drafts: [DraftSummary(draft: draft)]

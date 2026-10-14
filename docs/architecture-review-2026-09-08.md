@@ -10,7 +10,7 @@
 
 | 编号 | 优先级 | 用户可见后果 | 修复位置与原则 |
 | --- | --- | --- | --- |
-| 1 | P1 | 已归档对象同长度损坏后，去重归档可能移除投递箱的完好副本 | [PlaintextLANInboxStore](../Sources/KinloguePlatform/LAN/PlaintextLANInboxStore.swift)：在最终清理边界、同一 mutation lease 内验证实际目标原件与 OCR |
+| 1 | P1 | 已归档对象同长度损坏后，去重归档可能移除投递箱的完好副本 | PlaintextLANInboxStore（`Sources/KinloguePlatform/LAN/PlaintextLANInboxStore.swift`，已删除）：在最终清理边界、同一 mutation lease 内验证实际目标原件与 OCR |
 | 2 | P1 | 整库恢复时，旧 App 状态和独立 Viewer 像素仍可能存活 | [AppComposition](../Sources/KinlogueApp/App/AppComposition.swift)、[RestoreModel](../Sources/KinlogueApp/ViewModels/RestoreModel.swift)：复用删除流程的 App/LAN/Viewer 撤销 |
 | 3 | P1 | DICOM 原文件在检查后被换成 FIFO，导入与 Vault lease 可能无限等待 | [DICOMFolderScanner](../Sources/KinloguePlatform/DICOM/DICOMFolderScanner.swift)：非阻塞打开后继续检查类型、身份与长度 |
 | 4 | P2 | 备份成功后仍延后保留清理，旧恢复点累积 | [BackupOperationCoordinator](../Sources/KinlogueApp/Backup/BackupOperationCoordinator.swift)：使用验证完成时间评估 witness，保留真正时钟回退保护 |
@@ -33,12 +33,12 @@
 
 | 交接边界 | 可复核的回归入口 |
 | --- | --- |
-| 真实 Vault、逐来源 OCR 与损坏目标保护 | [识别集成测试](../Tests/KinlogueAppTests/LiveAppServiceRecognitionIntegrationTests.swift)、[LAN 归档测试](../Tests/KinloguePlatformTests/LANReportArchiveTests.swift) |
+| 真实 Vault、逐来源 OCR 与损坏目标保护 | [识别集成测试](../Tests/KinlogueAppTests/LiveAppServiceRecognitionIntegrationTests.swift)、LAN 归档测试（`Tests/KinloguePlatformTests/LANReportArchiveTests.swift`，已删除） |
 | writer 完成时间、保留与 scheduler | [协调器测试](../Tests/KinlogueAppTests/BackupOperationCoordinatorTests.swift)、[调度测试](../Tests/KinlogueAppTests/BackupSchedulerTests.swift)、[真实备份 service 测试](../Tests/KinlogueAppTests/LiveBackupServiceTests.swift) |
 | 恢复取消、App/LAN/独立窗口撤销 | [恢复 service 测试](../Tests/KinlogueAppTests/BackupRestoreServiceTests.swift)、[恢复界面模型测试](../Tests/KinlogueAppTests/RestoreModelTests.swift) |
 | 详情刷新与编辑保护 | [AppModel 测试](../Tests/KinlogueAppTests/AppModelTests.swift)、[核对表单契约](../Tests/KinlogueAppTests/ImportReviewViewSafetyTests.swift) |
 | LAN admission 和手机异步去重 | [文件生命周期测试](../Tests/KinloguePlatformTests/LANReceiverFileLifecycleTests.swift)、[实际手机脚本 Node VM 回归](../Tests/KinloguePlatformTests/LANPhoneAssetSafetyTests.swift) |
-| DICOM 源类型切换、lease 释放与 Helper 像素 | [扫描器测试](../Tests/KinloguePlatformTests/DICOMFolderScannerTests.swift)、[导入集成测试](../Tests/KinloguePlatformTests/DICOMImportWorkflowIntegrationTests.swift)、[真实 XPC probe](../Sources/KinlogueDICOMXPCProbe/KinlogueDICOMXPCProbe.swift) |
+| DICOM 源类型切换、lease 释放与 Helper 像素 | [扫描器测试](../Tests/KinloguePlatformTests/DICOMFolderScannerTests.swift)、导入集成测试（`Tests/KinloguePlatformTests/DICOMImportWorkflowIntegrationTests.swift`，已删除）、[真实 XPC probe](../Sources/KinlogueDICOMXPCProbe/KinlogueDICOMXPCProbe.swift) |
 | 匿名临时副本、签名与发布证据 | [DICOM 打包契约](../Tests/KinlogueAppTests/DICOMPackagingBoundaryTests.swift)、[执行实际脚本片段的发布回归](../Tests/KinlogueAppTests/ReleaseScriptSafetyTests.swift) |
 
 验证环境为 macOS 26.6.2 / arm64、Xcode 26.6（17F113）、Swift 6.3.3；全部数据为合成资料。
@@ -91,7 +91,7 @@
 - [Sources/KinlogueDICOMXPCProbe/KinlogueDICOMXPCProbe.swift](../Sources/KinlogueDICOMXPCProbe/KinlogueDICOMXPCProbe.swift)
 - [Sources/KinloguePlatform/DICOM/DICOMFolderScanner.swift](../Sources/KinloguePlatform/DICOM/DICOMFolderScanner.swift)
 - [Sources/KinloguePlatform/LAN/LANReceiver.swift](../Sources/KinloguePlatform/LAN/LANReceiver.swift)
-- [Sources/KinloguePlatform/LAN/PlaintextLANInboxStore.swift](../Sources/KinloguePlatform/LAN/PlaintextLANInboxStore.swift)
+- `Sources/KinloguePlatform/LAN/PlaintextLANInboxStore.swift`（已删除）
 - [Sources/KinloguePlatform/Resources/LANUpload/app.js](../Sources/KinloguePlatform/Resources/LANUpload/app.js)
 
 </details>
@@ -111,10 +111,10 @@
 - [Tests/KinlogueAppTests/ReleaseScriptSafetyTests.swift](../Tests/KinlogueAppTests/ReleaseScriptSafetyTests.swift)
 - [Tests/KinlogueAppTests/RestoreModelTests.swift](../Tests/KinlogueAppTests/RestoreModelTests.swift)
 - [Tests/KinloguePlatformTests/DICOMFolderScannerTests.swift](../Tests/KinloguePlatformTests/DICOMFolderScannerTests.swift)
-- [Tests/KinloguePlatformTests/DICOMImportWorkflowIntegrationTests.swift](../Tests/KinloguePlatformTests/DICOMImportWorkflowIntegrationTests.swift)
+- `Tests/KinloguePlatformTests/DICOMImportWorkflowIntegrationTests.swift`（已删除）
 - [Tests/KinloguePlatformTests/LANPhoneAssetSafetyTests.swift](../Tests/KinloguePlatformTests/LANPhoneAssetSafetyTests.swift)
 - [Tests/KinloguePlatformTests/LANReceiverFileLifecycleTests.swift](../Tests/KinloguePlatformTests/LANReceiverFileLifecycleTests.swift)
-- [Tests/KinloguePlatformTests/LANReportArchiveTests.swift](../Tests/KinloguePlatformTests/LANReportArchiveTests.swift)
+- `Tests/KinloguePlatformTests/LANReportArchiveTests.swift`（已删除）
 
 </details>
 

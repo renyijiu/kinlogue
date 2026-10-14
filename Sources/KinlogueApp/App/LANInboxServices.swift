@@ -2,10 +2,7 @@ import Foundation
 import KinlogueCore
 import KinloguePlatform
 
-struct LANInboxScreenSnapshot: Equatable, Sendable {
-    let snapshot: LANInboxSnapshot
-    let storage: LANInboxStorageSummary
-}
+typealias LANInboxScreenSnapshot = LANInboxQueueScreen
 
 struct LANReceiverDetails: Equatable, Sendable {
     let url: URL
@@ -16,15 +13,19 @@ struct LANReceiverDetails: Equatable, Sendable {
 protocol LANInboxServicing: Sendable {
     func initialize() async throws -> LANInboxScreenSnapshot
     func refresh() async throws -> LANInboxScreenSnapshot
+    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxScreenSnapshot
+    func processingPage(cursor: LANInboxPageCursor?) async throws -> LANInboxPage
+    func loadItems(ids: [UUID]) async throws -> [LANInboxItem]
     func resolveAddresses() async throws -> LANNetworkInterfaceResolution
     func startReceiving(at address: LANNetworkAddress) async throws -> LANReceiverDetails
     func stopReceiving() async
     func isReceiving() async -> Bool
     func changeGeneration() async -> UInt64
-    func preprocess(itemID: LANInboxItem.ID) async throws
+    func preprocess(itemID: LANInboxItem.ID, expectedRevision: UInt64?) async throws
     func delete(itemID: LANInboxItem.ID, expectedRevision: UInt64) async throws
     func archive(
         itemIDs: [LANInboxItem.ID],
+        expectedRevisions: [UInt64]?,
         memberID: FamilyMember.ID,
         canonicalReportDate: Date
     ) async throws -> LANReportArchiveResult
@@ -32,7 +33,11 @@ protocol LANInboxServicing: Sendable {
 }
 
 extension LANInboxServicing {
+    func preprocess(itemID: LANInboxItem.ID) async throws { try await preprocess(itemID: itemID, expectedRevision: nil) }
     func changeGeneration() async -> UInt64 { 0 }
+    func archive(itemIDs: [UUID], memberID: UUID, canonicalReportDate: Date) async throws -> LANReportArchiveResult {
+        try await archive(itemIDs: itemIDs, expectedRevisions: nil, memberID: memberID, canonicalReportDate: canonicalReportDate)
+    }
 }
 
 actor LiveLANInboxService: LANInboxServicing {
@@ -42,34 +47,29 @@ actor LiveLANInboxService: LANInboxServicing {
     ) async throws -> LANReceiverPresentation
 
     struct Dependencies: Sendable {
-        let sourceVerificationWillHash:
-            PlaintextLANInboxStore.SourceVerificationWillHash?
         let receiver: LANReceiver?
         let receiverStart: ReceiverStart
 
         init(
-            sourceVerificationWillHash:
-                PlaintextLANInboxStore.SourceVerificationWillHash? = nil,
             receiver: LANReceiver? = nil,
             receiverStart: @escaping ReceiverStart = { receiver, address in
                 try await receiver.start(at: address)
             }
         ) {
-            self.sourceVerificationWillHash = sourceVerificationWillHash
             self.receiver = receiver
             self.receiverStart = receiverStart
         }
     }
 
     private struct Runtime {
-        let inbox: PlaintextLANInboxStore
+        let inbox: SQLiteLANInboxStore
         let workflow: LANPendingQueueWorkflow
         let publicationGuard: LANInboxPublicationGuard
-        let changeMonitor: LANInboxChangeMonitor
     }
 
-    private let rootURL: URL
-    private let vault: PlaintextVault
+    private let inbox: SQLiteLANInboxStore
+    private var lastAdmissionGeneration: UInt64?
+    private var observedChangeGeneration: UInt64 = 0
     private let receiver: LANReceiver
     private let lifecycle: LibraryLifecycleCoordinator
     private let dependencies: Dependencies
@@ -78,22 +78,16 @@ actor LiveLANInboxService: LANInboxServicing {
     private var lifecycleRegistered = false
     private var revoked = false
 
-    init(
-        rootURL: URL,
-        vault: PlaintextVault,
-        lifecycle: LibraryLifecycleCoordinator,
-        dependencies: Dependencies = Dependencies()
-    ) {
-        self.rootURL = rootURL
-        self.vault = vault
+    init(store: SQLiteLibraryStore, lifecycle: LibraryLifecycleCoordinator, dependencies: Dependencies = Dependencies()) throws {
+        let inbox = try SQLiteLANInboxStore(store: store)
+        self.inbox = inbox
         self.lifecycle = lifecycle
         self.dependencies = dependencies
-        receiver = dependencies.receiver ?? LANReceiver(rootURL: rootURL)
+        receiver = dependencies.receiver ?? LANReceiver(store: inbox)
     }
 
     func initialize() async throws -> LANInboxScreenSnapshot {
         try await withActiveRuntimeOperation { runtime in
-            await runtime.workflow.resumeInterruptedWork()
             return try await Self.screenSnapshot(runtime: runtime)
         }
     }
@@ -135,12 +129,17 @@ actor LiveLANInboxService: LANInboxServicing {
     func isReceiving() async -> Bool { await receiver.isActive }
 
     func changeGeneration() async -> UInt64 {
-        runtime?.changeMonitor.currentGeneration() ?? 0
+        let generation = try? await inbox.itemAdmissionGeneration()
+        if generation != lastAdmissionGeneration || inbox.admissionPolicy.currentUsage.activeUploadCount > 0 {
+            lastAdmissionGeneration = generation
+            observedChangeGeneration &+= 1
+        }
+        return observedChangeGeneration
     }
 
-    func preprocess(itemID: LANInboxItem.ID) async throws {
+    func preprocess(itemID: LANInboxItem.ID, expectedRevision: UInt64? = nil) async throws {
         try await withActiveRuntimeOperation { runtime in
-            _ = try await runtime.workflow.preprocess(itemID: itemID)
+            _ = try await runtime.workflow.preprocess(itemID: itemID, expectedRevision: expectedRevision)
         }
     }
 
@@ -149,7 +148,7 @@ actor LiveLANInboxService: LANInboxServicing {
         expectedRevision: UInt64
     ) async throws {
         try await withActiveRuntimeOperation { [receiver] runtime in
-            _ = try await runtime.inbox.deleteItem(
+            try await runtime.inbox.removeItem(
                 itemID: itemID,
                 expectedRevision: expectedRevision,
                 activeSessionID: await receiver.activeSessionID
@@ -159,12 +158,14 @@ actor LiveLANInboxService: LANInboxServicing {
 
     func archive(
         itemIDs: [LANInboxItem.ID],
+        expectedRevisions: [UInt64]?,
         memberID: FamilyMember.ID,
         canonicalReportDate: Date
     ) async throws -> LANReportArchiveResult {
         try await withActiveRuntimeOperation { [receiver] runtime in
             try await runtime.workflow.archive(
                 itemIDs: itemIDs,
+                expectedRevisions: expectedRevisions,
                 memberID: memberID,
                 canonicalReportDate: canonicalReportDate,
                 activeSessionID: await receiver.activeSessionID
@@ -183,7 +184,6 @@ actor LiveLANInboxService: LANInboxServicing {
     private func revokeForVaultDeletion() async {
         guard !revoked else { return }
         revoked = true
-        runtime?.changeMonitor.stop()
         await receiver.stop()
         if let runtime {
             try? await runtime.inbox.revokePublications(
@@ -206,20 +206,10 @@ actor LiveLANInboxService: LANInboxServicing {
             lifecycleRegistered = true
         }
 
-        let inbox = try PlaintextLANInboxStore(
-            rootURL: rootURL,
-            sourceVerificationWillHash: dependencies.sourceVerificationWillHash
-        )
-        _ = try await inbox.initialize()
-        let changeMonitor = try LANInboxChangeMonitor(rootURL: rootURL)
-        let publicationGuard = try await inbox.publicationGuard()
+        try await inbox.prepare()
         let preprocessor = LANItemPreprocessor(inbox: inbox)
-        let archiveCoordinator = try LANReportArchiveCoordinator(
-            rootURL: rootURL,
-            inbox: inbox,
-            vault: vault,
-            preprocessor: preprocessor
-        )
+        let archiveCoordinator = LANReportArchiveCoordinator(inbox: inbox, preprocessor: preprocessor)
+        let publicationGuard = try await inbox.publicationGuard()
         let runtime = Runtime(
             inbox: inbox,
             workflow: LANPendingQueueWorkflow(
@@ -227,8 +217,7 @@ actor LiveLANInboxService: LANInboxServicing {
                 preprocessor: preprocessor,
                 archiveCoordinator: archiveCoordinator
             ),
-            publicationGuard: publicationGuard,
-            changeMonitor: changeMonitor
+            publicationGuard: publicationGuard
         )
         try await lifecycle.requireActive()
         guard !revoked else { throw LibraryLifecycleCoordinatorError.revoked }
@@ -245,18 +234,25 @@ actor LiveLANInboxService: LANInboxServicing {
         }
     }
 
-    private static func screenSnapshot(
-        runtime: Runtime
-    ) async throws -> LANInboxScreenSnapshot {
-        let projection = try await runtime.inbox.snapshotAndStorageSummary()
-        return LANInboxScreenSnapshot(
-            snapshot: projection.snapshot,
-            storage: projection.storage
-        )
+    private static func screenSnapshot(runtime: Runtime) async throws -> LANInboxScreenSnapshot {
+        try await runtime.inbox.queueScreen(cursor: nil)
+    }
+
+    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxScreenSnapshot {
+        try await withActiveRuntimeOperation { try await $0.inbox.queueScreen(cursor: cursor) }
+    }
+    func processingPage(cursor: LANInboxPageCursor?) async throws -> LANInboxPage {
+        try await withActiveRuntimeOperation { try await $0.inbox.itemPage(cursor: cursor, processing: true) }
+    }
+    func loadItems(ids: [UUID]) async throws -> [LANInboxItem] {
+        try await withActiveRuntimeOperation { try await $0.inbox.loadItems(ids: ids) }
     }
 }
 
 actor UnavailableLANInboxService: LANInboxServicing {
+    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxScreenSnapshot { throw AppServiceError.runtimeUnavailable }
+    func processingPage(cursor: LANInboxPageCursor?) async throws -> LANInboxPage { throw AppServiceError.runtimeUnavailable }
+    func loadItems(ids: [UUID]) async throws -> [LANInboxItem] { throw AppServiceError.runtimeUnavailable }
     func initialize() async throws -> LANInboxScreenSnapshot {
         throw AppServiceError.runtimeUnavailable
     }
@@ -271,7 +267,7 @@ actor UnavailableLANInboxService: LANInboxServicing {
     }
     func stopReceiving() async {}
     func isReceiving() async -> Bool { false }
-    func preprocess(itemID: LANInboxItem.ID) async throws {
+    func preprocess(itemID: LANInboxItem.ID, expectedRevision: UInt64? = nil) async throws {
         throw AppServiceError.runtimeUnavailable
     }
     func delete(itemID: LANInboxItem.ID, expectedRevision: UInt64) async throws {
@@ -279,6 +275,7 @@ actor UnavailableLANInboxService: LANInboxServicing {
     }
     func archive(
         itemIDs: [LANInboxItem.ID],
+        expectedRevisions: [UInt64]?,
         memberID: FamilyMember.ID,
         canonicalReportDate: Date
     ) async throws -> LANReportArchiveResult {

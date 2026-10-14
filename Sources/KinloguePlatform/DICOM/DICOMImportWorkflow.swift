@@ -10,56 +10,44 @@ public struct DICOMImportResult: Equatable, Sendable {
     public let ignoredDuplicateCount: Int
 }
 
-/// Orchestrates scan → opaque staging → staged-byte indexing → one manifest
+/// Orchestrates scan → opaque staging → staged-byte indexing → one graph
 /// publication. It never hands a user source URL to the decoder or persists it.
 public actor DICOMImportWorkflow {
     public private(set) var state: DICOMImportState = .ready
 
     private let rootURL: URL
-    private let vault: PlaintextVault
+    private let vault: any DICOMImportStoring
     private let decoder: any DICOMFrameDecoding
     private let policy: DICOMImportPolicy
     private let metrics: DICOMImportMetricsRecorder?
     private let scannerControl: (any DICOMFolderScannerControl)?
-    private let availableCapacityProvider: VaultDICOMStudyStaging.AvailableCapacityProvider
+    private let availableCapacityProvider: DICOMStudyStaging.AvailableCapacityProvider
     private var currentTask: Task<DICOMImportResult, Error>?
     private var currentOperationID: UUID?
 
-    public init(
-        rootURL: URL,
-        vault: PlaintextVault,
-        decoder: any DICOMFrameDecoding = DICOMDecoderAdapter(),
-        policy: DICOMImportPolicy = .default,
-        metrics: DICOMImportMetricsRecorder? = nil
-    ) throws {
-        try self.init(
-            rootURL: rootURL,
-            vault: vault,
-            decoder: decoder,
-            policy: policy,
-            metrics: metrics,
-            scannerControl: nil,
-            availableCapacityProvider: VaultDICOMStudyStaging.systemAvailableCapacity
-        )
-    }
-
     init(
         rootURL: URL,
-        vault: PlaintextVault,
+        vault: any DICOMImportStoring,
         decoder: any DICOMFrameDecoding,
         policy: DICOMImportPolicy = .default,
         metrics: DICOMImportMetricsRecorder?,
         scannerControl: (any DICOMFolderScannerControl)?,
-        availableCapacityProvider: @escaping VaultDICOMStudyStaging.AvailableCapacityProvider =
-            VaultDICOMStudyStaging.systemAvailableCapacity
+        availableCapacityProvider: @escaping DICOMStudyStaging.AvailableCapacityProvider =
+            DICOMStudyStaging.systemAvailableCapacity
     ) throws {
-        self.rootURL = try PlaintextVaultLayout(rootURL: rootURL).rootURL
+        self.rootURL = try DICOMImportLayout(rootURL: rootURL).rootURL
         self.vault = vault
         self.decoder = decoder
         self.policy = policy
         self.metrics = metrics
         self.scannerControl = scannerControl
         self.availableCapacityProvider = availableCapacityProvider
+    }
+
+    package init(repository: SQLiteDICOMRepository, decoder: any DICOMFrameDecoding = DICOMDecoderAdapter(),
+                 policy: DICOMImportPolicy = .default, metrics: DICOMImportMetricsRecorder? = nil) throws {
+        try self.init(rootURL: repository.store.rootURL, vault: repository, decoder: decoder,
+                      policy: policy, metrics: metrics, scannerControl: nil)
     }
 
     public func importDirectory(
@@ -171,22 +159,22 @@ public actor DICOMImportWorkflow {
         directoryURL: URL,
         securityScope: DICOMSecurityScopeRequirement,
         rootURL: URL,
-        vault: PlaintextVault,
+        vault: any DICOMImportStoring,
         decoder: any DICOMFrameDecoding,
         policy: DICOMImportPolicy,
         metrics: DICOMImportMetricsRecorder?,
         scannerControl: (any DICOMFolderScannerControl)?,
-        availableCapacityProvider: @escaping VaultDICOMStudyStaging.AvailableCapacityProvider,
+        availableCapacityProvider: @escaping DICOMStudyStaging.AvailableCapacityProvider,
         reportPhase: @escaping @Sendable (DICOMImportState) async -> Void
     ) async throws -> DICOMImportResult {
-        let staging = try VaultDICOMStudyStaging(
+        let staging = try DICOMStudyStaging(
             rootURL: rootURL,
             policy: policy,
             availableCapacityProvider: availableCapacityProvider
         )
-        let session: DICOMVaultImportSession
+        let session: DICOMImportSession
         do {
-            session = try await vault.beginDICOMImport(
+            session = try await vault.beginImport(
                 operationID: operationID,
                 staging: staging
             )
@@ -205,7 +193,7 @@ public actor DICOMImportWorkflow {
                 operationID: operationID,
                 securityScope: securityScope,
                 staging: staging,
-                ownership: session.stagingOwnership,
+                ownership: session.ownership,
                 willBeginStaging: { await reportPhase(.staging) }
             )
             if Task.isCancelled { throw DICOMImportError.cancelled }
@@ -216,7 +204,7 @@ public actor DICOMImportWorkflow {
                 metrics: metrics
             ).index(
                 stagedObjects: scan.stagedObjects,
-                vaultID: session.vaultID,
+                vaultID: session.libraryID,
                 staging: staging
             )
             let proposedResult = DICOMImportResult(
@@ -232,9 +220,9 @@ public actor DICOMImportWorkflow {
             )
             if Task.isCancelled { throw DICOMImportError.cancelled }
             await reportPhase(.committing)
-            let outcome: VaultDICOMStudyCommitOutcome
+            let outcome: DICOMImportCommit
             do {
-                outcome = try await vault.commitStagedDICOMStudy(
+                outcome = try await vault.commitImport(
                     proposal,
                     session: session,
                     staging: staging,
@@ -242,37 +230,35 @@ public actor DICOMImportWorkflow {
                 )
             } catch {
                 let commitError = error
-                let terminalCatalog = try? await vault.loadDICOMImportTerminalCatalog(session)
+                let terminal = try? await vault.committedImport(proposal, session: session)
                 var reconciliationError: Error?
-                do {
-                    try await vault.abortDICOMImport(session)
-                } catch {
-                    reconciliationError = error
-                }
+                do { try await vault.abortImport(session) } catch { reconciliationError = error }
                 sessionIsActive = false
-                let recoveredCatalog: VaultCatalog?
-                if let terminalCatalog {
-                    recoveredCatalog = terminalCatalog
-                } else {
-                    recoveredCatalog = try? await vault.loadCatalog()
-                }
-                if let catalog = recoveredCatalog,
-                   catalog.dicomStudies.contains(where: {
-                       Self.matchesCommittedGraph($0, proposal: proposal.study)
-                   }) {
-                    return proposedResult
+                let recovered: DICOMImportCommit?
+                if let terminal { recovered = terminal }
+                else { recovered = try? await vault.committedImport(proposal, session: session) }
+                if let recovered {
+                    switch recovered {
+                    case .accepted: return proposedResult
+                    case .duplicateExisting(let id):
+                        return DICOMImportResult(studyID: id, wasExisting: true,
+                            viewableInstanceCount: proposedResult.viewableInstanceCount,
+                            inertObjectCount: proposedResult.inertObjectCount,
+                            ignoredNonDICOMCount: proposedResult.ignoredNonDICOMCount,
+                            ignoredDuplicateCount: proposedResult.ignoredDuplicateCount)
+                    }
                 }
                 if let reconciliationError { throw reconciliationError }
                 throw commitError
             }
             sessionIsActive = false
             switch outcome {
-            case .accepted(_, _, let id):
+            case .accepted(let id):
                 guard id == proposedResult.studyID else {
                     throw DICOMImportError.integrityFailure
                 }
                 return proposedResult
-            case .duplicateExisting(_, _, let id):
+            case .duplicateExisting(let id):
                 return DICOMImportResult(
                     studyID: id,
                     wasExisting: true,
@@ -288,7 +274,7 @@ public actor DICOMImportWorkflow {
                 || operationError as? DICOMImportError == .cancelled
             if sessionIsActive {
                 do {
-                    try await vault.abortDICOMImport(session)
+                    try await vault.abortImport(session)
                 } catch {
                     throw error
                 }
@@ -298,13 +284,4 @@ public actor DICOMImportWorkflow {
         }
     }
 
-    nonisolated static func matchesCommittedGraph(
-        _ committed: DICOMStudy,
-        proposal: DICOMStudy
-    ) -> Bool {
-        committed.id == proposal.id
-            && committed.fingerprint == proposal.fingerprint
-            && committed.indexObjectID == proposal.indexObjectID
-            && committed.attachmentIDs == proposal.attachmentIDs
-    }
 }

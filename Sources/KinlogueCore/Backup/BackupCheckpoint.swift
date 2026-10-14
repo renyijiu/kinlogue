@@ -16,34 +16,89 @@ public enum BackupContractError: Error, Equatable, Sendable {
 }
 
 public enum BackupFormatLimits {
-    public static let maximumEntryCount = 20_000
-    public static let maximumPlaintextByteCount: UInt64 = 2 * 1_024 * 1_024 * 1_024
+    // 20,000 Vault objects, one blob and one derived leaf per durable inbox item, two manifests.
+    public static let maximumEntryCount = 30_002
+    public static let maximumPlaintextByteCount: UInt64 =
+        UInt64(maximumFrameCount) * UInt64(maximumFramePlaintextByteCount)
     public static let maximumFramePlaintextByteCount = 256 * 1_024
-    public static let maximumFrameCount = 30_000
+    // A per-checkpoint resource budget; each fresh DEK uses counter 0 for the manifest.
+    public static let maximumFrameCount = 1 << 24
     public static let maximumPathByteCount = 512
-    public static let maximumCanonicalManifestByteCount = 16 * 1_024 * 1_024
+    public static let maximumCanonicalManifestByteCount = 32 * 1_024 * 1_024
     public static let maximumCandidateFileCount = 4_096
     public static let maximumHPKEEncapsulatedKeyByteCount = 128
     public static let maximumHPKESealedKeyByteCount = 512
     public static let maximumTranscriptFieldCount = 32
     public static let maximumTranscriptFieldByteCount = 1 * 1_024 * 1_024
+    // Probe deadlines only; production progress is not rejected after this duration.
     public static let maximumBackupDuration: TimeInterval = 15 * 60
     public static let maximumRestoreDuration: TimeInterval = 15 * 60
     public static let maximumPeakMemoryDeltaByteCount = 96 * 1_024 * 1_024
     public static let maximumOpenFileCount = 64
     public static let targetFormatAllowanceByteCount: UInt64 = 64 * 1_024 * 1_024
     public static let capacityHeadroomByteCount: UInt64 = 256 * 1_024 * 1_024
+
+    public static func maximumEntryCount(for version: BackupFormatVersion) -> Int {
+        version == .legacy ? 20_000 : maximumEntryCount
+    }
+
+    public static func maximumFrameCount(for version: BackupFormatVersion) -> Int {
+        version == .legacy ? 30_000 : maximumFrameCount
+    }
+
+    public static func maximumPlaintextByteCount(for version: BackupFormatVersion) -> UInt64 {
+        version == .legacy ? 2 * 1_024 * 1_024 * 1_024 : maximumPlaintextByteCount
+    }
+
+    public static func maximumCanonicalManifestByteCount(for version: BackupFormatVersion) -> Int {
+        version == .legacy ? 16 * 1_024 * 1_024 : maximumCanonicalManifestByteCount
+    }
+
+    public static func maximumContainerByteCount(for version: BackupFormatVersion) -> UInt64 {
+        if version == .legacy {
+            return maximumPlaintextByteCount(for: version) + targetFormatAllowanceByteCount
+                + 4 + 512
+        }
+        return maximumPlaintextByteCount + UInt64(maximumFrameCount) * 36
+            + UInt64(maximumCanonicalManifestByteCount) + 4_096
+    }
+
+    public static func containerByteCount(
+        plaintextByteCount: UInt64,
+        frameCount: UInt64,
+        manifestByteCount: Int
+    ) throws -> UInt64 {
+        guard plaintextByteCount <= maximumPlaintextByteCount,
+              frameCount <= UInt64(maximumFrameCount),
+              manifestByteCount >= 0,
+              manifestByteCount <= maximumCanonicalManifestByteCount else {
+            throw BackupContractError.resourceLimit
+        }
+        // Each payload frame adds a 20-byte header and 16-byte tag; the remaining
+        // fixed records, manifest tag and footer occupy less than 4 KiB.
+        var total = plaintextByteCount
+        for component in [frameCount * 36, UInt64(manifestByteCount), 4_096] {
+            let next = total.addingReportingOverflow(component)
+            guard !next.overflow else { throw BackupContractError.arithmeticOverflow }
+            total = next.partialValue
+        }
+        return total
+    }
 }
 
 public struct BackupFormatVersion: Hashable, Sendable {
-    public static let current = try! BackupFormatVersion(major: 1, minor: 0, minimumReaderMinor: 0)
+    public static let legacy = try! BackupFormatVersion(major: 1, minor: 0, minimumReaderMinor: 0)
+    public static let current = try! BackupFormatVersion(major: 1, minor: 1, minimumReaderMinor: 1)
 
     public let major: UInt16
     public let minor: UInt16
     public let minimumReaderMinor: UInt16
 
-    public init(major: UInt16, minor: UInt16, minimumReaderMinor: UInt16) throws {
-        guard major == 1, minor == 0, minimumReaderMinor == 0 else {
+    public init(
+        major: UInt16, minor: UInt16, minimumReaderMinor: UInt16, readerMinor: UInt16 = 1
+    ) throws {
+        guard major == 1, minor <= 1, minimumReaderMinor == minor,
+              minimumReaderMinor <= readerMinor else {
             throw BackupContractError.unsupportedVersion
         }
         self.major = major

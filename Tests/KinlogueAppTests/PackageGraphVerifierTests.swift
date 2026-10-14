@@ -167,6 +167,65 @@ struct PackageGraphVerifierTests {
         ))
     }
 
+    @Test(arguments: ["KinlogueCore", "KinlogueApp", "KinlogueDICOMDecoderHelper"])
+    func rejectsSQLiteOutsidePlatform(targetName: String) throws {
+        for dependency in [
+            PackageGraphFixture.product("GRDB", package: "GRDB.swift"),
+            PackageGraphFixture.byName("KinlogueSQLiteConfiguration"),
+        ] {
+            var graph = PackageGraphFixture.valid
+            let index = try #require(graph.targets.firstIndex { $0["name"] as? String == targetName })
+            var target = graph.targets[index]
+            var dependencies = try #require(target["dependencies"] as? [[String: Any]])
+            dependencies.append(dependency)
+            target["dependencies"] = dependencies
+            graph.targets[index] = target
+            let result = try verify(graph)
+            #expect(result.status != 0)
+            #expect(result.standardError.contains("\(targetName) direct dependencies"))
+        }
+    }
+
+    @Test
+    func rejectsGRDBPinDrift() throws {
+        let script = try String(contentsOf: repository.appendingPathComponent("scripts/verify-app.sh"), encoding: .utf8)
+        let start = try #require(script.range(of: "verify_grdb_prerequisites() {"))
+        let end = try #require(script.range(of: "verify_swiftnio_checkout() {"))
+        let fixture = "set -euo pipefail\nfail() { exit 1; }\n"
+            + String(script[start.lowerBound..<end.lowerBound])
+            + "\nverify_grdb_prerequisites \"$1\" \"$2\" \"$3\"\n"
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let manifestURL = root.appendingPathComponent("manifest.json")
+        let pinURL = root.appendingPathComponent("pins.json")
+        let graphURL = root.appendingPathComponent("graph.json")
+        for fault in ["", "url", "range", "revision", "missing", "duplicate", "graph"] {
+            let dependency: [String: Any] = ["sourceControl": [[
+                "identity": "grdb.swift",
+                "location": ["remote": [["urlString": fault == "url" ? "https://example.invalid" : "https://github.com/groue/GRDB.swift.git"]]],
+                "requirement": [fault == "range" ? "range" : "exact": ["7.11.1"]],
+            ]]]
+            let pin: [String: Any] = [
+                "identity": "grdb.swift", "location": "https://github.com/groue/GRDB.swift.git",
+                "state": ["version": "7.11.1", "revision": fault == "revision" ? "invalid" : "b83108d10f42680d78f23fe4d4d80fc88dab3212"],
+            ]
+            let pins = fault == "missing" ? [] : (fault == "duplicate" ? [pin, pin] : [pin])
+            try JSONSerialization.data(withJSONObject: ["dependencies": [dependency]]).write(to: manifestURL)
+            try JSONSerialization.data(withJSONObject: ["pins": pins]).write(to: pinURL)
+            try JSONSerialization.data(withJSONObject: ["dependencies": [[
+                "identity": "grdb.swift", "version": fault == "graph" ? "7.11.0" : "7.11.1",
+            ]]]).write(to: graphURL)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.arguments = ["-c", fixture, "grdb-fixture", manifestURL.path, pinURL.path, graphURL.path]
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            #expect((process.terminationStatus == 0) == fault.isEmpty, Comment(rawValue: fault))
+        }
+    }
+
     private func verify(_ graph: PackageGraphFixture) throws -> VerificationResult {
         let fileManager = FileManager.default
         let temporaryDirectory = fileManager.temporaryDirectory
@@ -236,6 +295,7 @@ private struct PackageGraphFixture {
         PackageGraphFixture(
             dependencies: [
                 ["sourceControl": [["identity": "dicom-swift"]]],
+                ["sourceControl": [["identity": "grdb.swift"]]],
                 ["sourceControl": [["identity": "swift-nio"]]],
                 ["sourceControl": [["identity": "zipfoundation"]]],
             ],
@@ -244,6 +304,7 @@ private struct PackageGraphFixture {
             ],
             targets: [
                 target(name: "KinlogueCore", type: "regular"),
+                target(name: "KinlogueSQLiteConfiguration", type: "regular"),
                 target(name: "KinlogueDICOMIPC", type: "regular"),
                 target(
                     name: "KinlogueDICOMDecoderHelper",
@@ -276,6 +337,8 @@ private struct PackageGraphFixture {
                     type: "regular",
                     dependencies: [
                         byName("KinlogueCore"),
+                        byName("KinlogueSQLiteConfiguration"),
+                        product("GRDB", package: "GRDB.swift"),
                         byName("KinlogueDICOMIPC"),
                         product("NIOCore", package: "swift-nio"),
                         product("NIOHTTP1", package: "swift-nio"),

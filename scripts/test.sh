@@ -111,18 +111,12 @@ PRIMARY_TEST_LOG="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-primary-tests.XXXX
 PRIMARY_TEST_LIST="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-test-list.XXXXXX")"
 PRIMARY_TEST_SHARDS="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-test-shards.XXXXXX")"
 PRIMARY_TEST_INVENTORY="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-test-inventory.XXXXXX")"
-DERIVED_XCTEST_CASE_LIST="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-derived-cases.XXXXXX")"
-DERIVED_XCTEST_INVENTORY="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-derived-inventory.XXXXXX")"
-DERIVED_XCTEST_LOG="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/kinlogue-derived-xctest.XXXXXX")"
 /bin/chmod 600 \
   "$PRIMARY_TEST_LOG" \
   "$PRIMARY_TEST_LIST" \
   "$PRIMARY_TEST_SHARDS" \
-  "$PRIMARY_TEST_INVENTORY" \
-  "$DERIVED_XCTEST_CASE_LIST" \
-  "$DERIVED_XCTEST_INVENTORY" \
-  "$DERIVED_XCTEST_LOG"
-trap '/bin/rm -f "$PRIMARY_TEST_LOG" "$PRIMARY_TEST_LIST" "$PRIMARY_TEST_SHARDS" "$PRIMARY_TEST_INVENTORY" "$DERIVED_XCTEST_CASE_LIST" "$DERIVED_XCTEST_INVENTORY" "$DERIVED_XCTEST_LOG"' \
+  "$PRIMARY_TEST_INVENTORY"
+trap '/bin/rm -f "$PRIMARY_TEST_LOG" "$PRIMARY_TEST_LIST" "$PRIMARY_TEST_SHARDS" "$PRIMARY_TEST_INVENTORY"' \
   EXIT HUP INT TERM
 
 if [[ "$RUN_ISOLATED_GATES" == true ]]; then
@@ -133,83 +127,7 @@ if [[ "$RUN_ISOLATED_GATES" == true ]]; then
       list > "$PRIMARY_TEST_LIST"
   /usr/bin/ruby "$REPO_DIR/scripts/primary-test-shards.rb" \
     --inventory-summary "$PRIMARY_TEST_LIST" > "$PRIMARY_TEST_INVENTORY"
-fi
 
-# The final remote partition is intentionally one fixed, expensive LAN suite.
-# SwiftPM only builds its XCTest bundle: hosted macOS 26 has stalled after a
-# successful cold build in SwiftPM's runners and while directly running the
-# whole XCTest class. Discover every built case and launch it in its own bounded
-# process so a loader or behavioral stall is isolated to one content-free selector.
-if [[ "$RUN_ISOLATED_GATES" == true \
-      && ("$PRIMARY_PARTITION_COUNT" -eq 1 \
-        || "$PRIMARY_PARTITION_INDEX" -eq $((PRIMARY_PARTITION_COUNT - 1))) ]]; then
-  XCTEST_BIN_DIR="$(
-    "$REPO_DIR/scripts/run-with-deadline.sh" \
-      "$KINLOGUE_PRIMARY_TEST_TIMEOUT_SECONDS" \
-      swift build "${SWIFT_TEST_ARGUMENTS[@]}" \
-        --disable-swift-testing --enable-xctest \
-        --show-bin-path
-  )"
-  "$REPO_DIR/scripts/run-with-deadline.sh" \
-    "$KINLOGUE_PRIMARY_TEST_TIMEOUT_SECONDS" \
-    swift build "${SWIFT_TEST_ARGUMENTS[@]}" \
-      --build-tests \
-      --disable-swift-testing --enable-xctest \
-      -j "$KINLOGUE_BUILD_JOBS"
-  # Swift Build (Xcode 27) emits one bundle per test target; the older
-  # SwiftPM engine emits a package-wide bundle. Select only these known layouts.
-  XCTEST_BUNDLE="$XCTEST_BIN_DIR/KinloguePlatformTests.xctest"
-  if [[ ! -d "$XCTEST_BUNDLE" ]]; then
-    XCTEST_BUNDLE="$XCTEST_BIN_DIR/KinloguePackageTests.xctest"
-  fi
-  if [[ ! -d "$XCTEST_BUNDLE" ]]; then
-    print -u2 "dedicated XCTest bundle was not produced at the expected path"
-    exit 70
-  fi
-  "$REPO_DIR/scripts/run-with-deadline.sh" \
-    "$KINLOGUE_PRIMARY_TEST_TIMEOUT_SECONDS" \
-    swift test "${SWIFT_TEST_ARGUMENTS[@]}" \
-      --skip-build \
-      --disable-swift-testing --enable-xctest \
-      list > "$DERIVED_XCTEST_INVENTORY"
-  /usr/bin/ruby "$REPO_DIR/scripts/discover-derived-xctest-cases.rb" \
-    "$DERIVED_XCTEST_INVENTORY" > "$DERIVED_XCTEST_CASE_LIST"
-  DERIVED_XCTEST_COUNT=0
-  while IFS= read -r derived_xctest_case; do
-    [[ -n "$derived_xctest_case" ]] || {
-      print -u2 "dedicated XCTest discovery emitted an empty selector"
-      exit 70
-    }
-    print "KLT_DERIVED_XCTEST_CASE selector=$derived_xctest_case"
-    : > "$DERIVED_XCTEST_LOG"
-    "$REPO_DIR/scripts/run-with-deadline.sh" \
-      "$KINLOGUE_ISOLATED_TEST_TIMEOUT_SECONDS" \
-      /usr/bin/xcrun xctest \
-        -XCTest "$derived_xctest_case" \
-        "$XCTEST_BUNDLE" \
-      2>&1 | /usr/bin/tee "$DERIVED_XCTEST_LOG"
-    if ! /usr/bin/grep -Fq \
-        "Executed 1 test, with 0 failures (0 unexpected)" \
-        "$DERIVED_XCTEST_LOG"; then
-      print -u2 "dedicated XCTest case did not emit its exact passing summary"
-      exit 70
-    fi
-    DERIVED_XCTEST_COUNT=$((DERIVED_XCTEST_COUNT + 1))
-  done < "$DERIVED_XCTEST_CASE_LIST"
-  [[ "$DERIVED_XCTEST_COUNT" -gt 0 ]] || {
-    print -u2 "dedicated XCTest discovery emitted no selectors"
-    exit 70
-  }
-  print "KLT_DERIVED_XCTEST_SUMMARY tests=$DERIVED_XCTEST_COUNT failures=0"
-  if [[ "$PRIMARY_PARTITION_COUNT" -gt 1 ]]; then
-    KINLOGUE_REQUIRE_TEST_EVIDENCE=1 \
-      KINLOGUE_TEST_INVENTORY_FILE="$PRIMARY_TEST_INVENTORY" \
-      "$REPO_DIR/scripts/verify-docs.sh"
-    exit 0
-  fi
-fi
-
-if [[ "$RUN_ISOLATED_GATES" == true ]]; then
   # Build once, then derive exact non-overlapping Platform/App shards from the
   # executable test inventory. The planner fails closed for unknown targets,
   # missing isolated gates, omissions, and duplicate matches.
@@ -251,7 +169,6 @@ if [[ "$RUN_ISOLATED_GATES" == true ]]; then
         swift test "${SWIFT_TEST_ARGUMENTS[@]}" \
           --skip-build --no-parallel -j "$KINLOGUE_BUILD_JOBS" \
           --filter "$shard_pattern" \
-          --skip DICOMImportWorkflowIntegrationTests \
           --skip AcceptanceScanScriptTests \
           --skip installedLANProbeUsesProductionHTTPAndPersistsAcrossProcessPhases \
           --skip productionFileQueueStaysBoundedWithTwoStreamsSlowPeersAndDisconnect \
@@ -291,13 +208,7 @@ if [[ "$RUN_ISOLATED_GATES" == true && "$PRIMARY_PARTITION_INDEX" -eq 0 ]]; then
     "$KINLOGUE_ISOLATED_TEST_TIMEOUT_SECONDS" \
     swift test "${SWIFT_TEST_ARGUMENTS[@]}" \
     --no-parallel \
-    --filter differentlyCasedVaultAliasesShareStableAndLegacyLockIdentity \
-    -j 1
-  "$REPO_DIR/scripts/run-with-deadline.sh" \
-    "$KINLOGUE_ISOLATED_TEST_TIMEOUT_SECONDS" \
-    swift test "${SWIFT_TEST_ARGUMENTS[@]}" \
-    --no-parallel \
-    --filter DICOMImportWorkflowIntegrationTests \
+    --filter differentlyCasedLibraryAliasesContendForOneOwner \
     -j 1
   "$REPO_DIR/scripts/run-with-deadline.sh" \
     "$KINLOGUE_ISOLATED_TEST_TIMEOUT_SECONDS" \

@@ -142,39 +142,41 @@ struct DICOMInstalledAcceptanceRunner: Sendable {
     let request: AcceptanceSmokeRequest
 
     func run() async throws {
+        let session = AcceptanceLibrarySession()
         do {
             switch request.phase {
             case .dicomImport:
-                try await runImport()
+                try await runImport(session)
             case .dicomRestart:
-                try await runRestart()
+                try await runRestart(session)
             case .dicomDelete:
-                try await runDelete()
+                try await runDelete(session)
             default:
                 throw DICOMInstalledAcceptanceError.invariantFailed(.phase)
             }
+            await session.close()
         } catch let error as DICOMInstalledAcceptanceError {
+            await session.close()
             throw error
         } catch {
+            await session.close()
             throw DICOMInstalledAcceptanceError.invariantFailed(.phase)
         }
     }
 
-    private func runImport() async throws {
+    private func runImport(_ session: AcceptanceLibrarySession) async throws {
         var step = DICOMInstalledAcceptanceFailureStep.context
         do {
             let context = try context()
             step = .inputOwnership
             try verifyOwnedInput(context.inputDirectory)
             step = .environment
-            let environment = try LiveAppServiceEnvironment.makeDefault(
-                identity: request.identity
-            )
+            let environment = try await session.library(identity: request.identity).services
             let baselineRSS = try residentMemoryByteCount()
             step = .initialSnapshot
             let initial = try await environment.dataService.bootstrap()
             guard initial.members.count == 4,
-                  initial.records.count == 96,
+                  initial.reportCount == 96,
                   initial.dicomStudies.isEmpty,
                   let member = initial.members.first(where: { !$0.isArchived }) else {
                 throw DICOMInstalledAcceptanceError.invariantFailed(step)
@@ -195,13 +197,14 @@ struct DICOMInstalledAcceptanceRunner: Sendable {
             let saved = try await environment.dataService.saveDICOMStudy(
                 SaveDICOMStudyCommand(
                     studyID: outcome.studyID,
+                    expectedRevision: try await environment.dataService.loadDICOMStudyReview(studyID: outcome.studyID).study.contentRevision,
                     memberID: member.id,
                     effectiveDate: Date(timeIntervalSince1970: 1_700_000_000)
                 )
             )
             step = .savedSnapshot
             guard saved.members.count == 4,
-                  saved.records.count == 96,
+                  saved.reportCount == 96,
                   saved.dicomStudies.count == 1,
                   saved.dicomStudies[0].state == .confirmed else {
                 throw DICOMInstalledAcceptanceError.invariantFailed(step)
@@ -270,7 +273,7 @@ struct DICOMInstalledAcceptanceRunner: Sendable {
                 rendered: rendered,
                 closeWithinLimit: closeWithinLimit,
                 memberCount: saved.members.count,
-                recordCount: saved.records.count,
+                recordCount: saved.reportCount,
                 studyCount: saved.dicomStudies.count
             ).emit()
         } catch let error as DICOMInstalledAcceptanceError {
@@ -280,11 +283,21 @@ struct DICOMInstalledAcceptanceRunner: Sendable {
         }
     }
 
-    private func runRestart() async throws {
-        let environment = try LiveAppServiceEnvironment.makeDefault(identity: request.identity)
+    private func reportSummaries(_ service: LiveAppService) async throws -> [LibraryReportSummary] {
+        var result: [LibraryReportSummary] = [], cursor: LibraryQueryCursor?
+        repeat {
+            let page = try await service.reportPage(query: "", memberID: nil, cursor: cursor)
+            guard page.damagedIDs.isEmpty else { throw DICOMInstalledAcceptanceError.invariantFailed(.restart) }
+            result += page.items; cursor = page.nextCursor
+        } while cursor != nil
+        return result
+    }
+
+    private func runRestart(_ session: AcceptanceLibrarySession) async throws {
+        let environment = try await session.library(identity: request.identity).services
         let snapshot = try await environment.dataService.bootstrap()
         guard snapshot.members.count == 4,
-              snapshot.records.count == 96,
+              snapshot.reportCount == 96,
               snapshot.dicomStudies.count == 1,
               let study = snapshot.dicomStudies.first,
               study.state == .confirmed else {
@@ -322,23 +335,25 @@ struct DICOMInstalledAcceptanceRunner: Sendable {
             ),
             closeWithinLimit: true,
             memberCount: snapshot.members.count,
-            recordCount: snapshot.records.count,
+            recordCount: snapshot.reportCount,
             studyCount: snapshot.dicomStudies.count
         ).emit()
     }
 
-    private func runDelete() async throws {
-        let environment = try LiveAppServiceEnvironment.makeDefault(identity: request.identity)
+    private func runDelete(_ session: AcceptanceLibrarySession) async throws {
+        let environment = try await session.library(identity: request.identity).services
         let before = try await environment.dataService.bootstrap()
+        let beforeReports = try await reportSummaries(environment.dataService)
         guard before.members.count == 4,
-              before.records.count == 96,
+              before.reportCount == 96,
               before.dicomStudies.count == 1,
               let study = before.dicomStudies.first else {
             throw DICOMInstalledAcceptanceError.invariantFailed(.delete)
         }
         let after = try await environment.dataService.deleteDICOMStudy(id: study.id)
+        let afterReports = try await reportSummaries(environment.dataService)
         guard after.members == before.members,
-              after.records == before.records,
+              afterReports == beforeReports,
               after.dicomStudies.isEmpty else {
             throw DICOMInstalledAcceptanceError.invariantFailed(.delete)
         }
@@ -348,7 +363,7 @@ struct DICOMInstalledAcceptanceRunner: Sendable {
             rendered: .zero,
             closeWithinLimit: true,
             memberCount: after.members.count,
-            recordCount: after.records.count,
+            recordCount: after.reportCount,
             studyCount: 0
         ).emit()
     }

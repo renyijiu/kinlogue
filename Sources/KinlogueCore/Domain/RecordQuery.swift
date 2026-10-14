@@ -117,24 +117,34 @@ public enum RecordQuery {
         member: FamilyMember?,
         dateFormatter: ISO8601DateFormatter
     ) -> Bool {
-        if member?.displayName.localizedCaseInsensitiveContains(term) == true
-            || member?.disambiguationLabel?.localizedCaseInsensitiveContains(term) == true
-            || record.title?.transcription.localizedCaseInsensitiveContains(term) == true
-            || record.organization?.transcription.localizedCaseInsensitiveContains(term) == true
-            || record.department?.transcription.localizedCaseInsensitiveContains(term) == true
-            || record.reportType?.transcription.localizedCaseInsensitiveContains(term) == true
-            || record.reportedResults?.transcription.localizedCaseInsensitiveContains(term) == true
-            || record.conclusion?.transcription.localizedCaseInsensitiveContains(term) == true {
-            return true
-        }
-        if record.abnormalItems.contains(where: {
-            $0.transcription.localizedCaseInsensitiveContains(term)
-        }) {
-            return true
-        }
-        guard let timelineDate = record.timelineDate else { return false }
-        return dateFormatter.string(from: timelineDate)
-            .localizedCaseInsensitiveContains(term)
+        matchesSearchTerm(term, fields: searchableFields(record: record, dateFormatter: dateFormatter)
+            + [member?.displayName, member?.disambiguationLabel].compactMap { $0 })
+    }
+
+    package static func matchesSearchTerm(_ term: String, fields: [String]) -> Bool {
+        fields.contains { localizedContains(term, in: $0, locale: .current) }
+    }
+
+    /// The localized, case-insensitive search behind every query path.
+    ///
+    /// When the term ends in NUL, Foundation's localized search reads past the end of the text as if
+    /// NUL followed it: it reports a match that is not there, and for some text it traps. The text is
+    /// then searched with one more unit that is not NUL, which keeps that read inside the text and
+    /// can never be part of a match.
+    package static func localizedContains(_ term: String, in field: String, locale: Locale) -> Bool {
+        let text = term.unicodeScalars.last?.value == 0 ? field + "\u{1}" : field
+        return text.range(of: term, options: .caseInsensitive, locale: locale) != nil
+    }
+
+    package static func searchableFields(record: HealthRecord) -> [String] {
+        searchableFields(record: record, dateFormatter: ISO8601DateFormatter())
+    }
+
+    private static func searchableFields(record: HealthRecord, dateFormatter: ISO8601DateFormatter) -> [String] {
+        [record.title, record.organization, record.department, record.reportType, record.reportedResults, record.conclusion]
+            .compactMap { $0?.transcription }
+            + record.abnormalItems.map(\.transcription)
+            + (record.timelineDate.map { [dateFormatter.string(from: $0)] } ?? [])
     }
 
     private static func normalizedName(_ value: String) -> String {

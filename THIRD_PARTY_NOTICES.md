@@ -3,6 +3,7 @@
 Kinlogue is built with the following Swift packages from the resolved build
 graph:
 
+- GRDB 7.11.1 (`b83108d10f42680d78f23fe4d4d80fc88dab3212`)
 - SwiftNIO 2.101.3 (`0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b`)
 - Swift Atomics 1.3.1 (`0442cb5a3f98ab802acb777929fdb446bda11a34`)
 - Swift Collections 1.6.0 (`a0cb0954ecb21e4e31b0070e6ed5674e8556685a`)
@@ -18,7 +19,7 @@ graph:
 SwiftNIO, Swift Atomics, Swift Collections, Swift System, DICOM-Swift,
 Swift Argument Parser, JLSwift, and CompressionFamily are distributed under
 the Apache License, Version 2.0; the complete license appears below.
-ZIPFoundation, J2KSwift, and JXLSwift are distributed under the MIT License.
+GRDB, ZIPFoundation, J2KSwift, and JXLSwift are distributed under the MIT License.
 SwiftNIO also contains or derives work from the projects
 identified in its upstream notice, which is reproduced in full. The llhttp
 component incorporated by SwiftNIO and ZIPFoundation have applicable MIT
@@ -432,3 +433,16 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## GRDB 7.11.1 LICENSE
+
+The following text is reproduced from GRDB's `LICENSE` at the exact
+revision listed above.
+
+Copyright (C) 2015-2025 Gwendal Roué
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

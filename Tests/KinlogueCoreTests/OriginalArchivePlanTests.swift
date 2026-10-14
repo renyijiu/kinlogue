@@ -35,16 +35,13 @@ func originalArchivePlanIncludesConfirmedOriginalsInDeterministicDateOrder() thr
         state: .confirmed
     )
     let study = try confirmedStudy(31, memberID: active.id, attachments: [dicomAttachment], date: utcDate(2025, 1, 3))
-    let catalog = try VaultCatalog(
-        vaultID: id(99),
-        generation: 1,
-        members: [archived, active],
+    let catalog = ArchiveLibrary(members: [archived, active],
         records: [undated, archivedRecord, dated],
         attachments: [dicomAttachment, archivedAttachment, undatedAttachment, datedAttachment],
         dicomStudies: [study]
     )
 
-    let plan = try OriginalArchivePlan.make(
+    let plan = try makePlan(
         catalog: catalog,
         preferredExtensions: [
             datedAttachment.id: "png",
@@ -80,11 +77,10 @@ func originalArchivePlanKeepsEveryOrderedSourceRowEvenWhenAttachmentRepeats() th
         sources: ReportSources([first, second]),
         importState: .confirmed
     )
-    let catalog = try VaultCatalog(
-        vaultID: id(99), generation: 1, members: [owner], records: [report], attachments: [original]
+    let catalog = ArchiveLibrary(members: [owner], records: [report], attachments: [original]
     )
 
-    let plan = try OriginalArchivePlan.make(
+    let plan = try makePlan(
         catalog: catalog,
         preferredExtensions: [original.id: "pdf"],
         undatedToken: "Undated"
@@ -108,16 +104,13 @@ func originalArchivePlanExcludesUnconfirmedRecordsStudiesAndEmptyMembers() throw
     let confirmed = try record(21, memberID: includedMember.id, attachment: confirmedAttachment, state: .confirmed)
     let review = try record(22, memberID: includedMember.id, attachment: reviewAttachment, state: .needsReview)
     let reviewStudy = try needsReviewStudy(31, attachments: [dicomAttachment])
-    let catalog = try VaultCatalog(
-        vaultID: id(99),
-        generation: 1,
-        members: [emptyMember, includedMember],
+    let catalog = ArchiveLibrary(members: [emptyMember, includedMember],
         records: [review, confirmed],
         attachments: [reviewAttachment, dicomAttachment, confirmedAttachment],
         dicomStudies: [reviewStudy]
     )
 
-    let plan = try OriginalArchivePlan.make(
+    let plan = try makePlan(
         catalog: catalog,
         preferredExtensions: [confirmedAttachment.id: "pdf"],
         undatedToken: "Undated"
@@ -149,15 +142,12 @@ func originalArchivePlanUsesVisibleMemberDisambiguationAndStableStudyOrdinals() 
         attachments: [secondAttachment],
         date: utcDate(2025, 1, 2)
     )
-    let catalog = try VaultCatalog(
-        vaultID: id(99),
-        generation: 1,
-        members: [owner],
+    let catalog = ArchiveLibrary(members: [owner],
         attachments: [firstAttachment, secondAttachment],
         dicomStudies: [second, first]
     )
 
-    let plan = try OriginalArchivePlan.make(
+    let plan = try makePlan(
         catalog: catalog,
         preferredExtensions: [firstAttachment.id: "dcm", secondAttachment.id: "dcm"],
         undatedToken: "Undated"
@@ -178,15 +168,12 @@ func originalArchivePlanSanitizesTraversalUnicodeCaseReservedNamesAndSpoofedExte
     let decomposed = "../e\u{301}vil.PDF.exe"
     let first = try record(21, memberID: firstMember.id, attachment: firstAttachment, name: decomposed, state: .confirmed)
     let second = try record(22, memberID: secondMember.id, attachment: secondAttachment, name: "ÉVIL.pdf", state: .confirmed)
-    let catalog = try VaultCatalog(
-        vaultID: id(99),
-        generation: 1,
-        members: [secondMember, firstMember],
+    let catalog = ArchiveLibrary(members: [secondMember, firstMember],
         records: [second, first],
         attachments: [secondAttachment, firstAttachment]
     )
 
-    let plan = try OriginalArchivePlan.make(
+    let plan = try makePlan(
         catalog: catalog,
         preferredExtensions: [firstAttachment.id: "png", secondAttachment.id: "png"],
         undatedToken: "Undated"
@@ -214,11 +201,10 @@ func originalArchivePlanBoundsEveryComponentAndCompletePath() throws {
         name: String(repeating: "检", count: 300) + ".pdf",
         state: .confirmed
     )
-    let catalog = try VaultCatalog(
-        vaultID: id(99), generation: 1, members: [owner], records: [report], attachments: [original]
+    let catalog = ArchiveLibrary(members: [owner], records: [report], attachments: [original]
     )
 
-    let plan = try OriginalArchivePlan.make(
+    let plan = try makePlan(
         catalog: catalog,
         preferredExtensions: [original.id: "pdf"],
         undatedToken: String(repeating: "未", count: 200)
@@ -236,29 +222,25 @@ func originalArchivePlanFailsClosedForMissingOrUnsafeExtensionAndByteOverflow() 
     let secondAttachment = try attachment(12, bytes: 1, digestByte: 0x12)
     let first = try record(21, memberID: owner.id, attachment: firstAttachment, state: .confirmed)
     let second = try record(22, memberID: owner.id, attachment: secondAttachment, state: .confirmed)
-    let singleCatalog = try VaultCatalog(
-        vaultID: id(98), generation: 1, members: [owner], records: [first], attachments: [firstAttachment]
+    let singleCatalog = ArchiveLibrary(members: [owner], records: [first], attachments: [firstAttachment]
     )
-    let overflowCatalog = try VaultCatalog(
-        vaultID: id(99),
-        generation: 1,
-        members: [owner],
+    let overflowCatalog = ArchiveLibrary(members: [owner],
         records: [first, second],
         attachments: [firstAttachment, secondAttachment]
     )
 
     #expect(throws: OriginalArchivePlanError.missingPreferredExtension) {
-        _ = try OriginalArchivePlan.make(catalog: singleCatalog, preferredExtensions: [:], undatedToken: "Undated")
+        _ = try makePlan(catalog: singleCatalog, preferredExtensions: [:], undatedToken: "Undated")
     }
     #expect(throws: OriginalArchivePlanError.invalidPreferredExtension) {
-        _ = try OriginalArchivePlan.make(
+        _ = try makePlan(
             catalog: singleCatalog,
             preferredExtensions: [firstAttachment.id: "../exe"],
             undatedToken: "Undated"
         )
     }
     #expect(throws: OriginalArchivePlanError.totalByteCountOverflow) {
-        _ = try OriginalArchivePlan.make(
+        _ = try makePlan(
             catalog: overflowCatalog,
             preferredExtensions: [firstAttachment.id: "pdf", secondAttachment.id: "pdf"],
             undatedToken: "Undated"
@@ -268,8 +250,8 @@ func originalArchivePlanFailsClosedForMissingOrUnsafeExtensionAndByteOverflow() 
 
 @Test
 func emptyCatalogProducesEmptyOriginalArchivePlanWithoutExtensionMappings() throws {
-    let catalog = try VaultCatalog(vaultID: id(99), generation: 1)
-    let plan = try OriginalArchivePlan.make(catalog: catalog, preferredExtensions: [:], undatedToken: "Undated")
+    let catalog = ArchiveLibrary()
+    let plan = try makePlan(catalog: catalog, preferredExtensions: [:], undatedToken: "Undated")
     #expect(plan.entries.isEmpty)
     #expect(plan.totalByteCount == 0)
 }
@@ -292,21 +274,46 @@ func originalArchivePlanRejectsMoreEntriesThanTheCharacterizedWriterLimit() thro
         sources: ReportSources(sources),
         importState: .confirmed
     )
-    let catalog = try VaultCatalog(
-        vaultID: id(99),
-        generation: 1,
-        members: [owner],
+    let catalog = ArchiveLibrary(members: [owner],
         records: [record],
         attachments: [original]
     )
 
     #expect(throws: OriginalArchivePlanError.maximumEntryCountExceeded) {
-        _ = try OriginalArchivePlan.make(
+        _ = try makePlan(
             catalog: catalog,
             preferredExtensions: [original.id: "pdf"],
             undatedToken: "Undated"
         )
     }
+}
+
+/// What a plan is made from. The library projects its rows into the same shape.
+private struct ArchiveLibrary {
+    var members: [FamilyMember] = []
+    var records: [HealthRecord] = []
+    var attachments: [KinlogueCore.Attachment] = []
+    var dicomStudies: [DICOMStudyHeader] = []
+}
+
+private func makePlan(
+    catalog: ArchiveLibrary,
+    preferredExtensions: [KinlogueCore.Attachment.ID: String],
+    undatedToken: String
+) throws -> OriginalArchivePlan {
+    try OriginalArchivePlan.make(
+        members: catalog.members.map { OriginalArchiveMemberProjection(member: $0) },
+        attachments: catalog.attachments,
+        reports: catalog.records.filter { $0.importState == .confirmed }.map {
+            OriginalArchiveReportProjection(id: $0.id, memberID: $0.memberID, sources: $0.sources, timelineDate: $0.timelineDate)
+        },
+        studies: try catalog.dicomStudies.filter { $0.state == .confirmed }.map {
+            let member = try #require($0.confirmedMemberID), date = try #require($0.effectiveDate)
+            return OriginalArchiveStudyProjection(id: $0.id, memberID: member, date: date, attachmentIDs: $0.attachmentIDs)
+        },
+        preferredExtensions: preferredExtensions,
+        undatedToken: undatedToken
+    )
 }
 
 private func id(_ ordinal: Int) -> UUID {
@@ -366,24 +373,22 @@ private func confirmedStudy(
     memberID: FamilyMember.ID,
     attachments: [KinlogueCore.Attachment],
     date: Date
-) throws -> DICOMStudy {
-    try DICOMStudy(
+) throws -> DICOMStudyHeader {
+    try DICOMStudyHeader(
         id: id(ordinal),
         state: .confirmed,
         fingerprint: fingerprint(attachments),
-        indexObjectID: id(ordinal + 300),
         attachmentIDs: attachments.map(\.id),
         confirmedMemberID: memberID,
         effectiveDate: date
     )
 }
 
-private func needsReviewStudy(_ ordinal: Int, attachments: [KinlogueCore.Attachment]) throws -> DICOMStudy {
-    try DICOMStudy(
+private func needsReviewStudy(_ ordinal: Int, attachments: [KinlogueCore.Attachment]) throws -> DICOMStudyHeader {
+    try DICOMStudyHeader(
         id: id(ordinal),
         state: .needsReview,
         fingerprint: fingerprint(attachments),
-        indexObjectID: id(ordinal + 300),
         attachmentIDs: attachments.map(\.id)
     )
 }

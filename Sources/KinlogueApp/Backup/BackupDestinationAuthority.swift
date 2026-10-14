@@ -109,20 +109,6 @@ final class BackupDestinationAuthority: BackupEnrollmentPublishing, @unchecked S
         self.ubiquitousItemDetector = ubiquitousItemDetector
     }
 
-    @MainActor
-    func chooseParentDirectory() throws -> URL {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-        panel.prompt = String(localized: "Choose")
-        guard panel.runModal() == .OK, let url = panel.url else {
-            throw BackupDestinationAuthorityError.selectionCancelled
-        }
-        return url
-    }
-
     func prepareSelectedParent(
         _ selectedParent: URL,
         activeVaultURL: URL

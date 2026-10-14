@@ -2,6 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>%lld 个唯一原件 · 原件内容 %@</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@value@</string>
+		<key>value</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Unique original: %1$lld · Source content: %2$@</string>
+			<key>other</key>
+			<string>Unique originals: %1$lld · Source content: %2$@</string>
+		</dict>
+	</dict>
 	<key>%lld 个唯一原件 · 实际占用 %@</key>
 	<dict>
 		<key>NSStringLocalizedFormatKey</key>

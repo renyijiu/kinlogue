@@ -58,6 +58,11 @@ final class BackupModel: ObservableObject {
         }
     }
 
+    var completionText: String? {
+        guard phase == .localCheckpointComplete, failure == nil else { return nil }
+        return AppLocalization.string("新的恢复点已创建并通过验证。")
+    }
+
     var failureText: String? {
         guard let failure else { return nil }
         return switch failure {

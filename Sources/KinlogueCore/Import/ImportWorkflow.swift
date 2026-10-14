@@ -19,7 +19,7 @@ public struct ImportProcessingLease: Equatable, Sendable {
 }
 
 /// The coherent data needed to present one import draft for review.
-/// All fields originate from the same persisted catalog generation.
+/// All fields originate from the same committed library revision.
 public struct ImportDraftReviewSnapshot: Equatable, Sendable {
     public let draft: ImportDraft
     public let document: ImportDraftDocument
@@ -69,11 +69,11 @@ public protocol ImportDraftStore: Sendable {
         draftID: ImportDraft.ID,
         expectedRevision: UInt64,
         record: HealthRecord
-    ) async throws -> VaultCatalog
+    ) async throws
     func discard(
         draftID: ImportDraft.ID,
         expectedRevision: UInt64
-    ) async throws -> VaultCatalog
+    ) async throws
 }
 
 public enum ImportWorkflowOutcome: Equatable, Sendable {
@@ -106,8 +106,11 @@ public actor ImportWorkflow {
         }
     }
 
-    public func retry(draftID: ImportDraft.ID) async throws -> ImportWorkflowOutcome {
-        try await process(draftID: draftID)
+    public func retry(
+        draftID: ImportDraft.ID,
+        attemptID: UUID = UUID()
+    ) async throws -> ImportWorkflowOutcome {
+        try await process(draftID: draftID, attemptID: attemptID)
     }
 
     public func resumeInterruptedImports() async throws -> [ImportWorkflowOutcome] {
@@ -125,19 +128,24 @@ public actor ImportWorkflow {
         return outcomes
     }
 
-    private func process(draftID: ImportDraft.ID) async throws -> ImportWorkflowOutcome {
-        let lease = try await store.beginProcessing(draftID: draftID, attemptID: UUID())
+    private func process(
+        draftID: ImportDraft.ID,
+        attemptID: UUID = UUID()
+    ) async throws -> ImportWorkflowOutcome {
+        let lease = try await store.beginProcessing(draftID: draftID, attemptID: attemptID)
         let blocks: [OCRBlock]
         do {
             let source = try await store.loadSource(draftID: draftID)
             blocks = try await textExtractor.extractText(from: source)
             try Task.checkCancellation()
-        } catch is CancellationError {
-            try await store.failProcessing(lease: lease, failureCode: .cancelled)
-            return .failed(draftID, .cancelled)
         } catch {
-            try await store.failProcessing(lease: lease, failureCode: .textExtractionFailed)
-            return .failed(draftID, .textExtractionFailed)
+            // An attempt whose task was cancelled is interrupted, not failed. Nothing is recorded:
+            // the draft stays in processing and the next launch resumes it. An extractor that gives
+            // up on its own, with the task still running, is recorded as a cancelled failure.
+            try Task.checkCancellation()
+            let code: ImportFailureCode = error is CancellationError ? .cancelled : .textExtractionFailed
+            try await store.failProcessing(lease: lease, failureCode: code)
+            return .failed(draftID, code)
         }
         let document = ImportDraftDocument(
             blocks: blocks,

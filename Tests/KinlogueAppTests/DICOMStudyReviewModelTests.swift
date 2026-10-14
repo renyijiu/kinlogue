@@ -49,7 +49,7 @@ struct DICOMStudyReviewModelTests {
             memberID: member.id,
             effectiveDate: date
         )
-        let snapshot = AppSnapshot(
+        let snapshot = TestLibrarySnapshot(
             generation: 9,
             members: [member],
             records: [],
@@ -80,10 +80,11 @@ struct DICOMStudyReviewModelTests {
         #expect(model.content?.study == confirmed)
         #expect(await service.saveCommands == [SaveDICOMStudyCommand(
             studyID: pending.id,
+            expectedRevision: pending.contentRevision,
             memberID: member.id,
             effectiveDate: date
         )])
-        #expect(await applied.snapshots == [snapshot])
+        #expect(await applied.snapshots == [snapshot.header])
     }
 
     @Test
@@ -128,7 +129,7 @@ struct DICOMStudyReviewModelTests {
         let events = DICOMReviewEventRecorder()
         let service = GatedDICOMReviewService(
             content: content,
-            savedSnapshot: AppSnapshot(
+            savedSnapshot: TestLibrarySnapshot(
                 generation: 2,
                 members: [member],
                 records: [],
@@ -203,7 +204,7 @@ private actor DICOMReviewEventRecorder {
 
 private actor GatedDICOMReviewService: DICOMAppServicing {
     let content: DICOMStudyReviewContent
-    let savedSnapshot: AppSnapshot
+    let savedSnapshot: TestLibrarySnapshot
     let loadGate: AsyncOperationGate
     let saveGate: AsyncOperationGate
     let deleteGate: AsyncOperationGate
@@ -211,7 +212,7 @@ private actor GatedDICOMReviewService: DICOMAppServicing {
 
     init(
         content: DICOMStudyReviewContent,
-        savedSnapshot: AppSnapshot,
+        savedSnapshot: TestLibrarySnapshot,
         loadGate: AsyncOperationGate,
         saveGate: AsyncOperationGate,
         deleteGate: AsyncOperationGate,
@@ -239,12 +240,12 @@ private actor GatedDICOMReviewService: DICOMAppServicing {
 
     func saveDICOMStudy(_ command: SaveDICOMStudyCommand) async throws -> AppSnapshot {
         await saveGate.wait()
-        return savedSnapshot
+        return savedSnapshot.header
     }
 
     func deleteDICOMStudy(id: DICOMStudy.ID) async throws -> AppSnapshot {
         await events.record("delete")
         await deleteGate.wait()
-        return .empty
+        return TestLibrarySnapshot.empty.header
     }
 }

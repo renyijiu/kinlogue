@@ -32,7 +32,7 @@ public struct AtomicFileStore: Sendable {
         rootURL: URL,
         failureInjector: (@Sendable (AtomicFileStoreFaultPoint) -> Bool)? = nil
     ) throws {
-        self.rootURL = try PlaintextVaultLayout(rootURL: rootURL).rootURL
+        self.rootURL = try DICOMImportLayout(rootURL: rootURL).rootURL
         self.failureInjector = failureInjector
     }
 
@@ -213,14 +213,6 @@ public struct AtomicFileStore: Sendable {
         return try await body(descriptor)
     }
 
-    func validateRegularFile(relativePath: String, expectedByteCount: Int) throws {
-        guard expectedByteCount >= 0 else { throw VaultError.resourceLimitExceeded }
-        let metadata = try regularFileMetadata(try resolved(relativePath))
-        guard metadata.st_size == expectedByteCount else {
-            throw VaultError.invalidDigest
-        }
-    }
-
     public func exists(relativePath: String) -> Bool {
         guard let url = try? resolved(relativePath) else { return false }
         var metadata = stat()
@@ -303,33 +295,6 @@ public struct AtomicFileStore: Sendable {
             throw VaultError.ioFailure(errno)
         }
         try syncDirectory(url.deletingLastPathComponent())
-    }
-
-    func removeRecognizedTemporaryFiles(relativeDirectory: String) throws {
-        let directory = try resolved(relativeDirectory, allowEmpty: true)
-        try validateNoSymlink(to: directory)
-
-        var directoryMetadata = stat()
-        guard lstat(directory.path, &directoryMetadata) == 0 else {
-            if errno == ENOENT { return }
-            throw VaultError.ioFailure(errno)
-        }
-        guard (directoryMetadata.st_mode & S_IFMT) == S_IFDIR else {
-            throw VaultError.invalidPath
-        }
-
-        let names: [String]
-        do {
-            names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
-        } catch {
-            throw VaultError.ioFailure(EIO)
-        }
-        for name in names where PlaintextVaultLayout.isAtomicTemporaryFilename(name) {
-            let relativePath = relativeDirectory.isEmpty
-                ? name
-                : "\(relativeDirectory)/\(name)"
-            try remove(relativePath: relativePath)
-        }
     }
 
     private func writeTemporary(_ data: Data, to url: URL) throws {

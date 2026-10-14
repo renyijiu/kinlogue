@@ -30,6 +30,10 @@ kind: pattern-reference | product-decision | external-spec
 
 ## 来源目录
 
+- [`2026-10-10-sqlite-architecture-references.md`](2026-10-10-sqlite-architecture-references.md)：SQLite 架构计划的官方资料。
+- [`2026-10-11-storage-plan-revision-evidence.md`](2026-10-11-storage-plan-revision-evidence.md)：主线与既有规模测量核对。
+- [`2026-10-11-grdb-engine-review.md`](2026-10-11-grdb-engine-review.md)：固定 GRDB 版本、许可、隐私资源及本机 engine 配置复核。
+
 ### 知识库、发布与产品文档
 
 - [`dicom-swift-1.5.0-dependency-review-2026-09-16.md`](dicom-swift-1.5.0-dependency-review-2026-09-16.md)：DICOM 依赖闭包、固定许可证与 JLSwift 授权来源。
@@ -55,3 +59,10 @@ kind: pattern-reference | product-decision | external-spec
 - [`2026-08-07-dicom-viewer-ui-contract.md`](2026-08-07-dicom-viewer-ui-contract.md)：Viewer model、canvas、交互和无障碍。
 - [`2026-08-09-dicom-canvas-lifetime-correction.md`](2026-08-09-dicom-canvas-lifetime-correction.md)：像素快照生命周期修正。
 - [`2026-08-09-dicom-viewer-window-presentation.md`](2026-08-09-dicom-viewer-window-presentation.md)：独立窗口呈现和撤销边界。
+
+- [`2026-10-11-sqlite-capture-cache.md`](2026-10-11-sqlite-capture-cache.md)：SQLite cache/spill 官方语义及临时捕获副本的本机验证边界。
+
+- [`2026-10-11-apple-search-semantics.md`](2026-10-11-apple-search-semantics.md)：Foundation 与 CF 的本地化子串匹配契约。
+- [`2026-10-12-corefoundation-find-implementation.md`](2026-10-12-corefoundation-find-implementation.md)：开源 CFString 查找实现的大小写折叠、非字面匹配与 locale 处理。
+- [`2026-10-11-sqlite-column-bounds.md`](2026-10-11-sqlite-column-bounds.md)：SQLite 大字段字节长度与惰性 CASE 的读取边界。
+- [`2026-10-11-grdb-text-fidelity.md`](2026-10-11-grdb-text-fidelity.md)：固定 GRDB 版本的 NUL 文本读写行为及项目保真边界。

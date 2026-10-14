@@ -36,50 +36,59 @@ struct EncryptedCheckpointWriterTests {
                 sink: restored.sink
             )
             #expect(read.manifest.revisionPair == result.revisionPair)
-            #expect(restored.value(for: "library.json") != nil)
-            #expect(restored.value(for: "lan-inbox/inbox.json") != nil)
+            #expect(read.manifest.isLogical)
+            #expect(restored.value(for: "logical/00000000.data") != nil)
             #expect(try checkpointFiles(in: fixture.repository) == [result.finalLeafName])
         }
     }
 
     @Test
-    func sourceMutationBeforeCommitPublishesNothingAndWritesNoWitness() async throws {
+    func sqliteLogicalPublisherKeepsCapturedRevisionAfterLegalCommitAndWritesWitness() async throws {
         try await withCheckpointWriterFixture { fixture in
+            let store = try SQLiteLibraryStore(rootURL: fixture.base.appendingPathComponent("SQLiteSource"))
+            defer { try? store.close() }
+            let repository = SQLiteReportRepository(store: store)
+            let member = try FamilyMember(displayName: "Synthetic before capture")
+            try await repository.saveMember(member, replacing: nil)
+            let bytes = Data("Synthetic immutable publisher original".utf8)
+            let file = try ValidatedImportedFile(data: bytes, kind: .image, contentTypeIdentifier: "public.png", sha256Digest: ContentDigest.sha256(bytes))
+            guard case let .created(draftID) = try await repository.stage(file) else { Issue.record("Missing draft"); return }
+            let draft = try await repository.draft(draftID)
+            let source = SQLiteLogicalBackupSource(store: store)
+            let before = try source.currentRevision()
             let writer = EncryptedCheckpointWriter(
-                source: fixture.source,
-                configurationStore: fixture.configurationStore,
+                source: source, configurationStore: fixture.configurationStore,
                 containerWriter: fixture.deterministicContainerWriter,
                 eventHandler: { event in
                     guard event == .beforeFinalSourceValidation else { return }
-                    let current = try await fixture.vault.loadCatalog()
-                    let member = try FamilyMember(displayName: "Concurrent mutation")
-                    _ = try await fixture.vault.commit(try VaultCommitRequest(
-                        expectedGeneration: current.generation,
-                        catalog: VaultCatalog(
-                            vaultID: current.vaultID,
-                            generation: try VaultGeneration.successor(of: current.generation),
-                            members: current.members + [member],
-                            records: current.records,
-                            attachments: current.attachments,
-                            importDrafts: current.importDrafts,
-                            dicomStudies: current.dicomStudies
-                        ),
-                        writes: []
-                    ))
+                    try await repository.discard(draftID: draftID, expectedRevision: draft.revision)
+                    var changed = member; changed.displayName = "Synthetic after capture"
+                    try await repository.saveMember(changed, replacing: member)
                 }
             )
-
-            await #expect(throws: EncryptedCheckpointWriterError.sourceChanged) {
-                _ = try await writer.write(
-                    repositoryURL: fixture.repository,
-                    configuration: fixture.configuration,
-                    sequence: 1
-                )
-            }
-            let files = try checkpointFiles(in: fixture.repository)
-            let configuration = try await fixture.configurationStore.load()
-            #expect(files.isEmpty)
-            #expect(configuration?.verificationWitnesses.isEmpty == true)
+            let result = try await BackupCheckpointPublisher(
+                repository: BackupRepository(repositoryURL: fixture.repository,
+                    expectedIdentity: fixture.configuration.repositoryDirectoryIdentity,
+                    trustedDescriptor: fixture.configuration.descriptor,
+                    expectedAuthorizationID: fixture.configuration.authorization.authorizationID,
+                    leaseAuthority: .init(configurationRootURL: fixture.configurationStore.rootURL, configuration: fixture.configuration)),
+                writer: writer, configurationStore: fixture.configurationStore
+            ).publishNext(configuration: fixture.configuration)
+            #expect(result.revisionPair == before)
+            #expect(before != (try source.currentRevision()))
+            #expect(result.maximumSimultaneousSourceFileCount == 1)
+            #expect(store.pins.isEmpty)
+            let finalURL = fixture.repository.appendingPathComponent(result.finalLeafName)
+            #expect(try strictTestLeafIdentity(finalURL) == result.fileIdentity)
+            let reloaded = try #require(await fixture.configurationStore.load())
+            #expect(reloaded.verificationWitnesses == [result.witness])
+            let restored = CheckpointTestLockedEntries()
+            let read = try BackupContainerReader().read(source: CheckpointTestByteSource(Data(contentsOf: finalURL)).source,
+                recoverySeed: fixture.recoverySeed, sink: restored.sink)
+            #expect(read.manifest.isLogical && read.manifest.revisionPair == before)
+            #expect(restored.value(for: "logical/00000000.data") != nil)
+            #expect(restored.value(for: "originals/\(draft.sources.elements[0].attachmentID.uuidString.lowercased()).data") == bytes)
+            #expect(try checkpointFiles(in: fixture.repository) == [result.finalLeafName])
         }
     }
 
@@ -248,7 +257,7 @@ struct EncryptedCheckpointWriterTests {
                         retentionCount: try BackupRetentionCount(2),
                         expectedRevision: current.revision
                     )
-                    let pair = try await fixture.source.prepare().revisionPair
+                    let pair = try fixture.source.currentRevision()
                     _ = try await fixture.configurationStore.observeRevisionPair(
                         pair,
                         observedAt: Date(timeIntervalSince1970: 4_000),
@@ -518,8 +527,8 @@ struct EncryptedCheckpointWriterTests {
 
 private struct CheckpointWriterFixture {
     let base: URL
-    let vault: PlaintextVault
-    let source: PlaintextLibraryBackupSource
+    let store: SQLiteLibraryStore
+    let source: SQLiteLogicalBackupSource
     let repository: URL
     let configurationStore: BackupLocalConfigurationStore
     let configuration: BackupLocalConfiguration
@@ -538,12 +547,9 @@ private func withCheckpointWriterFixture(
     )
     defer { try? FileManager.default.removeItem(at: base) }
     try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-    let root = base.appendingPathComponent("Vault", isDirectory: true)
-    let vault = try PlaintextVault(rootURL: root)
-    _ = try await vault.initialize()
-    let inbox = try PlaintextLANInboxStore(rootURL: root)
-    _ = try await inbox.initialize()
-    let source = try PlaintextLibraryBackupSource(vault: vault, inboxStore: inbox)
+    let store = try SQLiteLibraryStore(rootURL: base.appendingPathComponent("Vault", isDirectory: true))
+    defer { try? store.close() }
+    let source = SQLiteLogicalBackupSource(store: store)
 
     let selected = base.appendingPathComponent("selected", isDirectory: true)
     let repository = selected.appendingPathComponent(".kinlogue-backup-v1", isDirectory: true)
@@ -598,7 +604,7 @@ private func withCheckpointWriterFixture(
     )
     try await body(.init(
         base: base,
-        vault: vault,
+        store: store,
         source: source,
         repository: repository,
         configurationStore: configurationStore,

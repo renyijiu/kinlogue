@@ -15,7 +15,7 @@ struct DICOMAppModelTests {
             memberID: member.id,
             effectiveDate: Date(timeIntervalSinceReferenceDate: 100)
         )
-        let snapshot = AppSnapshot(
+        let snapshot = TestLibrarySnapshot(
             generation: 3,
             members: [member],
             records: [],
@@ -62,6 +62,7 @@ struct DICOMAppModelTests {
 
         model.selectDICOMStudy(fixture.study.id)
         model.selectedMemberID = fixture.otherMember.id
+        await model.waitForCurrentPage()
         #expect(model.dicomLibraryModel.selectedStudyID == nil)
         #expect(model.timelineSections.isEmpty)
     }
@@ -100,29 +101,43 @@ struct DICOMAppModelTests {
 
         model.selectDICOMStudy(fixture.study.id)
         model.timelineFilter = .reports
+        await model.waitForCurrentPage()
         #expect(model.timelineSections.flatMap(\.dicomStudies).isEmpty)
         #expect(model.timelineSections.flatMap(\.records).map(\.id) == [fixture.record.id])
         #expect(model.dicomLibraryModel.selectedStudyID == nil)
 
         await model.selectRecord(fixture.record.id)
         model.searchText = "Synthetic timeline"
+        await model.waitForCurrentPage()
         #expect(model.searchResults.map(\.id) == [fixture.record.id])
 
+        // Imaging never enters search, so the filter shows no entries while a search is active.
         model.timelineFilter = .imaging
-        #expect(model.timelineSections.flatMap(\.records).isEmpty)
-        #expect(model.timelineSections.flatMap(\.dicomStudies).map(\.id) == [fixture.study.id])
+        await model.waitForCurrentPage()
+        #expect(model.timelineSections.isEmpty)
         #expect(model.searchResults.isEmpty)
         #expect(model.selectedRecordID == nil)
 
+        model.searchText = ""
+        await model.waitForCurrentPage()
+        #expect(model.timelineSections.flatMap(\.records).isEmpty)
+        #expect(model.timelineSections.flatMap(\.dicomStudies).map(\.id) == [fixture.study.id])
+
         model.selectDICOMStudy(fixture.study.id)
         model.timelineFilter = .all
+        await model.waitForCurrentPage()
         #expect(model.timelineSections.flatMap(\.records).map(\.id) == [fixture.record.id])
         #expect(model.timelineSections.flatMap(\.dicomStudies).map(\.id) == [fixture.study.id])
-        #expect(model.searchResults.map(\.id) == [fixture.record.id])
         #expect(model.dicomLibraryModel.selectedStudyID == fixture.study.id)
+
+        model.searchText = "Synthetic timeline"
+        await model.waitForCurrentPage()
+        #expect(model.searchResults.map(\.id) == [fixture.record.id])
+        model.searchText = ""
 
         model.timelineFilter = .imaging
         await model.selectRecord(fixture.record.id)
+        await model.waitForCurrentPage()
         #expect(model.timelineFilter == .all)
         #expect(model.selectedRecord?.id == fixture.record.id)
         #expect(model.timelineSections.flatMap(\.records).map(\.id) == [fixture.record.id])
@@ -131,7 +146,7 @@ struct DICOMAppModelTests {
     @Test
     func timelineFilterFallsBackToAllWhenNoConfirmedImagingRemains() async throws {
         let fixture = try TimelineImagingFixture()
-        let model = fixture.makeModel(refreshedSnapshot: AppSnapshot(
+        let model = fixture.makeModel(refreshedSnapshot: TestLibrarySnapshot(
             generation: 2,
             members: [fixture.member, fixture.otherMember],
             records: [fixture.record],
@@ -174,6 +189,7 @@ struct DICOMAppModelTests {
             URL(fileURLWithPath: "/synthetic/existing-dicom", isDirectory: true),
         ]))
         let outcome = await model.finishDICOMImport()
+        await model.waitForCurrentPage()
 
         #expect(outcome?.destination == .timeline)
         #expect(model.selectedMemberID == nil)
@@ -187,7 +203,7 @@ struct DICOMAppModelTests {
     @Test
     func DICOMFolderSelectionSharesTheRootModalBoundaryAndLifecycleClearsImagingState() async throws {
         let pending = dicomSummary(state: .needsReview)
-        let snapshot = AppSnapshot(
+        let snapshot = TestLibrarySnapshot(
             generation: 1,
             members: [],
             records: [],
@@ -323,14 +339,14 @@ struct DICOMAppModelTests {
         let pending = dicomSummary(state: .needsReview)
         let model = AppModel(
             service: AppServiceSpy(
-                snapshot: AppSnapshot(
+                snapshot: TestLibrarySnapshot(
                     generation: 1,
                     members: [],
                     records: [],
                     drafts: [],
                     dicomStudies: [pending]
                 ),
-                refreshedSnapshot: AppSnapshot(
+                refreshedSnapshot: TestLibrarySnapshot(
                     generation: 2,
                     members: [],
                     records: [],
@@ -356,14 +372,14 @@ struct DICOMAppModelTests {
         let registry = DICOMViewerRegistry()
         let model = AppModel(
             service: AppServiceSpy(
-                snapshot: AppSnapshot(
+                snapshot: TestLibrarySnapshot(
                     generation: 1,
                     members: [],
                     records: [],
                     drafts: [],
                     dicomStudies: [confirmed]
                 ),
-                refreshedSnapshot: AppSnapshot(
+                refreshedSnapshot: TestLibrarySnapshot(
                     generation: 2,
                     members: [],
                     records: [],
@@ -393,7 +409,7 @@ struct DICOMAppModelTests {
         let study = dicomSummary(state: .confirmed)
         let registry = DICOMViewerRegistry()
         let model = AppModel(
-            service: AppServiceSpy(snapshot: AppSnapshot(
+            service: AppServiceSpy(snapshot: TestLibrarySnapshot(
                 members: [],
                 records: [],
                 drafts: [],
@@ -423,7 +439,7 @@ struct DICOMAppModelTests {
         let registry = DICOMViewerRegistry()
         let model = AppModel(
             service: AppServiceSpy(
-                snapshot: AppSnapshot(
+                snapshot: TestLibrarySnapshot(
                     generation: 1,
                     members: [],
                     records: [],
@@ -479,14 +495,14 @@ struct DICOMAppModelTests {
         )
         let model = AppModel(
             service: AppServiceSpy(
-                snapshot: AppSnapshot(
+                snapshot: TestLibrarySnapshot(
                     generation: 1,
                     members: [],
                     records: [],
                     drafts: [],
                     dicomStudies: [original]
                 ),
-                refreshedSnapshot: AppSnapshot(
+                refreshedSnapshot: TestLibrarySnapshot(
                     generation: 2,
                     members: [],
                     records: [],
@@ -509,18 +525,18 @@ struct DICOMAppModelTests {
     }
 
     @Test
-    func refreshRevokesViewerForAnUnrelatedCatalogGenerationChange() async {
+    func refreshKeepsViewerForAnUnrelatedCatalogGenerationChange() async {
         let study = dicomSummary(state: .confirmed)
         let model = AppModel(
             service: AppServiceSpy(
-                snapshot: AppSnapshot(
+                snapshot: TestLibrarySnapshot(
                     generation: 1,
                     members: [],
                     records: [],
                     drafts: [],
                     dicomStudies: [study]
                 ),
-                refreshedSnapshot: AppSnapshot(
+                refreshedSnapshot: TestLibrarySnapshot(
                     generation: 2,
                     members: [],
                     records: [],
@@ -537,8 +553,8 @@ struct DICOMAppModelTests {
 
         await model.refresh()
 
-        #expect(viewer.phase == .closed)
-        #expect(dismissal.count == 1)
+        #expect(viewer.phase != .closed)
+        #expect(dismissal.count == 0)
         #expect(model.dicomLibraryModel.studies == [study])
     }
 
@@ -559,14 +575,14 @@ struct DICOMAppModelTests {
             memberID: updatedMember.id,
             effectiveDate: updatedDate
         )
-        let initialSnapshot = AppSnapshot(
+        let initialSnapshot = TestLibrarySnapshot(
             generation: 1,
             members: [originalMember, updatedMember],
             records: [],
             drafts: [],
             dicomStudies: [originalStudy]
         )
-        let updatedSnapshot = AppSnapshot(
+        let updatedSnapshot = TestLibrarySnapshot(
             generation: 2,
             members: [originalMember, updatedMember],
             records: [],
@@ -578,7 +594,7 @@ struct DICOMAppModelTests {
         let dicomService = DICOMAppServiceSpy()
         await dicomService.setReviewContent(DICOMStudyReviewContent(
             viewerContent: viewerContent,
-            selectableMembers: [originalMember, updatedMember]
+            selectableMembers: [originalMember, updatedMember].map(LibraryMemberSummary.init)
         ))
         await dicomService.setSavedSnapshot(updatedSnapshot)
         let slices = GatedAppModelDICOMSliceService(session: session)
@@ -623,7 +639,7 @@ struct DICOMAppModelTests {
     func reviewCannotEscapeBeforeItsModelAllowsDismissal() async {
         let study = dicomSummary(state: .confirmed)
         let model = AppModel(
-            service: AppServiceSpy(snapshot: AppSnapshot(
+            service: AppServiceSpy(snapshot: TestLibrarySnapshot(
                 members: [],
                 records: [],
                 drafts: [],
@@ -760,15 +776,12 @@ private func appModelViewerSession(studyID: DICOMStudy.ID) throws -> DICOMSliceS
         windowCenter: 128,
         windowWidth: 256
     )
-    let revision = try VaultRevision(
-        generation: 1,
-        commitID: UUID(),
-        catalogDigest: Data(repeating: 0x42, count: 32)
-    )
+    let seriesID = UUID()
     return try DICOMSliceSeriesSession(
-        token: DICOMVaultSessionToken(vaultID: UUID(), revision: revision),
+        token: DICOMLibrarySessionToken(libraryID: UUID(), epoch: UUID(), studyID: studyID, contentRevision: 1,
+                                      seriesID: seriesID, seriesHash: Data(repeating: 0x42, count: 32)),
         studyID: studyID,
-        seriesID: UUID(),
+        seriesID: seriesID,
         orderingProvenance: .geometryProjection,
         instances: [try DICOMSliceInstanceDescriptor(
             id: UUID(),
@@ -806,12 +819,12 @@ private struct TimelineImagingFixture {
     }
 
     func makeModel(
-        refreshedSnapshot: AppSnapshot? = nil,
+        refreshedSnapshot: TestLibrarySnapshot? = nil,
         dicomService: DICOMAppServiceSpy = DICOMAppServiceSpy()
     ) -> AppModel {
         AppModel(
             service: AppServiceSpy(
-                snapshot: AppSnapshot(
+                snapshot: TestLibrarySnapshot(
                     generation: 1,
                     members: [member, otherMember],
                     records: [record],
