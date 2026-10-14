@@ -61,7 +61,7 @@ public struct ReportCandidates: Codable, Equatable, Sendable {
 }
 
 public struct ReportCandidateExtractor: Sendable {
-    public static let extractionVersion = 5
+    public static let extractionVersion = 6
 
     private static let memberNameLabels = ["受检者姓名", "患者姓名", "病人姓名", "姓名"]
     private static let organizationLabels = [
@@ -118,6 +118,14 @@ public struct ReportCandidateExtractor: Sendable {
         "备注", "审核时间", "审核日期", "报告医师", "审核医师", "审核者",
         "查看原始影像", "查看原始图像", "查看报告", "查看影像", "查看图像",
         "下载影像", "下载图像", "下载报告", "扫码", "扫一扫", "简体中文", "English",
+    ]
+    // The column headings of a lab results table, compared with spaces removed.
+    private static let itemColumnHeadings: Set<String> = [
+        "项目", "检验项目", "检测项目", "检查项目", "化验项目", "项目名称",
+    ]
+    private static let resultColumnHeadings: Set<String> = ["结果", "检验结果", "检测结果", "测定结果"]
+    private static let referenceColumnHeadings: Set<String> = [
+        "参考值", "参考范围", "参考区间", "生物参考区间", "参考值范围",
     ]
     private static let resultTableFooterHeadings = dateLabelMappings.map { $0.0 } + [
         "检验：", "检验:", "核对：", "核对:",
@@ -351,10 +359,16 @@ public struct ReportCandidateExtractor: Sendable {
                 }
                 return true
             }
-            let firstBoundary = (header.itemX + header.resultX) / 2
-            let secondBoundary = (header.resultX + header.referenceX) / 2
+            let firstBoundary = header.resultBoundary
+            let secondBoundary = header.referenceBoundary
+            // Columns before the item column (a row number) and a second table printed beside
+            // this one are not part of its rows.
+            let columns = body.filter { block in
+                header.leftBoundary.map { block.boundingBox.x >= $0 } ?? true
+                    && header.rightBoundary.map { block.boundingBox.x < $0 } ?? true
+            }
 
-            for row in alignedRows(body) {
+            for row in alignedRows(columns) {
                 let item = joinedCell(row.filter { $0.boundingBox.x < firstBoundary })
                 let result = joinedCell(row.filter {
                     ($0.boundingBox.x >= firstBoundary && $0.boundingBox.x < secondBoundary)
@@ -381,25 +395,43 @@ public struct ReportCandidateExtractor: Sendable {
         blocksByPage: [Int: [OCRBlock]]
     ) -> [ResultTableHeader] {
         var headers: [ResultTableHeader] = []
-        for item in ordered where normalizedHeaderCell(item.text) == "项目" {
+        for item in ordered where Self.itemColumnHeadings.contains(normalizedHeaderCell(item.text)) {
             let sameLine = blocksByPage[item.pageNumber, default: []].filter { block in
                 abs(block.boundingBox.y - item.boundingBox.y) <= Self.headerAlignmentTolerance
+            }.sorted { $0.boundingBox.x < $1.boundingBox.x }
+            // A second table printed beside this one starts at its own item heading; this
+            // table's result and reference headings are the nearest ones before it.
+            let next = sameLine.first {
+                $0.boundingBox.x > item.boundingBox.x
+                    && Self.itemColumnHeadings.contains(normalizedHeaderCell($0.text))
             }
-            guard let result = sameLine.first(where: { normalizedHeaderCell($0.text) == "结果" }),
-                  let reference = sameLine.first(where: {
-                      let text = normalizedHeaderCell($0.text)
-                      return text == "参考值" || text == "参考范围"
+            let own = sameLine.filter { block in
+                block.boundingBox.x > item.boundingBox.x
+                    && next.map { block.boundingBox.x < $0.boundingBox.x } ?? true
+            }
+            guard let result = own.first(where: {
+                      Self.resultColumnHeadings.contains(normalizedHeaderCell($0.text))
                   }),
-                  item.boundingBox.x < result.boundingBox.x,
-                  result.boundingBox.x < reference.boundingBox.x else {
+                  let reference = own.first(where: {
+                      $0.boundingBox.x > result.boundingBox.x
+                          && Self.referenceColumnHeadings.contains(normalizedHeaderCell($0.text))
+                  }) else {
                 continue
             }
+            // Each column between two of the three headings joins the cell on its left: an
+            // abbreviation joins the item, a flag or unit column joins the result.
+            func boundary(before heading: OCRBlock) -> Double {
+                let left = ([item] + own).last { $0.boundingBox.x < heading.boundingBox.x } ?? item
+                return (left.boundingBox.x + heading.boundingBox.x) / 2
+            }
+            let previous = sameLine.last { $0.boundingBox.x < item.boundingBox.x }
             headers.append(ResultTableHeader(
                 pageNumber: item.pageNumber,
                 y: max(item.boundingBox.y, result.boundingBox.y, reference.boundingBox.y),
-                itemX: item.boundingBox.x,
-                resultX: result.boundingBox.x,
-                referenceX: reference.boundingBox.x,
+                resultBoundary: boundary(before: result),
+                referenceBoundary: boundary(before: reference),
+                leftBoundary: previous.map { ($0.boundingBox.x + item.boundingBox.x) / 2 },
+                rightBoundary: next.map { ((own.last ?? reference).boundingBox.x + $0.boundingBox.x) / 2 },
                 blockIDs: [item.id, result.id, reference.id]
             ))
         }
@@ -424,8 +456,9 @@ public struct ReportCandidateExtractor: Sendable {
             }
             .map(\.boundingBox.y)
             .max()
+        // A table printed beside this one shares its heading line and does not end it.
         let nextHeaderY = headers
-            .filter { $0.pageNumber == header.pageNumber && $0.y < header.y }
+            .filter { $0.pageNumber == header.pageNumber && $0.y < header.y - Self.headerAlignmentTolerance }
             .map(\.y)
             .max()
         return [footerY, nextHeaderY].compactMap { $0 }.max()
@@ -774,8 +807,12 @@ private struct DateCandidateIdentity: Hashable {
 private struct ResultTableHeader {
     let pageNumber: Int
     let y: Double
-    let itemX: Double
-    let resultX: Double
-    let referenceX: Double
+    /// Where the result cell and the reference cell begin across the page.
+    let resultBoundary: Double
+    let referenceBoundary: Double
+    /// Where the table's rows begin and end across the page, when other columns or another
+    /// table share its heading line.
+    let leftBoundary: Double?
+    let rightBoundary: Double?
     let blockIDs: Set<OCRBlock.ID>
 }

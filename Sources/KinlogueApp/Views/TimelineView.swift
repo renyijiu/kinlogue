@@ -66,7 +66,8 @@ struct TimelineView: View {
     @ObservedObject var dicomLibraryModel: DICOMLibraryModel
     let sections: [AppTimelineSection]
     let searchResults: [LibraryReportSummary]
-    let isSearching: Bool
+    /// The trimmed query the search results answer; empty on the timeline.
+    let searchTerm: String
     let filter: AppTimelineFilter
     let selectedRecordID: HealthRecord.ID?
     /// False on one member's timeline, where every card would repeat the
@@ -113,6 +114,8 @@ struct TimelineView: View {
                                 record: record,
                                 memberLabel: memberLabel(record),
                                 showsMemberLabel: showsMemberLabels,
+                                showsDate: true,
+                                highlightTerm: searchTerm,
                                 isSelected: record.id == selectedRecordID,
                                 comparisonModel: comparisonModel,
                                 onSelect: onSelect
@@ -132,6 +135,8 @@ struct TimelineView: View {
                                         record: record,
                                         memberLabel: memberLabel(record),
                                         showsMemberLabel: showsMemberLabels,
+                                        showsDate: false,
+                                        highlightTerm: "",
                                         isSelected: record.id == selectedRecordID,
                                         comparisonModel: comparisonModel,
                                         onSelect: onSelect
@@ -170,6 +175,8 @@ struct TimelineView: View {
                 .accessibilityHint(AppLocalization.string("载入下一页记录"))
         }
     }
+
+    private var isSearching: Bool { !searchTerm.isEmpty }
 
     private var displayedEntriesAreEmpty: Bool {
         isSearching ? searchResults.isEmpty : sections.allSatisfy(\.entries.isEmpty)
@@ -266,6 +273,10 @@ private struct TimelineCard: View {
     let record: LibraryReportSummary
     let memberLabel: String
     let showsMemberLabel: Bool
+    /// Search results have no date sections above them, so each card names its own date.
+    let showsDate: Bool
+    /// The search term to set in bold wherever the card shows it; empty on the timeline.
+    let highlightTerm: String
     let isSelected: Bool
     @ObservedObject var comparisonModel: ComparisonModel
     let onSelect: (HealthRecord.ID) -> Void
@@ -294,7 +305,10 @@ private struct TimelineCard: View {
                                 .foregroundStyle(KinlogueTheme.primary)
                                 .accessibilityHidden(true)
                         }
-                        Text(record.title ?? record.reportType ?? AppLocalization.string("健康记录"))
+                        Text(SearchHighlight.text(
+                            record.title ?? record.reportType ?? AppLocalization.string("健康记录"),
+                            term: highlightTerm
+                        ))
                             .font(.headline)
                         Spacer()
                         if showsMemberLabel {
@@ -305,16 +319,44 @@ private struct TimelineCard: View {
                                 .kinlogueChip()
                         }
                     }
+                    if showsDate {
+                        Label(dateText, systemImage: "calendar")
+                            .font(.subheadline)
+                            .foregroundStyle(KinlogueTheme.onVariant)
+                    }
                     if let organization = record.organization {
-                        Label(organization, systemImage: "building.2")
+                        Label {
+                            Text(SearchHighlight.text(organization, term: highlightTerm))
+                        } icon: {
+                            Image(systemName: "building.2")
+                        }
                             .font(.subheadline)
                             .foregroundStyle(KinlogueTheme.onVariant)
                             .lineLimit(1)
                     }
-                    Text(record.conclusion ?? AppLocalization.string("原报告未提供结论"))
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
+                    if !record.matchedResultLines.isEmpty {
+                        MatchedResultLinesView(
+                            lines: record.matchedResultLines,
+                            totalCount: record.matchedResultLineCount,
+                            term: highlightTerm
+                        )
+                    } else if let excerpt = record.matchedExcerpt {
+                        // Shows where the term was found when the heading does not.
+                        Label {
+                            Text(SearchHighlight.text(excerpt.displayText, term: highlightTerm))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                        } icon: {
+                            Image(systemName: "text.magnifyingglass")
+                                .foregroundStyle(KinlogueTheme.onVariant)
+                        }
+                            .font(.subheadline)
+                    } else {
+                        Text(record.conclusion ?? AppLocalization.string("原报告未提供结论"))
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                    }
                 }
             }
             .buttonStyle(.kinlogueCard(isHighlighted: isHighlighted))
@@ -331,6 +373,87 @@ private struct TimelineCard: View {
     private var localizedAccessibilityLabel: String {
         let recordType = record.reportType
             ?? AppLocalization.string("健康记录")
-        return AppLocalization.string("\(memberLabel)，\(recordType)")
+        guard showsDate else { return AppLocalization.string("\(memberLabel)，\(recordType)") }
+        guard !record.matchedResultLines.isEmpty else {
+            if let excerpt = record.matchedExcerpt?.displayText {
+                return AppLocalization.string("\(memberLabel)，\(recordType)，\(dateText)，匹配内容：\(excerpt)")
+            }
+            return AppLocalization.string("\(memberLabel)，\(recordType)，\(dateText)")
+        }
+        let lines = MatchedResultLinesView.spokenText(
+            lines: record.matchedResultLines,
+            totalCount: record.matchedResultLineCount
+        )
+        return AppLocalization.string("\(memberLabel)，\(recordType)，\(dateText)，匹配的结果行：\(lines)")
+    }
+
+    private var dateText: String {
+        record.timelineDate.map { ReportDateSemantics.formatted($0, style: .medium) }
+            ?? AppLocalization.string("日期未知")
+    }
+}
+
+/// The confirmed result lines a search term was found in, cell by cell as the report printed
+/// them. Nothing is parsed, compared or marked; a printed "↑" stays in its own cell.
+private struct MatchedResultLinesView: View {
+    let lines: [ReportedResultLine]
+    let totalCount: Int
+    let term: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 4) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    GridRow {
+                        ForEach(Array(line.cells.enumerated()), id: \.offset) { index, cell in
+                            Text(SearchHighlight.text(cell, term: term))
+                                .font(index == 0 ? .subheadline : .subheadline.monospacedDigit())
+                                .fontWeight(index == 1 ? .medium : .regular)
+                                .foregroundStyle(index < 2 ? KinlogueTheme.onSurface : KinlogueTheme.onVariant)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+            if totalCount > lines.count {
+                Text(AppLocalization.string("还有 \(totalCount - lines.count) 行匹配"))
+                    .font(.caption)
+                    .foregroundStyle(KinlogueTheme.onVariant)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .kinloguePanel(.container, cornerRadius: KinlogueTheme.Radius.control)
+    }
+
+    static func spokenText(lines: [ReportedResultLine], totalCount: Int) -> String {
+        var parts = lines.map { $0.cells.joined(separator: " ") }
+        if totalCount > lines.count {
+            parts.append(AppLocalization.string("还有 \(totalCount - lines.count) 行匹配"))
+        }
+        return parts.joined(separator: AppLocalization.string("；"))
+    }
+}
+
+/// Text with every place the search term is found set in bold Primary. The places are found by
+/// the localized, case-insensitive search that matched the report; bold keeps them visible
+/// without relying on color.
+enum SearchHighlight {
+    static func text(_ value: String, term: String, locale: Locale = .current) -> AttributedString {
+        var attributed = AttributedString(value)
+        // A term with NUL takes a guarded path in the match predicate; it is not highlighted.
+        guard !term.isEmpty, !term.unicodeScalars.contains(where: { $0.value == 0 }) else { return attributed }
+        var searchStart = value.startIndex
+        while let found = value.range(of: term, options: .caseInsensitive,
+                                      range: searchStart..<value.endIndex, locale: locale),
+              !found.isEmpty {
+            if let range = Range(found, in: attributed) {
+                attributed[range].inlinePresentationIntent = .stronglyEmphasized
+                attributed[range].swiftUI.foregroundColor = KinlogueTheme.primary
+            }
+            searchStart = found.upperBound
+        }
+        return attributed
     }
 }

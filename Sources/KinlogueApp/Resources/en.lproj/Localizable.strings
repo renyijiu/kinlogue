@@ -12,6 +12,12 @@
 	<string>%1$@ record, %2$@</string>
 	<key>%@，%@</key>
 	<string>%1$@, %2$@</string>
+	<key>%@，%@，%@</key>
+	<string>%1$@, %2$@, %3$@</string>
+	<key>%@，%@，%@，匹配内容：%@</key>
+	<string>%1$@, %2$@, %3$@, matching text: %4$@</string>
+	<key>%@，%@，%@，匹配的结果行：%@</key>
+	<string>%1$@, %2$@, %3$@, matching result lines: %4$@</string>
 	<key>%lld</key>
 	<string>%lld</string>
 	<key>MR · %lld × %lld · %lld 张</key>
@@ -1248,5 +1254,7 @@
 	<string>, page %@</string>
 	<key>，识别置信度 %lld%%</key>
 	<string>, recognition confidence %lld%%</string>
+	<key>；</key>
+	<string>; </string>
 </dict>
 </plist>

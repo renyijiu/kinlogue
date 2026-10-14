@@ -1666,3 +1666,38 @@
 - **验证**：用 native 与本机默认两种构建系统产出的 GRDB 资源包分别模拟新的复制步骤，结果都只有 `GRDB_GRDB.bundle/PrivacyInfo.xcprivacy`；`zsh -n scripts/build-app.sh` 通过；`scripts/test.sh --filter 'Safety|GitHubActions|Documentation|Packaging|PrivacyGuard|Localization|Presentation|Layout|AcceptanceScan'` 通过。
 - **CodeQL**：同一次运行里必需检查 `Analyze Swift` 在 45 分钟上限处被取消：traced build 用了 43 分钟（main 最近一次成功为 32 分钟），分析步骤开始约 1 分钟后到时；main 上分析步骤约 3.5 分钟。多出的时间来自本分支加入的 GRDB 依赖。[`codeql.yml`](../.github/workflows/codeql.yml) 的上限改为 60 分钟，构建方式和权限不变。
 - **未执行**：本机没有 Xcode 26，没有完整运行 native 构建下的 `verify-app.sh`；两处修复是否让托管 CI 的 bundle job 和 CodeQL 通过，要看推送后的远端运行。
+
+## [2026-10-14] search/ui | 搜索结果显示日期，并逐格列出命中的检验表格行
+
+- **起因**：用户让调研一款同类 iPhone 健康档案应用（[来源笔记](sources/2026-10-14-carehealth-competitor-notes.md)），最值得参考的是“搜指标名看到历次数值”。续页的表格抽取早已把每行写成“项目⇥结果⇥参考值”，但搜索只返回整条报告，搜索卡片也没有日期。用户决定按日期列出原文行算呈现，不算趋势分析，见 [`decisions.md`](decisions.md) 2026-10-14 一节。
+- **Core**：新增 [`ReportedResultLine`](../Sources/KinlogueCore/Domain/ReportedResultLine.swift)，只按制表符切分、去掉空格，至少两个非空单元格才算一行；匹配沿用 `RecordQuery.localizedContains`，作用在存储的整行上，所以搜索词不会跨格。[`LibraryReportSummary`](../Sources/KinlogueCore/Domain/LibraryReportQuery.swift) 增加 `matchedResultLines`（最多 8 行、每格 160 个 Unicode scalar）和 `matchedResultLineCount`；由记录构造的摘要两者为空，详情读取时的投影核对不受影响。
+- **Platform**：[`SQLiteReportSearch.matchedResultLines`](../Sources/KinloguePlatform/Storage/SQLiteReportSearch.swift) 在搜索分页里为每个列出的报告取命中行：先看缓存条目或重新校验的搜索行里有没有带制表符且含搜索词的行，有才读取详情，核对详情摘要与行摘要后只解码检查结果字段。搜索行和详情无法校验时报告照常列出、不带行。搜索表、schema、备份格式都没有变。
+- **App**：[`TimelineView`](../Sources/KinlogueApp/Views/TimelineView.swift) 的搜索卡片在标题下显示日期；有命中行时，结论的位置换成逐格显示的网格，超出 8 行时注明还有几行。这一块不用任何状态色。VoiceOver 标签增加日期和命中行。新增 4 条中英文案（含单复数），英文运行时资源已重新生成。README 的“前后对照”一条和 [`design-system.md`](design-system.md) 第 26 条同步。
+- **测试**：Core 3 项（抽取格式的行与匹配、两格门槛与用户编辑后的残行、摘要上限），Platform 1 项（只列检查结果里的行、标题/成员/空查询不列、无缓存路径、详情损坏时照常列出），App 2 项（搜索卡片源码约束含“不使用状态色”、新文案的中英文与单复数）。主清单 1175 tests / 96 suites。
+- **界面核对**：用临时测试把搜索结果（合成数据，不接触真实资料库）在 760 和 420 点宽度下离屏渲染成图片看过：日期、两列与四列的行、“还有 2 行匹配”和无命中行的卡片都按预期显示；临时测试随后删除。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，源码和测试改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1175 tests / 96 suites，隔离运行的验收扫描、storage process、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只改了文档。传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：近上限资料库的搜索计时没有重测；合成资料库的检查结果里没有制表符，量不到读取详情的开销。按本机一次微基准推断，约 27 KiB 的详情解码一次约 0.44 ms，一页 100 份全部命中表格行时多出约 45 ms。真实报告上抽取行的质量、窄窗口截断、键盘和 VoiceOver 朗读没有人工核对；`run-acceptance.sh`、托管平台上的 CI、macOS 26 和真机门禁与前几条相同，都没有执行。
+
+## [2026-10-14] search/ui | 搜索词加粗标出，非表格命中显示上下文摘录；README 补上留存原件的动机
+
+- **起因**：上一条之后，用户确认调研里剩下的两项也要做：搜索结果的命中高亮与命中片段，以及 README 的动机文案。取舍补记在 [`decisions.md`](decisions.md) 2026-10-14 一节。
+- **Core**：新增 [`SearchExcerpt`](../Sources/KinlogueCore/Domain/SearchExcerpt.swift)：在一个字段里用同一套本地化、不区分大小写的匹配找到第一处命中，空白折叠为一个空格，保留命中前最多 30 个字符、总长约 120 个字符，两端截断处标省略号；含 NUL 的搜索词不生成摘录。[`LibraryReportSearchMatch`](../Sources/KinlogueCore/Domain/LibraryReportQuery.swift) 把命中行和摘录合在一起，有命中行时不带摘录；摘录跳过卡片已显示的标题（或报告类型）、机构和日期。摘要的 `listing` 改为接收它，摘录再限 480 个 Unicode scalar。
+- **Platform**：[`SQLiteReportSearch.match`](../Sources/KinloguePlatform/Storage/SQLiteReportSearch.swift) 取代上一条的 `matchedResultLines`：没有命中行时，从同一组已校验的搜索字段里取摘录，不再读任何行。搜索行无法校验时什么都不带；只有详情无法校验时仍可显示摘录。
+- **App**：[`TimelineView`](../Sources/KinlogueApp/Views/TimelineView.swift) 的参数 `isSearching` 改为 `searchTerm`（由 [`AppShellView`](../Sources/KinlogueApp/Views/AppShellView.swift) 传入去掉首尾空白的搜索词；搜索词每次变化时结果都会清空重载，所以它就是当前结果对应的词）。新增 `SearchHighlight`，把标题、机构、命中行和摘录里的搜索词设为加粗加 Primary。卡片在命中行、摘录、结论三者中按此顺序显示一项；摘录前置 `text.magnifyingglass` 符号。新增 1 条中英文案（VoiceOver 读出摘录）。[`design-system.md`](design-system.md) 第 26 条同步。
+- **README**：“为什么做续页”补上纸质报告会褪色、有些医院的线上报告只能在一段时间内查看或下载；“前后对照”一条写明加粗和上下文。
+- **测试**：Core 2 项（摘录的窗口、截断、空白折叠、大小写和 NUL；命中行优先、跳过已显示字段、摘要上限），App 2 项（卡片的显示顺序与新文案的源码约束；高亮标出每一处命中且空词、不存在的词和含 NUL 的词都不标）；Platform 的搜索集成测试补上摘录、已显示字段不出摘录、无缓存路径和详情损坏时的摘录。主清单 1179 tests / 96 suites。
+- **界面核对**：用临时测试离屏渲染了一张命中行卡片、一张摘录卡片和一张无命中卡片（合成数据），加粗与省略号位置符合预期；临时测试随后删除。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，本条改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1179 tests / 96 suites，隔离运行的验收扫描、storage process、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只追加了本条日志。传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：近上限资料库的搜索计时没有重测，摘录给每页每份报告多出一次字段内的本地化查找，开销没有量过。英文界面、窄窗口下的两行截断、键盘和 VoiceOver 朗读没有人工核对；改动后的 App 没有在真实资料库上搜过。`run-acceptance.sh`、托管平台上的 CI、macOS 26 和真机门禁与前几条相同，都没有执行。
+
+## [2026-10-14] search/perf+ocr | 完整测试后的优化：搜索呈现提速，检验表格的表头别名与并排表格
+
+- **起因**：用户要求对前两条做完整测试并找出可优化处。做了两项核对：近上限资料库上的首页计时对照，以及真实 OCR 走完导入、确认和搜索的合成版式核对。方法、数字和边界见 [搜索呈现测量](search-presentation-measurement-2026-10-14.md)；两项都用临时改动完成，结束后已撤回（规模探针源码与基线开关恢复原样，临时测试删除）。
+- **计时发现**：9,990 份报告（9,791 条已确认）、结果改为 30 行表格的合成库上，初版呈现让首页 p50 从 39–40 ms 升到 59–81 ms（成员、日期、`合成`），从 62 ms 升到 100 ms（每份恰有一行命中）。原因是对每个列出的报告逐字段做本地化查找、整段折叠空白，并且每次完整解码详情。
+- **Platform 优化**：[`SQLiteReportSearch.match`](../Sources/KinloguePlatform/Storage/SQLiteReportSearch.swift) 改为用缓存条目里的预筛键挑候选字段；只在候选字段里找表格行，找到后直接返回，摘录也只看候选字段。结果字段在搜索字段里的位置按搜索行与详情行两个摘要记在 `SQLiteReportSearchCache` 里（最多 20,000 条，随数据库关闭清空），之后的查询不再读取详情；第一次读取只解码结果文本，不解码来源引用。最终除 `合成`（每份列出报告的 30 行全部命中）多约 12 ms 外，各词首页与基线相差不超过 3 ms。
+- **Core 优化**：[`ReportedResultLine.lines(matching:)`](../Sources/KinlogueCore/Domain/ReportedResultLine.swift) 改为“找下一处命中、取其所在行”，一行只命中时只需两次查找；含 NUL 的词仍逐行走有保护的谓词，含换行的词不匹配任何行。[`SearchExcerpt`](../Sources/KinlogueCore/Domain/SearchExcerpt.swift) 先在原文里查找，只折叠命中处附近的空白。
+- **端到端发现**：6 种合成版式各一份 PDF 和一张图片。图片的基本表格可抽出；表头写成“检验项目 / 检测结果 / 参考区间”、带序号与缩写列的检验科版式、两表并排这三种此前抽不出或抽错。带文字层的 PDF 全部抽不出表格。
+- **抽取规则 version 6**：[`ReportCandidateExtractor`](../Sources/KinlogueCore/OCR/ReportCandidateExtractor.swift) 识别三个表头的常见别名；表头行上的其他列按位置并入左侧的格，项目表头左侧的列不进入该行；同一表头行上的第二个项目表头视为并排的另一张表，两表各自成行。并排表格最初只出左表：右表表头略低于左表，被当成了“下面的下一张表”的起点，改为只把低于表头容差的表头当作下一张表后修复。复跑端到端核对，三种版式的图片都抽出全部 8 行。已确认记录不重新抽取；旧版本的待确认草稿按既有规则只补空字段。
+- **测试**：Core 新增 2 项（检验科版式的列归并、并排表格且两行表头高度不同），后一项先在没有修复的代码上确认失败；Platform 搜索集成测试改为覆盖“结果字段位置已记住时仍从已校验的搜索行列出、重新读取时详情损坏则不列”，并改用新的 `match` 签名。主清单 1181 tests / 96 suites。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，本条改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1181 tests / 96 suites，隔离运行的验收扫描、storage process、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只追加了本条日志。传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未处理**：带文字层的 PDF 按行生成 block，一行各列合成一个 block，因此抽不出表格，科室和日期候选会带上同行其他文字，没有标记的表格行不进入任何已确认字段、搜不到。可以按字符位置把文字层的行在大间隔处拆开，但 block 数会增加数倍，可能触发每份 4,096 个 block 的输出上限，需要单独评估。识别层误读（“↑”读成“个”或“T”，“白”读成“自”，“U/L”读成“UIL”）原样保留，由用户在复核时修正。
