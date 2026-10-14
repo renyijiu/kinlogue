@@ -259,9 +259,11 @@ GRDB_RESOURCE_CONTENTS="$(swiftpm_resource_directory "$GRDB_RESOURCE_BUNDLE")"
     && ! -L "$GRDB_RESOURCE_CONTENTS/PrivacyInfo.xcprivacy" \
     && -z "$(/usr/bin/find "$GRDB_RESOURCE_BUNDLE" -type l -print -quit)" ]] \
   || fail "the GRDB SwiftPM privacy resource bundle is unavailable"
-/usr/bin/ditto \
-  "$GRDB_RESOURCE_CONTENTS" \
-  "$APP_BUNDLE/Contents/Resources/$GRDB_RESOURCE_BUNDLE_NAME"
+# The native build system also places an Info.plist in this flat bundle; the
+# app ships only the privacy manifest.
+/bin/mkdir "$APP_BUNDLE/Contents/Resources/$GRDB_RESOURCE_BUNDLE_NAME"
+/bin/cp -- "$GRDB_RESOURCE_CONTENTS/PrivacyInfo.xcprivacy" \
+  "$APP_BUNDLE/Contents/Resources/$GRDB_RESOURCE_BUNDLE_NAME/PrivacyInfo.xcprivacy"
 APP_RESOURCE_BUNDLE="$BIN_DIR/$APP_RESOURCE_BUNDLE_NAME"
 [[ -d "$APP_RESOURCE_BUNDLE" && ! -L "$APP_RESOURCE_BUNDLE" ]] \
   || fail "the KinlogueApp SwiftPM resource bundle is unavailable"

@@ -1657,3 +1657,12 @@
 - **界面核对**：用临时测试把设置页（合成状态，不接触真实资料库）离屏渲染成图片看过：提示出现在按钮下方靠右，验证时间为固定的日期时刻；临时测试随后删除。
 - **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，源码和测试改动完成后的完整 `scripts/test.sh` 退出码 0：主清单 1169 tests / 96 suites，隔离运行的验收扫描、storage process、大小写别名锁、安装 LAN 生产 HTTP 探针和真实双流 LAN 用例通过；此后只改了本条日志。传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
 - **未执行**：改动后的构建没有在界面上实际点过“立即备份”；英文界面没有渲染核对；`run-acceptance.sh`、托管平台上的 CI、macOS 26、真实手机和人工门禁与前几条相同，都没有执行。
+
+## [2026-10-14] ci/fix | 托管 CI 上的 bundle 资源清单多出 GRDB 的 Info.plist，CodeQL 超时
+
+- **起因**：PR #21 第一次远端运行时，`Verify bundle and DICOM XPC` 在 macOS 26 / Xcode 26.6 / Swift 6.3.3 上以“the application bundle resource allow-list does not match exactly”失败；本机 Xcode 27 / Swift 6.4 构建的 bundle 清单完全一致。
+- **原因**：Swift 6.3 默认使用 native 构建系统，资源包是扁平目录。本机用 `swift build -c release --build-system native --target GRDB` 复现：`GRDB_GRDB.bundle` 里除 `PrivacyInfo.xcprivacy` 外还有一个 `Info.plist`，同样方式构建的 `ZIPFoundation_ZIPFoundation.bundle` 只有隐私清单。[`build-app.sh`](../scripts/build-app.sh) 原先用 `ditto` 复制整个 GRDB 资源目录，多出的文件不在 [`verify-app.sh`](../scripts/verify-app.sh) 的精确清单里。
+- **改动**：GRDB 资源包只复制 `PrivacyInfo.xcprivacy`；精确清单不变。
+- **验证**：用 native 与本机默认两种构建系统产出的 GRDB 资源包分别模拟新的复制步骤，结果都只有 `GRDB_GRDB.bundle/PrivacyInfo.xcprivacy`；`zsh -n scripts/build-app.sh` 通过；`scripts/test.sh --filter 'Safety|GitHubActions|Documentation|Packaging|PrivacyGuard|Localization|Presentation|Layout|AcceptanceScan'` 通过。
+- **CodeQL**：同一次运行里必需检查 `Analyze Swift` 在 45 分钟上限处被取消：traced build 用了 43 分钟（main 最近一次成功为 32 分钟），分析步骤开始约 1 分钟后到时；main 上分析步骤约 3.5 分钟。多出的时间来自本分支加入的 GRDB 依赖。[`codeql.yml`](../.github/workflows/codeql.yml) 的上限改为 60 分钟，构建方式和权限不变。
+- **未执行**：本机没有 Xcode 26，没有完整运行 native 构建下的 `verify-app.sh`；两处修复是否让托管 CI 的 bundle job 和 CodeQL 通过，要看推送后的远端运行。
