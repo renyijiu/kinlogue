@@ -30,7 +30,7 @@ flowchart LR
 
 | Target | 类型 | 责任 | 依赖 |
 | --- | --- | --- | --- |
-| `KinlogueCore` | internal library target | 领域模型、状态机、import/LAN 协议、DICOM study/index、查询契约、fingerprint、backup contract/retention 和平台无关验证 | Foundation |
+| `KinlogueCore` | internal library target | 领域模型、状态机、import/LAN 协议、DICOM study/index、查询契约、fingerprint、backup contract/retention、成员对话的上下文包/提示词/引用/对话值类型（`Assistant/`，尚未接入 App，见[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md)）和平台无关验证 | Foundation |
 | `KinloguePlatform` | internal library target | SQLite 资料库（数据库、原件生命周期、各领域仓库）、原子文件、删除、PDF/Image OCR、LAN receiver/inbox、流式原始文件 ZIP、加密 backup container/restore transaction、内嵌手机资源 | `KinlogueCore`、GRDB `7.11.1`、`KinlogueSQLiteConfiguration`、ZIPFoundation `0.9.20`、SwiftNIO `NIOCore/NIOHTTP1/NIOPosix`、CryptoKit 与 Apple frameworks |
 | `KinlogueSQLiteConfiguration` | internal C target | SQLite connection 配置与回读的最小 varargs bridge | 系统 sqlite3 |
 | `KinlogueDICOMIPC` | library | Foundation-only、有界 request/response DTO、固定错误码和 descriptor-only NSXPC contract | Foundation |
