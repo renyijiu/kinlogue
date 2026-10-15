@@ -43,6 +43,11 @@ MAIN_LINK_MAP="$REPO_DIR/.build/Kinlogue-main-LinkMap.txt"
 THIRD_PARTY_NOTICE_SOURCE="$REPO_DIR/THIRD_PARTY_NOTICES.md"
 THIRD_PARTY_NOTICE_NAME="THIRD_PARTY_NOTICES.md"
 ISOLATED_SWIFTPM_ROOT=""
+# The member-chat bridge stays out of the bundle by default until the feature, its privacy text
+# and the release gates are switched over together (docs/plans/2026-10-15-feat-member-cli-chat-plan.md).
+WITH_ASSISTANT_BRIDGE=false
+ASSISTANT_BRIDGE_PRODUCT="KinlogueAssistantBridge"
+ASSISTANT_BRIDGE_ENTITLEMENTS_SOURCE="$REPO_DIR/packaging/KinlogueAssistantBridge.entitlements"
 
 fail() {
   echo "Build failed: $1" >&2
@@ -50,7 +55,7 @@ fail() {
 }
 
 usage() {
-  fail "usage: build-app.sh [--isolated-swiftpm-root /absolute/private/path]"
+  fail "usage: build-app.sh [--isolated-swiftpm-root /absolute/private/path] [--with-assistant-bridge]"
 }
 
 while [[ "$#" -gt 0 ]]; do
@@ -59,6 +64,9 @@ while [[ "$#" -gt 0 ]]; do
       [[ "$#" -ge 2 ]] || usage
       ISOLATED_SWIFTPM_ROOT="$2"
       shift
+      ;;
+    --with-assistant-bridge)
+      WITH_ASSISTANT_BRIDGE=true
       ;;
     *)
       usage
@@ -181,6 +189,10 @@ fi
 "$SWIFT_EXECUTABLE" build "${SWIFTPM_ARGUMENTS[@]}" \
   -c release --product Kinlogue -j 2 \
   -Xlinker -map -Xlinker "$MAIN_LINK_MAP"
+if [[ "$WITH_ASSISTANT_BRIDGE" == true ]]; then
+  "$SWIFT_EXECUTABLE" build "${SWIFTPM_ARGUMENTS[@]}" \
+    -c release --product "$ASSISTANT_BRIDGE_PRODUCT" -j 2
+fi
 "$XCODEBUILD_EXECUTABLE" \
   -project "$DICOM_HELPER_PROJECT" \
   -scheme "$DICOM_HELPER_TARGET" \
@@ -332,6 +344,13 @@ done
   --entitlements "$DICOM_HELPER_ENTITLEMENTS_SOURCE" \
   "$DICOM_HELPER_BUNDLE"
 /usr/bin/codesign --verify --strict "$DICOM_HELPER_BUNDLE"
+
+if [[ "$WITH_ASSISTANT_BRIDGE" == true ]]; then
+  "$REPO_DIR/scripts/assemble-assistant-bridge.sh" \
+    "$BIN_DIR/$ASSISTANT_BRIDGE_PRODUCT" \
+    "$APP_BUNDLE/Contents/XPCServices/$ASSISTANT_BRIDGE_PRODUCT.xpc" \
+    "$ASSISTANT_BRIDGE_ENTITLEMENTS_SOURCE"
+fi
 
 /usr/bin/codesign --force --sign - \
   --entitlements "$REPO_DIR/packaging/Kinlogue.entitlements" \

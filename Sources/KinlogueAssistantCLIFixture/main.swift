@@ -14,9 +14,13 @@ if arguments.count > 1, arguments[1] == CLISupervisor.flag {
 }
 
 let home = ProcessInfo.processInfo.environment["HOME"] ?? NSTemporaryDirectory()
-let scenario = (try? JSONSerialization.jsonObject(
-    with: Data(contentsOf: URL(fileURLWithPath: home + "/kl-fake-codex.json"))
-)) as? [String: Any] ?? [:]
+// Inside the sandboxed bridge the real home is unreadable, so the scenario may also sit next to
+// the executable (scripts/verify-assistant-xpc.sh).
+let scenario = [home, URL(fileURLWithPath: arguments[0]).deletingLastPathComponent().path].lazy.compactMap { folder in
+    (try? JSONSerialization.jsonObject(
+        with: Data(contentsOf: URL(fileURLWithPath: folder + "/kl-fake-codex.json"))
+    )) as? [String: Any]
+}.first ?? [:]
 
 @MainActor
 func emit(_ object: [String: Any]) {
@@ -67,6 +71,7 @@ func record(_ name: String, stdinBytes: Int) {
         // included; the real CLI is not a Foundation program.
         "environmentKeys": ProcessInfo.processInfo.environment.keys.filter { $0 != "__CF_USER_TEXT_ENCODING" }.sorted(),
         "workingDirectory": FileManager.default.currentDirectoryPath,
+        "environmentPath": ProcessInfo.processInfo.environment["PATH"] ?? "",
         "stdinBytes": stdinBytes,
         "processGroupLeader": getpgrp() == getpid(),
     ]

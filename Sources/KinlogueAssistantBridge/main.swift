@@ -1,6 +1,7 @@
 import Foundation
 import KinlogueAssistantCLI
 import KinlogueAssistantIPC
+import os
 
 // The assistant bridge XPC service. The same executable is the supervisor that leads each CLI's
 // process group (`--supervise`), so a killed bridge never leaves the CLI running.
@@ -13,6 +14,8 @@ if CommandLine.arguments.count > 1, CommandLine.arguments[1] == CLISupervisor.fl
 private final class AssistantBridgeService: NSObject, KinlogueAssistantBridgeXPCProtocol, Sendable {
     private let bridge: CodexBridge?
     private let queue = DispatchQueue(label: "kinlogue.assistant.bridge", attributes: .concurrent)
+    /// The turn each connection started, so closing one connection stops only its own turn.
+    private let turns = OSAllocatedUnfairLock(initialState: [ObjectIdentifier: UUID]())
 
     override init() {
         bridge = try? CodexBridge(environment: .current(supervisor: Bundle.main.executablePath))
@@ -35,10 +38,13 @@ private final class AssistantBridgeService: NSObject, KinlogueAssistantBridgeXPC
     }
 
     func respond(_ request: Data, reply: @escaping @Sendable (Data) -> Void) {
-        queue.async { [bridge] in
+        let owner = NSXPCConnection.current().map(ObjectIdentifier.init)
+        queue.async { [bridge, turns] in
             let response: KinlogueAssistantTurnResponse
             if let request = try? KinlogueAssistantIPCCodec.decodeTurnRequest(request), let bridge {
+                if let owner { turns.withLock { $0[owner] = request.requestID } }
                 response = bridge.respond(request, cancellation: CLICancellation())
+                if let owner { turns.withLock { if $0[owner] == request.requestID { $0[owner] = nil } } }
             } else {
                 response = .failure(code: bridge == nil ? .failed : .invalidRequest, exitCode: nil)
             }
@@ -50,8 +56,9 @@ private final class AssistantBridgeService: NSObject, KinlogueAssistantBridgeXPC
         reply(UUID(uuidString: requestID).map { bridge?.cancel(requestID: $0) ?? false } ?? false)
     }
 
-    func connectionInvalidated() {
-        bridge?.cancelRunningTurn()
+    func connectionInvalidated(_ connection: ObjectIdentifier) {
+        guard let requestID = turns.withLock({ $0.removeValue(forKey: connection) }) else { return }
+        _ = bridge?.cancel(requestID: requestID)
     }
 }
 
@@ -61,7 +68,8 @@ private final class AssistantBridgeListener: NSObject, NSXPCListenerDelegate {
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         connection.exportedInterface = KinlogueAssistantXPCInterface.make()
         connection.exportedObject = service
-        connection.invalidationHandler = { [service] in service.connectionInvalidated() }
+        let identifier = ObjectIdentifier(connection)
+        connection.invalidationHandler = { [service] in service.connectionInvalidated(identifier) }
         connection.resume()
         return true
     }

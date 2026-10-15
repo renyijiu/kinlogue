@@ -72,3 +72,11 @@ U2 实现后，用一个用完即删的临时测试，让 `CodexBridge` 对本�
 - 关闭 41 个功能后，`features list` 仍显示 `unified_exec` 开启，`-c features.unified_exec=false` 也无效；同一组参数下实际发出的请求里没有任何工具。`features list` 读取的是用户配置，而这一轮用的是 `--ignore-user-config`，因此检查不再以功能表为准，只以实际请求为准。
 - 修正后，目录里的第一个模型（`gpt-6.1-sol`）和 `gpt-6-astra` 都通过检查：已登录、版本已验证、请求中工具数为 0、只有两条消息、没有本机路径，分别用时 3.1 秒和 1.4 秒；临时目录没有残留。
 - 没有经 bridge 跑真实的一轮问答。
+
+## U2b 签名 XPC 复核（同日追加）
+
+`scripts/verify-assistant-xpc.sh` 把 bridge 按 [方案 A 的 entitlements](../../packaging/KinlogueAssistantBridge.entitlements) ad-hoc 签名，嵌进只有 `app-sandbox` 的探针宿主，连续两次全部通过：
+
+- 生产 entitlements：本机 Codex 0.162.0 在沙盒 bridge 中通过能力检查。沙盒内可以用 `network.server` 在 127.0.0.1 上监听，Codex 子进程能连回来；bridge 自身作为 supervisor 也能在沙盒内启动。放在例外目录之外的 CLI 被拒，报“不支持的安装位置”：沙盒允许 bridge 读取文件元数据，`access(X_OK)` 才被拒，所以按这一点判断。
+- 验证签名（生产集合再加一个只读目录，并换用独立的 bundle 标识）：假 CLI 的一轮回答经 supervisor 返回；仿 npm 的包装（`bin/codex` → `codex.js`，`#!/usr/bin/env` 解释器放在 `bin/`）可以运行；从第二条连接发出的取消在 2 秒处停止这一轮，CLI 和它启动的孙进程都退出；SIGKILL bridge 服务进程后，supervisor 杀掉整组，没有 supervisor 残留。
+- 没有用真实账号跑一轮问答；`/usr/local/` 下没有真实安装可测；系统为探针创建的沙盒容器（`com.kinlogue.mac.assistant-bridge`、`…-verification`、`…assistant-xpc-probe`）保留在 `~/Library/Containers/`，其中只有元数据。

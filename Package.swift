@@ -100,6 +100,10 @@ let package = Package(
             name: "KinlogueAssistantCLIFixture",
             dependencies: ["KinlogueAssistantCLI"]
         ),
+        .executableTarget(
+            name: "KinlogueAssistantXPCProbe",
+            dependencies: ["KinlogueAssistantIPC"]
+        ),
         .testTarget(
             name: "KinlogueCoreTests",
             dependencies: ["KinlogueCore"]

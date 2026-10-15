@@ -40,7 +40,8 @@ flowchart LR
 | `KinlogueStorageProcessFixture` | executable | 跨进程存储协调和安装测试 fixture；恢复测试只负责 seed/驱动/strict verify，并通过 test-only SPI 调用生产恢复事务 | `KinlogueCore`、`KinloguePlatform` |
 | `KinlogueAssistantIPC` | internal library target | 成员对话 bridge 的有界请求/状态/回答 DTO、失败码和 `@Sendable` 回复的 NSXPC 协议；不传路径以外的访问权、文件句柄、记录 ID 或成员名 | Foundation |
 | `KinlogueAssistantCLI` | internal library target | Codex 加固参数、功能白名单、模型目录改写、`exec --json` 事件解析、本机模拟服务与请求检查、进程组运行器、`--supervise` supervisor 和 `CodexBridge`（能力检查、单轮执行、取消、私有临时目录） | `KinlogueAssistantIPC`、Darwin、os |
-| `KinlogueAssistantBridge` | non-published executable | 成员对话的 XPC 服务入口，同一二进制兼作 supervisor；尚未打包进 App（计划 U2b） | `KinlogueAssistantIPC`、`KinlogueAssistantCLI` |
+| `KinlogueAssistantBridge` | non-published executable / XPC service | 成员对话的 XPC 服务入口，同一二进制兼作 supervisor；独立签名、方案 A 的沙盒例外（[entitlements](../packaging/KinlogueAssistantBridge.entitlements)）；只在 `build-app.sh --with-assistant-bridge` 时嵌入，默认构建与发布不含 | `KinlogueAssistantIPC`、`KinlogueAssistantCLI` |
+| `KinlogueAssistantXPCProbe` | non-published executable | `verify-assistant-xpc.sh` 用的沙盒宿主，只发合成文本；不进入生产 product | `KinlogueAssistantIPC` |
 | `KinlogueAssistantCLIFixture` | non-published executable | 测试用的假 `codex`，按场景模拟 U0 记录的输出、失败、超时、工具调用和请求内容；不进入生产 product | `KinlogueAssistantCLI` |
 | `KinlogueExportWriterProbe` | non-published executable | 对 exact ZIP writer 做高 entry-count、RSS、取消、heartbeat 和清理 characterization；不进入生产 product | ZIPFoundation `0.9.20` |
 

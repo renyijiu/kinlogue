@@ -99,8 +99,11 @@ public final class CodexBridge: Sendable {
     }
 
     public func status(configuration: KinlogueAssistantCLIConfiguration, model: String? = nil) -> KinlogueAssistantStatus {
-        guard let executable = CLIExecutable.discover(explicit: configuration.executablePath, candidates: environment.candidatePaths) else {
-            return KinlogueAssistantStatus(executablePath: nil, cliVersion: nil, isLoggedIn: false, isVerifiedVersion: false, failure: .cliNotFound)
+        guard let executable = CLIExecutable.locate(explicit: configuration.executablePath, candidates: environment.candidatePaths) else {
+            return KinlogueAssistantStatus(
+                executablePath: nil, cliVersion: nil, isLoggedIn: false, isVerifiedVersion: false,
+                failure: notFound(configuration.executablePath)
+            )
         }
         let capability = capability(of: executable, model: model, proxy: configuration.proxy)
         let loggedIn = (try? withRun { run in
@@ -109,7 +112,7 @@ public final class CodexBridge: Sendable {
                                               exitStatus: result.exitCode ?? -1)
         }) ?? false
         return KinlogueAssistantStatus(
-            executablePath: executable,
+            executablePath: executable.resolved,
             cliVersion: capability.version,
             isLoggedIn: loggedIn,
             isVerifiedVersion: capability.version.map(CodexInvocation.isVerified(version:)) ?? false,
@@ -126,9 +129,9 @@ public final class CodexBridge: Sendable {
         guard claimed else { return .failure(code: .busy, exitCode: nil) }
         defer { state.withLock { $0.running = nil } }
 
-        guard let executable = CLIExecutable.discover(
+        guard let executable = CLIExecutable.locate(
             explicit: request.configuration.executablePath, candidates: environment.candidatePaths
-        ) else { return .failure(code: .cliNotFound, exitCode: nil) }
+        ) else { return .failure(code: notFound(request.configuration.executablePath), exitCode: nil) }
         let capability = capability(of: executable, model: request.model, proxy: request.configuration.proxy)
         if let failure = capability.failure { return .failure(code: failure, exitCode: nil) }
         guard let version = capability.version else { return .failure(code: .unsupportedCLI, exitCode: nil) }
@@ -146,7 +149,7 @@ public final class CodexBridge: Sendable {
                 var events = CodexEventAccumulator()
                 var thrown: Error?
                 let result = CLIProcess.run(
-                    executable: URL(fileURLWithPath: executable), arguments: arguments,
+                    executable: URL(fileURLWithPath: executable.resolved), arguments: arguments,
                     environment: processEnvironment(executable: executable, run: run, proxy: request.configuration.proxy),
                     workingDirectory: run.workingDirectory.path, input: Data(request.input.utf8),
                     supervisor: environment.supervisor.map(URL.init(fileURLWithPath:)), limits: environment.limits,
@@ -162,6 +165,10 @@ public final class CodexBridge: Sendable {
         }
     }
 
+    private func notFound(_ explicit: String?) -> KinlogueAssistantFailureCode {
+        explicit.map(CLIExecutable.inspect) == .outsideAllowedLocations ? .unsupportedLocation : .cliNotFound
+    }
+
     /// Stops the turn with this ID. False when no such turn is running.
     public func cancel(requestID: UUID) -> Bool {
         state.withLock { state in
@@ -169,11 +176,6 @@ public final class CodexBridge: Sendable {
             running.cancellation.cancel()
             return true
         }
-    }
-
-    /// Stops whatever turn is running, for a closed connection.
-    public func cancelRunningTurn() {
-        state.withLock { $0.running?.cancellation.cancel() }
     }
 
     // MARK: - Turn
@@ -207,11 +209,12 @@ public final class CodexBridge: Sendable {
 
     // MARK: - Capability check
 
-    private func capability(of executable: String, model requested: String?, proxy: [String: String]) -> Capability {
-        guard let model = requested ?? firstModel(executable, proxy: proxy) else {
-            return Capability(version: nil, disabledFeatures: [], failure: .unsupportedCLI)
+    private func capability(of executable: CLIExecutable.Located, model requested: String?, proxy: [String: String]) -> Capability {
+        let first = requested == nil ? firstModel(executable, proxy: proxy) : nil
+        guard let model = requested ?? first?.model else {
+            return Capability(version: nil, disabledFeatures: [], failure: first?.couldNotStart == true ? .unsupportedLocation : .unsupportedCLI)
         }
-        guard let identity = identity(of: executable, model: model) else {
+        guard let identity = identity(of: executable.resolved, model: model) else {
             return Capability(version: nil, disabledFeatures: [], failure: .cliNotFound)
         }
         if let cached = state.withLock({ $0.capabilities[identity] }) { return cached }
@@ -223,17 +226,20 @@ public final class CodexBridge: Sendable {
         return checked
     }
 
-    private func firstModel(_ executable: String, proxy: [String: String]) -> String? {
-        try? withRun { run in
+    private func firstModel(_ executable: CLIExecutable.Located, proxy: [String: String]) -> (model: String?, couldNotStart: Bool) {
+        (try? withRun { run in
             let result = short(executable, ["debug", "models"], run: run, proxy: proxy, limits: catalogLimits)
-            guard result.exitCode == 0 else { return nil }
-            return try? CodexModelCatalog.slugs(result.output).first(where: KinlogueAssistantText.isToken)
-        } ?? nil
+            guard result.exitCode == 0 else { return (nil, result.couldNotStart) }
+            return ((try? CodexModelCatalog.slugs(result.output))?.first(where: KinlogueAssistantText.isToken), false)
+        }) ?? (nil, false)
     }
 
-    private func check(_ executable: String, model: String, run: RunDirectory, proxy: [String: String]) -> Capability {
+    private func check(_ executable: CLIExecutable.Located, model: String, run: RunDirectory, proxy: [String: String]) -> Capability {
         let unsupported = { (version: String?) in Capability(version: version, disabledFeatures: [], failure: .unsupportedCLI) }
         let versionResult = short(executable, ["--version"], run: run, proxy: proxy)
+        if versionResult.couldNotStart {
+            return Capability(version: nil, disabledFeatures: [], failure: .unsupportedLocation)
+        }
         guard versionResult.exitCode == 0,
               let version = CodexInvocation.version(fromVersionOutput: String(decoding: versionResult.output, as: UTF8.self))
         else { return unsupported(nil) }
@@ -260,7 +266,7 @@ public final class CodexBridge: Sendable {
         processEnvironment[Self.checkKeyVariable] = UUID().uuidString
         var events = CodexEventAccumulator()
         let result = CLIProcess.run(
-            executable: URL(fileURLWithPath: executable), arguments: arguments, environment: processEnvironment,
+            executable: URL(fileURLWithPath: executable.resolved), arguments: arguments, environment: processEnvironment,
             workingDirectory: run.workingDirectory.path, input: Data(Self.checkInput.utf8),
             supervisor: environment.supervisor.map(URL.init(fileURLWithPath:)), limits: environment.limits, cancellation: nil,
             onLine: { try events.consume($0) }
@@ -275,14 +281,14 @@ public final class CodexBridge: Sendable {
         return Capability(version: version, disabledFeatures: disabled, failure: nil)
     }
 
-    private func features(_ executable: String, run: RunDirectory, proxy: [String: String]) -> [CodexFeature]? {
+    private func features(_ executable: CLIExecutable.Located, run: RunDirectory, proxy: [String: String]) -> [CodexFeature]? {
         let result = short(executable, ["features", "list"], run: run, proxy: proxy)
         guard result.exitCode == 0 else { return nil }
         return try? CodexFeatureList.parse(String(decoding: result.output, as: UTF8.self))
     }
 
     /// Writes the rewritten model catalog into the run directory.
-    private func catalog(_ executable: String, run: RunDirectory, proxy: [String: String]) -> URL? {
+    private func catalog(_ executable: CLIExecutable.Located, run: RunDirectory, proxy: [String: String]) -> URL? {
         let result = short(executable, ["debug", "models"], run: run, proxy: proxy, limits: catalogLimits)
         guard result.exitCode == 0, let rewritten = try? CodexModelCatalog.rewrite(result.output) else { return nil }
         let url = run.root.appendingPathComponent("catalog.json")
@@ -296,6 +302,8 @@ public final class CodexBridge: Sendable {
         let exitCode: Int32?
         let output: Data
         let errorTail: String
+        /// The CLI never ran: the spawn failed, or the supervisor reported 127 without output.
+        let couldNotStart: Bool
     }
 
     private var catalogLimits: CLIProcessLimits {
@@ -315,31 +323,44 @@ public final class CodexBridge: Sendable {
     }
 
     private func short(
-        _ executable: String,
+        _ executable: CLIExecutable.Located,
         _ arguments: [String],
         run: RunDirectory,
         proxy: [String: String],
         limits: CLIProcessLimits? = nil
     ) -> ShortResult {
         let result = CLIProcess.run(
-            executable: URL(fileURLWithPath: executable), arguments: arguments,
+            executable: URL(fileURLWithPath: executable.resolved), arguments: arguments,
             environment: processEnvironment(executable: executable, run: run, proxy: proxy),
             workingDirectory: run.workingDirectory.path, input: Data(),
             supervisor: environment.supervisor.map(URL.init(fileURLWithPath:)), limits: limits ?? shortLimits,
             cancellation: nil, retainOutput: true, onLine: { _ in }
         )
-        if case let .exited(code) = result.ending {
-            return ShortResult(exitCode: code, output: result.output, errorTail: result.errorTail)
+        switch result.ending {
+        case let .exited(code):
+            let silent = result.output.isEmpty && result.errorTail.isEmpty
+            return ShortResult(exitCode: code, output: result.output, errorTail: result.errorTail,
+                               couldNotStart: code == CLISupervisor.couldNotStartStatus && silent)
+        case .launchFailed:
+            return ShortResult(exitCode: nil, output: Data(), errorTail: "", couldNotStart: true)
+        default:
+            return ShortResult(exitCode: nil, output: Data(), errorTail: "", couldNotStart: false)
         }
-        return ShortResult(exitCode: nil, output: Data(), errorTail: "")
     }
 
-    private func processEnvironment(executable: String, run: RunDirectory, proxy: [String: String]) -> [String: String] {
+    private func processEnvironment(executable: CLIExecutable.Located, run: RunDirectory, proxy: [String: String]) -> [String: String] {
+        // The requested folder first: an npm-style `codex` resolves to a script whose interpreter
+        // (`node`) sits next to the link, not next to the script.
+        var path = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        for folder in [executable.requested, executable.resolved].map({ ($0 as NSString).deletingLastPathComponent })
+        where !path.contains(folder) {
+            path.append(folder)
+        }
         var values = [
             "HOME": environment.home,
             "USER": environment.userName,
             "LOGNAME": environment.userName,
-            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:" + (executable as NSString).deletingLastPathComponent,
+            "PATH": path.joined(separator: ":"),
             "LANG": "en_US.UTF-8",
             "LC_ALL": "en_US.UTF-8",
             "TMPDIR": run.temporaryDirectory.path + "/",

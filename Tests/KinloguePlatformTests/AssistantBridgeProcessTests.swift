@@ -201,6 +201,62 @@ struct AssistantBridgeProcessTests {
     }
 
     @Test
+    func executablesThatCannotStartAreReportedAsUnsupportedLocations() throws {
+        let home = try FakeHome(scenario: ["check": "clean"])
+        defer { home.remove() }
+        // Executable and named codex, but not a format the system can start: what the sandbox's
+        // refusal looks like from inside the bridge.
+        let directory = URL(fileURLWithPath: home.path).appendingPathComponent("unstartable")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let codex = directory.appendingPathComponent("codex")
+        try Data("not an executable format".utf8).write(to: codex)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: codex.path)
+        let configuration = try KinlogueAssistantCLIConfiguration(executablePath: codex.path, proxy: [:])
+
+        for supervisor in [try fixtureExecutable().path, nil] {
+            var environment = home.environment(supervisor: try fixtureExecutable())
+            environment = CodexBridgeEnvironment(
+                home: environment.home, userName: environment.userName, temporaryRoot: environment.temporaryRoot,
+                supervisor: supervisor, candidatePaths: environment.candidatePaths, limits: environment.limits
+            )
+            let bridge = try CodexBridge(environment: environment)
+            #expect(bridge.status(configuration: configuration).failure == .unsupportedLocation, "supervisor \(supervisor ?? "none")")
+        }
+    }
+
+    @Test
+    func npmStyleWrappersFindTheirInterpreterNextToTheRequestedPath() throws {
+        let home = try FakeHome(scenario: ["check": "clean", "turn": "answer"])
+        defer { home.remove() }
+        // npm installs `bin/codex` as a link to a Node script whose `#!/usr/bin/env node` must find
+        // the interpreter in the folder of the requested path, not of the resolved script.
+        let npm = URL(fileURLWithPath: home.path).appendingPathComponent("npm")
+        let bin = npm.appendingPathComponent("bin"), package = npm.appendingPathComponent("lib/node_modules/codex/bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+        let script = package.appendingPathComponent("codex.js")
+        try Data("#!/usr/bin/env klnode\n".utf8).write(to: script)
+        let interpreter = bin.appendingPathComponent("klnode")
+        try Data("#!/bin/sh\nshift\nexec \"\(try fixtureExecutable().path)\" \"$@\"\n".utf8).write(to: interpreter)
+        for executable in [script, interpreter] {
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        }
+        try FileManager.default.createSymbolicLink(at: bin.appendingPathComponent("codex"), withDestinationURL: script)
+        let configuration = try KinlogueAssistantCLIConfiguration(executablePath: bin.path + "/codex", proxy: [:])
+        let bridge = try CodexBridge(environment: home.environment(supervisor: try fixtureExecutable()))
+
+        #expect(bridge.status(configuration: configuration).failure == nil)
+        let request = try KinlogueAssistantTurnRequest(
+            requestID: UUID(), configuration: configuration, model: "gpt-synthetic",
+            instructions: "Synthetic instructions", input: "Input"
+        )
+        #expect(bridge.respond(request, cancellation: CLICancellation())
+            == .answer(text: "fake answer bytes=5", cliVersion: "0.162.0", model: "gpt-synthetic"))
+        let path = (try home.record()["environmentPath"] as? String ?? "").split(separator: ":").map(String.init)
+        #expect(path.contains(realPath(bin.path)) || path.contains(bin.path))
+    }
+
+    @Test
     func aTurnReturnsTheAnswerAndCleansUpAfterItself() throws {
         let home = try FakeHome(scenario: ["check": "clean", "turn": "answer"])
         defer { home.remove() }

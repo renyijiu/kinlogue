@@ -11,6 +11,8 @@ import Foundation
 /// `__CF_USER_TEXT_ENCODING`, to the supervisor's environment at launch.
 public enum CLISupervisor {
     public static let flag = "--supervise"
+    /// The supervisor's status when it could not start the CLI at all.
+    public static let couldNotStartStatus: Int32 = 127
 
     public static func run(arguments: [String]) -> Never {
         guard arguments.count >= 5, arguments[1] == flag,
@@ -31,7 +33,7 @@ public enum CLISupervisor {
         }
         argv.forEach { free($0) }
         envp.forEach { free($0) }
-        guard result == 0, child > 1 else { exit(127) }
+        guard result == 0, child > 1 else { exit(couldNotStartStatus) }
 
         while true {
             if getppid() != parent {

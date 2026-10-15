@@ -170,6 +170,7 @@ expected_targets="$(sorted_lines \
   'KinlogueAssistantCLI|regular' \
   'KinlogueAssistantBridge|executable' \
   'KinlogueAssistantCLIFixture|executable' \
+  'KinlogueAssistantXPCProbe|executable' \
   'KinlogueCoreTests|test' \
   'KinloguePlatformTests|test' \
   'KinlogueAppTests|test' \
@@ -249,6 +250,8 @@ verify_target_dependencies KinlogueAssistantBridge \
   'target:KinlogueAssistantCLI'
 verify_target_dependencies KinlogueAssistantCLIFixture \
   'target:KinlogueAssistantCLI'
+verify_target_dependencies KinlogueAssistantXPCProbe \
+  'target:KinlogueAssistantIPC'
 verify_target_dependencies KinlogueCoreTests \
   'target:KinlogueCore'
 verify_target_dependencies KinloguePlatformTests \

@@ -368,6 +368,11 @@ private struct PackageGraphFixture {
                     dependencies: [byName("KinlogueAssistantCLI")]
                 ),
                 target(
+                    name: "KinlogueAssistantXPCProbe",
+                    type: "executable",
+                    dependencies: [byName("KinlogueAssistantIPC")]
+                ),
+                target(
                     name: "KinlogueCoreTests",
                     type: "test",
                     dependencies: [byName("KinlogueCore")]
