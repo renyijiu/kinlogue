@@ -21,6 +21,46 @@ struct AppModelTests {
     }
 
     @Test
+    func anOpenRecordOffersTheCurrentRulesAndSavesOnlyTheFieldsTheUserTakes() async throws {
+        let fixture = try AppFixture()
+        let service = AppServiceSpy(
+            snapshot: fixture.snapshot,
+            originals: [fixture.confirmed.id: OriginalDocumentPayload(
+                data: Data([0x25, 0x50, 0x44, 0x46]),
+                contentTypeIdentifier: "com.adobe.pdf"
+            )]
+        )
+        let update = try #require(RecordRuleUpdate.proposal(
+            for: fixture.confirmed,
+            candidates: ReportCandidates(reportedResults: try SourceField(originalTranscription: "合成葡萄糖\t5.4")),
+            extractionVersion: 7
+        ))
+        await service.offerRuleUpdate(update)
+        let model = AppModel(service: service)
+        await model.start()
+
+        await model.selectRecord(fixture.confirmed.id)
+        await model.waitForRuleUpdateCheck()
+        #expect(model.ruleUpdate == update)
+
+        model.presentRuleUpdate()
+        #expect(model.reviewingRuleUpdate == update)
+        #expect(await model.applyRuleUpdate(accepting: [.reportedResults]) == .saved)
+        #expect(await service.appliedRuleUpdates == [ApplyRuleUpdateCommand(
+            recordID: fixture.confirmed.id,
+            expectedRevision: fixture.confirmed.revision,
+            extractionVersion: 7,
+            acceptedFields: [.reportedResults]
+        )])
+
+        // Nothing is offered for a record that is no longer open.
+        model.clearSelection()
+        #expect(model.ruleUpdate == nil && model.reviewingRuleUpdate == nil)
+        model.presentRuleUpdate()
+        #expect(model.reviewingRuleUpdate == nil)
+    }
+
+    @Test
     func searchOnlyUsesConfirmedCatalogProjection() async throws {
         let fixture = try AppFixture()
         let service = AppServiceSpy(snapshot: fixture.snapshot)
@@ -1482,6 +1522,16 @@ actor AppServiceSpy: TestLibraryServing {
     }
     func confirmDraft(_ command: ConfirmDraftCommand) async throws -> AppSnapshot {
         confirmedCommands.append(command)
+        return currentSnapshot.header
+    }
+    private var offeredRuleUpdate: RecordRuleUpdate?
+    private(set) var appliedRuleUpdates: [ApplyRuleUpdateCommand] = []
+    func offerRuleUpdate(_ update: RecordRuleUpdate) { offeredRuleUpdate = update }
+    func ruleUpdate(recordID: HealthRecord.ID) async throws -> RecordRuleUpdate? {
+        offeredRuleUpdate?.recordID == recordID ? offeredRuleUpdate : nil
+    }
+    func applyRuleUpdate(_ command: ApplyRuleUpdateCommand) async throws -> AppSnapshot {
+        appliedRuleUpdates.append(command)
         return currentSnapshot.header
     }
     func updateRecord(_ command: UpdateRecordCommand) async throws -> AppSnapshot {

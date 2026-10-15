@@ -49,6 +49,35 @@ struct ImportReviewViewSafetyTests {
         #expect(originalDocument.contains("presentation: .viewer"))
     }
 
+    @Test
+    func bothEditorsOfferMisreadingSuggestionsThatChangeNothingUntilTaken() throws {
+        let importReview = try source(named: "ImportReviewView.swift")
+        let recordEdit = try source(named: "RecordEditView.swift")
+        let panel = try source(named: "RecognitionSuggestionsPanel.swift")
+
+        #expect(importReview.contains("RecognitionSuggestionsPanel(text: $model.reportedResults)"))
+        #expect(recordEdit.contains("RecognitionSuggestionsPanel(text: $editor.reportedResults)"))
+        // The text changes only when the user takes a suggestion.
+        #expect(panel.components(separatedBy: "text = ").count - 1 == 1)
+        #expect(panel.contains("Button(AppLocalization.string(\"采纳\")) {\n                            if let fixed = suggestion.applied(to: text) { text = fixed }"))
+        #expect(!panel.contains(".onAppear") && !panel.contains(".task"))
+    }
+
+    @Test
+    func aRecordOffersTheCurrentRulesOnlyThroughANoticeTheUserOpens() throws {
+        let recordDetail = try source(named: "RecordDetailView.swift")
+        let shell = try source(named: "AppShellView.swift")
+        let sheet = try source(named: "RecordRuleUpdateView.swift")
+
+        #expect(recordDetail.contains("RecordRuleUpdateNotice(update: ruleUpdate, onReview: onReviewRuleUpdate)"))
+        #expect(shell.contains("onReviewRuleUpdate: { model.presentRuleUpdate() }"))
+        #expect(shell.contains(".sheet(item: $model.reviewingRuleUpdate"))
+        // No field is taken until the user ticks it, and a field the user wrote says so.
+        #expect(sheet.contains("@State private var accepted: Set<RecordRuleUpdate.Field> = []"))
+        #expect(sheet.contains("if change.replacesUserText {"))
+        #expect(sheet.contains("await onSave(accepted)"))
+    }
+
     private func source(named filename: String) throws -> String {
         try String(
             contentsOf: repositoryURL

@@ -20,11 +20,17 @@ package struct LibraryReportSummary: Equatable, Identifiable, Sendable {
     package let matchedResultLines: [ReportedResultLine]
     /// Every line the term was found in, including those beyond `matchedResultLines`.
     package let matchedResultLineCount: Int
-    /// Where a search term was found when no listed line and no visible field shows it.
+    /// The sentences of the confirmed narrative results and conclusion in which a search term was
+    /// found, when no table line holds it; at most `maximumMatchedPassages` of them.
+    package let matchedPassages: [SearchPassage]
+    /// Every such sentence, including those beyond `matchedPassages`.
+    package let matchedPassageCount: Int
+    /// Where a search term was found when no listed line, no sentence and no visible field shows it.
     package let matchedExcerpt: SearchExcerpt?
 
     package static let maximumMatchedResultLines = 8
     package static let maximumResultCellScalars = 160
+    package static let maximumMatchedPassages = 3
     package static let maximumExcerptScalars = 480
 
     package init(record: HealthRecord) {
@@ -34,18 +40,23 @@ package struct LibraryReportSummary: Equatable, Identifiable, Sendable {
         reportType = record.reportType.map { String(String.UnicodeScalarView($0.transcription.unicodeScalars.prefix(128))) }
         organization = record.organization.map { String(String.UnicodeScalarView($0.transcription.unicodeScalars.prefix(128))) }
         conclusion = record.conclusion.map { String(String.UnicodeScalarView($0.transcription.unicodeScalars.prefix(512))) }
-        matchedResultLines = []; matchedResultLineCount = 0; matchedExcerpt = nil
+        matchedResultLines = []; matchedResultLineCount = 0
+        matchedPassages = []; matchedPassageCount = 0; matchedExcerpt = nil
     }
 
     package init(id: UUID, memberID: UUID, revision: UInt64, timelineDate: Date?, dateKind: ReportDateKind?,
                  title: String?, reportType: String?, organization: String?, conclusion: String?,
-                 matchedResultLines: [ReportedResultLine] = [], matchedExcerpt: SearchExcerpt? = nil) {
+                 matchedResultLines: [ReportedResultLine] = [], matchedPassages: [SearchPassage] = [],
+                 matchedPassageCount: Int = 0, matchedExcerpt: SearchExcerpt? = nil) {
         self.id = id; self.memberID = memberID; self.revision = revision; self.timelineDate = timelineDate
         self.dateKind = dateKind; self.title = title; self.reportType = reportType
         self.organization = organization; self.conclusion = conclusion
         self.matchedResultLines = matchedResultLines.prefix(Self.maximumMatchedResultLines)
             .map { $0.bounded(toScalars: Self.maximumResultCellScalars) }
         matchedResultLineCount = matchedResultLines.count
+        self.matchedPassages = matchedPassages.prefix(Self.maximumMatchedPassages)
+            .map { $0.bounded(toScalars: Self.maximumExcerptScalars) }
+        self.matchedPassageCount = max(matchedPassageCount, self.matchedPassages.count)
         self.matchedExcerpt = matchedExcerpt?.bounded(toScalars: Self.maximumExcerptScalars)
     }
 
@@ -53,7 +64,8 @@ package struct LibraryReportSummary: Equatable, Identifiable, Sendable {
     package func listing(_ match: LibraryReportSearchMatch) -> Self {
         Self(id: id, memberID: memberID, revision: revision, timelineDate: timelineDate, dateKind: dateKind,
              title: title, reportType: reportType, organization: organization, conclusion: conclusion,
-             matchedResultLines: match.resultLines, matchedExcerpt: match.excerpt)
+             matchedResultLines: match.resultLines, matchedPassages: match.passages,
+             matchedPassageCount: match.passageCount, matchedExcerpt: match.excerpt)
     }
 
     /// The text a row already shows for this report: its heading and organization, each possibly
@@ -63,35 +75,36 @@ package struct LibraryReportSummary: Equatable, Identifiable, Sendable {
     }
 }
 
-/// What a listed report shows of a search match: the table lines of its results the term was
-/// found in or, when there are none, an excerpt of a field the row does not already show.
+/// What a listed report shows of a search match, the first of: the table lines of its results
+/// the term was found in, the sentences of its narrative results and conclusion the term was found
+/// in, or an excerpt of a field the row does not already show.
 package struct LibraryReportSearchMatch: Equatable, Sendable {
     package let resultLines: [ReportedResultLine]
+    package let passages: [SearchPassage]
+    /// Every sentence the term was found in; `passages` may hold only the first of them.
+    package let passageCount: Int
     package let excerpt: SearchExcerpt?
 
     package static let none = Self(resultLines: [], excerpt: nil)
 
-    package init(resultLines: [ReportedResultLine], excerpt: SearchExcerpt?) {
+    package init(resultLines: [ReportedResultLine], passages: [SearchPassage] = [], passageCount: Int = 0,
+                 excerpt: SearchExcerpt?) {
         self.resultLines = resultLines
-        self.excerpt = resultLines.isEmpty ? excerpt : nil
+        self.passages = resultLines.isEmpty ? passages : []
+        self.passageCount = self.passages.isEmpty ? 0 : max(passageCount, self.passages.count)
+        self.excerpt = resultLines.isEmpty && self.passages.isEmpty ? excerpt : nil
     }
 
-    package var isEmpty: Bool { resultLines.isEmpty && excerpt == nil }
+    package var isEmpty: Bool { resultLines.isEmpty && passages.isEmpty && excerpt == nil }
 
-    /// The excerpt from the first of `fields` the term is found in, skipping a field whose match
-    /// the row already shows. `fields` are a report's search fields in their stored order and
-    /// `visible` the text the row shows of them; a visible text may be the start of a longer field,
-    /// so the field is skipped only when the term is found in that start.
-    package static func excerpt(term: String, fields: [String], hiding visible: [String],
-                                locale: Locale = .current) -> SearchExcerpt? {
-        for field in fields {
-            let shown = visible.contains { text in
-                field.unicodeScalars.starts(with: text.unicodeScalars)
-                    && RecordQuery.localizedContains(term, in: text, locale: locale)
-            }
-            if !shown, let excerpt = SearchExcerpt(term: term, in: field, locale: locale) { return excerpt }
+    /// Whether the row already shows where `term` is found in `field`: one of `visible`, the text
+    /// the row shows, is the start of the field and holds the term. A visible text may be cut short
+    /// of its field, so a match beyond the cut is not shown.
+    package static func shows(_ term: String, of field: String, in visible: [String], locale: Locale = .current) -> Bool {
+        visible.contains { text in
+            field.unicodeScalars.starts(with: text.unicodeScalars)
+                && RecordQuery.localizedContains(term, in: text, locale: locale)
         }
-        return nil
     }
 }
 

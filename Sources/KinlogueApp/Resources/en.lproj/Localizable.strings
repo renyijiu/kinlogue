@@ -6,6 +6,8 @@
 	<string>%1$@ / %2$@</string>
 	<key>%@ · %@</key>
 	<string>%1$@ · %2$@</string>
+	<key>%@ → %@</key>
+	<string>%1$@ → %2$@</string>
 	<key>%@原件，仅在应用内存中查看</key>
 	<string>%@ original, viewed only in app memory</string>
 	<key>%@记录，%@</key>
@@ -16,8 +18,14 @@
 	<string>%1$@, %2$@, %3$@</string>
 	<key>%@，%@，%@，匹配内容：%@</key>
 	<string>%1$@, %2$@, %3$@, matching text: %4$@</string>
+	<key>%@，%@，%@，匹配的句子：%@</key>
+	<string>%1$@, %2$@, %3$@, matching sentences: %4$@</string>
 	<key>%@，%@，%@，匹配的结果行：%@</key>
 	<string>%1$@, %2$@, %3$@, matching result lines: %4$@</string>
+	<key>%@：%@</key>
+	<string>%1$@: %2$@</string>
+	<key>%@：%@ 改为 %@</key>
+	<string>%1$@: %2$@ changed to %3$@</string>
 	<key>%lld</key>
 	<string>%lld</string>
 	<key>MR · %lld × %lld · %lld 张</key>
@@ -56,6 +64,8 @@
 	<string>Next Slice</string>
 	<key>下一页</key>
 	<string>Next page</string>
+	<key>下面的字段由当前的识别规则从这份报告保存的识别结果重新整理，没有重新识别原件。勾选的字段换成新规则的结果，没有勾选的保持不变。</key>
+	<string>These fields were read again by the current recognition rules from the recognition results saved with this report; the original was not recognized again. Ticked fields take the new reading, and the rest stay as they are.</string>
 	<key>不包含 OCR、转录、备注、目录或草稿。</key>
 	<string>Does not include OCR, transcriptions, notes, catalog data, or drafts.</string>
 	<key>不包含健康内容的恢复点概要</key>
@@ -92,14 +102,22 @@
 	<string>Delete from Kinlogue</string>
 	<key>从续页删除影像检查</key>
 	<string>Delete Imaging Study from Kinlogue</string>
+	<key>以下按常见的识别误读找出，采纳前请对照原件。</key>
+	<string>Found by common recognition misreadings. Check the original before accepting.</string>
 	<key>作为 1 份报告</key>
 	<string>As One Report</string>
 	<key>作为 1 份报告加入待确认</key>
 	<string>Add as One Report for Review</string>
+	<key>你改过这一项，使用新规则会替换你的修改。</key>
+	<string>You changed this field. Using the new reading replaces your change.</string>
 	<key>使用新的本机识别结果覆盖当前字段</key>
 	<string>Replace current fields with new on-device recognition results</string>
+	<key>使用新规则的%@</key>
+	<string>Use the new reading of %@</string>
 	<key>保存</key>
 	<string>Save</string>
+	<key>保存后这份报告不再提示，之后仍可以随时编辑。</key>
+	<string>After saving, this report no longer shows the notice. You can still edit it at any time.</string>
 	<key>保存数据备份恢复码</key>
 	<string>Save the Backup Recovery Code</string>
 	<key>保留</key>
@@ -112,6 +130,8 @@
 	<string>Restore points to keep</string>
 	<key>保留空间估算</key>
 	<string>Estimated retained space</string>
+	<key>保留识别出的写法</key>
+	<string>Keeps the recognized reading</string>
 	<key>停止接收</key>
 	<string>Stop Receiving</string>
 	<key>健康记录</key>
@@ -120,6 +140,8 @@
 	<string>Admission Date</string>
 	<key>全部</key>
 	<string>All</string>
+	<key>全部保留</key>
+	<string>Keep All</string>
 	<key>全部记录</key>
 	<string>All Records</string>
 	<key>共 %lld 个序列，%lld 张可查看影像</key>
@@ -260,6 +282,8 @@
 	<string>Viewable Images</string>
 	<key>可查看文件状态、顺序和支持的原件预览。</key>
 	<string>View file status and order, and preview supported originals.</string>
+	<key>可能的识别错误</key>
+	<string>Possible recognition errors</string>
 	<key>可选择并归档</key>
 	<string>Ready to select and archive</string>
 	<key>可预览并归档</key>
@@ -464,6 +488,8 @@
 	<string>Archiving creates one report for review; it won't appear in the timeline until confirmed.</string>
 	<key>归档给</key>
 	<string>File For</string>
+	<key>当前</key>
+	<string>Current</string>
 	<key>当前 %lld%%</key>
 	<string>Current zoom: %lld%%</string>
 	<key>当前影像切片加载失败，可以重试</key>
@@ -512,6 +538,8 @@
 	<string>You must choose explicitly; image content does not assign a family member</string>
 	<key>必须由你确认，识别结果不会自动归档</key>
 	<string>You must confirm this. Recognized text is never filed automatically.</string>
+	<key>忽略</key>
+	<string>Ignore</string>
 	<key>忽略的非 DICOM 文件</key>
 	<string>Ignored Non-DICOM Files</string>
 	<key>恢复已完成。请退出并重新打开续页。</key>
@@ -580,6 +608,8 @@
 	<string>Open confirmed fields and originals</string>
 	<key>扩大窗宽</key>
 	<string>Widen Window Width</string>
+	<key>把检查结果里的这一格改成建议的写法</key>
+	<string>Changes this cell of the findings to the suggested reading</string>
 	<key>报告</key>
 	<string>Reports</string>
 	<key>报告日期</key>
@@ -600,6 +630,10 @@
 	<string>Press to toggle comparison selection</string>
 	<key>按右侧显示的顺序创建一份待确认报告</key>
 	<string>Create one report in the order shown on the right</string>
+	<key>按新规则重新整理</key>
+	<string>Update with Current Rules</string>
+	<key>按新规则，这份报告的%@可以重新整理。不会重新识别原件，也不会自动修改。</key>
+	<string>With the current rules, this report's %@ can be read again. The original is not recognized again, and nothing changes on its own.</string>
 	<key>接收中</key>
 	<string>Receiving</string>
 	<key>提供窗宽窗位和平移的键盘操作</key>
@@ -656,6 +690,8 @@
 	<string>The new restore point was kept, but old restore points have not been cleaned up yet.</string>
 	<key>新的恢复点已创建并通过验证。</key>
 	<string>A new restore point was created and verified.</string>
+	<key>新规则</key>
+	<string>New Reading</string>
 	<key>无法使用所选备份目录，请重新选择。</key>
 	<string>The selected backup folder cannot be used. Choose it again.</string>
 	<key>无法使用所选导出位置，请选择其他位置。</key>
@@ -766,6 +802,8 @@
 	<string>Source: original pages %@</string>
 	<key>查找</key>
 	<string>Find</string>
+	<key>查看</key>
+	<string>Review</string>
 	<key>查看 %@ 原件</key>
 	<string>View %@ original</string>
 	<key>查看原图</key>
@@ -1050,6 +1088,8 @@
 	<string>Recognition failed; press to retry</string>
 	<key>识别结果只是转录建议，请对照左侧原件确认。</key>
 	<string>Recognition results are transcription suggestions only. Confirm them against the original on the left.</string>
+	<key>识别规则已更新</key>
+	<string>Recognition Rules Updated</string>
 	<key>该成员仍关联 %lld 条记录和 %lld 份草稿。请先重分配这些内容，或逐条删除后再试。</key>
 	<string>Linked records: %1$lld; drafts: %2$lld. Reassign or delete them before trying again.</string>
 	<key>该成员仍关联 %lld 项医学影像检查。请先重分配或删除这些检查后再试。</key>
@@ -1126,6 +1166,8 @@
 	<string>No Confirmed Medical Images Yet</string>
 	<key>还没有手机上传资料</key>
 	<string>No Phone Uploads Yet</string>
+	<key>这份报告已在其他窗口中发生变化，请关闭后重新打开再整理。</key>
+	<string>This report changed in another window. Close this sheet and open it again to update.</string>
 	<key>这会替换而不是合并当前资料库，并移除本机备份设置。外部恢复点会保留。</key>
 	<string>This replaces rather than merges the current library and removes local backup settings. External restore points are kept.</string>
 	<key>这会移除本机保存的未完成备份身份。已有外部文件不会被删除；之后可以选择目录并生成新的恢复码。</key>
@@ -1190,6 +1232,8 @@
 	<string>Select the interface language</string>
 	<key>选择记录后显示原件</key>
 	<string>Select a record to show originals</string>
+	<key>逐项对照当前内容和新规则的结果</key>
+	<string>Compares each field with the new reading</string>
 	<key>通用</key>
 	<string>General</string>
 	<key>部分原件暂时无法打开</key>
@@ -1200,6 +1244,8 @@
 	<string>Some items couldn’t be read</string>
 	<key>采样日期</key>
 	<string>Collection Date</string>
+	<key>采纳</key>
+	<string>Accept</string>
 	<key>重新授权原备份目录…</key>
 	<string>Reauthorize Original Backup Folder…</string>
 	<key>重新识别失败，当前内容已保留</key>
@@ -1250,6 +1296,8 @@
 	<string>Verification code %@</string>
 	<key>验证码约 %lld 分钟内有效，首次验证成功后即失效。</key>
 	<string>Approximate code lifetime: %lld min. It expires after the first successful verification.</string>
+	<key>（无）</key>
+	<string>(None)</string>
 	<key>，第 %@ 页</key>
 	<string>, page %@</string>
 	<key>，识别置信度 %lld%%</key>

@@ -108,6 +108,10 @@ package protocol LibraryReportStoring: Sendable {
     func original(draftID: UUID, expectedRevision: UInt64, sourceID: UUID, expectedLibrary: LibraryRevision) async throws -> (Attachment, Data)
     func updateRecord(_ record: HealthRecord, expectedRevision: UInt64) async throws
     func deleteRecord(_ id: UUID, expectedRevision: UInt64) async throws
+    /// A confirmed record with the OCR document retained for it, from one snapshot.
+    func recordDocument(_ id: UUID) async throws -> (record: HealthRecord, document: ImportDraftDocument?)
+    /// Replaces a confirmed record and its retained OCR document together; the blocks stay.
+    func updateRecord(_ record: HealthRecord, expectedRevision: UInt64, document: ImportDraftDocument) async throws
 }
 
 package protocol LibraryDICOMStoring: Sendable {

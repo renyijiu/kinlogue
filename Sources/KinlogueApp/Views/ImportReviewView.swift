@@ -155,6 +155,7 @@ struct ImportReviewView: View {
                                 source: model.fieldSourceDescriptions[.reportedResults],
                                 minimumHeight: 150
                             )
+                            RecognitionSuggestionsPanel(text: $model.reportedResults)
 
                             ReviewTextEditor(
                                 AppLocalization.string("检查结论（逐字）"),

@@ -120,6 +120,25 @@
 
 **验证门禁**：定向测试见 [`log.md`](log.md)。近上限资料库的首页计时对照和合成版式的端到端核对见 [搜索呈现测量](search-presentation-measurement-2026-10-14.md)：除每份列出报告的表格行全部命中的情况外，首页与不做呈现时相差不超过 3 ms。真实报告上抽取出的表格行质量、键盘与 VoiceOver 朗读仍属人工矩阵。
 
+## [2026-10-15] 叙述命中按句呈现、识别误读只提示不替换、已确认报告可按新规则整理
+
+**问题**：同一帖子的[后续回复](sources/2026-10-15-carehealth-thread-followup.md)里，有用户想对比多份超声报告的关键信息，也有用户因为 OCR 加手工补录太繁琐而放弃使用。续页对叙述型报告的搜索只显示第一处命中附近约 120 字的摘录；复核时识别误读要用户自己发现；已确认报告不参与抽取规则升级，version 6 的表格改进只惠及新导入的报告。
+
+**选择**（用户 2026-10-15 决策，按“看看如何优化”后给出的建议实施）：
+
+1. **叙述命中按句呈现**：没有命中表格行时，从已确认的检查结果和检查结论里列出含搜索词的句子，最多 3 句，先检查结果后检查结论，每句标明出自哪个字段，另有几处匹配时注明。句子按“。；;！!？?”切分，不按换行（识别结果在页面折行处换行）也不按句点（与小数点相同）；单句过长时只截取命中附近，与摘录相同。仍是对原文的呈现：不提取、不比较、不判断。命中只在其他字段时仍显示摘录。
+2. **异常标记带上所在行（抽取规则 version 7）**：报告印的高低标记落在已识别的检验表格行里时，异常标记取整行（项目、带标记的结果、参考值），来源引用指向整行；印在单独“提示”列里的标记也算。表格外的标记照旧。
+3. **识别误读只提示**：复核页和已确认记录的编辑页在检查结果下列出“可能的识别错误”，只覆盖合成核对中实际见过的三种：结果格里数值后的“个”或“T”应为“↑”，“UIL”应为“U/L”，项目名里的“自细胞/自蛋白/自球比”应为“白”。每条由用户点“采纳”或“忽略”，不预先替换；采纳按用户修正保存，识别原文保留。与“査→查”预先还原不同，箭头有医学含义，自动替换错了会凭空造出异常标记。
+4. **已确认报告按新规则整理**：打开一份 OCR 结果由旧规则抽取的已确认报告时，App 用当前规则对保存的 OCR block 重新抽取（不重新识别原件），字段有差异就在详情页显示提示。用户在对照页逐项勾选，默认全部保留；用户改过或手动填写的字段注明“使用新规则会替换你的修改”。保存时记录 revision 加一，同一事务里把保留的 OCR 文档换成新候选与当前规则版本，此后不再提示；不勾选任何字段也会这样记下。成员、日期和备注不参与。
+
+**未选择的替代方案**：叙述报告按器官或项目抽取结构化字段再对比——超出“只呈现原文”的边界，且需要新的抽取模型；识别误读自动替换或按词典大范围纠错——会在用户没注意时改写原文，规则越多误报越多；已确认报告升级规则时自动覆盖未修改的字段——用户确认过的内容在不知情时被改变；整库批量重新整理入口——先做逐份提示，批量入口以后再定。
+
+**影响的代码/文档**：新增 [`SearchPassage`](../Sources/KinlogueCore/Domain/SearchPassage.swift)、[`RecognitionSuggestion`](../Sources/KinlogueCore/OCR/RecognitionSuggestion.swift)、[`RecordRuleUpdate`](../Sources/KinlogueCore/Import/RecordRuleUpdate.swift)、[`RecognitionSuggestionsPanel`](../Sources/KinlogueApp/Views/RecognitionSuggestionsPanel.swift) 与 [`RecordRuleUpdateView`](../Sources/KinlogueApp/Views/RecordRuleUpdateView.swift)；[`ReportCandidateExtractor`](../Sources/KinlogueCore/OCR/ReportCandidateExtractor.swift) 升到 version 7；[`SQLiteReportSearch`](../Sources/KinloguePlatform/Storage/SQLiteReportSearch.swift) 记住检查结果与结论两个字段的位置；[`SQLiteReportRepository`](../Sources/KinloguePlatform/Storage/SQLiteReportRepository.swift) 新增读取记录与其 OCR 文档、以及二者同事务更新；[`AppModel`](../Sources/KinlogueApp/App/AppModel.swift)、[`LiveAppService`](../Sources/KinlogueApp/App/AppServices.swift)、[`TimelineView`](../Sources/KinlogueApp/Views/TimelineView.swift)、[`RecordDetailView`](../Sources/KinlogueApp/Views/RecordDetailView.swift) 与中英文案。专题页见 [`project-overview.md`](project-overview.md)、[`domain-and-data-model.md`](domain-and-data-model.md)、[`import-and-ocr.md`](import-and-ocr.md)、[`sqlite-storage.md`](sqlite-storage.md)、[`design-system.md`](design-system.md)。
+
+**迁移/回滚要求**：没有 schema、搜索行或备份格式变化。按新规则整理会改写该报告保留的 OCR 文档行（候选与规则版本），blocks 不变，只在用户保存时发生；回滚代码后旧版本照常读取，只是不再提示。version 7 只影响之后的抽取，已确认记录不会被自动改写。
+
+**验证门禁**：定向测试与完整测试见 [`log.md`](log.md)，叙述命中的规模计时见 [搜索呈现测量](search-presentation-measurement-2026-10-14.md#叙述命中按句呈现的复测2026-10-15)。三种识别误读规则只来自合成核对，真实报告上的命中与误报没有核对；按新规则整理只用合成 block 验证过；键盘、VoiceOver 与窄窗口下的对照页仍属人工矩阵。
+
 ## 已被 supersede 的早期决策
 
 [`2026-08-01-001-feat-kinlogue-macos-vault-plan.md`](plans/2026-08-01-001-feat-kinlogue-macos-vault-plan.md) 早期计划曾以“加密 Vault、Keychain、加密 backup/restore”为 MVP 方向；它已被明文 MVP 计划的 `supersedes` 字段覆盖。它仍然保留 threat model、早期 target 规划和未来安全升级的背景，但不能作为当前代码或隐私文案的事实来源。

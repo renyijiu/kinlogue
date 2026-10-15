@@ -164,6 +164,13 @@ struct AppShellView: View {
                 await model.updateRecord(command)
             }
         }
+        .sheet(item: $model.reviewingRuleUpdate, onDismiss: {
+            model.presentationDidEnd()
+        }) { update in
+            RecordRuleUpdateView(update: update) { fields in
+                await model.applyRuleUpdate(accepting: fields)
+            }
+        }
         .sheet(item: $model.viewingOriginal, onDismiss: {
             model.presentationDidEnd()
         }) { _ in
@@ -498,7 +505,9 @@ struct AppShellView: View {
                             if let record = model.selectedRecord {
                                 model.requestDeleteRecord(record)
                             }
-                        }
+                        },
+                        ruleUpdate: model.ruleUpdate,
+                        onReviewRuleUpdate: { model.presentRuleUpdate() }
                     )
                     .background(KinlogueTheme.surface)
                 }

@@ -62,12 +62,19 @@ struct TimelineViewSourceTests {
         let shell = try source(named: "AppShellView.swift")
 
         #expect(shell.contains("searchTerm: model.searchText.trimmingCharacters(in: .whitespacesAndNewlines),"))
-        #expect(timeline.components(separatedBy: "term: searchTerm").count - 1 == 4)
-        // Lines come first, then the excerpt, and only then the conclusion.
+        #expect(timeline.components(separatedBy: "term: searchTerm").count - 1 == 5)
+        // Lines come first, then the sentences, then the excerpt, and only then the conclusion.
         let lines = try #require(timeline.range(of: "if !record.matchedResultLines.isEmpty {"))
+        let passages = try #require(timeline.range(of: "} else if !record.matchedPassages.isEmpty {"))
         let excerpt = try #require(timeline.range(of: "} else if let excerpt = record.matchedExcerpt {"))
         let conclusion = try #require(timeline.range(of: "AppLocalization.string(\"原报告未提供结论\")"))
-        #expect(lines.lowerBound < excerpt.lowerBound && excerpt.lowerBound < conclusion.lowerBound)
+        #expect(lines.lowerBound < passages.lowerBound && passages.lowerBound < excerpt.lowerBound)
+        #expect(excerpt.lowerBound < conclusion.lowerBound)
+        #expect(timeline.contains("AppLocalization.string(\"\\(memberLabel)，\\(recordType)，\\(dateText)，匹配的句子：\\(sentences)\")"))
+        // Each sentence names its field; VoiceOver reads the sentence without the drawn ellipses.
+        #expect(timeline.contains("case .reportedResults: AppLocalization.string(\"检查结果\")"))
+        #expect(timeline.contains("case .conclusion: AppLocalization.string(\"检查结论\")"))
+        #expect(timeline.contains("AppLocalization.string(\"\\(fieldName($0.field))：\\($0.excerpt.text)\")"))
         #expect(timeline.contains("AppLocalization.string(\"\\(memberLabel)，\\(recordType)，\\(dateText)，匹配内容：\\(excerpt)\")"))
         // VoiceOver reads the excerpt without the drawn ellipses.
         #expect(timeline.contains("if let excerpt = record.matchedExcerpt?.text {"))

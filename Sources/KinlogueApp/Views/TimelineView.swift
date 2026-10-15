@@ -336,6 +336,12 @@ private struct TimelineCard: View {
                             totalCount: record.matchedResultLineCount,
                             term: searchTerm
                         )
+                    } else if !record.matchedPassages.isEmpty {
+                        MatchedPassagesView(
+                            passages: record.matchedPassages,
+                            totalCount: record.matchedPassageCount,
+                            term: searchTerm
+                        )
                     } else if let excerpt = record.matchedExcerpt {
                         // Shows where the term was found when the heading does not.
                         Label {
@@ -373,6 +379,13 @@ private struct TimelineCard: View {
         let recordType = record.reportType
             ?? AppLocalization.string("健康记录")
         guard isSearchResult else { return AppLocalization.string("\(memberLabel)，\(recordType)") }
+        if record.matchedResultLines.isEmpty, !record.matchedPassages.isEmpty {
+            let sentences = MatchedPassagesView.spokenText(
+                passages: record.matchedPassages,
+                totalCount: record.matchedPassageCount
+            )
+            return AppLocalization.string("\(memberLabel)，\(recordType)，\(dateText)，匹配的句子：\(sentences)")
+        }
         guard !record.matchedResultLines.isEmpty else {
             // The ellipses are only drawn; VoiceOver reads the excerpt's own text.
             if let excerpt = record.matchedExcerpt?.text {
@@ -431,6 +444,58 @@ private struct MatchedResultLinesView: View {
         var parts = lines.map { $0.cells.joined(separator: " ") }
         if totalCount > lines.count {
             parts.append(AppLocalization.string("还有 \(totalCount - lines.count) 行匹配"))
+        }
+        return parts.joined(separator: AppLocalization.string("；"))
+    }
+}
+
+/// The sentences of a narrative report a search term was found in, each under the name of the
+/// field it comes from, as the report printed them. Nothing is parsed, compared or marked.
+private struct MatchedPassagesView: View {
+    let passages: [SearchPassage]
+    let totalCount: Int
+    let term: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 6) {
+                ForEach(Array(passages.enumerated()), id: \.offset) { index, passage in
+                    GridRow {
+                        // The field is named where it begins, not on every sentence of it.
+                        Text(index > 0 && passages[index - 1].field == passage.field ? "" : Self.fieldName(passage.field))
+                            .font(.caption)
+                            .foregroundStyle(KinlogueTheme.onVariant)
+                        Text(SearchHighlight.text(passage.excerpt.displayText, term: term))
+                            .font(.subheadline)
+                            .foregroundStyle(KinlogueTheme.onSurface)
+                            .lineLimit(2)
+                    }
+                }
+            }
+            if totalCount > passages.count {
+                Text(AppLocalization.string("还有 \(totalCount - passages.count) 处匹配"))
+                    .font(.caption)
+                    .foregroundStyle(KinlogueTheme.onVariant)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .kinloguePanel(.container, cornerRadius: KinlogueTheme.Radius.control)
+    }
+
+    static func fieldName(_ field: SearchPassage.Field) -> String {
+        switch field {
+        case .reportedResults: AppLocalization.string("检查结果")
+        case .conclusion: AppLocalization.string("检查结论")
+        }
+    }
+
+    /// The ellipses are only drawn; VoiceOver reads each sentence's own text after its field.
+    static func spokenText(passages: [SearchPassage], totalCount: Int) -> String {
+        var parts = passages.map { AppLocalization.string("\(fieldName($0.field))：\($0.excerpt.text)") }
+        if totalCount > passages.count {
+            parts.append(AppLocalization.string("还有 \(totalCount - passages.count) 处匹配"))
         }
         return parts.joined(separator: AppLocalization.string("；"))
     }

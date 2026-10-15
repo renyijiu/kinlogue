@@ -362,6 +362,21 @@ struct AppLocalizationTests {
         #expect(AppLocalization.string("还有 \(3) 行匹配", locale: english) == "3 more matching lines")
         #expect(AppLocalization.string("；", locale: chinese) == "；")
         #expect(AppLocalization.string("；", locale: english) == "; ")
+
+        let field = "合成结论", sentence = "合成甲状腺结节。"
+        #expect(AppLocalization.string("\(field)：\(sentence)", locale: chinese) == "合成结论：合成甲状腺结节。")
+        #expect(AppLocalization.string("\(field)：\(sentence)", locale: english) == "合成结论: 合成甲状腺结节。")
+        #expect(
+            AppLocalization.string("\(member)，\(recordType)，\(date)，匹配的句子：\(sentence)", locale: chinese)
+                == "合成成员，合成检验，2026年10月9日，匹配的句子：合成甲状腺结节。"
+        )
+        #expect(
+            AppLocalization.string("\(member)，\(recordType)，\(date)，匹配的句子：\(sentence)", locale: english)
+                == "合成成员, 合成检验, 2026年10月9日, matching sentences: 合成甲状腺结节。"
+        )
+        #expect(AppLocalization.string("还有 \(1) 处匹配", locale: chinese) == "还有 1 处匹配")
+        #expect(AppLocalization.string("还有 \(1) 处匹配", locale: english) == "1 more match")
+        #expect(AppLocalization.string("还有 \(2) 处匹配", locale: english) == "2 more matches")
     }
 
     @Test
