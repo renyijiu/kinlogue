@@ -77,6 +77,8 @@ swift scripts/render-app-icon.swift packaging
 3. 模型输出如何保持在非诊断边界内，以及它与用户已确认的来源转录如何区分。
 4. `README.md`、`PRIVACY.md`、[`privacy-and-security.md`](privacy-and-security.md) 和相关验收脚本如何同步改写。
 
+2026-10-15 提议的第一步见 [成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md)：只做模型问答，首版由使用者本机已登录的 Codex CLI 提供模型（Claude Code 留待后续）；它回答了上面第 2、3 项的候选做法，但仍待决策和实现。
+
 **落地时采用的品牌约束**（推断，待届时确认）：
 
 - 助手一次只使用一位成员的资料作为上下文，不混用不同成员的数据，除非使用者明确要求对比。

@@ -1712,3 +1712,51 @@
 - **未处理**：搜索字段只是无标签的字符串数组，需要按详情找出结果字段的位置。改为带标签的格式要改动已校验的行格式并迁移现有资料库，这次不做。
 - **测试**：Core 新增 1 项（表头居中、两表各带序号列），并在现有测试里补上按行前进、含换行或 NUL 的词、含空白的词的摘录、超长标题的摘录；Platform 缓存测试补上结果字段位置的摘要匹配、随报告清除、20,000 条上限和 `removeAll`。三处新断言先在未修复的代码上确认失败。主清单 1182 tests / 96 suites。
 - **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，完整 `scripts/test.sh` 退出码 0，主清单 1182 tests / 96 suites，隔离门禁一并通过；传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。近上限资料库的首页计时没有重测：摘录跳过字段的判断只对卡片显示的两三段文字做前缀比较，预计不改变 [搜索呈现测量](search-presentation-measurement-2026-10-14.md) 的结果，但这是推断。真实检验单版式上的边界效果仍未核对。
+
+## [2026-10-15] plan/assistant | 提议成员对话：调用本机已登录的 Codex / Claude Code CLI
+
+- **起因**：用户希望针对每一位成员引入模型对话，先接入本机已有的 Codex CLI 或 Claude Code CLI，让使用者以聊天方式了解这位成员的资料并提问，不作为诊断。本条只做规划，没有改代码。
+- **依据**：读了 [`project-overview.md`](project-overview.md)、[`../PRIVACY.md`](../PRIVACY.md)、[`decisions.md`](decisions.md) 2026-10-11 一节和开放门禁第 6 项、[`brand.md`](brand.md) 的方向一节、[`architecture.md`](architecture.md)，以及主 App 的 [entitlements](../packaging/Kinlogue.entitlements)。另读了未合入的 `codex/agentrunkit-probe` 分支（基于 SQLite 切换前的主线）的助手、Codex 接入和调研文档：它内置锁定版本的 Codex 并由续页自己做 ChatGPT 授权，刻意不读取用户的 CLI 配置和凭据，Claude 暂缓。本机两个 CLI 只看了帮助文本，记录在[来源笔记](sources/2026-10-15-local-cli-noninteractive-flags.md)。
+- **产出**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md)（status: proposed）。要点：每段对话绑定一位成员，只发送预先组好、可逐字预览的已确认报告投影，模型没有任何工具；启动 CLI 放在拿不到资料库的单独 XPC helper 中，主 App 权限不扩大；健康资料只经 stdin；按能力检查 CLI 而不锁版本；对话只在内存中。helper 是否启用沙盒、是否纳入 Claude Code、同意粒度、是否允许描述性排列历次结果等 7 项留给用户决定。导航同步到 [`index.md`](index.md)、[`plans/README.md`](plans/README.md)、[`sources/README.md`](sources/README.md)、[`decisions.md`](decisions.md) 开放门禁第 6 项和 [`brand.md`](brand.md)。
+- **未执行**：没有发起任何模型请求，没有在 App Sandbox 或 XPC 中运行 CLI；计划中凭据可读性、流式事件格式、工具是否真正关闭、是否写入会话或遥测文件等都标为待 U0 实测。`PRIVACY.md`、`README.md` 和产品契约没有改动。
+
+## [2026-10-15] plan/assistant | 成员对话计划修订：首版只接 Codex，对话保存做兼容设计
+
+- **起因**：用户确定 D6 为首版只做 Codex，并要求“如果想保留对话，设计上最好可以兼容”。暂不执行 U0。
+- **依据**：[`sqlite-storage.md`](sqlite-storage.md) 的格式一节（打开时精确校验 `user_version=1` 与 schema，未知版本拒绝、不自动迁移）和逻辑恢复点一节（logical-v1 与 schema 解耦、有冻结夹具）；[`decisions.md`](decisions.md) 的“首发前 current-only”；`SQLiteReportRepository.deleteMember` 在成员仍有报告、草稿或 DICOM 时拒绝删除。
+- **计划改动**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 的范围、方案比较、适配表、界面、U0 和人工矩阵改为只针对 Codex，适配层保留 `CLIAdapter` 接口给后续的 Claude Code。新增第 4.9 节：首版对话仍只在内存，但对话、轮次和每轮发送清单是可编码的 Core 值类型，引用落在记录 ID 与 revision 上，每轮无状态重发、不依赖 Codex 会话文件，App 只经 `AssistantConversationStoring` 读写；打开保存时推荐在主资料库加三张表并进入恢复点，代价是第一次 schema 迁移（v1→v2）和 logical payload v2，需要用户同意 current-only 的例外；备选是单独的对话数据库文件。新增可选单元 U7 和待定决策 D8；第 9 节把 D6 移到“已定”。导航中的描述同步到 [`index.md`](index.md)、[`plans/README.md`](plans/README.md)、[`decisions.md`](decisions.md) 和 [`brand.md`](brand.md)。
+- **未执行**：仍未发起模型请求，没有改代码；迁移、恢复点 v2 和对话表都只是设计，没有原型或测试。
+
+## [2026-10-15] plan/assistant | 成员对话计划：确定对话保存进主资料库与恢复点，设计 v1→v2 迁移
+
+- **起因**：用户确定 D8：保存的对话放进主资料库并进入恢复点，同意为此做资料库第一次 schema 迁移（v1→v2）。
+- **依据**：[`SQLiteLibrarySchema`](../Sources/KinloguePlatform/Storage/SQLiteLibrarySchema.swift) 打开时要求 `user_version` 等于当前版本、每张表的 DDL 逐字相同，并在 `library_state` 保存全部 DDL 的 SHA-256；[`sqlite-storage.md`](sqlite-storage.md) 的逻辑恢复点一节（logical-v1 与 schema 解耦、两个 v1 冻结夹具）。
+- **计划改动**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 第 4.9 节写明迁移做法：只接受 v1 作为迁移输入、其他未知版本照旧失败关闭；在单实例 owner 下、普通服务打开前，用单个事务校验 v1、按 v2 的 DDL 常量建表、写 `user_version = 2`、更新 `library_state` 的 schema identity 与内容摘要，再按 v2 校验；只新增表，不改已有行、不读原件；建议但不强制迁移前手动备份；回退只能用迁移前的恢复点。恢复点 payload 升到 v2，reader 同时接受 v1 与 v2。U7 的退出条件补上 v1 冻结资料库夹具的分阶段强退测试；D8 移入“已定”，D4 改为问 U7 放进首版还是首版之后单独发布（建议后者）。[`decisions.md`](decisions.md) 开放门禁第 6 项记下这个例外已获同意、实施前 current-only 规则不变。
+- **未执行**：没有改代码、没有原型或测试；迁移和恢复点 v2 都还只是设计。
+
+## [2026-10-15] plan/assistant | 成员对话计划：确定保存对话在首版之后单独发布
+
+- **起因**：用户确定 D4 按建议执行：U7（保存对话）在首版之后单独发布。
+- **计划改动**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 把 D4 移入“已定”，修订说明、第 4.6 节和 U7 一行同步。首版对话只在内存里，但仍按第 4.9 节做可保存的兼容设计。待定的还有 D1（由 U0 实测决定）、D2、D3、D5、D7，以及代理变量和 Codex 服务商配置两个默认值。
+- **未执行**：没有改代码，U0 未开始。
+
+## [2026-10-15] plan/assistant | 成员对话计划：D2、D3、D5、D7 按建议确定
+
+- **起因**：用户确定 D2、D3、D5、D7 都按计划中的建议执行。
+- **计划改动**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 第 9 节把四项移入“已定”：首版模型没有任何工具，只发送可逐字预览的上下文包（D2）；同意按对话计，CLI、模型或上下文包变化即失效（D3）；允许按时间描述性排列同一项目的历次原文结果并逐条引用，不做好转或恶化判断（D5，实现时需在 [`decisions.md`](decisions.md) 记录它与“当前不做趋势分析”的边界）；默认不发送机构名称，确认页提供单独开关（D7）。第 3.2 节、第 4.4 节和确认页描述同步。待定的只剩 D1（由 U0 实测决定），以及代理变量和 Codex 服务商配置两个默认值。
+- **未执行**：没有改代码，U0 未开始。
+- **补充**：同日在第 9 节为剩下的两个默认值写出建议，编号 E1、E2：允许在设置里填写四个代理变量，只传给 Codex 子进程（E1）；首版不加载 Codex 的用户配置，因此不支持第三方中转，后续改为在续页设置里填写服务商地址并经 `-c` 传入（E2）。第 7 节人工矩阵补上对应检查。两项待用户确认。
+
+## [2026-10-15] plan/assistant | 成员对话计划：E1、E2 按建议确定
+
+- **起因**：用户确定 E1、E2 都按建议执行。
+- **计划改动**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 第 9 节把 E1（设置里可填四个代理变量，只传给 Codex 子进程）和 E2（首版不加载 Codex 用户配置、不支持第三方中转，后续改为在续页设置里填写服务商地址）移入“已定”；第 4.3 节、设置页描述和第 11 节后续工作同步。除 D1 由 U0 实测决定外，计划中的决策已全部确定。
+- **未执行**：没有改代码，U0 未开始；U0 会消耗用户的 Codex 额度，需要用户同意后执行。
+
+## [2026-10-15] probe/assistant | 成员对话计划 U0：本机 Codex 在加固参数与两种 XPC helper 下的实测
+
+- **起因**：用户同意开始 U0，并允许使用其本机 Codex 的额度；只用合成资料。
+- **做法**：探针代码放在会话临时目录，没有进入仓库。先用只监听 127.0.0.1 的模拟 Responses 服务记录 Codex 0.162.0 实际发出的请求，再用真实账号在终端跑 3 轮；然后构建 ad-hoc 签名的沙盒宿主，内嵌沙盒加例外（A）与非沙盒（B）两个 XPC helper，各自用真实账号跑通。结果与方法见 [U0 证据笔记](sources/2026-10-15-codex-u0-probe-evidence.md)。
+- **关键发现**：只关闭功能不够——当前所有模型的目录项都是 `code_mode_only`，请求里仍有代码模式和子 agent 协作共 9 个工具；加 `agents.enabled=false` 并用 `model_catalog_json` 传入改过的目录后，工具数为 0。`-c instructions=...` 整段替换内置提示词，加固后的请求只有两条消息，没有本机路径。`--strict-config` 拒绝不认识的配置键。`exec --json` 没有逐字增量。真实账号 3 份记录 6.2 秒、20 份（约 92 KB）17.1 秒；注入记录被当成资料，canary 未外泄。整个 `~/.codex` 中找不到合成标记串。A 下 helper 读不到真实家目录和 `~/Library/Containers`，Codex 仍能读登录文件并完成回答。
+- **计划改动**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 按约定规则确定 D1 为方案 A（B 不再作为备选），写明 helper 的 entitlement 集合；第 4.3 节换成实测过的参数表，能力检查增加“发送前对本机模拟服务跑一轮、确认请求中没有工具”；超时改为启动 10 秒、整轮 180 秒；对话面板增加等待提示；U2 补上模型目录改写、模拟请求检查和其他安装位置的验证；风险一节换成 temporary exception 与模型目录改写两项。计划中的决策已全部确定。
+- **未执行**：A 下的令牌刷新写回（这几轮没有发生刷新）、Homebrew 以外的安装位置、真实发送的网络去向（没有抓包）、取消与进程组回收、Developer ID 与公证、macOS 26。探针留下两个由系统保护的空沙盒容器（`~/Library/Containers/com.kinlogue.u0probe.*`），`rm` 无法删除，需要用户在 Finder 中移除。
