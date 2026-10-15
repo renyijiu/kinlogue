@@ -447,7 +447,7 @@ struct AppShellView: View {
                             dicomLibraryModel: model.dicomLibraryModel,
                             sections: model.timelineSections,
                             searchResults: model.searchResults,
-                            isSearching: !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                            searchTerm: model.searchText.trimmingCharacters(in: .whitespacesAndNewlines),
                             filter: model.timelineFilter,
                             selectedRecordID: model.selectedRecordID,
                             showsMemberLabels: model.selectedMemberID == nil,

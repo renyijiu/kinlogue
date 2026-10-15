@@ -4,10 +4,16 @@ import KinlogueCore
 
 /// Decoded search fields and their coarse keys, kept while one database stays open.
 ///
-/// Nothing here is trusted on its own: a query hashes the bytes it reads from every search row and
-/// uses an entry only when that digest equals the one the entry was built from. The cache saves the
-/// decoding and key derivation of identical verified bytes, not the verification.
-// SAFETY: `entries` and `cost` are only touched while `lock` is held.
+/// Search entries are not trusted on their own: a query hashes the bytes it reads from every search
+/// row and uses an entry only when that digest equals the one the entry was built from. The cache
+/// saves the decoding and key derivation of identical verified bytes, not the verification.
+///
+/// A results-field index is the one exception: it is trusted from the verified read of the details
+/// that produced it for as long as the report's directory row names the same two digests, and the
+/// details are not read again. If the details row alone is damaged later, the list keeps showing the
+/// lines it showed, which still come from the verified search row; opening the report reports the
+/// damage, and the next session shows an excerpt instead.
+// SAFETY: `entries`, `cost` and `resultsFields` are only touched while `lock` is held.
 final class SQLiteReportSearchCache: @unchecked Sendable {
     struct Entry: Sendable {
         let fieldsHash: Data
@@ -17,12 +23,25 @@ final class SQLiteReportSearchCache: @unchecked Sendable {
         var cost: Int { fields.reduce(key.count + 96 + fields.count * 32) { $0 + $1.utf8.count } }
     }
 
+    /// Which search field of a report holds its confirmed results, learned by decoding its details
+    /// once. Used only while the report's directory row still names both digests; the details bytes
+    /// are not hashed again.
+    struct ResultsField: Sendable {
+        let fieldsHash: Data
+        let detailHash: Data
+        /// Nil when the report has no results field.
+        let index: Int?
+    }
+
     /// Rows beyond this budget stay correct; they are decoded again by each query.
     static let costLimit = 64 * 1_024 * 1_024
+    /// One per report the format allows; each holds two digests and an index.
+    static let resultsFieldLimit = 20_000
 
     private let lock = NSLock()
     private var entries: [UUID: Entry] = [:]
     private var cost = 0
+    private var resultsFields: [UUID: ResultsField] = [:]
 
     func snapshot() -> [UUID: Entry] { lock.withLock { entries } }
 
@@ -34,6 +53,7 @@ final class SQLiteReportSearchCache: @unchecked Sendable {
                 for id in entries.keys where !present.contains(id) {
                     cost -= entries.removeValue(forKey: id)?.cost ?? 0
                 }
+                for id in resultsFields.keys where !present.contains(id) { resultsFields[id] = nil }
             }
             for (id, entry) in fresh {
                 // The row's bytes changed, so its previous entry can never be used again.
@@ -45,7 +65,21 @@ final class SQLiteReportSearchCache: @unchecked Sendable {
         }
     }
 
-    func removeAll() { lock.withLock { entries = [:]; cost = 0 } }
+    func resultsField(_ id: UUID, fieldsHash: Data, detailHash: Data) -> ResultsField? {
+        lock.withLock {
+            guard let known = resultsFields[id], known.fieldsHash == fieldsHash, known.detailHash == detailHash else { return nil }
+            return known
+        }
+    }
+
+    func setResultsField(_ id: UUID, _ value: ResultsField) {
+        lock.withLock {
+            guard resultsFields[id] != nil || resultsFields.count < Self.resultsFieldLimit else { return }
+            resultsFields[id] = value
+        }
+    }
+
+    func removeAll() { lock.withLock { entries = [:]; cost = 0; resultsFields = [:] } }
 }
 
 /// The rows and database stay on the GRDB queue. Workers receive only owned immutable values.
@@ -161,6 +195,13 @@ enum SQLiteReportSearch {
         }
     }
 
+    /// Whether `data` is the search row the directory names: the bytes hash to its digest and, with
+    /// the report ID, to the row's content hash.
+    static func isVerified(_ id: UUID, fields data: Data, fieldsHash: Data?, rowHash: Data?) -> Bool {
+        ContentDigest.sha256(data) == fieldsHash
+            && SQLiteContentHash.hash(domain: "report_search:1", values: [.blob(id.sqliteBytes), .blob(data)]) == rowHash
+    }
+
     /// Returns the matching reports in timeline order. Every search row in scope is read and hashed
     /// on every call, so the result is complete and a damaged row is reported whether or not it
     /// would have matched. `prefilter: false` is the independent reference used by tests and the
@@ -231,8 +272,7 @@ enum SQLiteReportSearch {
                         let candidate = candidates[index]
                         autoreleasepool {
                             guard let data = candidate.fields, let fieldsHash = candidate.fieldsHash,
-                                  ContentDigest.sha256(data) == fieldsHash,
-                                  SQLiteContentHash.hash(domain: "report_search:1", values: [.blob(candidate.id.sqliteBytes), .blob(data)]) == candidate.rowHash else {
+                                  isVerified(candidate.id, fields: data, fieldsHash: fieldsHash, rowHash: candidate.rowHash) else {
                                 output.found.append((candidate.ordinal, true)); return
                             }
                             guard prefilter else {
@@ -319,6 +359,88 @@ enum SQLiteReportSearch {
             cache.update(fresh, present: stale ? Set(reports.map(\.id)) : nil)
         }
         return result
+    }
+
+    /// Only the results text of a stored record; its references are not needed to place it.
+    private struct ConfirmedResults: Decodable {
+        struct Transcription: Decodable {
+            let originalTranscription: String
+            let correctedTranscription: String?
+        }
+        let reportedResults: Transcription?
+    }
+
+    /// Which of a report's search fields is its confirmed results field, or nil when it has none or
+    /// its details cannot be verified. The details are read, verified and decoded only the first
+    /// time for these digests; the answer then holds for as long as the directory row names them,
+    /// since any edit changes them. The lines themselves always come from the search row the query
+    /// verified.
+    private static func resultsFieldIndex(_ id: UUID, fields: [String], searchHash: Data, detailHash: Data,
+                                          cache: SQLiteReportSearchCache?, _ db: Database) throws -> Int? {
+        if let known = cache?.resultsField(id, fieldsHash: searchHash, detailHash: detailHash) { return known.index }
+        guard let detail = try SQLiteRows.fetchOne(db, sql: """
+                SELECT record_id, CASE WHEN length(payload) <= \(LibraryStorageLimits.maximumEntityJSONBytes) THEN payload ELSE NULL END AS payload,
+                    content_hash FROM report_details WHERE record_id = ?
+                """, arguments: [id.sqliteBytes]),
+              let payload = detail["payload"] as Data?, ContentDigest.sha256(payload) == detailHash,
+              (try? SQLiteReportRows.verify(detail, table: "report_details", columns: ["record_id", "payload"])) != nil,
+              let decoded = try? CanonicalVaultJSON.decode(ConfirmedResults.self, from: payload) else { return nil }
+        // The stored record was validated when written, so this is its `SourceField.transcription`.
+        let index = decoded.reportedResults.flatMap {
+            fields.firstIndex(of: $0.correctedTranscription ?? $0.originalTranscription)
+        }
+        cache?.setResultsField(id, .init(fieldsHash: searchHash, detailHash: detailHash, index: index))
+        return index
+    }
+
+    /// What one listed report shows of the match: the table lines of its confirmed results in
+    /// which the term is found or, failing those, an excerpt of a field the row does not show.
+    ///
+    /// `summary` is the report's verified directory row and `listed` its projection. Everything
+    /// comes from the verified search fields, except the lines: the details are decoded only when
+    /// a field the term is found in has a tab-separated line holding it, and the lines come from
+    /// the results field alone. Only fields the coarse key cannot rule out are searched, so a query
+    /// that matches a member reads and searches nothing more. A report whose search row cannot be
+    /// verified shows nothing extra; opening it still reports the damage.
+    static func match(_ id: UUID, summary: Row, listed: LibraryReportSummary, predicate: Predicate,
+                      cache: [UUID: SQLiteReportSearchCache.Entry], resultsFields: SQLiteReportSearchCache?,
+                      dateFormatter: ISO8601DateFormatter, _ db: Database) throws -> LibraryReportSearchMatch {
+        let term = predicate.term
+        guard !term.isEmpty else { return .none }
+        let searchHash: Data = summary["search_hash"], detailHash: Data = summary["detail_hash"]
+        let fields: [String], key: [UInt8]
+        if let entry = cache[id], entry.fieldsHash == searchHash {
+            fields = entry.fields; key = entry.key
+        } else {
+            guard let row = try SQLiteRows.fetchOne(db, sql: """
+                SELECT CASE WHEN length(fields) <= \(LibraryStorageLimits.maximumEntityJSONBytes) THEN fields ELSE NULL END AS fields,
+                    content_hash FROM report_search WHERE record_id = ?
+                """, arguments: [id.sqliteBytes]),
+                  let data = row["fields"] as Data?,
+                  isVerified(id, fields: data, fieldsHash: searchHash, rowHash: row["content_hash"]),
+                  let decoded = try? CanonicalVaultJSON.decode([String].self, from: data) else { return .none }
+            fields = decoded; key = SQLiteReportSearchKey.key(fields: decoded)
+        }
+        // Only fields the coarse key cannot rule out are searched; a member match searches none.
+        let candidates = (predicate.needle.isEmpty
+            ? Array(fields.indices) : SQLiteReportSearchKey.matchingFields(predicate.needle, in: key))
+            .filter { $0 < fields.count }
+        // The lines of every candidate field with a table line holding the term; the results
+        // field's are the ones listed.
+        var linesByField: [Int: [ReportedResultLine]] = [:]
+        for index in candidates {
+            let fieldLines = ReportedResultLine.lines(matching: term, in: fields[index], locale: predicate.locale)
+            if !fieldLines.isEmpty { linesByField[index] = fieldLines }
+        }
+        if !linesByField.isEmpty,
+           let index = try resultsFieldIndex(id, fields: fields, searchHash: searchHash,
+                                             detailHash: detailHash, cache: resultsFields, db),
+           let lines = linesByField[index] {
+            return LibraryReportSearchMatch(resultLines: lines, excerpt: nil)
+        }
+        let visible = listed.visibleSearchText + (listed.timelineDate.map { [dateFormatter.string(from: $0)] } ?? [])
+        return LibraryReportSearchMatch(resultLines: [], excerpt: LibraryReportSearchMatch.excerpt(
+            term: term, fields: candidates.map { fields[$0] }, hiding: visible, locale: predicate.locale))
     }
 }
 

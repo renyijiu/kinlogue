@@ -106,15 +106,21 @@ package actor SQLiteReportRepository: ImportDraftStore {
                             let scan = try SQLiteReportSearch.scan(db, term: term, memberID: memberID, cursor: cursor,
                                 maximumMatches: limit + 1, cancellation: cancellation, cache: store.reportSearchCache)
                             var items: [LibraryReportSummary] = [], damaged: [UUID] = []
+                            let entries = store.reportSearchCache.snapshot(), dateFormatter = ISO8601DateFormatter()
+                            let predicate = SQLiteReportSearch.Predicate(term)
                             for match in scan.matches.prefix(limit) {
                                 try cancellation.check()
                                 if match.damaged { damaged.append(match.id); continue }
                                 guard let row = try SQLiteRows.fetchOne(db, sql: "SELECT \(SQLiteReportRows.summaryProjection) FROM reports WHERE record_id=?", arguments: [match.id.sqliteBytes]) else { throw SQLiteLibraryError.damaged }
+                                let summary: LibraryReportSummary
                                 do {
                                     guard !(row["oversized"] as Bool) else { throw SQLiteLibraryError.damaged }
                                     try store.requireUnquarantined(.report, SQLiteReportRows.uuid(row, "record_id"))
-                                items.append(try SQLiteReportRows.summary(row))
-                                } catch { damaged.append(match.id) }
+                                    summary = try SQLiteReportRows.summary(row)
+                                } catch { damaged.append(match.id); continue }
+                                let found = try SQLiteReportSearch.match(match.id, summary: row, listed: summary, predicate: predicate,
+                                    cache: entries, resultsFields: store.reportSearchCache, dateFormatter: dateFormatter, db)
+                                items.append(found.isEmpty ? summary : summary.listing(found))
                             }
                             let next = scan.matches.count > limit ? scan.matches.prefix(limit).last.map {
                                 LibraryQueryCursor(libraryID: state.libraryID, commitID: state.commitID, openEpoch: epoch,

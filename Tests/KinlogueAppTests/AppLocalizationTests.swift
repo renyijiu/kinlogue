@@ -335,6 +335,36 @@ struct AppLocalizationTests {
     }
 
     @Test
+    func searchResultCardCopyKeepsItsArgumentsInBothLanguages() {
+        let chinese = Locale(identifier: "zh-Hans"), english = Locale(identifier: "en")
+        let member = "合成成员", recordType = "合成检验", date = "2026年10月9日", lines = "合成葡萄糖 5.4 3.9~6.1"
+
+        #expect(AppLocalization.string("\(member)，\(recordType)，\(date)", locale: chinese) == "合成成员，合成检验，2026年10月9日")
+        #expect(AppLocalization.string("\(member)，\(recordType)，\(date)", locale: english) == "合成成员, 合成检验, 2026年10月9日")
+        #expect(
+            AppLocalization.string("\(member)，\(recordType)，\(date)，匹配的结果行：\(lines)", locale: chinese)
+                == "合成成员，合成检验，2026年10月9日，匹配的结果行：合成葡萄糖 5.4 3.9~6.1"
+        )
+        #expect(
+            AppLocalization.string("\(member)，\(recordType)，\(date)，匹配的结果行：\(lines)", locale: english)
+                == "合成成员, 合成检验, 2026年10月9日, matching result lines: 合成葡萄糖 5.4 3.9~6.1"
+        )
+        #expect(
+            AppLocalization.string("\(member)，\(recordType)，\(date)，匹配内容：\(lines)", locale: english)
+                == "合成成员, 合成检验, 2026年10月9日, matching text: 合成葡萄糖 5.4 3.9~6.1"
+        )
+        #expect(
+            AppLocalization.string("\(member)，\(recordType)，\(date)，匹配内容：\(lines)", locale: chinese)
+                == "合成成员，合成检验，2026年10月9日，匹配内容：合成葡萄糖 5.4 3.9~6.1"
+        )
+        #expect(AppLocalization.string("还有 \(1) 行匹配", locale: chinese) == "还有 1 行匹配")
+        #expect(AppLocalization.string("还有 \(1) 行匹配", locale: english) == "1 more matching line")
+        #expect(AppLocalization.string("还有 \(3) 行匹配", locale: english) == "3 more matching lines")
+        #expect(AppLocalization.string("；", locale: chinese) == "；")
+        #expect(AppLocalization.string("；", locale: english) == "; ")
+    }
+
+    @Test
     func localizesDICOMSeriesAndPlaybackCountsInBothLanguages() {
         #expect(
             AppLocalization.string(

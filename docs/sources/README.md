@@ -45,6 +45,7 @@ kind: pattern-reference | product-decision | external-spec
 - [`swift-macos-engineering-guidance-2026-08-19.md`](swift-macos-engineering-guidance-2026-08-19.md)：Swift API、并发、SwiftUI 状态、性能与 App Sandbox 官方实践复核。
 - [`architecture-review-practices-2026-09-08.md`](architecture-review-practices-2026-09-08.md)：actor 重入、协作取消、流式 I/O、嵌套签名与 DICOM padding 的一手依据。
 - [`2026-08-05-github-readme-patterns.md`](2026-08-05-github-readme-patterns.md)：README 信息结构调研。
+- [`2026-10-14-carehealth-competitor-notes.md`](2026-10-14-carehealth-competitor-notes.md)：同类 iPhone 健康档案应用的公开资料与回帖需求，用于搜索呈现检验表格行的取舍。
 
 ### DICOM 调研与阶段契约
 

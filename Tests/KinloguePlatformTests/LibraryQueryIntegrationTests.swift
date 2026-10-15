@@ -112,6 +112,77 @@ func sqliteReportSearchMatchesFoundationFieldsAndKeepsPreviewsBounded() async th
 }
 
 @Test
+func sqliteSearchListsTheMatchingTableLinesOfConfirmedResultsOnly() async throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let kernel = try SQLiteLibraryStore(rootURL: root)
+    defer { try? kernel.close() }
+    let repository = SQLiteReportRepository(store: kernel)
+    let member = try FamilyMember(displayName: "Synthetic member")
+    try await repository.saveMember(member, replacing: nil)
+    let base = try await sqliteConfirmedRecord(repository, member: member, seed: "table")
+    let table = try HealthRecord(id: base.id, memberID: base.memberID, sources: base.sources,
+        ocrDocumentObjectID: base.ocrDocumentObjectID, importState: .confirmed, revision: base.revision + 1,
+        title: SourceField.manualEntry("合成血糖"), dateCandidates: base.dateCandidates,
+        timelineDateCandidateID: base.timelineDateCandidateID,
+        reportedResults: SourceField.manualEntry("合成葡萄糖\t5.4 mmol/L\t3.9~6.1\n合成胰岛素\t3.0\t1.9~23"),
+        // A tab line outside the results is never listed as one.
+        conclusion: SourceField.manualEntry("合成葡萄糖\t结论里的一行"))
+    try await repository.updateRecord(table, expectedRevision: base.revision)
+    let narrative = try await sqliteConfirmedRecord(repository, member: member, seed: "narrative", conclusion: "合成葡萄糖叙述")
+
+    let page = try await repository.reportPage(query: "葡萄糖")
+    #expect(Set(page.items.map(\.id)) == [table.id, narrative.id])
+    let listed = try #require(page.items.first { $0.id == table.id })
+    #expect(listed.matchedResultLines.map(\.cells) == [["合成葡萄糖", "5.4 mmol/L", "3.9~6.1"]])
+    #expect(listed.matchedResultLineCount == 1)
+    #expect(listed.title == "合成血糖")
+    #expect(page.items.first { $0.id == narrative.id }?.matchedResultLines.isEmpty == true)
+    #expect(try await repository.reportPage(query: "合成").items.first { $0.id == table.id }?.matchedResultLineCount == 2)
+    #expect(listed.matchedExcerpt == nil)
+    // Without a table line, an excerpt shows where the term was found.
+    #expect(page.items.first { $0.id == narrative.id }?.matchedExcerpt?.text == "合成葡萄糖叙述")
+    let department = try await repository.reportPage(query: "科室")
+    #expect(department.items.first { $0.id == narrative.id }?.matchedExcerpt?.text == "科室")
+    // What the row already shows (title, organization, date), a member and the plain page add nothing.
+    for term in ["合成血糖", "Synthetic facility", "2026", "Synthetic member", ""] {
+        let items = try await repository.reportPage(query: term).items
+        #expect(!items.isEmpty)
+        #expect(items.allSatisfy { $0.matchedResultLines.isEmpty && $0.matchedExcerpt == nil }, "\(term)")
+    }
+
+    // Without a cache entry the verified search row is read instead.
+    let uncached = try kernel.read { db in
+        let row = try #require(try SQLiteRows.fetchOne(db, sql: "SELECT \(SQLiteReportRows.summaryProjection) FROM reports WHERE record_id = ?",
+            arguments: [table.id.sqliteBytes]))
+        let listed = try SQLiteReportRows.summary(row)
+        return try ["胰岛素", "结论里"].map {
+            try SQLiteReportSearch.match(table.id, summary: row, listed: listed, predicate: SQLiteReportSearch.Predicate($0), cache: [:], resultsFields: nil,
+                                         dateFormatter: ISO8601DateFormatter(), db)
+        }
+    }
+    #expect(uncached[0].resultLines.map(\.cells) == [["合成胰岛素", "3.0", "1.9~23"]])
+    #expect(uncached[1].excerpt?.text == "合成葡萄糖 结论里的一行")
+
+    try kernel.write { db in
+        try db.execute(sql: "UPDATE report_details SET payload = ? WHERE record_id = ?", arguments: [Data("broken".utf8), table.id.sqliteBytes])
+    }
+    // Which field holds the results is remembered for the digests the directory row still names;
+    // the lines come from the search row this query verified, and opening the report reports damage.
+    let remembered = try await repository.reportPage(query: "葡萄糖")
+    #expect(remembered.items.first { $0.id == table.id }?.matchedResultLines.map(\.cells) == [["合成葡萄糖", "5.4 mmol/L", "3.9~6.1"]])
+    // Read afresh, details that cannot be verified give no lines; the report is still listed.
+    kernel.reportSearchCache.removeAll()
+    let damaged = try await repository.reportPage(query: "葡萄糖")
+    #expect(damaged.damagedIDs.isEmpty)
+    let damagedTable = try #require(damaged.items.first { $0.id == table.id })
+    #expect(damagedTable.matchedResultLines.isEmpty)
+    // The verified search row still shows where the term was found.
+    #expect(damagedTable.matchedExcerpt?.text == "合成葡萄糖 5.4 mmol/L 3.9~6.1 合成胰岛素 3.0 1.9~23")
+    await #expect(throws: SQLiteLibraryError.damaged) { _ = try await repository.record(table.id) }
+}
+
+@Test
 func sqliteReportPagingReportsDamageAndRejectsStaleCursors() async throws {
     let root = try sqliteTestRoot()
     defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
@@ -472,8 +543,25 @@ func sqliteSearchCacheStopsGrowingAtItsBudgetAndDropsEntriesOfMissingReports() {
     let kept = Set(stored.keys.prefix(1)), newcomer = UUID()
     cache.update([(newcomer, one)], present: kept.union([newcomer]))
     #expect(Set(cache.snapshot().keys) == kept.union([newcomer]))
+
+    // A results-field index holds only for both digests it was learned with, and goes with its report.
+    let search = Data(repeating: 3, count: 32), detail = Data(repeating: 4, count: 32), indexed = UUID()
+    cache.setResultsField(indexed, .init(fieldsHash: search, detailHash: detail, index: 4))
+    #expect(cache.resultsField(indexed, fieldsHash: search, detailHash: detail)?.index == 4)
+    #expect(cache.resultsField(indexed, fieldsHash: search, detailHash: search) == nil)
+    #expect(cache.resultsField(indexed, fieldsHash: detail, detailHash: detail) == nil)
+    cache.update([], present: [newcomer])
+    #expect(cache.resultsField(indexed, fieldsHash: search, detailHash: detail) == nil)
+    // At its limit a report already known is still updated; a new one is not remembered.
+    let known = (0..<SQLiteReportSearchCache.resultsFieldLimit).map { _ in UUID() }
+    for id in known { cache.setResultsField(id, .init(fieldsHash: search, detailHash: detail, index: nil)) }
+    cache.setResultsField(indexed, .init(fieldsHash: search, detailHash: detail, index: 4))
+    #expect(cache.resultsField(indexed, fieldsHash: search, detailHash: detail) == nil)
+    cache.setResultsField(known[0], .init(fieldsHash: search, detailHash: detail, index: 2))
+    #expect(cache.resultsField(known[0], fieldsHash: search, detailHash: detail)?.index == 2)
     cache.removeAll()
     #expect(cache.snapshot().isEmpty)
+    #expect(cache.resultsField(known[0], fieldsHash: search, detailHash: detail) == nil)
 }
 
 @Test

@@ -99,6 +99,27 @@
 
 **验证门禁**：自动化结果见 [`log.md`](log.md)；卷重新编号仍然只通过改写记录里的设备号模拟，没有在重启前后实测，外接卷和网盘目录上的备份目录也没有实测。
 
+## [2026-10-14] 搜索结果列出命中的检验表格行，属于呈现
+
+**问题**：一款[同类 iPhone 应用](sources/2026-10-14-carehealth-competitor-notes.md)把检验报告拆成一行行指标，搜索指标名就能看到历次数值。续页的表格抽取已经把每行写成“项目⇥结果⇥参考值”，存在已确认的检查结果里，但搜索只返回整条报告，搜索卡片上也没有日期。需要判断：按日期列出同一项目的原文数值，算“呈现来源”还是“趋势分析”。
+
+**选择**（用户 2026-10-14 决策）：算呈现。搜索结果卡片显示报告日期；搜索词出现在已确认检查结果的某个表格行里时，卡片在结论的位置逐格列出这些行，最多 8 行，并注明另有几行匹配。
+
+- 只取已确认记录检查结果（`reportedResults`）中至少有两个非空单元格的制表符分隔行；标题、结论、异常标记等其他字段里的行不列出。
+- 单元格逐字显示：不解析数值、单位或范围，不跨报告比较，不画图、不加箭头，也不判断正常与否；报告自己印的“↑”“H”留在原单元格里。这一块界面不使用任何状态色。
+- 结果沿用搜索已有的时间线顺序；按成员筛选时，就是这个人这一项目的历次记录。
+- 不新增持久化字段，不改搜索表、schema 或备份格式。
+
+同日用户又确认两项搜索呈现：卡片上的标题、机构和命中行里，搜索词加粗并用 Primary 标出（同一套本地化、不区分大小写的匹配）；没有命中表格行、搜索词又不在卡片已显示的标题、机构或日期里时，在结论的位置显示命中字段的一段上下文（命中处之前最多 30 个字符，总长约 120 个字符，空白折叠为一个空格，两端截断处加省略号）。摘录直接取自已校验的搜索字段，不多读详情；只命中成员名时不显示摘录。README“为什么做续页”同时补上纸质报告褪色、线上报告有查看或下载期限这一动机。
+
+**未选择的替代方案**：把每行存成结构化指标（名称、数值、单位、参考范围）并在复核页逐行确认——查询更快，也能做单项历史页，但要改 schema、备份格式和复核界面，而资料库不提供迁移；按项目名自动合并、画趋势图或按参考范围标注正常/异常——同名项目可能来自不同时点或方法（例如空腹与餐后），合并和判断都会写出原报告没有的结论；只在详情页把检查结果排成表格——不解决“按项目找历次数值”。
+
+**影响的代码/文档**：新增 [`ReportedResultLine`](../Sources/KinlogueCore/Domain/ReportedResultLine.swift) 与 [`SearchExcerpt`](../Sources/KinlogueCore/Domain/SearchExcerpt.swift)；[`LibraryReportSummary`](../Sources/KinlogueCore/Domain/LibraryReportQuery.swift) 增加有界的命中行与摘录；[`SQLiteReportSearch`](../Sources/KinloguePlatform/Storage/SQLiteReportSearch.swift) 的 `match` 与 [`SQLiteReportRepository`](../Sources/KinloguePlatform/Storage/SQLiteReportRepository.swift) 的搜索分页；[`TimelineView`](../Sources/KinlogueApp/Views/TimelineView.swift) 的搜索卡片、`SearchHighlight` 与中英文案；[`README.md`](../README.md)。专题页见 [`project-overview.md`](project-overview.md)、[`domain-and-data-model.md`](domain-and-data-model.md)、[`import-and-ocr.md`](import-and-ocr.md)、[`sqlite-storage.md`](sqlite-storage.md)、[`design-system.md`](design-system.md)。“当前明确不做”里的趋势分析不变。
+
+**迁移/回滚要求**：没有持久化变化，已有资料库和恢复点无需迁移；回滚只需撤回代码。
+
+**验证门禁**：定向测试见 [`log.md`](log.md)。近上限资料库的首页计时对照和合成版式的端到端核对见 [搜索呈现测量](search-presentation-measurement-2026-10-14.md)：除每份列出报告的表格行全部命中的情况外，首页与不做呈现时相差不超过 3 ms。真实报告上抽取出的表格行质量、键盘与 VoiceOver 朗读仍属人工矩阵。
+
 ## 已被 supersede 的早期决策
 
 [`2026-08-01-001-feat-kinlogue-macos-vault-plan.md`](plans/2026-08-01-001-feat-kinlogue-macos-vault-plan.md) 早期计划曾以“加密 Vault、Keychain、加密 backup/restore”为 MVP 方向；它已被明文 MVP 计划的 `supersedes` 字段覆盖。它仍然保留 threat model、早期 target 规划和未来安全升级的背景，但不能作为当前代码或隐私文案的事实来源。

@@ -122,3 +122,4 @@ LAN 相关当前模型位于 `KinlogueCore/LAN/`，主要关系是：
 - App snapshot 只把 `records.filter { importState == .confirmed }` 暴露给时间线和普通搜索。
 - 比较使用 `HealthRecord.comparisonPresentation`，只呈现来源字段的 verbatim reported results、verbatim conclusion 和有来源的 abnormal items。
 - 没有 conclusion 时使用 `.notProvided`，不能由比较逻辑补写新的总结。
+- 搜索摘要 `LibraryReportSummary` 可以带 `matchedResultLines`：搜索词出现在已确认 `reportedResults` 的制表符分隔行里时，列出这些行，最多 8 行、每格最多 160 个 Unicode scalar，并保留总匹配行数。[`ReportedResultLine`](../Sources/KinlogueCore/Domain/ReportedResultLine.swift) 只按制表符切分并去掉空格，至少两个非空单元格才算一行；单元格是原文，不解析数值、单位、范围或正常与否。没有命中行时，摘要可以带 `matchedExcerpt`：[`SearchExcerpt`](../Sources/KinlogueCore/Domain/SearchExcerpt.swift) 取自第一个含搜索词、而卡片没有显示的搜索字段（卡片显示标题或报告类型、机构和日期），保留命中处之前最多 30 个字符、总长约 120 个字符，空白折叠为一个空格，摘要层再限 480 个 Unicode scalar；两者由 `LibraryReportSearchMatch` 合在一起，有命中行时不带摘录。它们都是查询时的投影，不持久化，也不进入比较。取舍见 [`decisions.md`](decisions.md)。

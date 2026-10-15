@@ -237,6 +237,83 @@ func candidateExtractorKeepsNarrativeFindingsAndStopsConclusionBeforeReportTime(
 }
 
 @Test
+func candidateExtractorJoinsTheColumnsOfALabFormToTheirCells() throws {
+    // A common laboratory form: row number, name, abbreviation, result, flag, unit, reference.
+    let headings = [("序号", 0.05), ("项目名称", 0.12), ("缩写", 0.38), ("结果", 0.49), ("提示", 0.58), ("单位", 0.65), ("参考值", 0.77)]
+    let rows: [[(String, Double)]] = [
+        [("1", 0.05), ("合成项目甲", 0.12), ("ABC", 0.38), ("6.85", 0.49), ("↑", 0.585), ("mmol/L", 0.645), ("3.89-6.11", 0.77)],
+        [("2", 0.05), ("合成项目乙", 0.12), ("DE", 0.38), ("1.21", 0.49), ("mmol/L", 0.645), ("<1.70", 0.77)],
+    ]
+    var blocks = try headings.map { try block($0.0, page: 1, x: $0.1, y: 0.82, width: 0.06) }
+    for (index, row) in rows.enumerated() {
+        blocks += try row.map { try block($0.0, page: 1, x: $0.1, y: 0.79 - Double(index) * 0.03, width: 0.05) }
+    }
+
+    let candidates = ReportCandidateExtractor().extract(from: blocks)
+
+    // The row number is left out; the abbreviation joins the item, the flag and unit the result.
+    #expect(candidates.reportedResults?.transcription
+        == "合成项目甲 ABC\t6.85 ↑ mmol/L\t3.89-6.11\n合成项目乙 DE\t1.21 mmol/L\t<1.70")
+    #expect(candidates.title == nil)
+}
+
+@Test
+func candidateExtractorKeepsTwoTablesPrintedSideBySideApart() throws {
+    let blocks = try [
+        block("检验项目", page: 1, x: 0.05, y: 0.82, width: 0.1),
+        block("检测结果", page: 1, x: 0.27, y: 0.82, width: 0.08),
+        block("参考区间", page: 1, x: 0.38, y: 0.82, width: 0.08),
+        // Recognition places the second heading line a little off the first.
+        block("项目", page: 1, x: 0.52, y: 0.823, width: 0.05),
+        block("结果", page: 1, x: 0.74, y: 0.824, width: 0.05),
+        block("参考范围", page: 1, x: 0.85, y: 0.823, width: 0.08),
+        block("合成项目甲", page: 1, x: 0.05, y: 0.79, width: 0.15),
+        block("6.85↑", page: 1, x: 0.27, y: 0.79, width: 0.06),
+        block("3.89-6.11", page: 1, x: 0.38, y: 0.79, width: 0.08),
+        block("合成项目丙", page: 1, x: 0.52, y: 0.79, width: 0.15),
+        block("28", page: 1, x: 0.74, y: 0.79, width: 0.03),
+        block("7-40", page: 1, x: 0.85, y: 0.79, width: 0.05),
+        block("合成项目乙", page: 1, x: 0.05, y: 0.76, width: 0.15),
+        block("1.21", page: 1, x: 0.27, y: 0.76, width: 0.04),
+        block("<1.70", page: 1, x: 0.38, y: 0.76, width: 0.05),
+    ]
+
+    let candidates = ReportCandidateExtractor().extract(from: blocks)
+
+    #expect(candidates.reportedResults?.transcription
+        == "合成项目甲\t6.85↑\t3.89-6.11\n合成项目乙\t1.21\t<1.70\n合成项目丙\t28\t7-40")
+    #expect(candidates.title == nil)
+}
+
+@Test
+func candidateExtractorKeepsCellsThatStartLeftOfTheirCentredHeading() throws {
+    // Two tables side by side, each with a row number, headings centred over left-aligned cells.
+    let blocks = try [
+        block("序号", page: 1, x: 0.04, y: 0.82, width: 0.04),
+        block("项目名称", page: 1, x: 0.16, y: 0.82, width: 0.08),
+        block("结果", page: 1, x: 0.36, y: 0.82, width: 0.04),
+        block("参考值", page: 1, x: 0.47, y: 0.82, width: 0.06),
+        block("序号", page: 1, x: 0.58, y: 0.82, width: 0.04),
+        block("项目", page: 1, x: 0.70, y: 0.82, width: 0.04),
+        block("结果", page: 1, x: 0.84, y: 0.82, width: 0.04),
+        block("参考范围", page: 1, x: 0.92, y: 0.82, width: 0.07),
+        block("1", page: 1, x: 0.055, y: 0.79, width: 0.01),
+        block("合成项目甲", page: 1, x: 0.09, y: 0.79, width: 0.15),
+        block("6.85↑", page: 1, x: 0.35, y: 0.79, width: 0.06),
+        block("3.89-6.11", page: 1, x: 0.45, y: 0.79, width: 0.08),
+        block("2", page: 1, x: 0.595, y: 0.79, width: 0.01),
+        block("合成项目丙", page: 1, x: 0.63, y: 0.79, width: 0.15),
+        block("28", page: 1, x: 0.84, y: 0.79, width: 0.03),
+        block("7-40", page: 1, x: 0.91, y: 0.79, width: 0.05),
+    ]
+
+    let candidates = ReportCandidateExtractor().extract(from: blocks)
+
+    #expect(candidates.reportedResults?.transcription
+        == "合成项目甲\t6.85↑\t3.89-6.11\n合成项目丙\t28\t7-40")
+}
+
+@Test
 func candidateExtractorJoinsASameLineSplitDateLabelAndValue() throws {
     let blocks = try [
         block("采样日期：", page: 1, x: 0.05, y: 0.8, width: 0.18),
