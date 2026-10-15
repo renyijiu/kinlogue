@@ -35,7 +35,7 @@
 
 当前 Swift package 声明最低 Swift tools 6.2，使用 Swift 6 language mode；本机 Xcode 27 / Swift 6.4 构建说明见 [`testing-and-release.md`](testing-and-release.md)。只发布 `Kinlogue` App product；Core、Platform 与测试辅助程序保持为内部 target。持续集成以 GitHub Actions 为唯一当前入口，已经完成使命的 Codemagic 试验配置和 LAN feasibility host 只保留历史文档证据，不再进入构建图。
 
-当前候选抽取规则为 extraction version 6：标签与取值的配对、医院抬头兜底、表单名称、识别异体字、检验表格的表头别名与并排表格的处理见 [`import-and-ocr.md`](import-and-ocr.md)；带文字层的 PDF 仍抽不出表格；规则移植自 Go 预览的合成版式夹具，真实样本命中率尚未验证。
+当前候选抽取规则为 extraction version 7：标签与取值的配对、医院抬头兜底、表单名称、识别异体字、检验表格的表头别名与并排表格的处理、异常标记取所在表格行，以及识别误读提示和已确认报告按新规则整理，见 [`import-and-ocr.md`](import-and-ocr.md)；带文字层的 PDF 仍抽不出表格；规则移植自 Go 预览的合成版式夹具，真实样本命中率尚未验证。
 
 当前报告界面在进入时间线时默认打开最新记录、在侧边栏为待确认草稿计数并显示文件名、在导入期间显示识别状态并解释首次识别的等待，报告复核页支持 Command-Return 确认，搜索结果卡片显示报告日期、加粗标出搜索词，并逐格列出命中的检验表格行或显示命中处上下文；规则与未做的人工检查见 [`design-system.md`](design-system.md) 第 20–26 条。
 

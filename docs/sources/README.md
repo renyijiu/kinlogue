@@ -46,6 +46,7 @@ kind: pattern-reference | product-decision | external-spec
 - [`architecture-review-practices-2026-09-08.md`](architecture-review-practices-2026-09-08.md)：actor 重入、协作取消、流式 I/O、嵌套签名与 DICOM padding 的一手依据。
 - [`2026-08-05-github-readme-patterns.md`](2026-08-05-github-readme-patterns.md)：README 信息结构调研。
 - [`2026-10-14-carehealth-competitor-notes.md`](2026-10-14-carehealth-competitor-notes.md)：同类 iPhone 健康档案应用的公开资料与回帖需求，用于搜索呈现检验表格行的取舍。
+- [`2026-10-15-carehealth-thread-followup.md`](2026-10-15-carehealth-thread-followup.md)：同一帖子 58–113 楼与 1.2.6 更新，补记录入成本、超声报告对比和“先存原件、等识别变好”的思路，用于按句呈现叙述命中、识别误读提示和已确认报告按新规则整理。
 
 ### DICOM 调研与阶段契约
 

@@ -119,7 +119,7 @@ package actor SQLiteReportRepository: ImportDraftStore {
                                     summary = try SQLiteReportRows.summary(row)
                                 } catch { damaged.append(match.id); continue }
                                 let found = try SQLiteReportSearch.match(match.id, summary: row, listed: summary, predicate: predicate,
-                                    cache: entries, resultsFields: store.reportSearchCache, dateFormatter: dateFormatter, db)
+                                    cache: entries, positions: store.reportSearchCache, dateFormatter: dateFormatter, db)
                                 items.append(found.isEmpty ? summary : summary.listing(found))
                             }
                             let next = scan.matches.count > limit ? scan.matches.prefix(limit).last.map {
@@ -374,6 +374,46 @@ package actor SQLiteReportRepository: ImportDraftStore {
                 try db.execute(sql: "DELETE FROM report_sources WHERE draft_id = ?", arguments: [draftID.sqliteBytes])
                 try db.execute(sql: "DELETE FROM import_drafts WHERE draft_id = ?", arguments: [draftID.sqliteBytes])
                 try SQLiteReportRows.saveRecord(record, documentHash: hash, db)
+                try SQLiteLibraryState.advance(in: db)
+            }
+        }
+    }
+
+    /// A confirmed record and the OCR document retained with it, read from one snapshot; nil
+    /// document when the record has none.
+    @concurrent
+    package nonisolated func recordDocument(_ id: UUID) async throws -> (record: HealthRecord, document: ImportDraftDocument?) {
+        try await LibraryStorageExecutor.run {
+            try store.read { db in
+                let record = try usableRecord(id, db)
+                guard let documentID = record.ocrDocumentObjectID else { return (record, nil) }
+                let hash = try Data.fetchOne(db, sql: "SELECT document_hash FROM reports WHERE record_id = ?", arguments: [id.sqliteBytes])
+                return (record, try SQLiteReportRows.document(documentID, sources: record.sources, expectedHash: hash, db))
+            }
+        }
+    }
+
+    /// Replaces a confirmed record together with its retained OCR document in one transaction, for
+    /// a record brought to the current extraction rules. The document keeps its blocks; only its
+    /// candidates and rules version may change.
+    @concurrent
+    package nonisolated func updateRecord(_ record: HealthRecord, expectedRevision: UInt64, document: ImportDraftDocument) async throws {
+        try await LibraryStorageExecutor.run {
+            try Task.checkCancellation()
+            try store.write { db in
+                let current = try usableRecord(record.id, db)
+                guard current.revision == expectedRevision else { throw LibraryReportError.staleRevision }
+                guard expectedRevision < Int64.max, record.revision == expectedRevision + 1,
+                      record.sources == current.sources, record.memberID == current.memberID,
+                      let documentID = current.ocrDocumentObjectID, record.ocrDocumentObjectID == documentID else {
+                    throw LibraryReportError.invalidDocument
+                }
+                try SQLiteReportRows.requireMember(record.memberID, allowArchived: true, in: db)
+                let hash = try Data.fetchOne(db, sql: "SELECT document_hash FROM reports WHERE record_id = ?", arguments: [record.id.sqliteBytes])
+                let stored = try SQLiteReportRows.document(documentID, sources: current.sources, expectedHash: hash, db)
+                guard document.blocks == stored.blocks, document.reviewState == nil else { throw LibraryReportError.invalidDocument }
+                let digest = try SQLiteReportRows.saveDocument(document, id: documentID, revision: record.revision, sources: record.sources, db)
+                try SQLiteReportRows.saveRecord(record, documentHash: digest, db)
                 try SQLiteLibraryState.advance(in: db)
             }
         }

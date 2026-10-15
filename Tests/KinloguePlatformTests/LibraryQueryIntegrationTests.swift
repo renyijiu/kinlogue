@@ -140,10 +140,17 @@ func sqliteSearchListsTheMatchingTableLinesOfConfirmedResultsOnly() async throws
     #expect(page.items.first { $0.id == narrative.id }?.matchedResultLines.isEmpty == true)
     #expect(try await repository.reportPage(query: "合成").items.first { $0.id == table.id }?.matchedResultLineCount == 2)
     #expect(listed.matchedExcerpt == nil)
-    // Without a table line, an excerpt shows where the term was found.
-    #expect(page.items.first { $0.id == narrative.id }?.matchedExcerpt?.text == "合成葡萄糖叙述")
+    // Without a table line, the sentences of the narrative results and conclusion show the match.
+    let sentence = try #require(page.items.first { $0.id == narrative.id })
+    #expect(sentence.matchedPassages.map(\.field) == [.conclusion])
+    #expect(sentence.matchedPassages.map(\.excerpt.text) == ["合成葡萄糖叙述"])
+    #expect(sentence.matchedPassageCount == 1 && sentence.matchedExcerpt == nil)
+    let finding = try await repository.reportPage(query: "platelet").items.first { $0.id == narrative.id }
+    #expect(finding?.matchedPassages.map(\.field) == [.reportedResults])
+    // Any other field the row does not show gets an excerpt.
     let department = try await repository.reportPage(query: "科室")
     #expect(department.items.first { $0.id == narrative.id }?.matchedExcerpt?.text == "科室")
+    #expect(department.items.first { $0.id == narrative.id }?.matchedPassages.isEmpty == true)
     // What the row already shows (title, organization, date), a member and the plain page add nothing.
     for term in ["合成血糖", "Synthetic facility", "2026", "Synthetic member", ""] {
         let items = try await repository.reportPage(query: term).items
@@ -157,12 +164,32 @@ func sqliteSearchListsTheMatchingTableLinesOfConfirmedResultsOnly() async throws
             arguments: [table.id.sqliteBytes]))
         let listed = try SQLiteReportRows.summary(row)
         return try ["胰岛素", "结论里"].map {
-            try SQLiteReportSearch.match(table.id, summary: row, listed: listed, predicate: SQLiteReportSearch.Predicate($0), cache: [:], resultsFields: nil,
+            try SQLiteReportSearch.match(table.id, summary: row, listed: listed, predicate: SQLiteReportSearch.Predicate($0), cache: [:], positions: nil,
                                          dateFormatter: ISO8601DateFormatter(), db)
         }
     }
     #expect(uncached[0].resultLines.map(\.cells) == [["合成胰岛素", "3.0", "1.9~23"]])
-    #expect(uncached[1].excerpt?.text == "合成葡萄糖 结论里的一行")
+    #expect(uncached[1].passages.map(\.field) == [.conclusion])
+    #expect(uncached[1].passages.map(\.excerpt.text) == ["合成葡萄糖 结论里的一行"])
+
+    // A narrative report lists its first three matching sentences, results before conclusion, and
+    // counts the rest.
+    let ultrasound = try HealthRecord(id: narrative.id, memberID: narrative.memberID, sources: narrative.sources,
+        ocrDocumentObjectID: narrative.ocrDocumentObjectID, importState: .confirmed, revision: narrative.revision + 1,
+        title: SourceField.manualEntry("合成超声"), dateCandidates: narrative.dateCandidates,
+        timelineDateCandidateID: narrative.timelineDateCandidateID,
+        reportedResults: SourceField.manualEntry("合成甲状腺右叶见结节。合成肝脏未见异常。合成甲状腺左叶正常；合成甲状腺峡部正常。"),
+        conclusion: SourceField.manualEntry("合成甲状腺右叶结节。"))
+    try await repository.updateRecord(ultrasound, expectedRevision: narrative.revision)
+    let thyroid = try #require(try await repository.reportPage(query: "甲状腺").items.first { $0.id == narrative.id })
+    #expect(thyroid.matchedPassages.map(\.excerpt.text) == ["合成甲状腺右叶见结节。", "合成甲状腺左叶正常；", "合成甲状腺峡部正常。"])
+    #expect(thyroid.matchedPassages.allSatisfy { $0.field == .reportedResults })
+    #expect(thyroid.matchedPassageCount == 4)
+    let nodule = try #require(try await repository.reportPage(query: "结节").items.first { $0.id == narrative.id })
+    #expect(nodule.matchedPassages.map(\.field) == [.reportedResults, .conclusion])
+    // The title the row shows needs no sentence.
+    let shown = try #require(try await repository.reportPage(query: "合成超声").items.first { $0.id == narrative.id })
+    #expect(shown.matchedPassages.isEmpty && shown.matchedExcerpt == nil)
 
     try kernel.write { db in
         try db.execute(sql: "UPDATE report_details SET payload = ? WHERE record_id = ?", arguments: [Data("broken".utf8), table.id.sqliteBytes])
@@ -544,24 +571,24 @@ func sqliteSearchCacheStopsGrowingAtItsBudgetAndDropsEntriesOfMissingReports() {
     cache.update([(newcomer, one)], present: kept.union([newcomer]))
     #expect(Set(cache.snapshot().keys) == kept.union([newcomer]))
 
-    // A results-field index holds only for both digests it was learned with, and goes with its report.
+    // Field positions hold only for both digests they were learned with, and go with their report.
     let search = Data(repeating: 3, count: 32), detail = Data(repeating: 4, count: 32), indexed = UUID()
-    cache.setResultsField(indexed, .init(fieldsHash: search, detailHash: detail, index: 4))
-    #expect(cache.resultsField(indexed, fieldsHash: search, detailHash: detail)?.index == 4)
-    #expect(cache.resultsField(indexed, fieldsHash: search, detailHash: search) == nil)
-    #expect(cache.resultsField(indexed, fieldsHash: detail, detailHash: detail) == nil)
+    cache.setFieldPositions(indexed, .init(fieldsHash: search, detailHash: detail, results: 4, conclusion: 5))
+    #expect(cache.fieldPositions(indexed, fieldsHash: search, detailHash: detail)?.conclusion == 5)
+    #expect(cache.fieldPositions(indexed, fieldsHash: search, detailHash: search) == nil)
+    #expect(cache.fieldPositions(indexed, fieldsHash: detail, detailHash: detail) == nil)
     cache.update([], present: [newcomer])
-    #expect(cache.resultsField(indexed, fieldsHash: search, detailHash: detail) == nil)
+    #expect(cache.fieldPositions(indexed, fieldsHash: search, detailHash: detail) == nil)
     // At its limit a report already known is still updated; a new one is not remembered.
-    let known = (0..<SQLiteReportSearchCache.resultsFieldLimit).map { _ in UUID() }
-    for id in known { cache.setResultsField(id, .init(fieldsHash: search, detailHash: detail, index: nil)) }
-    cache.setResultsField(indexed, .init(fieldsHash: search, detailHash: detail, index: 4))
-    #expect(cache.resultsField(indexed, fieldsHash: search, detailHash: detail) == nil)
-    cache.setResultsField(known[0], .init(fieldsHash: search, detailHash: detail, index: 2))
-    #expect(cache.resultsField(known[0], fieldsHash: search, detailHash: detail)?.index == 2)
+    let known = (0..<SQLiteReportSearchCache.fieldPositionLimit).map { _ in UUID() }
+    for id in known { cache.setFieldPositions(id, .init(fieldsHash: search, detailHash: detail, results: nil, conclusion: nil)) }
+    cache.setFieldPositions(indexed, .init(fieldsHash: search, detailHash: detail, results: 4, conclusion: 5))
+    #expect(cache.fieldPositions(indexed, fieldsHash: search, detailHash: detail) == nil)
+    cache.setFieldPositions(known[0], .init(fieldsHash: search, detailHash: detail, results: 2, conclusion: nil))
+    #expect(cache.fieldPositions(known[0], fieldsHash: search, detailHash: detail)?.results == 2)
     cache.removeAll()
     #expect(cache.snapshot().isEmpty)
-    #expect(cache.resultsField(known[0], fieldsHash: search, detailHash: detail) == nil)
+    #expect(cache.fieldPositions(known[0], fieldsHash: search, detailHash: detail) == nil)
 }
 
 @Test
