@@ -62,6 +62,7 @@ let package = Package(
                 "KinlogueSQLiteConfiguration",
                 .product(name: "GRDB", package: "GRDB.swift"),
                 "KinlogueDICOMIPC",
+                "KinlogueAssistantIPC",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),

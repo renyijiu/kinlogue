@@ -7,8 +7,10 @@ set -euo pipefail
 #   check, which runs it against a loopback stand-in and costs no quota; a codex outside the
 #   sandbox exceptions is reported as an unsupported location.
 # - With the production entitlements plus one read-only exception for this run's folder: the fake
-#   CLI answers a turn, an npm-style wrapper finds its interpreter, a cancel stops the turn and its
-#   descendants, and killing the bridge makes the supervisor stop them too.
+#   CLI answers a turn, an npm-style wrapper finds its interpreter, cancelling the client's task
+#   stops the turn and its descendants, and killing the bridge makes the supervisor stop them too.
+#
+# The probe host uses KinlogueAssistantXPCClient, the client the App uses.
 #
 # Only synthetic text is sent. Nothing reaches a provider.
 
@@ -181,7 +183,7 @@ CODEX_PATTERN="$FIXTURE_DIR/codex-real"
 scenario hang
 line="$(probe "$TEST_APP" respond "$TEST_SERVICE" --executable "$PROBE_ROOT/test/bin/codex" \
   --model gpt-synthetic --cancel-after 2)"
-expect_line "a cancel from a second connection stops the turn" "$line" 'kind=failure code=cancelled'
+expect_line "cancelling the client's task stops the turn" "$line" 'kind=failure code=cancelled'
 wait_for_no_processes "$CODEX_PATTERN" "the cancelled CLI and its descendants are gone"
 
 BRIDGE_EXECUTABLE="$TEST_APP/Contents/XPCServices/$BRIDGE_NAME.xpc/Contents/MacOS/$BRIDGE_NAME"

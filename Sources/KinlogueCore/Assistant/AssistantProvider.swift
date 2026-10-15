@@ -27,8 +27,16 @@ package struct AssistantProviderReply: Hashable, Sendable {
 /// Why a turn produced no answer. The CLI's own output is never carried, only these codes.
 package enum AssistantFailure: Error, Hashable, Sendable {
     case cliNotFound
+    /// The CLI is installed where the bridge's sandbox may not run it.
+    case unsupportedLocation
     case notLoggedIn
     case unsupportedCLI
+    /// The CLI started a tool despite the hardening; the turn was stopped.
+    case toolUseDetected
+    /// Another turn is running.
+    case busy
+    /// The bridge service is missing, crashed, or answered with something unreadable.
+    case bridgeUnavailable
     case rateLimited
     case networkUnavailable
     case timedOut

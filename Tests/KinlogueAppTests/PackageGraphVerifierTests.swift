@@ -340,6 +340,7 @@ private struct PackageGraphFixture {
                         byName("KinlogueSQLiteConfiguration"),
                         product("GRDB", package: "GRDB.swift"),
                         byName("KinlogueDICOMIPC"),
+                        byName("KinlogueAssistantIPC"),
                         product("NIOCore", package: "swift-nio"),
                         product("NIOHTTP1", package: "swift-nio"),
                         product("NIOPosix", package: "swift-nio"),

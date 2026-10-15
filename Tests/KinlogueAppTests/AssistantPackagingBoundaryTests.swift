@@ -67,7 +67,7 @@ struct AssistantPackagingBoundaryTests {
             "inside the sandbox",
             "through the supervisor",
             "npm-style wrapper",
-            "a cancel from a second connection stops the turn",
+            "cancelling the client's task stops the turn",
             "killing the bridge stops the CLI and its descendants",
             "no supervisor outlives the bridge",
         ] {

@@ -235,6 +235,7 @@ verify_target_dependencies KinloguePlatform \
   'target:KinlogueSQLiteConfiguration' \
   'product:GRDB@GRDB.swift' \
   'target:KinlogueDICOMIPC' \
+  'target:KinlogueAssistantIPC' \
   'product:NIOCore@swift-nio' \
   'product:NIOHTTP1@swift-nio' \
   'product:NIOPosix@swift-nio' \

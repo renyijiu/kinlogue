@@ -98,6 +98,27 @@ func assistantPackKeepsTheNewestRecordsAndLabelsThemOldestFirst() throws {
 }
 
 @Test
+func assistantPackCountsReportsTheQueryDidNotLoadAsOmitted() throws {
+    let member = try FamilyMember(displayName: "Synthetic member")
+    let records = try (1...3).map { try packRecord(memberID: member.id, day: "202\($0)-06-01", results: "Value \($0)") }
+
+    let automatic = try AssistantContextPackBuilder.build(
+        member: member, records: records, confirmedRecordCount: 10, digest: testDigest
+    )
+    let explicit = try AssistantContextPackBuilder.build(
+        member: member, records: records, selection: .explicit([records[0].id, records[2].id]),
+        confirmedRecordCount: 10, digest: testDigest
+    )
+    let understated = try AssistantContextPackBuilder.build(
+        member: member, records: records, confirmedRecordCount: 1, digest: testDigest
+    )
+
+    #expect(automatic.omittedRecordCount == 7)
+    #expect(explicit.omittedRecordCount == 8)
+    #expect(understated.omittedRecordCount == 0)
+}
+
+@Test
 func assistantPackStopsAtTheByteBudgetWithoutSkippingToOlderRecords() throws {
     let member = try FamilyMember(displayName: "Synthetic member")
     let large = String(repeating: "合成", count: 1_800) // 10,800 UTF-8 bytes

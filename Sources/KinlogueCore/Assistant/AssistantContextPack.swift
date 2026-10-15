@@ -84,11 +84,15 @@ package enum AssistantContextPackBuilder {
 
     /// Builds the pack from the member's records. Records of other members and records that are
     /// not confirmed are left out here as well as in the query that supplies them.
+    ///
+    /// A query may pass only the newest reports; `confirmedRecordCount` is then the member's total,
+    /// so the pack still says how many reports it leaves out.
     package static func build(
         member: FamilyMember,
         records: [HealthRecord],
         selection: AssistantPackSelection = .automatic,
         includeOrganization: Bool = false,
+        confirmedRecordCount: Int? = nil,
         digest: (Data) -> Data
     ) throws -> AssistantContextPack {
         guard !member.isArchived else { throw AssistantPackError.memberArchived }
@@ -145,7 +149,7 @@ package enum AssistantContextPackBuilder {
             memberID: member.id,
             entries: entries,
             includesOrganization: includeOrganization,
-            omittedRecordCount: confirmed.count - chosen.count
+            omittedRecordCount: max(confirmedRecordCount ?? 0, confirmed.count) - chosen.count
         )
     }
 

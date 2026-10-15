@@ -284,3 +284,8 @@ public enum KinlogueAssistantXPCInterface {
         NSXPCInterface(with: KinlogueAssistantBridgeXPCProtocol.self)
     }
 }
+
+public enum KinlogueAssistantService {
+    /// The bridge's bundle identifier, which is also its XPC service name.
+    public static let name = "com.kinlogue.mac.assistant-bridge"
+}

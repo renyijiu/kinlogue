@@ -31,14 +31,14 @@ flowchart LR
 | Target | 类型 | 责任 | 依赖 |
 | --- | --- | --- | --- |
 | `KinlogueCore` | internal library target | 领域模型、状态机、import/LAN 协议、DICOM study/index、查询契约、fingerprint、backup contract/retention、成员对话的上下文包/提示词/引用/对话值类型（`Assistant/`，尚未接入 App，见[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md)）和平台无关验证 | Foundation |
-| `KinloguePlatform` | internal library target | SQLite 资料库（数据库、原件生命周期、各领域仓库）、原子文件、删除、PDF/Image OCR、LAN receiver/inbox、流式原始文件 ZIP、加密 backup container/restore transaction、内嵌手机资源 | `KinlogueCore`、GRDB `7.11.1`、`KinlogueSQLiteConfiguration`、ZIPFoundation `0.9.20`、SwiftNIO `NIOCore/NIOHTTP1/NIOPosix`、CryptoKit 与 Apple frameworks |
+| `KinloguePlatform` | internal library target | SQLite 资料库（数据库、原件生命周期、各领域仓库）、原子文件、删除、PDF/Image OCR、LAN receiver/inbox、流式原始文件 ZIP、加密 backup container/restore transaction、内嵌手机资源、成员对话的上下文包读取与 `BridgeAssistantProvider`（经 XPC 客户端调用 bridge；尚未接入 App） | `KinlogueCore`、`KinlogueAssistantIPC`、GRDB `7.11.1`、`KinlogueSQLiteConfiguration`、ZIPFoundation `0.9.20`、SwiftNIO `NIOCore/NIOHTTP1/NIOPosix`、CryptoKit 与 Apple frameworks |
 | `KinlogueSQLiteConfiguration` | internal C target | SQLite connection 配置与回读的最小 varargs bridge | 系统 sqlite3 |
 | `KinlogueDICOMIPC` | library | Foundation-only、有界 request/response DTO、固定错误码和 descriptor-only NSXPC contract | Foundation |
 | `KinlogueDICOMDecoderHelper` | non-published executable / XPC service | 在独立 sandbox 中把只读 descriptor 有界复制到写入前已 unlink 的匿名临时文件，并只解码受支持的单帧 MR 对象 | `KinlogueDICOMIPC`、exact `DicomCore` 1.5.0 |
 | `KinlogueDICOMTestSupport` / `KinlogueDICOMXPCProbe` | non-published test support | 生成无身份 Explicit VR Little Endian MR fixture，并验证真实 embedded XPC round-trip | Foundation、`KinloguePlatform`（probe） |
 | `KinlogueApp` | executable | SwiftUI/AppKit UI、App service、ViewModel、运行时身份和合成验收入口 | `KinlogueCore`、`KinloguePlatform` |
 | `KinlogueStorageProcessFixture` | executable | 跨进程存储协调和安装测试 fixture；恢复测试只负责 seed/驱动/strict verify，并通过 test-only SPI 调用生产恢复事务 | `KinlogueCore`、`KinloguePlatform` |
-| `KinlogueAssistantIPC` | internal library target | 成员对话 bridge 的有界请求/状态/回答 DTO、失败码和 `@Sendable` 回复的 NSXPC 协议；不传路径以外的访问权、文件句柄、记录 ID 或成员名 | Foundation |
+| `KinlogueAssistantIPC` | internal library target | 成员对话 bridge 的有界请求/状态/回答 DTO、失败码、`@Sendable` 回复的 NSXPC 协议与 App 和验证探针共用的 `KinlogueAssistantXPCClient`（取消任务即发送取消）；不传路径以外的访问权、文件句柄、记录 ID 或成员名 | Foundation、os |
 | `KinlogueAssistantCLI` | internal library target | Codex 加固参数、功能白名单、模型目录改写、`exec --json` 事件解析、本机模拟服务与请求检查、进程组运行器、`--supervise` supervisor 和 `CodexBridge`（能力检查、单轮执行、取消、私有临时目录） | `KinlogueAssistantIPC`、Darwin、os |
 | `KinlogueAssistantBridge` | non-published executable / XPC service | 成员对话的 XPC 服务入口，同一二进制兼作 supervisor；独立签名、方案 A 的沙盒例外（[entitlements](../packaging/KinlogueAssistantBridge.entitlements)）；只在 `build-app.sh --with-assistant-bridge` 时嵌入，默认构建与发布不含 | `KinlogueAssistantIPC`、`KinlogueAssistantCLI` |
 | `KinlogueAssistantXPCProbe` | non-published executable | `verify-assistant-xpc.sh` 用的沙盒宿主，只发合成文本；不进入生产 product | `KinlogueAssistantIPC` |
