@@ -21,6 +21,11 @@ package struct AssistantCLISettings: Equatable, Sendable {
 
     package var executablePath: String? { configuration.executablePath }
     package var proxy: [String: String] { configuration.proxy }
+
+    /// A model name the bridge accepts: a short token that cannot read as a command-line option.
+    package static func isValidModel(_ model: String) -> Bool {
+        KinlogueAssistantText.isToken(model)
+    }
 }
 
 /// What Settings shows about the local CLI.
@@ -31,11 +36,18 @@ package struct AssistantCLIStatus: Equatable, Sendable {
     package let isVerifiedVersion: Bool
     /// Nil when the CLI can be used.
     package let failure: AssistantFailure?
+    /// The model the checks ran with; the default model for a turn.
+    package let model: String?
 }
 
 /// The assistant provider backed by the bridge XPC service. Each turn is one request; cancelling
 /// the calling task stops it.
 package final class BridgeAssistantProvider: AssistantProvider {
+    /// The provider the App uses: the bridge service embedded in the App bundle.
+    package static func overXPC(settings: AssistantCLISettings) -> BridgeAssistantProvider {
+        BridgeAssistantProvider(client: KinlogueAssistantXPCClient(), settings: settings)
+    }
+
     private let client: any KinlogueAssistantBridgeClient
     private let settings: AssistantCLISettings
 
@@ -54,7 +66,8 @@ package final class BridgeAssistantProvider: AssistantProvider {
         }
         return AssistantCLIStatus(
             executablePath: status.executablePath, cliVersion: status.cliVersion, isLoggedIn: status.isLoggedIn,
-            isVerifiedVersion: status.isVerifiedVersion, failure: status.failure.map { Self.failure($0, exitCode: nil) }
+            isVerifiedVersion: status.isVerifiedVersion, failure: status.failure.map { Self.failure($0, exitCode: nil) },
+            model: status.model
         )
     }
 
@@ -101,6 +114,6 @@ package final class BridgeAssistantProvider: AssistantProvider {
     }
 
     private static func unavailableStatus(_ failure: AssistantFailure) -> AssistantCLIStatus {
-        AssistantCLIStatus(executablePath: nil, cliVersion: nil, isLoggedIn: false, isVerifiedVersion: false, failure: failure)
+        AssistantCLIStatus(executablePath: nil, cliVersion: nil, isLoggedIn: false, isVerifiedVersion: false, failure: failure, model: nil)
     }
 }

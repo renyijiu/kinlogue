@@ -108,24 +108,29 @@ public struct KinlogueAssistantStatus: Codable, Equatable, Sendable {
     public let isVerifiedVersion: Bool
     /// Nil when the CLI passed every check and can be used.
     public let failure: KinlogueAssistantFailureCode?
+    /// The model the checks ran with: the requested one, or the first in the CLI's catalog.
+    public let model: String?
 
     public init(
         executablePath: String?,
         cliVersion: String?,
         isLoggedIn: Bool,
         isVerifiedVersion: Bool,
-        failure: KinlogueAssistantFailureCode?
+        failure: KinlogueAssistantFailureCode?,
+        model: String? = nil
     ) {
         self.executablePath = executablePath
         self.cliVersion = cliVersion
         self.isLoggedIn = isLoggedIn
         self.isVerifiedVersion = isVerifiedVersion
         self.failure = failure
+        self.model = model
     }
 
     public func validate() throws {
         guard executablePath.map({ $0.utf8.count <= KinlogueAssistantIPCLimits.maximumPathBytes }) ?? true,
-              cliVersion.map(KinlogueAssistantText.isToken) ?? true else {
+              cliVersion.map(KinlogueAssistantText.isToken) ?? true,
+              model.map(KinlogueAssistantText.isToken) ?? true else {
             throw KinlogueAssistantIPCValidationError.invalidField
         }
     }

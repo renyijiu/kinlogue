@@ -68,6 +68,8 @@ public final class CodexBridge: Sendable {
     }
 
     private struct Capability: Sendable {
+        /// The model the check ran with, once one was chosen.
+        var model: String? = nil
         let version: String?
         let disabledFeatures: [String]
         /// Nil when every safety check passed.
@@ -116,7 +118,8 @@ public final class CodexBridge: Sendable {
             cliVersion: capability.version,
             isLoggedIn: loggedIn,
             isVerifiedVersion: capability.version.map(CodexInvocation.isVerified(version:)) ?? false,
-            failure: capability.failure ?? (loggedIn ? nil : .notLoggedIn)
+            failure: capability.failure ?? (loggedIn ? nil : .notLoggedIn),
+            model: capability.model
         )
     }
 
@@ -218,8 +221,10 @@ public final class CodexBridge: Sendable {
             return Capability(version: nil, disabledFeatures: [], failure: .cliNotFound)
         }
         if let cached = state.withLock({ $0.capabilities[identity] }) { return cached }
-        let checked = (try? withRun { run in check(executable, model: model, run: run, proxy: proxy) })
+        var result = (try? withRun { run in check(executable, model: model, run: run, proxy: proxy) })
             ?? Capability(version: nil, disabledFeatures: [], failure: .failed)
+        result.model = model
+        let checked = result
         if checked.failure != .failed {
             state.withLock { $0.capabilities[identity] = checked }
         }

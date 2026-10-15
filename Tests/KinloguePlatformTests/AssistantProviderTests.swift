@@ -76,6 +76,8 @@ struct AssistantProviderTests {
         #expect(status.isLoggedIn)
         #expect(status.isVerifiedVersion)
         #expect(status.executablePath?.hasSuffix("/KinlogueAssistantCLIFixture") == true)
+        #expect(status.model == "gpt-synthetic")
+        #expect(await ready.provider.status(model: nil).model == "gpt-synthetic", "the first model of the CLI's catalog")
 
         let loggedOut = try ProviderSetup(scenario: ["check": "clean", "loggedOut": true])
         defer { loggedOut.remove() }
