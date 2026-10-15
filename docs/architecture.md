@@ -38,6 +38,10 @@ flowchart LR
 | `KinlogueDICOMTestSupport` / `KinlogueDICOMXPCProbe` | non-published test support | 生成无身份 Explicit VR Little Endian MR fixture，并验证真实 embedded XPC round-trip | Foundation、`KinloguePlatform`（probe） |
 | `KinlogueApp` | executable | SwiftUI/AppKit UI、App service、ViewModel、运行时身份和合成验收入口 | `KinlogueCore`、`KinloguePlatform` |
 | `KinlogueStorageProcessFixture` | executable | 跨进程存储协调和安装测试 fixture；恢复测试只负责 seed/驱动/strict verify，并通过 test-only SPI 调用生产恢复事务 | `KinlogueCore`、`KinloguePlatform` |
+| `KinlogueAssistantIPC` | internal library target | 成员对话 bridge 的有界请求/状态/回答 DTO、失败码和 `@Sendable` 回复的 NSXPC 协议；不传路径以外的访问权、文件句柄、记录 ID 或成员名 | Foundation |
+| `KinlogueAssistantCLI` | internal library target | Codex 加固参数、功能白名单、模型目录改写、`exec --json` 事件解析、本机模拟服务与请求检查、进程组运行器、`--supervise` supervisor 和 `CodexBridge`（能力检查、单轮执行、取消、私有临时目录） | `KinlogueAssistantIPC`、Darwin、os |
+| `KinlogueAssistantBridge` | non-published executable | 成员对话的 XPC 服务入口，同一二进制兼作 supervisor；尚未打包进 App（计划 U2b） | `KinlogueAssistantIPC`、`KinlogueAssistantCLI` |
+| `KinlogueAssistantCLIFixture` | non-published executable | 测试用的假 `codex`，按场景模拟 U0 记录的输出、失败、超时、工具调用和请求内容；不进入生产 product | `KinlogueAssistantCLI` |
 | `KinlogueExportWriterProbe` | non-published executable | 对 exact ZIP writer 做高 entry-count、RSS、取消、heartbeat 和清理 characterization；不进入生产 product | ZIPFoundation `0.9.20` |
 
 语言模式是 Swift 6，最低平台是 macOS 26；Swift package 只对外声明 `Kinlogue` executable product，Core 与 Platform 保持内部 target。SwiftNIO 固定为 `2.101.3`，ZIPFoundation 以 exact `0.9.20` 作为 root dependency 直接链接到 `KinloguePlatform`。DICOM-Swift 同时在 root manifest 和 Helper Xcode project 中固定为 exact `1.5.0` / revision `8f3605a33ed070160b4e023eacd87f32eae8e913`，两个 `Package.resolved` 都受门禁约束。Helper 是 non-published target；主 App/Core/Platform 不 import 或链接 `DicomCore`。主 App 的 ZIP 导出是独立的 Platform 能力，并把 ZIPFoundation 的 SwiftPM `PrivacyInfo.xcprivacy` resource bundle 放入主 App；这不改变 DicomCore 仍只存在于 Helper 的隔离边界，Helper 的 Xcode-generated ZIPFoundation resource bundle 处理也保持原样。

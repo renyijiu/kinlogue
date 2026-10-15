@@ -124,7 +124,7 @@ B 不再作为备选；C 留作“不想复用本机登录”的用户的后续�
 | 角色提示词 | `-c instructions=<固定文本>`，整段替换 Codex 内置的约 21 KB 编程助手提示词；`include_collaboration_mode_instructions=false`、`include_apps_instructions=false`、`include_environment_context=false`、`include_permissions_instructions=false`、`project_doc_max_bytes=0`、`skills.include_instructions=false`。固定文本里没有健康资料 |
 | 不留会话 | `--ephemeral`、`history.persistence="none"` |
 | 遥测 | `analytics.enabled=false`、`feedback.enabled=false`、三个 `otel` 导出设为 `none`、`otel.log_user_prompt=false`、`check_for_update_on_startup=false` |
-| 输出 | `exec --json` 只给 `thread.started`、`turn.started`、一个完整的 `agent_message` 和 `turn.completed`，**没有逐字增量**，回答整段显示。成功判据：退出码 0、收到 `turn.completed`、恰好一个 `agent_message`。`error` 事件只记为诊断，不单独判失败 |
+| 输出 | `exec --json` 只给 `thread.started`、`turn.started`、一个完整的 `agent_message` 和 `turn.completed`，**没有逐字增量**，回答整段显示。成功判据：退出码 0、收到 `turn.completed`，回答取最后一个 `agent_message`（U2 修订：模型可能先给一段前言）。`error` 事件只记为诊断，不单独判失败；消息、推理和 `error` 之外的任何事件项都视为工具调用，立即终止这一轮 |
 | 登录状态 | `codex login status`（结果在 stderr） |
 | 工作目录 | 每轮新建的空私有目录，里面没有 AGENTS.md 或 git 仓库 |
 
@@ -132,7 +132,7 @@ B 不再作为备选；C 留作“不想复用本机登录”的用户的后续�
 
 适配层定义统一的 `CLIAdapter` 接口（能力检查、参数构造、事件解析、错误映射），首版只有 Codex 一个实现。以后接 Claude Code 时，帮助文本里已经看到的 `-p`、`--tools ""`、`--safe-mode`、`--strict-mcp-config`、`--no-session-persistence`、`--system-prompt`、`--output-format stream-json` 是候选组合，届时另做 U0 式验证。
 
-**按能力检查，不锁版本。** 用户安装的 Codex 会更新，无法像探针那样锁定 SHA-256。helper 在启用时和可执行文件变化后（路径、inode、大小、修改时间任一变化）做两步检查：先确认 `exec --help` 里有上表用到的选项，并在 `--strict-config` 下应用全部覆盖后，`features list` 里白名单之外没有开启的功能；再用同一组参数对 helper 自己在 127.0.0.1 上起的模拟服务跑一轮合成提示词，检查实际请求里工具数为 0、只有两条消息、没有本机路径。两步都通过才允许真实发送，否则停用并显示“这个版本缺少必需的隔离选项”。模拟这一轮不消耗额度。通过 U0 验证的版本（0.162.0）列为“已验证”，其他版本显示“未验证版本”。
+**按能力检查，不锁版本。** 用户安装的 Codex 会更新，无法像探针那样锁定 SHA-256。helper 在启用时和可执行文件变化后（路径、inode、大小、修改时间任一变化）做两步检查：先确认版本可读、`exec --help` 里有上表用到的选项，并由 `features list` 算出要关闭的功能；再用同一组参数和这一轮要用的模型，对 helper 自己在 127.0.0.1 上起的模拟服务跑一轮合成提示词，检查实际请求里工具数为 0、只有我们的两条消息、模型名一致、`store` 为 false、没有本机路径。两步都通过才允许真实发送，结果按（可执行文件、模型）缓存，否则停用并显示“这个版本缺少必需的隔离选项”。模拟这一轮不消耗额度。通过 U0 验证的版本（0.162.0）列为“已验证”，其他版本显示“未验证版本”。
 
 **进程规则：**
 
@@ -257,7 +257,7 @@ helper 用 checked-in Xcode 工程（同 DICOM Helper）还是 SwiftPM 可执行
 | --- | --- | --- |
 | **U0 可行性探针** | 独立的临时工程，不进 main。签名的沙盒宿主 + 方案 A、B 两种 helper，各自启动用户本机的 `codex`，用合成资料做一轮问答。核对：登录可用且刷新后在终端里仍能用；凭据保存在文件还是系统钥匙串，`--ignore-user-config` 后是否仍能找到；流式事件格式；事件里没有任何工具调用（再加一条要求读取合成 canary 文件的注入资料，确认没有发生）；运行前后 `~/.codex` 没有新增含资料内容的文件；关闭遥测的配置；GUI 环境下的 `PATH` 和代理；20 份 / 60 KB 上下文的延迟。 | 新增来源笔记记录版本、选项和结果；D1 有结论。U0 会消耗你的 Codex 额度，执行前需要你同意。 |
 | **U1 Core** | 上下文包、发送清单、提示词、引用、对话值类型与上限、Provider 协议。 | 测试覆盖：只取已确认记录、成员隔离、不含姓名/备注/机构/UUID、预算与截断标记、编号确定、转义 `</record`、指纹随任何输入变化、引用校验与“已更改/已删除”判定、值类型编码往返。 |
-| **U2 IPC 与 helper** | DTO、helper、Codex 适配器、模型目录改写、发送前的模拟请求检查、假 CLI fixture（按 U0 记录的 `exec --json` 事件格式输出）、打包与 entitlement 门禁；验证 npm 全局等其他安装位置能否加入例外列表。 | 用假 CLI 覆盖：中文分片 UTF-8、超长行、输出洪泛、非零退出、未登录/限流输出、首字节与整轮超时、取消后孙进程也退出、helper 被杀后进程组结束、命令行参数与环境变量里没有资料内容、环境白名单、工作目录清理；能力检查缺一项即拒绝。主 App entitlement 集合不变。 |
+| **U2 IPC 与 helper**（实施时拆为 U2 与 U2b：U2 是下列逻辑和测试，U2b 是打包进 App、helper entitlement、签名 XPC 验证、其他安装位置和经 helper 的真实一轮） | DTO、helper、Codex 适配器、模型目录改写、发送前的模拟请求检查、假 CLI fixture（按 U0 记录的 `exec --json` 事件格式输出）、打包与 entitlement 门禁；验证 npm 全局等其他安装位置能否加入例外列表。 | 用假 CLI 覆盖：中文分片 UTF-8、超长行、输出洪泛、非零退出、未登录/限流输出、首字节与整轮超时、取消后孙进程也退出、helper 被杀后进程组结束、命令行参数与环境变量里没有资料内容、环境白名单、工作目录清理；能力检查缺一项即拒绝。主 App entitlement 集合不变。 |
 | **U3 Platform** | SQLite 窄查询、XPC 客户端。 | 真实 SQLite 资料库上验证投影规则；XPC 往返用签名 helper 加假 CLI 验证。 |
 | **U4 App 服务** | 设置、同意、内存版对话存储、生命周期、提交观察。 | 删除/恢复资料库、删除成员、关闭功能时取消并清空；迟到结果被拒绝；包过期后要求重新确认；只有完成的轮次进入存储协议；错误保存为语义 key。 |
 | **U5 界面** | 对话面板、确认页、设置页、中英文案。 | 本地化硬编码门禁通过；离屏渲染核对中英文和窄窗口；单复数文案测试。 |

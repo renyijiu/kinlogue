@@ -62,6 +62,7 @@ Kinlogue 借鉴 LLM Wiki 的“原始资料 → 编译后的 Wiki → schema”�
 | `Sources/KinloguePlatform/` | 明文 Vault、文件原子提交、OCR、PDF/Image 处理、LAN receiver/inbox、平台资源 | 资源上限、路径防护、并发/重启恢复、无内容日志和对应集成测试。 |
 | `Sources/KinlogueApp/` | SwiftUI/AppKit composition root、App service、ViewModel、界面和验收入口 | UI 状态、主线程边界、生命周期通知、真实 service 链路。 |
 | `Sources/KinlogueStorageProcessFixture/` | 跨进程存储协调测试的 fixture | 只用于测试，不把测试入口接进生产 bundle。 |
+| `Sources/KinlogueAssistant*/` | 成员对话的 IPC、Codex 适配与 bridge（尚未接入 App）及其测试用假 CLI | 健康资料只走 stdin、不进参数/环境/日志；进程组终止与输出上限；能力检查以实际请求为准；假 CLI 不进生产 bundle。见[成员对话计划](docs/plans/2026-10-15-feat-member-cli-chat-plan.md)。 |
 | `Tests/` | 按 target 镜像的单元、集成、并发、脚本安全和安装验收测试 | 任何行为改动先找到现有覆盖，再补最小缺口。 |
 | `scripts/` | 构建、隐私扫描、安装验收、回滚归档和包安全门禁 | 不把一次本机通过写成跨系统或正式分发通过。 |
 

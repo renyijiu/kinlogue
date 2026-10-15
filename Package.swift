@@ -87,6 +87,19 @@ let package = Package(
                 .process("Resources")
             ]
         ),
+        .target(name: "KinlogueAssistantIPC"),
+        .target(
+            name: "KinlogueAssistantCLI",
+            dependencies: ["KinlogueAssistantIPC"]
+        ),
+        .executableTarget(
+            name: "KinlogueAssistantBridge",
+            dependencies: ["KinlogueAssistantIPC", "KinlogueAssistantCLI"]
+        ),
+        .executableTarget(
+            name: "KinlogueAssistantCLIFixture",
+            dependencies: ["KinlogueAssistantCLI"]
+        ),
         .testTarget(
             name: "KinlogueCoreTests",
             dependencies: ["KinlogueCore"]
@@ -97,6 +110,9 @@ let package = Package(
                 "KinloguePlatform",
                 "KinlogueDICOMIPC",
                 "KinlogueDICOMTestSupport",
+                "KinlogueAssistantIPC",
+                "KinlogueAssistantCLI",
+                "KinlogueAssistantCLIFixture",
                 .product(name: "NIOEmbedded", package: "swift-nio"),
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
             ]

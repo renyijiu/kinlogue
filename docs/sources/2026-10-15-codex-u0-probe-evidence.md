@@ -63,3 +63,12 @@ kind: external-spec
 - 真实发送时的网络去向：只检查了发往模拟服务的请求体，没有抓真实流量。
 - 取消、超时与进程组回收（留给 U2）；Developer ID 签名、公证和 macOS 26 上 temporary exception 的表现；服务商侧的保留政策。
 - 探针留下的两个空沙盒容器（`~/Library/Containers/com.kinlogue.u0probe.*`）由系统保护，`rm` 无法删除，需要在 Finder 中手动移除。
+
+## U2 复核（同日追加）
+
+U2 实现后，用一个用完即删的临时测试，让 `CodexBridge` 对本机真实的 Codex 0.162.0 跑能力检查（只走本机模拟服务，不消耗额度）。新发现：
+
+- `codex features list` 里有带点的功能名（`guardianv2.thread_context`），解析器最初只接受字母、数字和下划线，导致检查失败；已改为接受 `.`。
+- 关闭 41 个功能后，`features list` 仍显示 `unified_exec` 开启，`-c features.unified_exec=false` 也无效；同一组参数下实际发出的请求里没有任何工具。`features list` 读取的是用户配置，而这一轮用的是 `--ignore-user-config`，因此检查不再以功能表为准，只以实际请求为准。
+- 修正后，目录里的第一个模型（`gpt-6.1-sol`）和 `gpt-6-astra` 都通过检查：已登录、版本已验证、请求中工具数为 0、只有两条消息、没有本机路径，分别用时 3.1 秒和 1.4 秒；临时目录没有残留。
+- 没有经 bridge 跑真实的一轮问答。

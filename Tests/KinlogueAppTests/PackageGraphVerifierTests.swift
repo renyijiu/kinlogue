@@ -351,6 +351,22 @@ private struct PackageGraphFixture {
                     type: "executable",
                     dependencies: [byName("KinlogueCore"), byName("KinloguePlatform")]
                 ),
+                target(name: "KinlogueAssistantIPC", type: "regular"),
+                target(
+                    name: "KinlogueAssistantCLI",
+                    type: "regular",
+                    dependencies: [byName("KinlogueAssistantIPC")]
+                ),
+                target(
+                    name: "KinlogueAssistantBridge",
+                    type: "executable",
+                    dependencies: [byName("KinlogueAssistantIPC"), byName("KinlogueAssistantCLI")]
+                ),
+                target(
+                    name: "KinlogueAssistantCLIFixture",
+                    type: "executable",
+                    dependencies: [byName("KinlogueAssistantCLI")]
+                ),
                 target(
                     name: "KinlogueCoreTests",
                     type: "test",
@@ -363,6 +379,9 @@ private struct PackageGraphFixture {
                         byName("KinloguePlatform"),
                         byName("KinlogueDICOMIPC"),
                         byName("KinlogueDICOMTestSupport"),
+                        byName("KinlogueAssistantIPC"),
+                        byName("KinlogueAssistantCLI"),
+                        byName("KinlogueAssistantCLIFixture"),
                         product("NIOEmbedded", package: "swift-nio"),
                         product("ZIPFoundation", package: "ZIPFoundation"),
                     ]

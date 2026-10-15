@@ -166,6 +166,10 @@ expected_targets="$(sorted_lines \
   'KinlogueDICOMAcceptanceFixtureGenerator|executable' \
   'KinloguePlatform|regular' \
   'KinlogueApp|executable' \
+  'KinlogueAssistantIPC|regular' \
+  'KinlogueAssistantCLI|regular' \
+  'KinlogueAssistantBridge|executable' \
+  'KinlogueAssistantCLIFixture|executable' \
   'KinlogueCoreTests|test' \
   'KinloguePlatformTests|test' \
   'KinlogueAppTests|test' \
@@ -237,12 +241,23 @@ verify_target_dependencies KinloguePlatform \
 verify_target_dependencies KinlogueApp \
   'target:KinlogueCore' \
   'target:KinloguePlatform'
+verify_target_dependencies KinlogueAssistantIPC
+verify_target_dependencies KinlogueAssistantCLI \
+  'target:KinlogueAssistantIPC'
+verify_target_dependencies KinlogueAssistantBridge \
+  'target:KinlogueAssistantIPC' \
+  'target:KinlogueAssistantCLI'
+verify_target_dependencies KinlogueAssistantCLIFixture \
+  'target:KinlogueAssistantCLI'
 verify_target_dependencies KinlogueCoreTests \
   'target:KinlogueCore'
 verify_target_dependencies KinloguePlatformTests \
   'target:KinloguePlatform' \
   'target:KinlogueDICOMIPC' \
   'target:KinlogueDICOMTestSupport' \
+  'target:KinlogueAssistantIPC' \
+  'target:KinlogueAssistantCLI' \
+  'target:KinlogueAssistantCLIFixture' \
   'product:NIOEmbedded@swift-nio' \
   'product:ZIPFoundation@ZIPFoundation'
 verify_target_dependencies KinlogueAppTests \
