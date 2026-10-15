@@ -41,6 +41,9 @@ final class AssistantConversationModel: ObservableObject {
     @Published private(set) var issue: AssistantIssue?
     @Published private(set) var includeOrganization = false
     @Published private(set) var recordStates: [UUID: AssistantRecordState] = [:]
+    /// The question of the turn that is running, shown until its answer arrives.
+    @Published private(set) var pendingQuestion: String?
+    @Published private(set) var sendingStartedAt: Date?
 
     private let service: LiveAssistantService
     private let currentSettings: @MainActor () -> AssistantSettings
@@ -129,6 +132,8 @@ final class AssistantConversationModel: ObservableObject {
         let conversationID = conversation?.id
         phase = .sending
         issue = nil
+        pendingQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        sendingStartedAt = Date()
         let task = Task { [service] in
             try await service.send(question, conversationID: conversationID, pack: pack, consent: consent, settings: settings)
         }
@@ -136,7 +141,7 @@ final class AssistantConversationModel: ObservableObject {
         do {
             let updated = try await task.value
             guard generation == self.generation else { return }
-            sending = nil
+            endSending()
             conversation = updated
             for entry in pack.entries {
                 recordStates[entry.recordID] = AssistantRecordState(revision: entry.recordRevision, projectionDigest: entry.projectionDigest)
@@ -145,7 +150,7 @@ final class AssistantConversationModel: ObservableObject {
             phase = .ready
         } catch {
             guard generation == self.generation else { return }
-            sending = nil
+            endSending()
             show(Self.issue(for: error), phase: self.consent == nil ? .needsConsent : .ready)
         }
         if refreshAfterSending {
@@ -156,6 +161,12 @@ final class AssistantConversationModel: ObservableObject {
 
     func stop() {
         sending?.cancel()
+    }
+
+    /// Checks the CLI and reloads the pack again, for example after the user fixed the login.
+    func recheck() async {
+        guard let memberID else { return }
+        await open(memberID: memberID)
     }
 
     func startNewConversation() {
@@ -217,7 +228,7 @@ final class AssistantConversationModel: ObservableObject {
     private func reset(memberID: UUID?) -> UInt64 {
         generation &+= 1
         sending?.cancel()
-        sending = nil
+        endSending()
         refreshAfterSending = false
         self.memberID = memberID
         pack = nil
@@ -230,6 +241,12 @@ final class AssistantConversationModel: ObservableObject {
         checkedRecordIDs = []
         includeOrganization = false
         return generation
+    }
+
+    private func endSending() {
+        sending = nil
+        pendingQuestion = nil
+        sendingStartedAt = nil
     }
 
     private func loadPack(generation: UInt64) async -> Bool {

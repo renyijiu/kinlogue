@@ -21,7 +21,8 @@ struct SQLiteAppLaunchView: View {
                 AppShellView(model: composition.appModel, deletionModel: composition.deletionModel,
                     lanInboxModel: composition.lanInboxModel, backupModel: composition.backupModel,
                     restoreModel: composition.restoreModel, startupCoordinator: composition.startupCoordinator,
-                    selectedLanguage: $selectedLanguage, integrityCoordinator: composition.integrityCoordinator)
+                    selectedLanguage: $selectedLanguage, integrityCoordinator: composition.integrityCoordinator,
+                    assistantModel: composition.assistantModel, assistantSettings: composition.assistantSettings)
             } else {
                 ProgressView(AppLocalization.string("正在打开资料库…"))
             }

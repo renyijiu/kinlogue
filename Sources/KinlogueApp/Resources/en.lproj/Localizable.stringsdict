@@ -50,6 +50,54 @@
 			<string>%lld files</string>
 		</dict>
 	</dict>
+	<key>%lld 份报告</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@value@</string>
+		<key>value</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld report</string>
+			<key>other</key>
+			<string>%lld reports</string>
+		</dict>
+	</dict>
+	<key>%lld 份报告无法读取，没有包含在内</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@value@</string>
+		<key>value</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld report could not be read and is left out</string>
+			<key>other</key>
+			<string>%lld reports could not be read and are left out</string>
+		</dict>
+	</dict>
+	<key>%lld 份报告过长，只发送开头部分</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@value@</string>
+		<key>value</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld report is too long; only its beginning is sent</string>
+			<key>other</key>
+			<string>%lld reports are too long; only their beginnings are sent</string>
+		</dict>
+	</dict>
 	<key>共 %lld 个原件；顺序只影响这次报告。</key>
 	<dict>
 		<key>NSStringLocalizedFormatKey</key>
@@ -82,6 +130,22 @@
 			<string>%1$lld files, %2$@</string>
 		</dict>
 	</dict>
+	<key>另有 %lld 份较早的报告不会发送</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@value@</string>
+		<key>value</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld older report will not be sent</string>
+			<key>other</key>
+			<string>%lld older reports will not be sent</string>
+		</dict>
+	</dict>
 	<key>已选 %lld 个原件，作为 1 份报告</key>
 	<dict>
 		<key>NSStringLocalizedFormatKey</key>
@@ -96,6 +160,22 @@
 			<string>%lld original selected as one report</string>
 			<key>other</key>
 			<string>%lld originals selected as one report</string>
+		</dict>
+	</dict>
+	<key>正在等待 Codex 回答 · %lld 秒</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@value@</string>
+		<key>value</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Waiting for Codex to answer · %lld second</string>
+			<key>other</key>
+			<string>Waiting for Codex to answer · %lld seconds</string>
 		</dict>
 	</dict>
 	<key>还有 %lld 行匹配</key>

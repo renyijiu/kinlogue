@@ -16,7 +16,7 @@
 - 想了解同步目录备份/恢复：读 [`backup-and-restore.md`](backup-and-restore.md)、实施计划和 [`acceptance/current-release.md`](acceptance/current-release.md)。
 - 想改界面或文案：读 [`design-system.md`](design-system.md) 和 [`localization.md`](localization.md)。
 - 想改名称、标语、应用图标或了解产品方向：读 [`brand.md`](brand.md)。
-- 想了解成员对话（首版调用本机已登录的 Codex CLI）的提议方案：读 [`plans/2026-10-15-feat-member-cli-chat-plan.md`](plans/2026-10-15-feat-member-cli-chat-plan.md)；它是待决策的计划，不是当前能力。
+- 想了解成员对话（首版调用本机已登录的 Codex CLI）的提议方案：读 [`plans/2026-10-15-feat-member-cli-chat-plan.md`](plans/2026-10-15-feat-member-cli-chat-plan.md)；它是实施中的计划；对话界面只在 `build-app.sh --with-assistant-bridge` 的开发构建中出现，默认构建和发布都不含这一能力。
 
 当前最低系统已调整为 macOS 26，主要面向个人自用；Xcode 27 构建适配、CI Metal 组件准备、基线检查名兼容与 DICOM 崩溃恢复探针的重启等待预算见 [`testing-and-release.md`](testing-and-release.md)，转录编辑器的系统写作工具边界见 [`import-and-ocr.md`](import-and-ocr.md)；旧系统支持决策见 [`decisions.md`](decisions.md)，macOS 26/27 验收状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
 

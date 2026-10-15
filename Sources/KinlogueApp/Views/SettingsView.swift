@@ -12,6 +12,7 @@ struct SettingsView: View {
     let onExportOriginals: () -> Void
     let onDeleteVault: () -> Void
     var integrityCoordinator: AppIntegrityCoordinator? = nil
+    var assistantSettings: AssistantSettingsModel? = nil
     @State private var isAbandonPendingBackupConfirmationPresented = false
 
     var body: some View {
@@ -66,6 +67,10 @@ struct SettingsView: View {
                         .foregroundStyle(KinlogueTheme.primary)
 
                     backupCard
+                }
+
+                if let assistantSettings {
+                    AssistantSettingsSection(settings: assistantSettings, controlColumnWidth: Self.controlColumnWidth)
                 }
 
                 VStack(alignment: .leading, spacing: 12) {

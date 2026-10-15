@@ -15,7 +15,7 @@ struct AppComposition {
     var integrityCoordinator: AppIntegrityCoordinator? = nil
     /// Member chat; present when the services provide a library for it.
     var assistantModel: AssistantConversationModel? = nil
-    var assistantSettings: AssistantSettingsStore? = nil
+    var assistantSettings: AssistantSettingsModel? = nil
 
     /// The composition on an opened SQLite library. `LibraryLaunchCoordinator` is its only caller.
     static func makeOpened(identity: AppRuntimeIdentity, services: LiveAppServiceEnvironment,
@@ -43,6 +43,9 @@ struct AppComposition {
         }
         let assistantModel = assistantService.map { service in
             AssistantConversationModel(service: service, settings: { assistantSettings.settings })
+        }
+        let assistantSettingsModel = assistantService.map { service in
+            AssistantSettingsModel(store: assistantSettings, service: service, conversation: assistantModel)
         }
         let appModel = AppModel(
             service: services.dataService,
@@ -163,7 +166,7 @@ struct AppComposition {
             restoreModel: restoreModel,
             startupCoordinator: startup,
             processingCoordinator: processing, libraryObserver: observer, integrityCoordinator: inspection,
-            assistantModel: assistantModel, assistantSettings: assistantSettings
+            assistantModel: assistantModel, assistantSettings: assistantSettingsModel
         )
     }
 

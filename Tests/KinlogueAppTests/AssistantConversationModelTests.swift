@@ -70,14 +70,19 @@ struct AssistantConversationModelTests {
         let model = AssistantConversationModel(service: fixture.service, settings: { .enabled })
         await model.open(memberID: fixture.member.id)
         model.confirm()
-        await model.send("First")
+        await model.send("  First \n")
+        #expect(model.pendingQuestion == nil, "a completed turn is shown from the conversation")
 
         fixture.backend.setBehavior(.waitForCancellation)
         let sending = Task { await model.send("Second") }
         try await fixture.backend.waitUntilStarted()
+        #expect(model.pendingQuestion == "Second")
+        #expect(model.sendingStartedAt != nil)
         model.stop()
         await sending.value
 
+        #expect(model.pendingQuestion == nil)
+        #expect(model.sendingStartedAt == nil)
         #expect(model.phase == .ready)
         #expect(model.issue == .cli(.cancelled))
         #expect(model.conversation?.turns.map(\.question) == ["First"])

@@ -51,6 +51,21 @@ final class AssistantSettingsStore {
     }
 }
 
+/// Whether this build carries the bridge. Until the privacy documents describe member chat, only
+/// development builds made with `scripts/build-app.sh --with-assistant-bridge` embed it, and the
+/// App offers the feature only there.
+enum AssistantAvailability {
+    /// The bridge's product name in `scripts/build-app.sh`.
+    static let bridgeProduct = "KinlogueAssistantBridge"
+
+    static func isBridgeEmbedded(inAppAt appURL: URL = Bundle.main.bundleURL) -> Bool {
+        guard appURL.pathExtension.caseInsensitiveCompare("app") == .orderedSame else { return false }
+        let bridge = appURL.appendingPathComponent("Contents/XPCServices/\(bridgeProduct).xpc", isDirectory: true)
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: bridge.path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+}
+
 /// The bridge as the App uses it: a provider that can also report the CLI's status.
 protocol AssistantBackend: AssistantProvider {
     func status(model: String?) async -> AssistantCLIStatus

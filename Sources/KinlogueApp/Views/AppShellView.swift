@@ -12,7 +12,11 @@ struct AppShellView: View {
     @ObservedObject private var restoreModel: RestoreModel
     private let startupCoordinator: AppStartupCoordinator
     private let integrityCoordinator: AppIntegrityCoordinator?
+    private let assistantModel: AssistantConversationModel?
+    private let assistantSettings: AssistantSettingsModel?
     @State private var selectedSidebarSection = AppSidebarSection.records
+    /// The detail column shows the member chat instead of the report.
+    @State private var isAssistantShown = false
     @State private var hasCompletedStartup = false
     @Binding private var selectedLanguage: AppLanguage
     @AppStorage("hasAcknowledgedPlaintextStorageDisclosure")
@@ -28,7 +32,9 @@ struct AppShellView: View {
         restoreModel: RestoreModel,
         startupCoordinator: AppStartupCoordinator,
         selectedLanguage: Binding<AppLanguage>,
-        integrityCoordinator: AppIntegrityCoordinator? = nil
+        integrityCoordinator: AppIntegrityCoordinator? = nil,
+        assistantModel: AssistantConversationModel? = nil,
+        assistantSettings: AssistantSettingsModel? = nil
     ) {
         self.model = model
         self.deletionModel = deletionModel
@@ -37,6 +43,8 @@ struct AppShellView: View {
         self.restoreModel = restoreModel
         self.startupCoordinator = startupCoordinator
         self.integrityCoordinator = integrityCoordinator
+        self.assistantModel = assistantModel
+        self.assistantSettings = assistantSettings
         _selectedLanguage = selectedLanguage
     }
 
@@ -373,7 +381,8 @@ struct AppShellView: View {
                 onRestoreBackup: restoreModel.present,
                 onExportOriginals: model.presentOriginalExport,
                 onDeleteVault: model.presentVaultDeletion,
-                integrityCoordinator: integrityCoordinator
+                integrityCoordinator: integrityCoordinator,
+                assistantSettings: assistantSettings
             )
         }
     }
@@ -452,8 +461,14 @@ struct AppShellView: View {
                             selectedRecordID: model.selectedRecordID,
                             showsMemberLabels: model.selectedMemberID == nil,
                             memberLabel: model.memberLabel(for:),
-                            onSelect: { id in Task { await model.selectRecord(id) } },
-                            onSelectDICOM: { id in model.selectDICOMStudy(id) },
+                            onSelect: { id in
+                                isAssistantShown = false
+                                Task { await model.selectRecord(id) }
+                            },
+                            onSelectDICOM: { id in
+                                isAssistantShown = false
+                                model.selectDICOMStudy(id)
+                            },
                             onImport: { presentImporterIfAvailable() },
                             pageState: model.pageState, hasMore: model.hasMoreRecords,
                             hasDamage: !model.damagedItemIDs.isEmpty || !model.damagedMemberIDs.isEmpty,
@@ -476,6 +491,24 @@ struct AppShellView: View {
         } detail: {
             if selectedSidebarSection == .lanInbox {
                 LANPendingSelectionDetailView(model: lanInboxModel)
+            } else if isAssistantShown, let assistantModel, let memberID = model.selectedMemberID,
+                      assistantSettings?.settings.isEnabled == true {
+                AssistantPanelView(
+                    model: assistantModel,
+                    memberLabel: LibraryMemberSummary.labels(model.members)[memberID],
+                    onShowRecord: { id in
+                        isAssistantShown = false
+                        Task { await model.selectRecord(id) }
+                    },
+                    onOpenSettings: { selectedSidebarSection = .settings },
+                    onClose: { isAssistantShown = false }
+                )
+                // A member keeps its chat while the report is shown; another member starts afresh.
+                .task(id: memberID) {
+                    if assistantModel.memberID != memberID || assistantModel.phase == .closed {
+                        await assistantModel.open(memberID: memberID)
+                    }
+                }
             } else {
                 TimelineDetailContainer(
                     dicomLibraryModel: model.dicomLibraryModel,
@@ -528,6 +561,13 @@ struct AppShellView: View {
                     model: model.comparisonModel,
                     onToggle: { model.toggleComparisonSelection() }
                 )
+                if let assistantSettings {
+                    AssistantToolbarItem(
+                        settings: assistantSettings,
+                        isShown: $isAssistantShown,
+                        hasMember: model.selectedMemberID != nil
+                    )
+                }
                 Button {
                     if lanInboxModel.receiverPhase == .active {
                         lanInboxModel.isReceiverSheetPresented = true
