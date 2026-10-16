@@ -1887,3 +1887,23 @@
   - 迁移后的冻结库做完整性巡检时，两个原件被标为损坏，因为冻结行记录的是生成机器上的 inode。测试只接受这一种情况，其余行都要通过巡检。
   - 迁移只建空表，没有单独的“正在升级”启动页，也不自动备份。这一点和决策记录写在 [`decisions.md`](decisions.md) 2026-10-16 一节。
 - **文档**：PRIVACY 与 README 说明对话以明文保存在资料库并进入恢复点、可删除、随成员删除、关闭功能不删除；[`privacy-and-security.md`](privacy-and-security.md)、[`project-overview.md`](project-overview.md)、[`architecture.md`](architecture.md)、[`sqlite-storage.md`](sqlite-storage.md)、[`storage.md`](storage.md)、[`backup-and-restore.md`](backup-and-restore.md)、[`domain-and-data-model.md`](domain-and-data-model.md)、[`design-system.md`](design-system.md)、[`decisions.md`](decisions.md)、[`index.md`](index.md)、`AGENTS.md`、计划状态、[成员对话矩阵](acceptance/member-chat-matrix.md)和[当前候选证据](acceptance/current-release.md)同步。
+
+## [2026-10-16] fix/assistant | 成员对话面板在分栏详情列中溢出、输入法组字被提示文字盖住、全文展开文字点击无效
+
+- **现象**：
+  - 在 App 里打开对话后，面板整体上移，标题区和输入框（或确认卡片）在窗口之外，无法输入。
+  - 修正上一条后复测：用拼音输入时，灰色提示“就已确认的报告提问”留在组字文本之上。
+  - 确认页“查看将发送的报告全文”只有左侧小箭头可点，点文字无效。
+- **原因**：
+  - 详情列没有宽度约束，分栏视图计算它的最小尺寸时按接近零的宽度测量。[`AssistantPanelView`](../Sources/KinlogueApp/Views/AssistantPanelView.swift) 在对话记录之外有几段固定高度的换行文本（发送范围、确认说明、问题提示），在这个宽度下逐字换行，使窗口的最小高度升到约 1160–1960pt。
+  - 输入法未提交的组字文本不进入 `draft`，提示文字只在 `draft` 为空时显示，于是组字期间仍然显示。
+  - macOS 的 `DisclosureGroup` 标签本身不响应点击，只有展开箭头响应。
+- **修正**：
+  - 面板根视图设最小宽度 360pt 并填满详情列；标题区的成员名优先占用剩余宽度，“新对话”按钮保持自身尺寸，不再被压成竖排。
+  - 提示文字只在输入框为空且没有焦点时显示；[`AssistantViewSafetyTests`](../Tests/KinlogueAppTests/AssistantViewSafetyTests.swift) 增加对应的源码检查，先失败后通过。
+  - [`AssistantConsentSheet`](../Sources/KinlogueApp/Views/AssistantConsentSheet.swift) 的展开标签改为切换同一展开状态的按钮（`kinlogueGhost` 样式，28pt 高），保留系统展开箭头；同一测试增加源码检查，先失败后通过。
+- **验证**：
+  - 临时离屏测试按 App 的列宽在 1000×745 与 920×620 的带标题栏窗口中放入面板，需确认与可输入两种状态的窗口高度都保持不变；最小高度 672pt，与只放普通详情内容时相同。截图确认标题区、示例问题和输入框都在窗口内。另一个临时离屏测试在输入框上设置组字文本（`setMarkedText`），截图确认组字时不再有提示文字，失焦且为空时提示恢复。第三个临时测试向确认页发送真实鼠标事件点击文字，截图确认全文展开。三个临时测试均已删除。
+  - 对话、主题与本地化相关套件 157 tests 通过；`lint.sh` 与 `git diff --check` 通过；`build-app.sh` 重新构建并签名。
+  - 用户用 16:05 的构建在 App 中复测：面板完整显示，点击输入框后拼音组字不再被提示盖住，点击“查看将发送的报告全文”能展开全文。
+- **未执行**：完整 `scripts/test.sh`；`verify-app.sh`（打包与 entitlement 未改动）。

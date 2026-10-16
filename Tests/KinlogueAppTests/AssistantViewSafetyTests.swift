@@ -43,6 +43,10 @@ struct AssistantViewSafetyTests {
         #expect(panel.contains(".keyboardShortcut(.return, modifiers: .command)"))
         #expect(panel.contains("TextInputComposition.isActive(in: NSApp.keyWindow?.firstResponder)"))
         #expect(!panel.contains(".onSubmit"), "Return adds a line; only Command-Return sends")
+        // An input method's uncommitted text is not in `draft` yet; a hint shown until the first
+        // committed character would sit on top of it.
+        #expect(panel.contains(".focused($isEditorFocused)"))
+        #expect(panel.contains("if draft.isEmpty && !isEditorFocused {"))
     }
 
     @Test
@@ -56,6 +60,9 @@ struct AssistantViewSafetyTests {
         #expect(sheet.contains("model.setIncludeOrganization("))
         #expect(sheet.contains(".kinlogueSheetCanvas()"))
         #expect(sheet.contains(".disabled(model.phase != .needsConsent)"))
+        // A disclosure label takes no clicks on macOS; the words that open the full text must.
+        #expect(sheet.contains("DisclosureGroup(isExpanded: $showsFullText)"))
+        #expect(sheet.contains("Button(AppLocalization.string(\"查看将发送的报告全文\")) { showsFullText.toggle() }"))
     }
 
     @Test

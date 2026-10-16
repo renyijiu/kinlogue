@@ -43,6 +43,7 @@ struct AssistantPanelView: View {
     @State private var draft = ""
     @State private var isConsentPresented = false
     @State private var pendingDeletion: UUID?
+    @FocusState private var isEditorFocused: Bool
 
     private static let bottomID = "assistant-bottom"
 
@@ -52,6 +53,9 @@ struct AssistantPanelView: View {
             Divider()
             content
         }
+        // The split view measures the detail column at its narrowest; without a floor every wrapping
+        // line outside the transcript would break per character and push the composer off screen.
+        .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
         .background(KinlogueTheme.surface)
         .sheet(isPresented: $isConsentPresented) {
             AssistantConsentSheet(model: model, memberLabel: memberLabel) { isConsentPresented = false }
@@ -92,6 +96,7 @@ struct AssistantPanelView: View {
                             .lineLimit(1)
                     }
                 }
+                .layoutPriority(1)
                 Spacer(minLength: 12)
                 historyMenu
                 Button(AppLocalization.string("新对话")) {
@@ -99,6 +104,7 @@ struct AssistantPanelView: View {
                     draft = ""
                 }
                 .buttonStyle(.kinlogueSecondary)
+                .fixedSize()
                 .disabled(model.conversation == nil || model.phase == .sending)
                 .help(AppLocalization.string("清空当前对话，从新的问题开始"))
                 Button(action: onClose) {
@@ -343,13 +349,16 @@ struct AssistantPanelView: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
             TextEditor(text: $draft)
+                .focused($isEditorFocused)
                 .writingToolsBehavior(.disabled)
                 .scrollContentBackground(.hidden)
                 .frame(height: 72)
                 .padding(8)
                 .kinlogueInputFrame()
                 .overlay(alignment: .topLeading) {
-                    if draft.isEmpty {
+                    // An input method keeps its uncommitted text out of `draft`, so the hint goes
+                    // when the editor takes focus rather than at the first committed character.
+                    if draft.isEmpty && !isEditorFocused {
                         Text(AppLocalization.string("就已确认的报告提问"))
                             .foregroundStyle(KinlogueTheme.onVariantSubtle)
                             .padding(.horizontal, 13)

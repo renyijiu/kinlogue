@@ -134,8 +134,9 @@ struct AssistantConsentSheet: View {
             .kinloguePanel(.container)
             .padding(.top, 8)
         } label: {
-            Text(AppLocalization.string("查看将发送的报告全文"))
-                .foregroundStyle(KinlogueTheme.primary)
+            // On macOS only the disclosure arrow takes clicks; the words open the full text too.
+            Button(AppLocalization.string("查看将发送的报告全文")) { showsFullText.toggle() }
+                .buttonStyle(.kinlogueGhost)
         }
         .accessibilityIdentifier("assistant-consent-full-text")
     }
