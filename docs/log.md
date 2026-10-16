@@ -1821,3 +1821,33 @@
 - **文案**：String Catalog 新增 109 条中英文案，其中 5 条带英文单复数；已运行 `compile-localizations.sh --write`。
 - **测试先行**：新增 [`AssistantPresentationTests`](../Tests/KinlogueAppTests/AssistantPresentationTests.swift)（8 项：全部问题的中英文案、语气、单复数与年月范围、去链接、来源状态）、[`AssistantSettingsModelTests`](../Tests/KinlogueAppTests/AssistantSettingsModelTests.swift)（4 项：开关与检查、字段校验、通知对话模型、bundle 中的 bridge）和 [`AssistantViewSafetyTests`](../Tests/KinlogueAppTests/AssistantViewSafetyTests.swift)（5 项源码检查：视图不创建服务、不读偏好；回答保持中性且没有链接；Command-Return 与输入法保护；同意只在确认页给出；入口受 bridge 与开关约束）。对话模型测试补充发送中状态。主题门禁的 sheet 画布清单加入确认页。`MemberSidebarViewSourceTests` 对 `onSelectDICOM` 闭包的断言改为新的多行写法：选中影像仍调用 `model.selectDICOMStudy`，同时把详情栏从对话切回影像。主清单 1280 tests / 108 suites，[`acceptance/current-release.md`](acceptance/current-release.md) 同步；[`design-system.md`](design-system.md) 第 27 条、[`architecture.md`](architecture.md)、[`index.md`](index.md) 和 `AGENTS.md` 的范围说明同步。
 - **离屏核对**：用临时测试在离屏窗口里以合成数据渲染中英文的面板（需要确认、空、已回答、发送中、已停止、不可用）、确认页、设置区块和 340pt 窄宽度。据此修正四处：发送范围拆成两行，不再截断；提问框固定高度；确认页开关移到行尾；设置状态与字段改用 Grid 对齐。临时测试已删除，PNG 只留在会话临时目录，没有进入仓库。
+
+## [2026-10-16] feat/assistant | 成员对话计划 U6：默认嵌入 bridge、发布门禁与隐私承诺改写
+
+- **起因**：用户确认 U5 后要求继续 U6：按计划第 8 节同步改写承诺与脚本、加入验收矩阵，并按此前说明把 bridge 默认放进构建。
+- **构建与发布门禁**：[`build-app.sh`](../scripts/build-app.sh) 删除 `--with-assistant-bridge`，总是构建并嵌入 bridge，开始前检查其 entitlements、Info.plist 与打包脚本。[`verify-app.sh`](../scripts/verify-app.sh) 新增以下检查：
+  - bridge 源 entitlements 与审查过的方案 A 集合逐字一致（规范化 JSON）；
+  - 正式包恰好两个 XPC service；
+  - bridge 包内容只有 Info.plist、可执行文件和签名，标识与类型正确，签名有效，签名后的 entitlements 与源文件一致，只含 arm64；
+  - 主 App 不含 `CodexBridge` 等 CLI 运行代码；bridge 含 Codex 适配、不链接 SQLite 存储内核与 DICOM 解码器；
+  - 假 CLI 与 XPC 探针没有进入正式包；
+  - 成员对话的 IPC、CLI 与 bridge 源码没有任何日志调用；
+  - 报告新增 bridge 的标识、可执行文件摘要与 entitlements 摘要。
+
+  [`package-distribution.sh`](../scripts/package-distribution.sh) 用 Developer ID、hardened runtime、时间戳和 bridge 自己的 entitlements 重签 bridge，并逐项核对 Authority、Team ID、时间戳、runtime、标识与 entitlements。[`build-acceptance-app.sh`](../scripts/build-acceptance-app.sh) 复制和重签后都核对 bridge 签名。[`privacy-guard.sh`](../scripts/privacy-guard.sh) 要求 PRIVACY 写明“AI 对话（实验）”“不是匿名化”“发送后无法撤回”，README 写明前两项，并把“不连接互联网或云服务”列为过时的离线声明。
+- **承诺改写**：
+  - [`PRIVACY.md`](../PRIVACY.md) 首段改为“默认不访问互联网”，指明唯一的外发例外，新增“AI 对话（实验）”一节，说明接收方、发送与不发送的内容、不是匿名化、不可撤回、额度、无工具、只在内存和明文设置。OCR 一条保留原句并注明例外。
+  - [`README.md`](../README.md) 新增核心体验条目、边界表一行、使用说明一节，并更新 `verify-app.sh` 说明和目录表。
+  - 以下页面同步更新：[`privacy-and-security.md`](privacy-and-security.md)（姿态、威胁模型、代码边界、日志、生命周期、Agent 禁区）、[`project-overview.md`](project-overview.md)、[`architecture.md`](architecture.md)（target 图与 bridge 行）、[`decisions.md`](decisions.md)（新增 2026-10-16 决策与开放门禁）、[`brand.md`](brand.md)、[`localization.md`](localization.md)、[`testing-and-release.md`](testing-and-release.md)、`AGENTS.md` 第 3、4 节、[`index.md`](index.md) 和计划状态。
+  - 新增[成员对话验收矩阵](acceptance/member-chat-matrix.md)，[当前候选证据](acceptance/current-release.md)的人工门禁加入成员对话。
+- **测试先行**：`AssistantPackagingBoundaryTests` 改为断言默认嵌入，以及四个发布脚本都覆盖 bridge。`ReleaseScriptSafetyTests` 的分发签名夹具加入 bridge，并对它的无效签名、ad-hoc、Team ID、时间戳、runtime、标识与 entitlements 七种错误逐一要求失败。新增隐私门禁测试：删掉任一披露短语或加回离线声明即失败。主清单 1281 tests / 108 suites。
+- **验证**（macOS 27.0.1 / Xcode 27.0 / Swift 6.4）：
+  - `verify-app.sh` 拒绝未提交的工作树，所以把已跟踪文件和新文件复制到会话临时目录中的一次性 git 仓库并提交，在其上运行 `verify-app.sh --require-clean-source`，退出码 0。正式包含两个 XPC service，报告记录 bridge 标识 `com.kinlogue.mac.assistant-bridge`。在同一副本里给 bridge entitlements 多加一项后，验证器在构建前就以“source entitlements differ”失败。副本随后删除，没有在本仓库提交。
+  - 会断言文本的套件通过。完整 `scripts/test.sh` 退出码 0，没有失败，各分片期望数与实测数一致，隔离门禁一并通过，无残留假 CLI 进程。传入实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check` 和 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+  - PRIVACY 与 README 中“不下诊断、不给用药建议”改写为对模型的要求、不能保证，因为这由提示词约束而不是程序保证。
+- **未执行**：
+  - 经真实 Codex 的一轮问答与人工矩阵（会消耗额度，需要用户同意）；
+  - Developer ID 签名、hardened runtime 下 temporary exception 的表现与 notarization（分发脚本只经假 `codesign` 测试）；
+  - macOS 26；
+  - `/usr/local` 的真实安装；
+  - 安装后合成验收不覆盖成员对话。

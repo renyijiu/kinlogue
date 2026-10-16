@@ -7,6 +7,7 @@
 - [`current-release.md`](current-release.md)：当前版本、测试清单、候选身份和整体发布状态的唯一权威账本。
 - [`lan-upload-matrix.md`](lan-upload-matrix.md)：当前 LAN 自动化、候选证据和真实设备待办矩阵。
 - [`dicom-mri-viewer-matrix.md`](dicom-mri-viewer-matrix.md)：当前 DICOM 支持范围、生成式/私有样本证据和设备待办矩阵。
+- [`member-chat-matrix.md`](member-chat-matrix.md)：成员对话（AI 对话，实验）的自动化证据、发布门禁和未执行的真实 Codex 人工矩阵。
 
 ## Archive
 

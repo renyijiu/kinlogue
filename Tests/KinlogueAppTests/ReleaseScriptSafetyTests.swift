@@ -18,7 +18,10 @@ struct ReleaseScriptSafetyTests {
         defer { try? fileManager.removeItem(at: root) }
         let app = root.appendingPathComponent("Kinlogue.app")
         let helper = app.appendingPathComponent("Contents/XPCServices/KinlogueDICOMDecoderHelper.xpc")
-        for (bundle, executable) in [(app, "Kinlogue"), (helper, "KinlogueDICOMDecoderHelper")] {
+        let bridge = app.appendingPathComponent("Contents/XPCServices/KinlogueAssistantBridge.xpc")
+        for (bundle, executable) in [
+            (app, "Kinlogue"), (helper, "KinlogueDICOMDecoderHelper"), (bridge, "KinlogueAssistantBridge"),
+        ] {
             let executableURL = bundle.appendingPathComponent("Contents/MacOS/\(executable)")
             try fileManager.createDirectory(
                 at: executableURL.deletingLastPathComponent(), withIntermediateDirectories: true
@@ -39,13 +42,22 @@ struct ReleaseScriptSafetyTests {
         fixture_codesign() {
           local target="${@[-1]}"
           local fault=""
-          [[ "$target" == *.xpc ]] && fault="$SIGNATURE_FAULT"
-          if [[ "$target" == *.bundle && "$SIGNATURE_FAULT" == resource-* ]]; then
-            fault="${SIGNATURE_FAULT#resource-}"
-          fi
+          case "$target" in
+            *KinlogueAssistantBridge.xpc)
+              [[ "$SIGNATURE_FAULT" == bridge-* ]] && fault="${SIGNATURE_FAULT#bridge-}"
+              ;;
+            *.xpc)
+              [[ "$SIGNATURE_FAULT" == bridge-* || "$SIGNATURE_FAULT" == resource-* ]] || fault="$SIGNATURE_FAULT"
+              ;;
+            *.bundle)
+              [[ "$SIGNATURE_FAULT" == resource-* ]] && fault="${SIGNATURE_FAULT#resource-}"
+              ;;
+          esac
           if [[ "$1" == --force ]]; then
             [[ " $* " != *' --deep '* && " $* " == *' --timestamp '* ]]
-            if [[ "$target" == *.xpc ]]; then
+            if [[ "$target" == *KinlogueAssistantBridge.xpc ]]; then
+              [[ " $* " == *' --options runtime '* && " $* " == *'/KinlogueAssistantBridge.entitlements '* ]]
+            elif [[ "$target" == *.xpc ]]; then
               [[ " $* " == *' --options runtime '* && " $* " == *'/KinlogueDICOMDecoderHelper.entitlements '* ]]
             elif [[ "$target" == *.app ]]; then
               [[ " $* " == *' --options runtime '* && " $* " == *'/Kinlogue.entitlements '* ]]
@@ -56,7 +68,9 @@ struct ReleaseScriptSafetyTests {
           elif [[ "$1" == --verify ]]; then
             [[ "$fault" != invalid ]] || return 1
           elif [[ " $* " == *' --entitlements '* ]]; then
-            if [[ "$target" == *.xpc && "$fault" != entitlements ]]; then
+            if [[ "$target" == *KinlogueAssistantBridge.xpc && "$fault" != entitlements ]]; then
+              /bin/cat "$REPO_DIR/packaging/KinlogueAssistantBridge.entitlements"
+            elif [[ "$target" == *.xpc && "$fault" != entitlements ]]; then
               /bin/cat "$REPO_DIR/packaging/KinlogueDICOMDecoderHelper.entitlements"
             else
               /bin/cat "$REPO_DIR/packaging/Kinlogue.entitlements"
@@ -72,6 +86,8 @@ struct ReleaseScriptSafetyTests {
             [[ "$fault" == runtime ]] || print -u2 'CodeDirectory v=20500 size=1 flags=0x10000(runtime)'
             if [[ "$fault" == identifier ]]; then
               print -u2 'Identifier=unexpected.helper'
+            elif [[ "$target" == *KinlogueAssistantBridge.xpc ]]; then
+              print -u2 'Identifier=com.kinlogue.mac.assistant-bridge'
             elif [[ "$target" == *.xpc ]]; then
               print -u2 'Identifier=com.kinlogue.mac.dicom-decoder'
             else
@@ -91,6 +107,8 @@ struct ReleaseScriptSafetyTests {
         for fault in [
             "", "invalid", "adhoc", "team", "timestamp", "runtime", "identifier", "entitlements",
             "resource-adhoc", "resource-team", "resource-timestamp",
+            "bridge-invalid", "bridge-adhoc", "bridge-team", "bridge-timestamp", "bridge-runtime",
+            "bridge-identifier", "bridge-entitlements",
         ] {
             environment["SIGNATURE_FAULT"] = fault
             let result = try run(URL(fileURLWithPath: "/bin/zsh"), ["-c", fixture], environment: environment)
@@ -99,7 +117,7 @@ struct ReleaseScriptSafetyTests {
                 #expect(result.output.split(separator: "\n").filter { $0.hasPrefix("SIGNED:") } == [
                     "SIGNED:DICOMSwift_DicomCore.bundle", "SIGNED:J2KSwift_J2KMetal.bundle",
                     "SIGNED:ZIPFoundation_ZIPFoundation.bundle",
-                    "SIGNED:KinlogueDICOMDecoderHelper.xpc", "SIGNED:Kinlogue.app",
+                    "SIGNED:KinlogueDICOMDecoderHelper.xpc", "SIGNED:KinlogueAssistantBridge.xpc", "SIGNED:Kinlogue.app",
                 ])
             } else {
                 #expect(result.status != 0, "accepted invalid nested signature: \(fault)")
@@ -506,6 +524,43 @@ struct ReleaseScriptSafetyTests {
         let unreviewed = try run(script, [], environment: environment)
         #expect(unreviewed.status != 0)
         #expect(unreviewed.output.contains("checked-in report-like PDF or image"))
+    }
+
+    @Test
+    func privacyGuardRequiresTheMemberChatDisclosureAndRejectsABlanketOfflineClaim() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("kinlogue-privacy-chat-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: root) }
+
+        try makeMinimalPrivacyGuardRepository(at: root)
+        let script = root.appendingPathComponent("scripts/privacy-guard.sh")
+        var environment = ProcessInfo.processInfo.environment
+        environment.removeValue(forKey: "KINLOGUE_FORBIDDEN_VALUES")
+        let current = try run(script, [], environment: environment)
+        #expect(current.status == 0, Comment(rawValue: current.output))
+
+        // Each disclosure must name the feature, say it is not anonymization, and that sending
+        // cannot be taken back.
+        for (file, phrase) in [
+            ("PRIVACY.md", "AI 对话（实验）"), ("PRIVACY.md", "不是匿名化"), ("PRIVACY.md", "发送后无法撤回"),
+            ("README.md", "AI 对话（实验）"), ("README.md", "不是匿名化"),
+        ] {
+            let url = root.appendingPathComponent(file)
+            let original = try String(contentsOf: url, encoding: .utf8)
+            try original.replacingOccurrences(of: phrase, with: "").write(to: url, atomically: true, encoding: .utf8)
+            let result = try run(script, [], environment: environment)
+            #expect(result.status != 0, "accepted \(file) without \(phrase)")
+            #expect(result.output.contains("member chat"))
+            try original.write(to: url, atomically: true, encoding: .utf8)
+        }
+
+        let privacy = root.appendingPathComponent("PRIVACY.md")
+        let original = try String(contentsOf: privacy, encoding: .utf8)
+        try (original + "\n续页不连接互联网或云服务。\n").write(to: privacy, atomically: true, encoding: .utf8)
+        let stale = try run(script, [], environment: environment)
+        #expect(stale.status != 0)
+        #expect(stale.output.contains("stale no-network"))
     }
 
     @Test

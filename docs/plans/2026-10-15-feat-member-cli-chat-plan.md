@@ -5,12 +5,12 @@ date: 2026-10-15
 topic: member-cli-chat
 execution: code
 baseline: main@81c376f
-status: proposed
+status: active
 ---
 
 # 成员对话：接入本机已安装的 Codex CLI
 
-本文是待决策的设计与验收契约，**不是当前能力**。在第 9 节的决策完成、对应单元实现并通过验收之前，[`project-overview.md`](../project-overview.md) 的“当前明确不做”、[`../../PRIVACY.md`](../../PRIVACY.md) 和 [`../../README.md`](../../README.md) 的承诺继续有效。CLI 选项的依据见[来源笔记](../sources/2026-10-15-local-cli-noninteractive-flags.md)，其中标为“未核实”的内容都由 U0 实测。
+本文是设计与验收契约，记录决策与实施单元，**不充当当前能力清单**；当前能力与承诺以 [`../../PRIVACY.md`](../../PRIVACY.md)、[`../../README.md`](../../README.md)、[`project-overview.md`](../project-overview.md) 和[成员对话验收矩阵](../acceptance/member-chat-matrix.md)为准。2026-10-16 状态：第 9 节决策已全部确定，U0–U6 已实现，U7 尚未开始，第 7 节的人工矩阵尚未执行。CLI 选项的依据见[来源笔记](../sources/2026-10-15-local-cli-noninteractive-flags.md)，其中标为“未核实”的内容都由 U0 实测。
 
 2026-10-15 修订：用户决定首版只接入 Codex（D6），并要求设计上能兼容以后保存对话，因此新增第 4.9 节和实施单元 U7；随后用户确定 D8：保存的对话放进主资料库并进入恢复点，同意为此做资料库第一次 schema 迁移（v1→v2）；又确定 D4：U7 在首版之后单独发布；随后 D2、D3、D5、D7 和两个默认值 E1、E2 均按建议确定，只剩 D1 由 U0 决定。U0 已于同日执行（[证据笔记](../sources/2026-10-15-codex-u0-probe-evidence.md)），按约定规则确定 D1 为方案 A，并据实测修订第 4.2、4.3 节。
 
@@ -109,7 +109,7 @@ App 先在本机组好上下文包，用户确认后，把“系统提示词 + �
 
 B 不再作为备选；C 留作“不想复用本机登录”的用户的后续选项。
 
-U2b 实测（[证据笔记](../sources/2026-10-15-codex-u0-probe-evidence.md)）：按上述集合签名的 bridge 在沙盒宿主中运行，本机 Codex 通过能力检查（`network.server` 在沙盒内可监听 127.0.0.1，supervisor 可在沙盒内启动）；例外目录之外的 CLI 报为“不支持的安装位置”。`/usr/local/` 只验证了同一机制，没有真实安装可测；家目录下的 nvm、volta、bun 等位置没有加入例外，在那里安装的 Codex 会报“不支持的安装位置”。npm 安装的 `codex` 是 Node 脚本，解释器要从请求路径所在目录找，PATH 已据此调整。在 U6 一并改写隐私说明和发布门禁之前，bridge 只在 `build-app.sh --with-assistant-bridge` 的开发构建中嵌入。
+U2b 实测（[证据笔记](../sources/2026-10-15-codex-u0-probe-evidence.md)）：按上述集合签名的 bridge 在沙盒宿主中运行，本机 Codex 通过能力检查（`network.server` 在沙盒内可监听 127.0.0.1，supervisor 可在沙盒内启动）；例外目录之外的 CLI 报为“不支持的安装位置”。`/usr/local/` 只验证了同一机制，没有真实安装可测；家目录下的 nvm、volta、bun 等位置没有加入例外，在那里安装的 Codex 会报“不支持的安装位置”。npm 安装的 `codex` 是 Node 脚本，解释器要从请求路径所在目录找，PATH 已据此调整。在 U6 一并改写隐私说明和发布门禁之前，bridge 只在 `build-app.sh --with-assistant-bridge` 的开发构建中嵌入；U6（2026-10-16）起由 `build-app.sh` 默认嵌入，该选项已删除。
 
 
 此外，helper 满足：没有资料库或 App 容器的访问权限；只接受来自本 App 的连接；IPC 只传有界的文本请求、取消指令和事件流，不传路径、命令行参数或环境变量；可执行文件只能是自动发现或用户在设置里选中、且通过第 4.3 节检查的 `codex`。

@@ -51,9 +51,8 @@ final class AssistantSettingsStore {
     }
 }
 
-/// Whether this build carries the bridge. Until the privacy documents describe member chat, only
-/// development builds made with `scripts/build-app.sh --with-assistant-bridge` embed it, and the
-/// App offers the feature only there.
+/// Whether this build carries the bridge. `scripts/build-app.sh` always embeds it; a build without
+/// it, such as one run straight from SwiftPM, does not offer the feature.
 enum AssistantAvailability {
     /// The bridge's product name in `scripts/build-app.sh`.
     static let bridgeProduct = "KinlogueAssistantBridge"

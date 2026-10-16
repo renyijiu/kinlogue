@@ -44,18 +44,42 @@ struct AssistantPackagingBoundaryTests {
     }
 
     @Test
-    func releaseBuildsLeaveTheBridgeOutUnlessAskedAndTheVerifierCoversTheSandbox() throws {
+    func releaseBuildsEmbedTheBridgeAndEveryReleaseGateChecksIt() throws {
         let builder = try text("scripts/build-app.sh")
         let releaseVerifier = try text("scripts/verify-app.sh")
+        let distribution = try text("scripts/package-distribution.sh")
+        let acceptance = try text("scripts/build-acceptance-app.sh")
         let assembler = try text("scripts/assemble-assistant-bridge.sh")
         let sandboxVerifier = try text("scripts/verify-assistant-xpc.sh")
 
-        #expect(builder.contains("WITH_ASSISTANT_BRIDGE=false"))
-        let optIn = try #require(builder.range(of: #"if [[ "$WITH_ASSISTANT_BRIDGE" == true ]]; then"#, options: .backwards))
-        let assembly = try #require(builder.range(of: "scripts/assemble-assistant-bridge.sh"))
-        #expect(optIn.lowerBound < assembly.lowerBound)
-        #expect(!releaseVerifier.contains("--with-assistant-bridge"))
-        #expect(!releaseVerifier.contains("KinlogueAssistantBridge"))
+        // Every build carries the bridge; there is no build without it to ship by mistake.
+        #expect(!builder.contains("WITH_ASSISTANT_BRIDGE"))
+        #expect(!builder.contains("--with-assistant-bridge"))
+        #expect(builder.contains(#"-c release --product "$ASSISTANT_BRIDGE_PRODUCT" -j 2"#))
+        #expect(builder.contains(#""$REPO_DIR/scripts/assemble-assistant-bridge.sh" \"#))
+
+        for token in [
+            #"ASSISTANT_BRIDGE_BUNDLE="$APP_BUNDLE/Contents/XPCServices/KinlogueAssistantBridge.xpc""#,
+            #"[[ "$XPC_SERVICE_COUNT" -eq 2"#,
+            #"EXPECTED_ASSISTANT_BRIDGE_IDENTIFIER="com.kinlogue.mac.assistant-bridge""#,
+            "the signed assistant bridge entitlements differ from packaging/KinlogueAssistantBridge.entitlements",
+            "the assistant bridge executable must contain only arm64",
+            "the main executable contains the assistant CLI runner",
+            "the assistant bridge must not link the SQLite storage kernel",
+            "artifact.assistantBridgeExecutableSHA256",
+            "artifact.assistantBridgeEntitlementsSHA256",
+        ] {
+            #expect(releaseVerifier.contains(token), "verify-app.sh must check: \(token)")
+        }
+        for token in [
+            #"ASSISTANT_BRIDGE_BUNDLE="$APP_BUNDLE/Contents/XPCServices/KinlogueAssistantBridge.xpc""#,
+            #"--entitlements "$REPO_DIR/packaging/KinlogueAssistantBridge.entitlements""#,
+            "Identifier=com.kinlogue.mac.assistant-bridge",
+        ] {
+            #expect(distribution.contains(token), "package-distribution.sh must sign and check: \(token)")
+        }
+        #expect(acceptance.contains("the copied release bundle lost its assistant bridge"))
+        #expect(acceptance.contains(#"/usr/bin/codesign --verify --strict "$TARGET_ASSISTANT_BRIDGE""#))
 
         for token in ["KinlogueAssistantBridge-Info.plist", "codesign --force --sign - --entitlements", "codesign --verify --strict"] {
             #expect(assembler.contains(token))

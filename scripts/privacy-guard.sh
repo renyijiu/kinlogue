@@ -37,7 +37,17 @@ done
   || fail "privacy notice does not disclose ordinary HTTP for LAN receiving"
 /usr/bin/grep -Fq '不把报告或识别结果发送到互联网' PRIVACY.md \
   || fail "privacy notice does not distinguish LAN receiving from external transfer"
-if /usr/bin/grep -E -n -- '没有账号、网络|不包含账号、网络连接|纯本地应用' \
+# Member chat sends report text, through the user's own Codex, to the service Codex signs in to.
+# Both disclosures must name it and its limits, and neither may still claim to be offline.
+for phrase in 'AI 对话（实验）' '不是匿名化' '发送后无法撤回'; do
+  /usr/bin/grep -Fq -- "$phrase" PRIVACY.md \
+    || fail "privacy notice does not disclose member chat: $phrase"
+done
+for phrase in 'AI 对话（实验）' '不是匿名化'; do
+  /usr/bin/grep -Fq -- "$phrase" README.md \
+    || fail "README does not disclose member chat: $phrase"
+done
+if /usr/bin/grep -E -n -- '没有账号、网络|不包含账号、网络连接|纯本地应用|不连接互联网或云服务' \
     README.md PRIVACY.md >/dev/null 2>&1; then
   fail "a stale no-network privacy claim remains"
 fi

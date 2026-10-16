@@ -8,7 +8,7 @@ status: navigation
 
 ## 提议中的计划
 
-- [`2026-10-15-feat-member-cli-chat-plan.md`](2026-10-15-feat-member-cli-chat-plan.md)：针对单个成员、调用使用者本机已登录的 Codex CLI 的只读对话（Claude Code 留待后续），首版不保存对话但按可保存设计。待决策，未实现；与未合入的 `codex/agentrunkit-probe` 分支的关系见计划第 2 节。
+- [`2026-10-15-feat-member-cli-chat-plan.md`](2026-10-15-feat-member-cli-chat-plan.md)：针对单个成员、调用使用者本机已登录的 Codex CLI 的只读对话（Claude Code 留待后续），首版不保存对话但按可保存设计。决策已确定，U0–U6 已实现为默认关闭的“AI 对话（实验）”，U7 保存对话未开始；人工矩阵见[成员对话验收矩阵](../acceptance/member-chat-matrix.md)。与未合入的 `codex/agentrunkit-probe` 分支的关系见计划第 2 节。
 
 ## 实施中的计划
 

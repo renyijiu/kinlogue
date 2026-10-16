@@ -20,6 +20,7 @@
 | DICOM exact 包的进程隔离 | DICOM-Swift 1.5.0 只链接进单独签名、无网络 entitlement、无 Vault-root 权限的 XPC Helper；主 App/Core/Platform 不 import/link `DicomCore`，只通过有界 Foundation IPC contract 交换一个只读 descriptor 与最小 DTO。 | [`2026-08-06-001`](plans/2026-08-06-001-feat-dicom-mri-viewer-plan.md) KTD1–KTD2、[`release 边界探针`](sources/2026-08-07-dicom-swift-1.3.3-release-boundary.md)、[1.5.0 依赖核对](sources/dicom-swift-1.5.0-dependency-review-2026-09-16.md) |
 | DICOM 是受限辅助能力 | DICOM 只帮助保存检查原件和查看明确支持的二维灰度 MR；不扩张为诊断、测量、PACS 或通用影像工作站。 | [`dicom.md`](dicom.md)、[`project-overview.md`](project-overview.md) |
 | 已确认影像只经时间线进入 | 已确认检查与报告共用成员时间线和右栏详情，侧边栏不设“医学影像”导航项；“只看影像”由时间线类型筛选承担。数据层隔离不变：影像仍不进入 OCR、搜索或比较。 | 用户 2026-10-11 决策、[`dicom.md`](dicom.md)、[`design-system.md`](design-system.md) |
+| 成员对话是唯一的外发例外 | 默认关闭。用户开启并按对话确认后，单独签名的沙盒 XPC bridge 启动用户本机已登录的 Codex，只经 stdin 发送一位成员的已确认报告投影与问答；模型没有工具，回答不进入时间线、搜索、比较或导出，对话只在内存。主 App 的 entitlement 不变。 | [成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) D1–D8、E1–E2，[`PRIVACY.md`](../PRIVACY.md) |
 | 首发前 current-only | 项目未公开发布，只支持当前的 SQLite schema 与 ordering policy v2；开发期的 JSON 清单存储、v1/v2 reader/migrator、policy v1 和 predecessor/rollback 路径已删除。除恢复先前由用户明确发起、且已写入有效 durable deletion receipt 的整库删除外，旧开发 Vault、未知版本、未知非空目录和损坏布局继续非破坏性 fail closed；App 不自动迁移、覆盖或删除其字节，用户可在仓库外导出后手工重置。 | 用户 2026-08-12 决策、[`storage.md`](storage.md)、[`dicom.md`](dicom.md) |
 
 ## [2026-09-16] 最低系统调整为 macOS 26
@@ -120,6 +121,27 @@
 
 **验证门禁**：定向测试见 [`log.md`](log.md)。近上限资料库的首页计时对照和合成版式的端到端核对见 [搜索呈现测量](search-presentation-measurement-2026-10-14.md)：除每份列出报告的表格行全部命中的情况外，首页与不做呈现时相差不超过 3 ms。真实报告上抽取出的表格行质量、键盘与 VoiceOver 朗读仍属人工矩阵。
 
+## [2026-10-16] 成员对话：经用户本机 Codex 的外发例外
+
+**问题**：用户希望按家庭成员用对话方式了解和询问其资料（2026-10-15）。这要把报告内容发给模型服务，与“不连接互联网或云服务”的承诺冲突；还要决定外部 CLI 在哪个进程运行、发送什么、何时同意，以及回答能说什么。
+
+**选择**（用户 2026-10-15 确定计划第 9 节的 D1–D8、E1–E2；2026-10-16 要求按计划继续 U6，包括默认把 bridge 放进构建）：
+
+- 外发只经用户本机已安装并登录的 Codex，续页不内置模型服务或密钥；功能默认关闭，在设置中开启。首版只做 Codex（D6）。
+- 方案 A（D1）：单独签名、启用 App Sandbox 的 XPC bridge，加 `network.client`、本机回环 listener、`~/.codex/` 读写和 `/opt/homebrew/`、`/usr/local/` 只读例外；主 App 的 entitlement 不变。
+- 模型没有工具，只发送事先组好、可逐字预览的上下文包（D2）；同意按对话计，CLI、模型或上下文包变化即失效（D3）；机构名称默认不发送（D7）。
+- 允许按时间描述性地排列同一项目的原文结果并逐条引用，不做好转、恶化或正常与否的判断（D5）。这是与“当前不做趋势分析”的边界：排列原文属于呈现，判断属于趋势分析。
+- 只支持 Codex 自己登录的 OpenAI 账号，不加载用户的 Codex 配置（E2）；代理变量在设置中填写（E1），界面首版只提供一个代理地址字段，同时写入 `HTTPS_PROXY` 与 `HTTP_PROXY`。
+- 首版不保存对话（D4）；保存对话与资料库 v1→v2 迁移在 U7 单独发布（D8）。
+
+**未选择的替代方案**：主 App 直接启动 CLI——子进程继承主 App 的沙盒，读不到登录、没有出站网络，给主 App 加例外又会扩大主进程权限；非沙盒 helper（方案 B）——行为最可预测，但 helper 不受沙盒约束；内置锁定版本的 Codex 并自做授权（方案 C）——不复用用户已有登录，体积约 247 MB；反向 MCP 桥接（方案 D）——对话不在 App 内，外部进程要读 App 容器；让模型按需调用工具读取资料——D2 否决。
+
+**影响的代码/文档**：`Sources/KinlogueAssistant*/`、`KinlogueCore/Assistant`、`KinloguePlatform/Assistant`、App 的 `AssistantService`、对话与设置模型和界面；[`packaging/KinlogueAssistantBridge.entitlements`](../packaging/KinlogueAssistantBridge.entitlements)；`build-app.sh`、`verify-app.sh`、`package-distribution.sh`、`build-acceptance-app.sh`、`privacy-guard.sh`、`verify-assistant-xpc.sh`；README、PRIVACY、[`privacy-and-security.md`](privacy-and-security.md)、[`project-overview.md`](project-overview.md)、[`architecture.md`](architecture.md)、[`design-system.md`](design-system.md)、[`localization.md`](localization.md)、[`testing-and-release.md`](testing-and-release.md)、[`brand.md`](brand.md)、`AGENTS.md` 和[成员对话验收矩阵](acceptance/member-chat-matrix.md)。
+
+**迁移/回滚要求**：没有持久化变化，对话只在内存，设置在 App 偏好的 `assistant.*` 键；回滚只需撤回代码与发布门禁。已经发送给服务方的内容不能因回滚而撤回。
+
+**验证门禁**：自动化与未执行的人工门禁见[成员对话验收矩阵](acceptance/member-chat-matrix.md)。经真实 Codex 的完整一轮、第 3.2 节回答边界的人工检查，以及 Developer ID 与公证下 temporary exception 的表现，都还没有执行。
+
 ## 已被 supersede 的早期决策
 
 [`2026-08-01-001-feat-kinlogue-macos-vault-plan.md`](plans/2026-08-01-001-feat-kinlogue-macos-vault-plan.md) 早期计划曾以“加密 Vault、Keychain、加密 backup/restore”为 MVP 方向；它已被明文 MVP 计划的 `supersedes` 字段覆盖。它仍然保留 threat model、早期 target 规划和未来安全升级的背景，但不能作为当前代码或隐私文案的事实来源。
@@ -141,7 +163,7 @@
 3. 锁屏、屏保、睡眠、快速用户切换、网络路径变化、退出/唤醒的安装后人工回执。
 4. 真实私有样本 OCR 抽检与键盘/VoiceOver 检查。
 5. 未来是否加入应用层加密、Keychain、可验证明文到加密迁移、备份/恢复或云同步；在决策完成前保持当前边界。
-6. 是否以及如何引入运动数据和模型问答（数据来源、本机或联网、非诊断边界、隐私承诺改写）；在决策完成前，HealthKit、互联网服务、趋势分析和诊断性输出继续属于当前明确不做。待决事项见 [`brand.md`](brand.md)；模型问答第一步的提议方案（首版调用使用者本机已登录的 Codex CLI）见 [成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md)，用户已确定首版只接 Codex，并同意在实现“保存对话”时做资料库第一次 schema 迁移（v1→v2，作为“首发前 current-only”的唯一例外）；其余决策项尚未确认，迁移实施前 current-only 规则不变。
+6. 是否以及如何引入运动数据（数据来源、本机或联网、隐私承诺改写），以及模型问答在首版之后的扩展（U7 保存对话与第一次 schema 迁移、Claude Code、本机模型、按问题检索）。首版成员对话见上面 2026-10-16 的决策和[成员对话验收矩阵](acceptance/member-chat-matrix.md)，其中经真实 Codex 的人工门禁尚未执行。在对应决策完成前，HealthKit、趋势分析和诊断性输出继续属于当前明确不做；其余待决事项见 [`brand.md`](brand.md)。
 
 ## 决策更新规则
 
