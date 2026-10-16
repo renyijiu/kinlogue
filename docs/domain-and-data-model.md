@@ -23,6 +23,9 @@ flowchart LR
   DICOMStudy -. "confirmed only" .-> Member
   DICOMIndex --> Viewable["viewable image instances"]
   DICOMIndex --> Inert["inert retained objects"]
+  Member --> Conversation["AssistantConversation (saved member chat)"]
+  Conversation --> Turn["AssistantTurn"]
+  Turn -. "record ID + revision + projection digest, no FK" .-> Record
 ```
 
 这些对象保存在[资料库](sqlite-storage.md)的各张表里：成员、报告（含详情与搜索投影）、草稿、来源和 OCR 文档各有自己的行，原件是 `originals/` 下的文件，由来源行按稳定 UUID 引用；每个 DICOM study 的保留对象、Series 和可查看 instance 的关系由规范化的四张表闭合。资料库没有整份的领域快照。
@@ -42,6 +45,8 @@ flowchart LR
 | `OCRBlock` | 页码、文本、bounding box、confidence、方法、engine version、block ID | OCR 文档只存来源转录与 provenance，不生成医学结论。 |
 | `DICOMStudy` | 状态、versioned fingerprint、index object ID、权威 attachment ID 集合 | `needsReview` 不得带成员/日期；`confirmed` 必须指向活跃成员和有限日期；不进入 report/OCR 模型。 |
 | `DICOMStudyFingerprint` | 固定 domain/version/count 与排序后的 digest + byte count | 覆盖所有唯一 retained DICOM 原件，包括惰性非影像对象；不使用文件名、原始 UID 或 DICOM 自由文本。 |
+| `AssistantConversation` | 成员、创建/更新时间、生成时的 CLI 种类/版本/模型、提示词版本、最多 20 轮 `AssistantTurn` | 保存在资料库并进入恢复点；随成员删除；每位成员最多 200 段；同意从不保存。回答永远不进入时间线、搜索、比较或原件导出。 |
+| `AssistantTurn` | 序号、问题、回答、完成时间、发送清单（`R#` → 记录 ID、revision、投影摘要） | 只保存完整完成的轮次；`R#` 只在本轮有意义；引用的记录被修改或删除后分别显示“已更新”“已删除”。 |
 | `DICOMStudyIndex` | vault-local UID digest、retained/viewable 分类、Series/instance 顺序、几何和像素布局 | 自描述且独立版本化；index 与 study attachment 集合必须精确相等；惰性对象不出现在可查看 Series 中。 |
 
 `DICOMStudyIndex.orderingPolicyVersion` 只接受并写入 v2：完整 geometry 使用 orientation normal projection，geometry 全缺失时才使用完整 Instance Number，最后才使用 digest/length content identity；file name、path 和 raw UID 不参与。reopen 重新验证持久顺序和 Series geometry/layout，但不静默改写；其他 policy version 均失败关闭。

@@ -123,6 +123,21 @@ private final class FixtureRuntime {
                 })
             try store.close()
             throw FixtureError.invalidCommand
+        case .holdSQLiteMigration:
+            let points = SQLiteMigrationFaultPoint.allCases
+            guard let variant = command.variant, (1...points.count).contains(variant) else {
+                throw FixtureError.invalidCommand
+            }
+            let point = points[variant - 1]
+            let store = try SQLiteLibraryStore(rootURL: FixtureRoot.validate(command.rootPath),
+                migrationFault: { current in
+                    guard current == point else { return false }
+                    FixtureProtocol.write(.init(event: .leaseHeld, ok: true))
+                    _ = readLine(strippingNewline: true)
+                    return true
+                })
+            try store.close()
+            throw FixtureError.invalidCommand
         case .holdSQLiteLANUpload:
             let points: [SQLiteOriginalFaultPoint] = [.afterRegistration, .afterIdentityCommit, .afterRename, .afterLiveCommit]
             guard let variant = command.variant, (1...5).contains(variant) else { throw FixtureError.invalidCommand }
@@ -344,7 +359,7 @@ private enum FixtureRoot {
 
 private enum FixtureOperation: String, Codable {
     case handshake
-    case openSQLite, suspendSQLite, closeSQLite, holdSQLiteOriginal, holdSQLiteInitialization, holdSQLiteLANUpload, holdSQLiteDICOMImport, holdSQLiteLogicalRestore, holdSQLiteLogicalCapture
+    case openSQLite, suspendSQLite, closeSQLite, holdSQLiteOriginal, holdSQLiteInitialization, holdSQLiteMigration, holdSQLiteLANUpload, holdSQLiteDICOMImport, holdSQLiteLogicalRestore, holdSQLiteLogicalCapture
     case barrierPublishBackup
     case release
     case exit

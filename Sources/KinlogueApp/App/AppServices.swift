@@ -13,7 +13,7 @@ struct LiveAppServiceEnvironment: Sendable {
     let lifecycle: LibraryLifecycleCoordinator
     var commitChanges: (@Sendable () -> AsyncStream<LibraryRevision>)? = nil
     /// The reports member chat reads; nil leaves member chat out of the composition.
-    var assistantLibrary: (any AssistantLibraryReading)? = nil
+    var assistantLibrary: (any AssistantLibraryReading & AssistantConversationStoring)? = nil
 
     @concurrent
     static func makeOpened(identity: AppRuntimeIdentity, store: SQLiteLibraryStore,

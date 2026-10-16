@@ -60,7 +60,7 @@ struct AssistantConversationModelTests {
         #expect(model.conversation == nil)
         #expect(model.phase == .needsConsent)
         #expect(model.issue == nil)
-        #expect(await fixture.service.conversations(memberID: fixture.member.id).isEmpty)
+        #expect(try await fixture.service.summaries(memberID: fixture.member.id).isEmpty)
     }
 
     @Test
@@ -184,6 +184,64 @@ struct AssistantConversationModelTests {
         #expect(model.phase == .unavailable)
         #expect(model.issue == .disabled)
         #expect(model.conversation == nil)
+    }
+
+    @Test
+    func theHistoryListsSavedConversationsAndReopensOne() async throws {
+        let fixture = try await AssistantServiceFixture()
+        defer { fixture.close() }
+        let model = AssistantConversationModel(service: fixture.service, settings: { .enabled })
+        await model.open(memberID: fixture.member.id)
+        model.confirm()
+        await model.send("Older question")
+        let older = try #require(model.conversation)
+        model.startNewConversation()
+        await model.send("Newer question")
+        let newer = try #require(model.conversation)
+        #expect(model.history.map(\.id) == [newer.id, older.id])
+        #expect(model.history.map(\.firstQuestion) == ["Newer question", "Older question"])
+
+        await model.selectConversation(older.id)
+        #expect(model.conversation == older)
+        #expect(model.phase == .ready, "the same receiver keeps the consent")
+
+        await model.deleteConversation(older.id)
+        #expect(model.conversation == nil, "the conversation on screen was deleted")
+        #expect(model.history.map(\.id) == [newer.id])
+        #expect(try await fixture.service.conversation(older.id) == nil)
+    }
+
+    @Test
+    func reopeningAMemberShowsTheLatestSavedConversationButAsksForConsentAgain() async throws {
+        let fixture = try await AssistantServiceFixture()
+        defer { fixture.close() }
+        let first = AssistantConversationModel(service: fixture.service, settings: { .enabled })
+        await first.open(memberID: fixture.member.id)
+        first.confirm()
+        await first.send("Saved question")
+        let saved = try #require(first.conversation)
+
+        // As after the App restarts: consent is never stored.
+        let reopened = AssistantConversationModel(service: fixture.service, settings: { .enabled })
+        await reopened.open(memberID: fixture.member.id)
+        #expect(reopened.conversation == saved)
+        #expect(reopened.phase == .needsConsent)
+        #expect(reopened.history.map(\.id) == [saved.id])
+    }
+
+    @Test
+    func turningTheFeatureOffKeepsSavedConversations() async throws {
+        let fixture = try await AssistantServiceFixture()
+        defer { fixture.close() }
+        let model = AssistantConversationModel(service: fixture.service, settings: { .enabled })
+        await model.open(memberID: fixture.member.id)
+        model.confirm()
+        await model.send("Kept question")
+
+        await model.settingsChanged(to: AssistantSettings())
+        #expect(model.conversation == nil)
+        #expect(model.history.isEmpty)
+        #expect(try await fixture.library.repository.assistantConversationSummaries(memberID: fixture.member.id).count == 1)
     }
 }
 

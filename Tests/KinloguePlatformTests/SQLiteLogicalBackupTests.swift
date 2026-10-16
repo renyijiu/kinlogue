@@ -220,7 +220,9 @@ func sqliteLogicalFrozenV1RestoresIntoAppSchemaAndRemainsByteExact() async throw
     #expect(result.memberCount == 1 && result.recordCount == 1 && result.inboxItemCount == 1)
     let after = try await SQLiteLogicalBackupSource(store: store).prepare()
     defer { after.release() }
-    #expect(try after.spool.read(offset: 0, count: after.spool.byteCount) == fixture.stream)
+    // The writer now produces logical version 2: the same records under a version-2 header, with
+    // no conversations. Restore itself checked the library against the version-1 bytes.
+    try expectSameRecordsInVersionTwo(after, as: fixture.stream)
     let records = try after.logicalRecordsForTesting()
     let reportDocument = try #require(records.first { $0.kind == .reportDocument }).decode(BackupLogicalReportDocumentV1.self)
     #expect(reportDocument.document.reviewState?.userNote == "Synthetic review note")
@@ -229,6 +231,25 @@ func sqliteLogicalFrozenV1RestoresIntoAppSchemaAndRemainsByteExact() async throw
     #expect(BackupLogicalKind.reportDocument.maximumCount == 40_000)
     // 4 TiB uses at most 4096 streaming ranges, fitting alongside every legal original.
     #expect(4_096 + BackupLogicalKind.original.maximumCount < BackupFormatLimits.maximumEntryCount)
+}
+
+@Test
+func sqliteLogicalFrozenV2RestoresSavedChatsAndRemainsByteExact() async throws {
+    let fixture = try JSONDecoder().decode(SQLiteLogicalFrozenFixture.self, from: Data(sqliteLogicalV2FrozenJSON.utf8))
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let store = try SQLiteLibraryStore(rootURL: root)
+    defer { try? store.close() }
+    let result = try sqliteRestoreFrozen(fixture, store: store)
+    #expect(result.memberCount == 1 && result.recordCount == 1)
+
+    let id = try #require(UUID(uuidString: "5C1A2B3D-4E5F-4061-8273-9A8B7C6D5E4F"))
+    let conversation = try #require(try await SQLiteReportRepository(store: store).assistantConversation(id))
+    #expect(conversation.turns.map(\.question) == ["Synthetic frozen question"])
+    #expect(conversation.turns[0].sources.map(\.label) == ["R1"])
+    let after = try await SQLiteLogicalBackupSource(store: store).prepare()
+    defer { after.release() }
+    #expect(try after.spool.read(offset: 0, count: after.spool.byteCount) == fixture.stream)
 }
 
 private func sqliteRestoreFrozen(_ fixture: SQLiteLogicalFrozenFixture, store: SQLiteLibraryStore) throws -> SQLiteLogicalValidation {
@@ -453,7 +474,7 @@ func sqliteLogicalFrozenRecoveryStatesAndReplayHistoryRemainPortable() async thr
     _ = try sqliteRestoreFrozen(fixture, store: store)
     let snapshot = try await SQLiteLogicalBackupSource(store: store).prepare()
     defer { snapshot.release() }
-    #expect(try snapshot.spool.read(offset: 0, count: snapshot.spool.byteCount) == fixture.stream)
+    try expectSameRecordsInVersionTwo(snapshot, as: fixture.stream)
     let records = try snapshot.logicalRecordsForTesting()
     let document = try #require(records.first { $0.kind == .reportDocument }).decode(BackupLogicalReportDocumentV1.self)
     #expect(document.document.blocks.count == 1)
@@ -542,4 +563,23 @@ func sqliteLogicalBackupDigestFailureQuarantinesWithoutReadingOriginalTwice(stri
     }
     #expect(store.originalReadMetrics.verifiedReadByteCount - before == UInt64(original.byteCount))
     await #expect(throws: SQLiteLibraryError.damaged) { try await repository.record(record.id) }
+}
+
+/// A version-2 capture of a library restored from a version-1 stream: the same header fields and the
+/// same records, byte for byte, with no conversations.
+private func expectSameRecordsInVersionTwo(_ snapshot: SQLiteLogicalBackupSnapshot, as versionOne: Data,
+                                           sourceLocation: SourceLocation = #_sourceLocation) throws {
+    func parse(_ bytes: Data) throws -> (BackupLogicalHeaderV1, [SQLiteLogicalRecord]) {
+        var records: [SQLiteLogicalRecord] = []
+        let header = try SQLiteLogicalStream.read(byteCount: bytes.count, read: { bytes.subdata(in: $0..<($0 + $1)) }) { records.append($0) }
+        return (header, records)
+    }
+    let (oldHeader, oldRecords) = try parse(versionOne)
+    let (newHeader, newRecords) = try parse(try snapshot.spool.read(offset: 0, count: snapshot.spool.byteCount))
+    #expect(oldHeader.version == 1 && newHeader.version == 2, sourceLocation: sourceLocation)
+    #expect(oldHeader.libraryID == newHeader.libraryID && oldHeader.generation == newHeader.generation
+        && oldHeader.commitID == newHeader.commitID, sourceLocation: sourceLocation)
+    #expect(newRecords.map(\.kind) == oldRecords.map(\.kind), sourceLocation: sourceLocation)
+    #expect(newRecords.map(\.key) == oldRecords.map(\.key), sourceLocation: sourceLocation)
+    #expect(newRecords.map(\.payload) == oldRecords.map(\.payload), sourceLocation: sourceLocation)
 }

@@ -20,8 +20,8 @@
 | DICOM exact 包的进程隔离 | DICOM-Swift 1.5.0 只链接进单独签名、无网络 entitlement、无 Vault-root 权限的 XPC Helper；主 App/Core/Platform 不 import/link `DicomCore`，只通过有界 Foundation IPC contract 交换一个只读 descriptor 与最小 DTO。 | [`2026-08-06-001`](plans/2026-08-06-001-feat-dicom-mri-viewer-plan.md) KTD1–KTD2、[`release 边界探针`](sources/2026-08-07-dicom-swift-1.3.3-release-boundary.md)、[1.5.0 依赖核对](sources/dicom-swift-1.5.0-dependency-review-2026-09-16.md) |
 | DICOM 是受限辅助能力 | DICOM 只帮助保存检查原件和查看明确支持的二维灰度 MR；不扩张为诊断、测量、PACS 或通用影像工作站。 | [`dicom.md`](dicom.md)、[`project-overview.md`](project-overview.md) |
 | 已确认影像只经时间线进入 | 已确认检查与报告共用成员时间线和右栏详情，侧边栏不设“医学影像”导航项；“只看影像”由时间线类型筛选承担。数据层隔离不变：影像仍不进入 OCR、搜索或比较。 | 用户 2026-10-11 决策、[`dicom.md`](dicom.md)、[`design-system.md`](design-system.md) |
-| 成员对话是唯一的外发例外 | 默认关闭。用户开启并按对话确认后，单独签名的沙盒 XPC bridge 启动用户本机已登录的 Codex，只经 stdin 发送一位成员的已确认报告投影与问答；模型没有工具，回答不进入时间线、搜索、比较或导出，对话只在内存。主 App 的 entitlement 不变。 | [成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) D1–D8、E1–E2，[`PRIVACY.md`](../PRIVACY.md) |
-| 首发前 current-only | 项目未公开发布，只支持当前的 SQLite schema 与 ordering policy v2；开发期的 JSON 清单存储、v1/v2 reader/migrator、policy v1 和 predecessor/rollback 路径已删除。除恢复先前由用户明确发起、且已写入有效 durable deletion receipt 的整库删除外，旧开发 Vault、未知版本、未知非空目录和损坏布局继续非破坏性 fail closed；App 不自动迁移、覆盖或删除其字节，用户可在仓库外导出后手工重置。 | 用户 2026-08-12 决策、[`storage.md`](storage.md)、[`dicom.md`](dicom.md) |
+| 成员对话是唯一的外发例外 | 默认关闭。用户开启并按对话确认后，单独签名的沙盒 XPC bridge 启动用户本机已登录的 Codex，只经 stdin 发送一位成员的已确认报告投影与问答；模型没有工具，回答不进入时间线、搜索、比较或导出；对话保存在资料库并进入恢复点。主 App 的 entitlement 不变。 | [成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) D1–D8、E1–E2，[`PRIVACY.md`](../PRIVACY.md) |
+| 首发前 current-only | 项目未公开发布，只支持当前的 SQLite schema 与 ordering policy v2；唯一例外是 schema 版本 1 到 2 的迁移，只为保存成员对话（见下文 2026-10-16）；开发期的 JSON 清单存储、v1/v2 reader/migrator、policy v1 和 predecessor/rollback 路径已删除。除恢复先前由用户明确发起、且已写入有效 durable deletion receipt 的整库删除外，旧开发 Vault、未知版本、未知非空目录和损坏布局继续非破坏性 fail closed；App 不自动迁移、覆盖或删除其字节，用户可在仓库外导出后手工重置。 | 用户 2026-08-12 决策、[`storage.md`](storage.md)、[`dicom.md`](dicom.md) |
 
 ## [2026-09-16] 最低系统调整为 macOS 26
 
@@ -138,9 +138,26 @@
 
 **影响的代码/文档**：`Sources/KinlogueAssistant*/`、`KinlogueCore/Assistant`、`KinloguePlatform/Assistant`、App 的 `AssistantService`、对话与设置模型和界面；[`packaging/KinlogueAssistantBridge.entitlements`](../packaging/KinlogueAssistantBridge.entitlements)；`build-app.sh`、`verify-app.sh`、`package-distribution.sh`、`build-acceptance-app.sh`、`privacy-guard.sh`、`verify-assistant-xpc.sh`；README、PRIVACY、[`privacy-and-security.md`](privacy-and-security.md)、[`project-overview.md`](project-overview.md)、[`architecture.md`](architecture.md)、[`design-system.md`](design-system.md)、[`localization.md`](localization.md)、[`testing-and-release.md`](testing-and-release.md)、[`brand.md`](brand.md)、`AGENTS.md` 和[成员对话验收矩阵](acceptance/member-chat-matrix.md)。
 
-**迁移/回滚要求**：没有持久化变化，对话只在内存，设置在 App 偏好的 `assistant.*` 键；回滚只需撤回代码与发布门禁。已经发送给服务方的内容不能因回滚而撤回。
+**迁移/回滚要求**：首版对话只在内存，设置在 App 偏好的 `assistant.*` 键；保存对话带来的 schema 迁移见下一节。已经发送给服务方的内容不能因回滚而撤回。
 
 **验证门禁**：自动化与未执行的人工门禁见[成员对话验收矩阵](acceptance/member-chat-matrix.md)。2026-10-16 经使用者同意，用真实 Codex 经签名沙盒 bridge 跑了完整一轮和 21 个合成边界问题，回答守住第 3.2 节边界（[来源笔记](sources/2026-10-16-member-chat-real-codex-check.md)）；这次检查发现并修正了沙盒改写 supervisor `HOME` 导致始终“未登录”的问题。App 界面上的人工检查、失败场景，以及 Developer ID 与公证下 temporary exception 的表现仍未执行。
+
+## [2026-10-16] 资料库第一次 schema 迁移：v1 到 v2，只为保存成员对话
+
+**问题**：保存成员对话（计划 U7、D8）要在资料库里加表，而“首发前 current-only”规定只支持当前 schema，未知版本一律失败关闭、不迁移。用户的真实资料库已经是 schema 版本 1。
+
+**选择**（用户 2026-10-15 同意 D8，作为 current-only 的唯一例外；2026-10-16 要求实现 U7）：
+
+- 当前版本为 2；版本 1 只作为迁移输入，其他版本照旧失败关闭、不改写。版本 1 的 DDL 原样冻结在代码里，只用于校验迁移输入。
+- 普通打开时，在单实例 owner 下、普通服务开始之前，先按版本 1 做完整校验，再在单个事务里只新增三张对话表、写 `user_version = 2`、更新 `library_state` 的 schema identity 及该行摘要；不读取、不改写其他行，也不碰原件。提交后按版本 2 重新校验。
+- 恢复点的逻辑流升到版本 2，reader 同时接受版本 1；版本 1 恢复点恢复为没有对话的版本 2 资料库。
+- 迁移只建空表，耗时与资料库大小无关，因此没有单独的“正在升级”启动页，也不自动备份；建议在升级前手动做一次恢复点。
+
+**未选择的替代方案**：单独的对话数据库文件——不需要迁移，但对话和记录不在同一事务里，默认也不进入恢复点；继续只在内存里保存——不满足 D8。
+
+**迁移/回滚要求**：迁移后更早的构建打不开这个资料库（照旧以“格式不受支持”失败关闭、不改写），也读不了版本 2 恢复点。需要回到旧构建时，只能用迁移前的恢复点在旧构建中恢复。
+
+**验证门禁**：[`SQLiteSchemaMigrationTests`](../Tests/KinlogueStorageProcessTests/SQLiteSchemaMigrationTests.swift) 用 2026-10-16 由迁移前代码写出并冻结的版本 1 资料库：已有行逐行不变、`library_state` 只有 identity 与摘要变化、未知版本与带漂移的版本 1 不被改写、四个中断点（含真实进程强退）之后只剩完整的版本 1 或版本 2；两个版本 1 和一个版本 2 冻结逻辑流可以恢复。真实资料库上的迁移没有在测试中执行。
 
 ## 已被 supersede 的早期决策
 

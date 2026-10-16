@@ -42,6 +42,7 @@ struct AssistantPanelView: View {
     let onClose: () -> Void
     @State private var draft = ""
     @State private var isConsentPresented = false
+    @State private var pendingDeletion: UUID?
 
     private static let bottomID = "assistant-bottom"
 
@@ -58,6 +59,20 @@ struct AssistantPanelView: View {
         .onChange(of: model.memberID) {
             draft = ""
             isConsentPresented = false
+            pendingDeletion = nil
+        }
+        .confirmationDialog(
+            AppLocalization.string("删除这段对话？"),
+            isPresented: Binding(get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } })
+        ) {
+            if let id = pendingDeletion {
+                Button(AppLocalization.string("删除对话"), role: .destructive) {
+                    Task { await model.deleteConversation(id) }
+                }
+            }
+            Button(AppLocalization.string("保留"), role: .cancel) {}
+        } message: {
+            Text(AppLocalization.string("对话会从本机资料库中删除；已写入的恢复点仍包含它，已发送给 Codex 服务的内容也不受影响。"))
         }
         .accessibilityIdentifier("assistant-panel")
     }
@@ -78,6 +93,7 @@ struct AssistantPanelView: View {
                     }
                 }
                 Spacer(minLength: 12)
+                historyMenu
                 Button(AppLocalization.string("新对话")) {
                     model.startNewConversation()
                     draft = ""
@@ -112,6 +128,34 @@ struct AssistantPanelView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
+    }
+
+    private var historyMenu: some View {
+        Menu {
+            ForEach(model.history) { summary in
+                Button {
+                    Task { await model.selectConversation(summary.id) }
+                } label: {
+                    if summary.id == model.conversation?.id {
+                        Label(AssistantText.historyTitle(summary), systemImage: "checkmark")
+                    } else {
+                        Text(AssistantText.historyTitle(summary))
+                    }
+                }
+            }
+            if !model.history.isEmpty { Divider() }
+            Button(AppLocalization.string("删除当前对话…"), role: .destructive) {
+                pendingDeletion = model.conversation?.id
+            }
+            .disabled(model.conversation == nil)
+        } label: {
+            Label(AppLocalization.string("历史对话"), systemImage: "clock.arrow.circlepath")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(model.phase == .sending || model.phase == .loading || model.phase == .closed)
+        .help(AppLocalization.string("查看或删除这位成员保存的对话"))
+        .accessibilityIdentifier("assistant-history")
     }
 
     private var summary: AssistantPackSummary? {
@@ -215,13 +259,22 @@ struct AssistantPanelView: View {
                     .padding(.bottom, 10)
                     .accessibilityIdentifier("assistant-issue")
             }
+            if let shown = model.conversation, !model.continuesShownConversation {
+                Text(AssistantText.otherReceiver(shown.provider))
+                    .font(.callout)
+                    .foregroundStyle(KinlogueTheme.onVariant)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 10)
+            }
             Divider()
             if model.phase == .needsConsent {
                 consentPrompt
             } else {
                 composer
             }
-            Text(AppLocalization.string("对话只保存在内存中，退出续页后清除。"))
+            Text(AppLocalization.string("对话保存在本机资料库中，可在“历史对话”里删除。"))
                 .font(.caption)
                 .foregroundStyle(KinlogueTheme.onVariant)
                 .frame(maxWidth: .infinity, alignment: .leading)

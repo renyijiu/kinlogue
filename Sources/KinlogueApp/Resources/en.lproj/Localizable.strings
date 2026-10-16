@@ -198,10 +198,20 @@
 	<string>Slice position</string>
 	<key>切片顺序警告：使用回退顺序</key>
 	<string>Slice order warning: fallback order is in use</string>
+	<key>删除全部对话</key>
+	<string>Delete All Chats</string>
+	<key>删除全部对话…</key>
+	<string>Delete All Chats…</string>
+	<key>删除全部已保存的对话？</key>
+	<string>Delete All Saved Chats?</string>
 	<key>删除家庭成员</key>
 	<string>Delete Family Member</string>
 	<key>删除家庭成员？</key>
 	<string>Delete Family Member?</string>
+	<key>删除对话</key>
+	<string>Delete Chat</string>
+	<key>删除当前对话…</key>
+	<string>Delete This Chat…</string>
 	<key>删除待确认项 %@</key>
 	<string>Delete pending item %@</string>
 	<key>删除所选…</key>
@@ -220,6 +230,8 @@
 	<string>Delete Library</string>
 	<key>删除这条记录？</key>
 	<string>Delete This Record?</string>
+	<key>删除这段对话？</key>
+	<string>Delete This Chat?</string>
 	<key>删除这项医学影像检查？</key>
 	<string>Delete This Imaging Study?</string>
 	<key>删除这项影像检查…</key>
@@ -242,6 +254,8 @@
 	<string>Hospital</string>
 	<key>单个恢复点估算</key>
 	<string>Estimated per restore point</string>
+	<key>历史对话</key>
+	<string>History</string>
 	<key>压缩包位于续页资料库之外，请妥善保管。</key>
 	<string>The ZIP is outside the Kinlogue library. Keep it secure.</string>
 	<key>压缩包验证失败，未发布不完整的导出。</key>
@@ -318,8 +332,8 @@
 	<string>Only supported local 2D MR slices are shown. Images are not included in OCR, search, or comparison.</string>
 	<key>只有已确认记录可以比较</key>
 	<string>Only confirmed records can be compared</string>
-	<key>只有没有关联记录或草稿时才能删除；否则请先重分配或逐条删除关联内容。</key>
-	<string>A family member can be deleted only when no records or drafts are linked. Reassign or delete linked items first.</string>
+	<key>只有没有关联记录或草稿时才能删除；否则请先重分配或逐条删除关联内容。这位成员保存的 AI 对话会一并删除。</key>
+	<string>A family member can be deleted only when no records or drafts are linked. Reassign or delete linked items first. This member's saved AI chats are deleted with it.</string>
 	<key>只校正原报告印出的高低或箭头标记，不会按数值推断。</key>
 	<string>Correct only high, low, or arrow markings printed in the original report. Values are never interpreted.</string>
 	<key>只确认归属成员与检查日期；续页不会从影像推断诊断或结论。</key>
@@ -432,8 +446,12 @@
 	<string>Family Timeline</string>
 	<key>对话</key>
 	<string>Chat</string>
-	<key>对话只保存在内存中，退出续页后清除。</key>
-	<string>Chats are kept in memory only and are cleared when you quit Kinlogue.</string>
+	<key>对话会从本机资料库中删除；已写入的恢复点仍包含它，已发送给 Codex 服务的内容也不受影响。</key>
+	<string>The chat is deleted from the library on this Mac. Restore points already written still contain it, and what was sent to the Codex service is not affected.</string>
+	<key>对话保存在本机资料库中，可在“历史对话”里删除。</key>
+	<string>Chats are saved in the library on this Mac and can be deleted under History.</string>
+	<key>对话和报告一样以明文保存在本机资料库中，并随加密恢复点备份；删除成员时一并删除。关闭 AI 对话不会删除它们。</key>
+	<string>Like reports, chats are saved unencrypted in the library on this Mac and included in encrypted restore points. They are deleted with their member. Turning off AI chat does not delete them.</string>
 	<key>对话组件不可用，请重新启动续页后再试。</key>
 	<string>The chat component is unavailable. Restart Kinlogue and try again.</string>
 	<key>导入 DICOM 文件夹并确认家庭成员与检查日期后，会显示在这里。</key>
@@ -486,6 +504,8 @@
 	<string>Organize originals from confirmed reports and medical images into one ZIP by family member and date.</string>
 	<key>尚无已验证的本地恢复点</key>
 	<string>No locally verified restore point yet</string>
+	<key>尚无问题</key>
+	<string>No question yet</string>
 	<key>尚未巡检</key>
 	<string>Not inspected</string>
 	<key>尚未巡检，等待空闲时开始</key>
@@ -508,6 +528,8 @@
 	<string>Left</string>
 	<key>已作为 1 份报告加入待确认。</key>
 	<string>Added as one report for review.</string>
+	<key>已保存的对话</key>
+	<string>Saved chats</string>
 	<key>已停止这次回答。</key>
 	<string>This answer was stopped.</string>
 	<key>已关闭比较并释放原件</key>
@@ -644,6 +666,8 @@
 	<string>My Notes (Optional)</string>
 	<key>我确认当前是可信任的私人局域网</key>
 	<string>I confirm this is a trusted private local network</string>
+	<key>所有成员保存的对话都会从本机资料库中删除；已写入的恢复点仍包含它们，已发送给 Codex 服务的内容也不受影响。</key>
+	<string>Every member's saved chats are deleted from the library on this Mac. Restore points already written still contain them, and what was sent to the Codex service is not affected.</string>
 	<key>所选位置没有足够空间完成备份。</key>
 	<string>The selected location does not have enough space to finish the backup.</string>
 	<key>所选位置没有足够空间完成导出。</key>
@@ -908,6 +932,8 @@
 	<string>Review and Confirm…</string>
 	<key>查看影像</key>
 	<string>View Images</string>
+	<key>查看或删除这位成员保存的对话</key>
+	<string>View or delete this member's saved chats</string>
 	<key>查看手机接收状态</key>
 	<string>View Phone Receiving Status</string>
 	<key>查看第 %lld 个原件</key>
@@ -1024,8 +1050,8 @@
 	<string>You selected this date manually. It is explicitly marked as manual entry.</string>
 	<key>此阶段可以取消；当前资料库不会被替换。</key>
 	<string>You can cancel at this stage; the current library will not be replaced.</string>
-	<key>每次对话发送前都会列出将要发送的内容并请你确认。对话只保存在内存中，退出续页后清除。</key>
-	<string>Before each chat sends anything, Kinlogue lists what will be sent and asks you to confirm. Chats are kept in memory only and are cleared when you quit Kinlogue.</string>
+	<key>每次对话发送前都会列出将要发送的内容并请你确认。</key>
+	<string>Before each chat sends anything, Kinlogue lists what will be sent and asks you to confirm.</string>
 	<key>每秒 %lld 张</key>
 	<string>%lld slices per second</string>
 	<key>比较</key>
@@ -1326,6 +1352,8 @@
 	<string>This replaces rather than merges the current library and removes local backup settings. External restore points are kept.</string>
 	<key>这会移除本机保存的未完成备份身份。已有外部文件不会被删除；之后可以选择目录并生成新的恢复码。</key>
 	<string>This removes the incomplete backup identity saved on this Mac. Existing external files are not deleted; afterward, you can choose a folder and generate a new recovery code.</string>
+	<key>这位成员保存的对话已达上限，请先在“历史对话”中删除一些。</key>
+	<string>This member already keeps the most saved chats allowed. Delete some under History first.</string>
 	<key>这位成员已归档，不能开始对话。</key>
 	<string>This member is archived, so a chat cannot start.</string>
 	<key>这位成员还没有已确认的报告，暂时没有可以对话的内容。</key>
@@ -1340,6 +1368,8 @@
 	<string>This record was updated in another window. Reloading the latest version will replace unsaved edits on this page.</string>
 	<key>这次对话已达到轮数上限，请开始新对话。</key>
 	<string>This chat has reached its turn limit. Start a new chat.</string>
+	<key>这段对话由 %@ 生成；继续提问将开始一段新的对话。</key>
+	<string>This chat came from %@; a new question starts a new chat.</string>
 	<key>这组影像超出当前支持范围</key>
 	<string>This image set is outside the currently supported range</string>
 	<key>这里会显示已确认字段和原件。</key>

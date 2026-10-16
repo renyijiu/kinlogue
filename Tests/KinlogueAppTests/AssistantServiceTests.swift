@@ -50,7 +50,28 @@ struct AssistantServiceTests {
         #expect(requests[1].input.contains("<conversation>"))
         #expect(requests[1].input.contains("空腹血糖是多少？"))
         #expect(!requests.contains { $0.input.contains("Synthetic member") })
-        #expect(await fixture.service.conversations(memberID: fixture.member.id) == [second])
+        #expect(try await fixture.service.summaries(memberID: fixture.member.id).map(\.id) == [second.id])
+        #expect(try await fixture.service.conversation(second.id) == second)
+    }
+
+    @Test
+    func savedConversationsOutliveTheServiceAndCanBeDeleted() async throws {
+        let fixture = try await AssistantServiceFixture()
+        defer { fixture.close() }
+        let (pack, consent) = try await fixture.consentedPack()
+        let first = try await fixture.service.send("First", conversationID: nil, pack: pack, consent: consent, settings: .enabled)
+        let second = try await fixture.service.send("Second", conversationID: nil, pack: pack, consent: consent, settings: .enabled)
+
+        // A new service on the same library, as after the App restarts.
+        let restarted = LiveAssistantService(library: fixture.library.repository, store: fixture.library.repository,
+                                             lifecycle: LibraryLifecycleCoordinator(), makeBackend: { _ in fixture.backend })
+        #expect(try await restarted.summaries(memberID: fixture.member.id).map(\.id) == [second.id, first.id])
+        #expect(try await restarted.conversation(first.id) == first)
+
+        try await restarted.deleteConversation(first.id)
+        #expect(try await restarted.summaries(memberID: fixture.member.id).map(\.id) == [second.id])
+        try await restarted.deleteAllConversations()
+        #expect(try await restarted.summaries(memberID: fixture.member.id).isEmpty)
     }
 
     @Test
@@ -98,7 +119,7 @@ struct AssistantServiceTests {
         await #expect(throws: AssistantServiceError.invalidQuestion) {
             _ = try await fixture.service.send("  ", conversationID: nil, pack: pack, consent: consent, settings: .enabled)
         }
-        #expect(await fixture.service.conversations(memberID: fixture.member.id).isEmpty)
+        #expect(try await fixture.service.summaries(memberID: fixture.member.id).isEmpty)
     }
 
     @Test
@@ -118,7 +139,7 @@ struct AssistantServiceTests {
     }
 
     @Test
-    func revocationCancelsTheTurnClearsConversationsAndRefusesMore() async throws {
+    func revocationCancelsTheTurnAndRefusesMoreWithoutWriting() async throws {
         let fixture = try await AssistantServiceFixture()
         defer { fixture.close() }
         let (pack, consent) = try await fixture.consentedPack()
@@ -131,7 +152,11 @@ struct AssistantServiceTests {
         await fixture.lifecycle.revoke()
 
         await #expect(throws: AssistantServiceError.self) { _ = try await turn.value }
-        #expect(await fixture.service.conversations(memberID: fixture.member.id).isEmpty)
+        // The library is being deleted or replaced: revocation stops the service but writes nothing.
+        #expect(try await fixture.library.repository.assistantConversationSummaries(memberID: fixture.member.id).count == 1)
+        await #expect(throws: AssistantServiceError.libraryUnavailable) {
+            _ = try await fixture.service.summaries(memberID: fixture.member.id)
+        }
         await #expect(throws: AssistantServiceError.libraryUnavailable) {
             _ = try await fixture.service.send("Q", conversationID: nil, pack: pack, consent: consent, settings: .enabled)
         }
@@ -172,7 +197,6 @@ struct AssistantServiceFixture {
     let library: AssistantAppLibrary
     let lifecycle = LibraryLifecycleCoordinator()
     let backend = FakeAssistantBackend()
-    let store = InMemoryAssistantConversationStore()
     let service: LiveAssistantService
     let member: FamilyMember
 
@@ -180,7 +204,7 @@ struct AssistantServiceFixture {
         library = try AssistantAppLibrary()
         let backend = self.backend
         service = LiveAssistantService(
-            library: library.repository, store: store, lifecycle: lifecycle, makeBackend: { _ in backend }
+            library: library.repository, store: library.repository, lifecycle: lifecycle, makeBackend: { _ in backend }
         )
         member = try await library.member("Synthetic member")
         _ = try await library.confirmed(member, day: 1, results: "Glucose\t5.1")

@@ -1265,16 +1265,6 @@
         }
       }
     },
-    "只有没有关联记录或草稿时才能删除；否则请先重分配或逐条删除关联内容。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "A family member can be deleted only when no records or drafts are linked. Reassign or delete linked items first."
-          }
-        }
-      }
-    },
     "只校正原报告印出的高低或箭头标记，不会按数值推断。": {
       "localizations": {
         "en": {
@@ -6731,16 +6721,6 @@
         }
       }
     },
-    "对话只保存在内存中，退出续页后清除。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chats are kept in memory only and are cleared when you quit Kinlogue."
-          }
-        }
-      }
-    },
     "可以这样问": {
       "localizations": {
         "en": {
@@ -7047,16 +7027,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "AI Chat (Experimental)"
-          }
-        }
-      }
-    },
-    "每次对话发送前都会列出将要发送的内容并请你确认。对话只保存在内存中，退出续页后清除。": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Before each chat sends anything, Kinlogue lists what will be sent and asks you to confirm. Chats are kept in memory only and are cleared when you quit Kinlogue."
           }
         }
       }
@@ -7757,6 +7727,208 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ was not among the reports sent"
+          }
+        }
+      }
+    },
+    "%@ · %@ · %lld 轮": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ · %2$@ · %3$lld turn"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ · %2$@ · %3$lld turns"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "删除全部对话": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete All Chats"
+          }
+        }
+      }
+    },
+    "删除全部对话…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete All Chats…"
+          }
+        }
+      }
+    },
+    "删除全部已保存的对话？": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete All Saved Chats?"
+          }
+        }
+      }
+    },
+    "删除对话": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Chat"
+          }
+        }
+      }
+    },
+    "删除当前对话…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete This Chat…"
+          }
+        }
+      }
+    },
+    "删除这段对话？": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete This Chat?"
+          }
+        }
+      }
+    },
+    "历史对话": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "History"
+          }
+        }
+      }
+    },
+    "只有没有关联记录或草稿时才能删除；否则请先重分配或逐条删除关联内容。这位成员保存的 AI 对话会一并删除。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A family member can be deleted only when no records or drafts are linked. Reassign or delete linked items first. This member's saved AI chats are deleted with it."
+          }
+        }
+      }
+    },
+    "对话会从本机资料库中删除；已写入的恢复点仍包含它，已发送给 Codex 服务的内容也不受影响。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The chat is deleted from the library on this Mac. Restore points already written still contain it, and what was sent to the Codex service is not affected."
+          }
+        }
+      }
+    },
+    "对话保存在本机资料库中，可在“历史对话”里删除。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chats are saved in the library on this Mac and can be deleted under History."
+          }
+        }
+      }
+    },
+    "对话和报告一样以明文保存在本机资料库中，并随加密恢复点备份；删除成员时一并删除。关闭 AI 对话不会删除它们。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Like reports, chats are saved unencrypted in the library on this Mac and included in encrypted restore points. They are deleted with their member. Turning off AI chat does not delete them."
+          }
+        }
+      }
+    },
+    "尚无问题": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No question yet"
+          }
+        }
+      }
+    },
+    "已保存的对话": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved chats"
+          }
+        }
+      }
+    },
+    "所有成员保存的对话都会从本机资料库中删除；已写入的恢复点仍包含它们，已发送给 Codex 服务的内容也不受影响。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every member's saved chats are deleted from the library on this Mac. Restore points already written still contain them, and what was sent to the Codex service is not affected."
+          }
+        }
+      }
+    },
+    "查看或删除这位成员保存的对话": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View or delete this member's saved chats"
+          }
+        }
+      }
+    },
+    "每次对话发送前都会列出将要发送的内容并请你确认。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Before each chat sends anything, Kinlogue lists what will be sent and asks you to confirm."
+          }
+        }
+      }
+    },
+    "这位成员保存的对话已达上限，请先在“历史对话”中删除一些。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This member already keeps the most saved chats allowed. Delete some under History first."
+          }
+        }
+      }
+    },
+    "这段对话由 %@ 生成；继续提问将开始一段新的对话。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This chat came from %@; a new question starts a new chat."
           }
         }
       }

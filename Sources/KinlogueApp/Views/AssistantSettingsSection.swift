@@ -7,6 +7,7 @@ import SwiftUI
 struct AssistantSettingsSection: View {
     @ObservedObject var settings: AssistantSettingsModel
     let controlColumnWidth: CGFloat
+    @State private var isDeleteAllPresented = false
 
     var body: some View {
         if settings.isAvailable {
@@ -49,8 +50,10 @@ struct AssistantSettingsSection: View {
                         Divider()
                         fields
                     }
+                    Divider()
+                    savedConversations
 
-                    Text(AppLocalization.string("每次对话发送前都会列出将要发送的内容并请你确认。对话只保存在内存中，退出续页后清除。"))
+                    Text(AppLocalization.string("每次对话发送前都会列出将要发送的内容并请你确认。"))
                         .font(.caption)
                         .foregroundStyle(KinlogueTheme.onVariant)
                         .fixedSize(horizontal: false, vertical: true)
@@ -59,6 +62,42 @@ struct AssistantSettingsSection: View {
                 .kinloguePanel(.card)
             }
             .task { await settings.checkIfNeeded() }
+        }
+    }
+
+    private var savedConversations: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 24) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(AppLocalization.string("已保存的对话"))
+                        .font(.headline)
+                        .foregroundStyle(KinlogueTheme.onSurface)
+                    Text(AppLocalization.string("对话和报告一样以明文保存在本机资料库中，并随加密恢复点备份；删除成员时一并删除。关闭 AI 对话不会删除它们。"))
+                        .foregroundStyle(KinlogueTheme.onVariant)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 24)
+                Button(AppLocalization.string("删除全部对话…"), role: .destructive) {
+                    isDeleteAllPresented = true
+                }
+                .buttonStyle(.kinlogueDestructive)
+                .disabled(settings.isDeletingConversations)
+                .fixedSize()
+                .frame(width: controlColumnWidth, alignment: .trailing)
+                .accessibilityIdentifier("assistant-settings-delete-all")
+            }
+            if let issue = settings.deletionIssue {
+                KinlogueStatusLabel(issue.message(), tone: .danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .confirmationDialog(AppLocalization.string("删除全部已保存的对话？"), isPresented: $isDeleteAllPresented) {
+            Button(AppLocalization.string("删除全部对话"), role: .destructive) {
+                Task { await settings.deleteAllConversations() }
+            }
+            Button(AppLocalization.string("保留"), role: .cancel) {}
+        } message: {
+            Text(AppLocalization.string("所有成员保存的对话都会从本机资料库中删除；已写入的恢复点仍包含它们，已发送给 Codex 服务的内容也不受影响。"))
         }
     }
 

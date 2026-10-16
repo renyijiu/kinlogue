@@ -23,7 +23,7 @@
 
 ### 保护对象
 
-报告原件、成员资料、OCR blocks、人工修正、搜索字段、source references、LAN inbox 的原件与预处理结果、记录之间的引用关系和可推断的存在性信息；成员对话开启后，还包括发送给 Codex 的上下文包、问题与回答。
+报告原件、成员资料、OCR blocks、人工修正、搜索字段、source references、LAN inbox 的原件与预处理结果、记录之间的引用关系和可推断的存在性信息；成员对话开启后，还包括发送给 Codex 的上下文包，以及保存在资料库里的问题与回答。
 
 ### 当前纳入的风险
 
@@ -68,7 +68,8 @@
 - `DICOMImportModel` / `DICOMStudyReviewModel` / `DICOMLibraryModel` / `DICOMStudyViewerModel`：用户界面只显示检查状态、用户确认的成员/日期、modality、尺寸、切片/Series 与 inert-object 聚合状态，不展示或记录文件名、路径、原始 UID 或 DICOM 自由文本。确认后的检查只把日期、成员和对象数量等检查级摘要投影到成员时间线；DICOM 原件、自由文本和像素仍不进入报告 OCR、搜索或比较。Viewer canvas 为当前帧保留一份有界的拥有式内存快照，不写预览/截图；App registry 在单 study 删除、外部删除刷新或 whole-Vault revoke 时先让所有目标窗口同步清空像素/失效请求，再等待 slice service close 并关闭窗口。普通关闭、Series 切换或 memory pressure 同样会使对应旧结果/handle 失效。
 
 - `AssistantContextPackBuilder` / `SQLiteReportRepository.assistantPack`：只取一位成员的已确认报告，最新最多 20 份、正文合计不超过 60,000 字节，每份不超过 12,000 字节并标注截断；不含姓名、备注、文件名、原件或记录 ID，机构名称默认不放入；报告文字中能闭合输入标签的 `<` 会被转义。
-- `LiveAssistantService` / `AssistantConversationModel`：同意绑定上下文包指纹、CLI 版本、模型和提示词版本，只在内存里；每轮发送前重查 CLI 状态并核对指纹；每轮在 `LibraryLifecycleCoordinator.withActiveOperation` 内运行，整库删除或恢复会先撤销服务、取消进行中的一轮并清空对话。
+- `SQLiteAssistantRows`：对话、轮次与发送清单逐行带字段分隔摘要，读取时整段核对；完整性巡检把对话作为独立目标。
+- `LiveAssistantService` / `AssistantConversationModel`：同意绑定上下文包指纹、CLI 版本、模型和提示词版本，只在内存里，重新打开已保存的对话后第一次发送仍要确认；每轮发送前重查 CLI 状态并核对指纹；每轮在 `LibraryLifecycleCoordinator.withActiveOperation` 内运行，整库删除或恢复会先撤销服务、取消进行中的一轮并清空对话。
 - `KinlogueAssistantBridge.xpc` / `CodexBridge` / `CLISupervisor`：bridge 以固定参数启动 Codex（`exec --json --ephemeral --ignore-user-config --ignore-rules --strict-config --sandbox read-only`，关闭会话历史、分析、遥测、网页搜索和子代理（agents），未列入白名单的功能逐个禁用，并改写模型目录去掉工具字段）；输入只走 stdin；环境变量只有 `HOME`（真实家目录）、`USER`、`LOGNAME`、`PATH`、`LANG`、`LC_ALL`、每轮私有的 `TMPDIR` 和用户设置的代理变量，每轮的工作目录与临时目录用后删除。App Sandbox 会把沙盒 supervisor 自己的 `HOME` 与 `TMPDIR` 改成容器路径，因此这些变量以 `KINLOGUE_CLI_ENV_` 前缀交给 supervisor，由它重建 CLI 的环境。能力检查对本机回环模拟服务发一次请求，确认工具数为零、只有两条消息、模型一致、`store` 为 false 且不含本机路径，结果按可执行文件和模型缓存。子进程在独立进程组中运行，首字节 10 秒、整轮 180 秒超时，输出上限 2 MiB；`--supervise` 进程在 bridge 退出时结束整组。IPC 只传有界文本 DTO，不传文件句柄、记录 ID 或成员名。
 
 这些保护主要解决“意外损坏、错误状态、资源滥用和错误路径写入”；它们不把明文文件变成加密文件。
@@ -96,7 +97,7 @@
 - 已发布的导出 ZIP 位于用户选择的位置，已经离开 Vault 生命周期；Vault destroy 不删除、跟踪或安全擦除它。用户界面必须在导出前说明这是未加密副本且不能恢复资料库。
 - 已发布的 `.kinloguebackup` 同样位于外部 repository；Vault destroy 或 restore 不删除它。retention 只处理当前 backup set 中经过认证、完整验证并满足 24 小时连续观察的恢复点，且不承诺第三方客户端远端已经上传或删除。
 - 删除失败或发生部分删除时，receipt/quarantine 让后续运行只继续处理已验证的同一目标，不能借路径替换删除另一个 Vault。
-- 成员对话只保存在内存中：关闭功能、整库删除或恢复、退出 App 时清空，并取消进行中的一轮；首版不写入资料库或恢复点。已经发送给服务方的内容不受续页的任何删除影响。
+- 成员对话保存在资料库的三张 STRICT 表里（schema 版本 2），与报告一样是明文，并进入加密恢复点。删除一段对话、删除成员（同一事务）、整库删除与恢复都在既有生命周期内完成；一轮与它的保存是同一个 active operation，整库删除或恢复会先取消它。关闭功能只停止进行中的一轮，不删除已保存的对话。已经发送给服务方的内容不受续页的任何删除影响。
 
 ## Agent 和测试禁区
 

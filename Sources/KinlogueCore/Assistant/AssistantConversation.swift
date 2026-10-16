@@ -193,8 +193,8 @@ package struct AssistantTurn: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-/// One member's conversation with one CLI and model. The first version keeps it in memory only;
-/// every field is what a saved conversation would store, and consent is never part of it.
+/// One member's conversation with one CLI and model, saved in the library as it grows. Consent is
+/// never part of it.
 package struct AssistantConversation: Codable, Hashable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id
@@ -227,7 +227,8 @@ package struct AssistantConversation: Codable, Hashable, Identifiable, Sendable 
         )
     }
 
-    private init(
+    /// A whole conversation, as read back from storage; the same checks as decoding.
+    package init(
         id: UUID,
         memberID: UUID,
         createdAt: Date,
@@ -290,5 +291,41 @@ package struct AssistantConversation: Codable, Hashable, Identifiable, Sendable 
             kept.append(turn)
         }
         return (kept.reversed(), turns.count - kept.count)
+    }
+}
+
+/// What the history list shows of a saved conversation without reading its turns.
+package struct AssistantConversationSummary: Hashable, Identifiable, Sendable {
+    /// How much of the first question the list shows.
+    package static let firstQuestionCharacters = 120
+
+    package let id: UUID
+    package let memberID: UUID
+    package let createdAt: Date
+    package let updatedAt: Date
+    package let provider: AssistantProviderDescriptor
+    package let turnCount: Int
+    /// The beginning of the first question; nil before the first turn.
+    package let firstQuestion: String?
+
+    package init(
+        id: UUID, memberID: UUID, createdAt: Date, updatedAt: Date, provider: AssistantProviderDescriptor,
+        turnCount: Int, firstQuestion: String?
+    ) {
+        self.id = id
+        self.memberID = memberID
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.provider = provider
+        self.turnCount = turnCount
+        self.firstQuestion = firstQuestion.map { String($0.prefix(Self.firstQuestionCharacters)) }
+    }
+
+    package init(_ conversation: AssistantConversation) {
+        self.init(
+            id: conversation.id, memberID: conversation.memberID, createdAt: conversation.createdAt,
+            updatedAt: conversation.updatedAt, provider: conversation.provider, turnCount: conversation.turns.count,
+            firstQuestion: conversation.turns.first?.question
+        )
     }
 }

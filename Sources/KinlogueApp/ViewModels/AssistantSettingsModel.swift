@@ -32,6 +32,9 @@ final class AssistantSettingsModel: ObservableObject {
     /// A check that could not run at all, such as settings the bridge refuses.
     @Published private(set) var checkIssue: AssistantIssue?
     @Published private(set) var isChecking = false
+    @Published private(set) var isDeletingConversations = false
+    /// Why deleting every saved conversation failed, if it did.
+    @Published private(set) var deletionIssue: AssistantIssue?
     let isAvailable: Bool
 
     private let store: AssistantSettingsStore
@@ -99,6 +102,20 @@ final class AssistantSettingsModel: ObservableObject {
             guard generation == self.generation else { return }
             status = nil
             checkIssue = (error as? AssistantServiceError) == .disabled ? .disabled : .invalidSettings
+        }
+    }
+
+    /// Deletes every member's saved conversations. The open conversation learns of it through the
+    /// library's commit.
+    func deleteAllConversations() async {
+        guard !isDeletingConversations else { return }
+        isDeletingConversations = true
+        defer { isDeletingConversations = false }
+        do {
+            try await service.deleteAllConversations()
+            deletionIssue = nil
+        } catch {
+            deletionIssue = (error as? AssistantServiceError) == .libraryUnavailable ? .libraryUnavailable : .storage
         }
     }
 

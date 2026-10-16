@@ -26,10 +26,11 @@ package struct SQLiteLibraryState: Equatable, Sendable {
     package let generation: Int64
     package let commitID: UUID
 
-    var contentHash: Data {
+    var contentHash: Data { contentHash(identity: SQLiteLibrarySchema.identity) }
+
+    func contentHash(identity: Data) -> Data {
         SQLiteContentHash.hash(domain: "library_state:1", values: [
-            .blob(libraryID.sqliteBytes), .integer(generation), .blob(commitID.sqliteBytes),
-            .blob(SQLiteLibrarySchema.identity)
+            .blob(libraryID.sqliteBytes), .integer(generation), .blob(commitID.sqliteBytes), .blob(identity)
         ])
     }
 
@@ -43,17 +44,20 @@ package struct SQLiteLibraryState: Equatable, Sendable {
         return next
     }
 
-    static func read(from db: Database) throws -> Self {
+    static func read(from db: Database) throws -> Self { try read(from: db, identity: SQLiteLibrarySchema.identity) }
+
+    /// The state row of a library whose schema identity is `identity`.
+    static func read(from db: Database, identity: Data) throws -> Self {
         let rows = try Row.fetchAll(db, sql: "SELECT * FROM library_state LIMIT 2")
         guard rows.count == 1, let row = rows.first,
               row["singleton"] as Int == 1,
               let libraryID = UUID(sqliteBytes: row["library_id"]),
               let commitID = UUID(sqliteBytes: row["commit_id"]),
-              row["schema_identity"] as Data == SQLiteLibrarySchema.identity else {
+              row["schema_identity"] as Data == identity else {
             throw SQLiteLibraryError.damaged
         }
         let state = Self(libraryID: libraryID, generation: row["generation"], commitID: commitID)
-        guard state.generation >= 0, state.contentHash == row["content_hash"] as Data else {
+        guard state.generation >= 0, state.contentHash(identity: identity) == row["content_hash"] as Data else {
             throw SQLiteLibraryError.damaged
         }
         return state
@@ -149,21 +153,25 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
     private(set) var openEpoch = UUID()
     let originalFault: (@Sendable (SQLiteOriginalFaultPoint) -> Bool)?
     private let initializationFault: (@Sendable (SQLiteInitializationFaultPoint) -> Bool)?
+    private let migrationFault: (@Sendable (SQLiteMigrationFaultPoint) -> Bool)?
     package let rootURL: URL
 
     package convenience init(
         rootURL: URL, originalFault: (@Sendable (SQLiteOriginalFaultPoint) -> Bool)? = nil,
-        initializationFault: (@Sendable (SQLiteInitializationFaultPoint) -> Bool)? = nil
+        initializationFault: (@Sendable (SQLiteInitializationFaultPoint) -> Bool)? = nil,
+        migrationFault: (@Sendable (SQLiteMigrationFaultPoint) -> Bool)? = nil
     ) throws {
         try self.init(owner: SQLiteLibraryOwner(rootURL: rootURL), mode: .normal,
-                      originalFault: originalFault, initializationFault: initializationFault)
+                      originalFault: originalFault, initializationFault: initializationFault, migrationFault: migrationFault)
     }
 
     package init(owner: SQLiteLibraryOwner, mode: SQLiteLibraryOpenMode = .normal,
                  originalFault: (@Sendable (SQLiteOriginalFaultPoint) -> Bool)? = nil,
-                 initializationFault: (@Sendable (SQLiteInitializationFaultPoint) -> Bool)? = nil) throws {
+                 initializationFault: (@Sendable (SQLiteInitializationFaultPoint) -> Bool)? = nil,
+                 migrationFault: (@Sendable (SQLiteMigrationFaultPoint) -> Bool)? = nil) throws {
         self.originalFault = originalFault
         self.initializationFault = initializationFault
+        self.migrationFault = migrationFault
         self.owner = owner
         rootURL = owner.rootURL
         do { try openDatabase(mode: mode) } catch {
@@ -356,18 +364,23 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
         }
         let opened = try DatabaseQueue(path: databaseURL.path, configuration: configuration)
         do {
-            let needsSchema = try opened.read { db in
+            let (needsSchema, needsMigration) = try opened.read { db in
                 if initializing,
                    try Int.fetchOne(db, sql: "PRAGMA application_id") == 0,
                    try Int.fetchOne(db, sql: "PRAGMA user_version") == 0 {
                     guard try Int.fetchOne(db, sql: "SELECT count(*) FROM sqlite_schema") == 0 else {
                         throw SQLiteLibraryError.unsupportedFormat
                     }
-                    return true
+                    return (true, false)
                 }
                 // A supported file may recover its DELETE journal; reject schema drift before app SQL.
-                try SQLiteLibrarySchema.validate(in: db)
-                return false
+                // A version-1 library must pass every version-1 check before it is migrated.
+                guard let found = try SQLiteLibrarySchema.readableVersion(in: db),
+                      found == SQLiteLibrarySchema.version || mode == .normal else {
+                    throw SQLiteLibraryError.unsupportedFormat
+                }
+                try SQLiteLibrarySchema.validate(in: db, version: found)
+                return (false, found != SQLiteLibrarySchema.version)
             }
             try opened.writeWithoutTransaction { db in
                 guard try String.fetchOne(db, sql: "PRAGMA journal_mode = DELETE") == "delete" else {
@@ -377,7 +390,13 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
             }
             if needsSchema { try opened.write(SQLiteLibrarySchema.create) }
             if initializing { try failInitialization(.afterSchemaCommit) }
-            if needsSchema { try opened.read(SQLiteLibrarySchema.validate) }
+            if needsMigration {
+                try failMigration(.beforeTransaction)
+                // One transaction: a crash leaves the whole of v1 or the whole of v2.
+                try opened.write { db in try SQLiteLibrarySchema.migrateFromV1(in: db, fault: failMigration) }
+                try failMigration(.afterCommit)
+            }
+            if needsSchema || needsMigration { try opened.read(SQLiteLibrarySchema.validate) }
             try owner.validate()
             queue = opened
             openEpoch = UUID()
@@ -416,13 +435,17 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
         func integer(_ offset: Int) -> Int {
             header[offset..<(offset + 4)].reduce(0) { ($0 << 8) | Int($1) }
         }
-        let known = integer(60) == SQLiteLibrarySchema.version && integer(68) == SQLiteLibrarySchema.applicationID
+        let known = (integer(60) == SQLiteLibrarySchema.version || integer(60) == 1) && integer(68) == SQLiteLibrarySchema.applicationID
         let unfinished = allowInitialization && integer(60) == 0 && integer(68) == 0
         guard (known || unfinished), header[18] == 1, header[19] == 1 else { throw SQLiteLibraryError.unsupportedFormat }
     }
 
     private func failInitialization(_ point: SQLiteInitializationFaultPoint) throws {
         if initializationFault?(point) == true { throw SQLiteLibraryError.injectedFailure }
+    }
+
+    private func failMigration(_ point: SQLiteMigrationFaultPoint) throws {
+        if migrationFault?(point) == true { throw SQLiteLibraryError.injectedFailure }
     }
 
     func syncDirectory(_ url: URL) throws {

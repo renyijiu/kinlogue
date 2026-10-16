@@ -78,3 +78,68 @@ extension SQLiteReportRepository {
         }
     }
 }
+
+extension SQLiteReportRepository {
+    /// A saved conversation, or nil when there is none.
+    @concurrent
+    package nonisolated func assistantConversation(_ id: UUID) async throws -> AssistantConversation? {
+        try await LibraryStorageExecutor.run {
+            try store.read { db in
+                try store.requireUnquarantined(.conversation, id)
+                return try SQLiteAssistantRows.conversation(id, db)
+            }
+        }
+    }
+
+    /// One member's saved conversations, newest first, without their turns.
+    @concurrent
+    package nonisolated func assistantConversationSummaries(memberID: UUID) async throws -> [AssistantConversationSummary] {
+        try await LibraryStorageExecutor.run {
+            try store.read { db in
+                let quarantined = store.quarantinedIDs(.conversation)
+                return try SQLiteAssistantRows.summaries(memberID: memberID, db).filter { !quarantined.contains($0.id) }
+            }
+        }
+    }
+
+    /// Saves the whole conversation, replacing what was saved for it before.
+    @concurrent
+    package nonisolated func saveAssistantConversation(_ conversation: AssistantConversation) async throws {
+        try await LibraryStorageExecutor.run {
+            try store.write { db in
+                try SQLiteAssistantRows.save(conversation, db)
+                try SQLiteLibraryState.advance(in: db)
+            }
+        }
+    }
+
+    @concurrent
+    package nonisolated func deleteAssistantConversation(_ id: UUID) async throws {
+        try await LibraryStorageExecutor.run {
+            try store.write { db in
+                try SQLiteAssistantRows.delete(id, db)
+                try SQLiteLibraryState.advance(in: db)
+            }
+        }
+    }
+
+    @concurrent
+    package nonisolated func deleteAssistantConversations(memberID: UUID) async throws {
+        try await LibraryStorageExecutor.run {
+            try store.write { db in
+                try SQLiteAssistantRows.deleteAll(memberID: memberID, db)
+                try SQLiteLibraryState.advance(in: db)
+            }
+        }
+    }
+
+    @concurrent
+    package nonisolated func deleteAllAssistantConversations() async throws {
+        try await LibraryStorageExecutor.run {
+            try store.write { db in
+                try SQLiteAssistantRows.deleteAll(db)
+                try SQLiteLibraryState.advance(in: db)
+            }
+        }
+    }
+}

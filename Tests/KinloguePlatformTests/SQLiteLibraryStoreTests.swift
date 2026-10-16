@@ -25,7 +25,8 @@ func sqliteKernelCreatesStrictSchemaAndVerifiesActualEngineConfiguration() throw
     }
     #expect(strictTables == ["library_state", "members", "originals", "ocr_documents", "reports", "report_details", "report_search",
         "import_drafts", "report_sources", "inbox_items", "inbox_content_terminals", "inbox_transport_receipts", "inbox_uploads", "inbox_archive_receipts",
-        "dicom_studies", "dicom_objects", "dicom_series", "dicom_instances"])
+        "dicom_studies", "dicom_objects", "dicom_series", "dicom_instances",
+        "assistant_conversations", "assistant_turns", "assistant_turn_sources"])
     try store.close()
     let reopened = try SQLiteLibraryStore(rootURL: root)
     #expect(try reopened.state() == first)

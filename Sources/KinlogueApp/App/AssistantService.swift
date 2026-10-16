@@ -80,43 +80,25 @@ protocol AssistantLibraryReading: Sendable {
 
 extension SQLiteReportRepository: AssistantLibraryReading {}
 
-enum AssistantConversationStoreError: Error, Equatable, Sendable {
-    case tooManyConversations
-}
-
-/// Where conversations are kept. The first version keeps them in memory; a saved version stores
-/// the same values (docs/plans/2026-10-15-feat-member-cli-chat-plan.md, section 4.9).
+/// Where conversations are kept: the library, so saved chats go into restore points and are
+/// deleted with their member or the library (docs/plans/2026-10-15-feat-member-cli-chat-plan.md, 4.9).
 protocol AssistantConversationStoring: Sendable {
-    func conversation(_ id: UUID) async -> AssistantConversation?
+    func savedConversation(_ id: UUID) async throws -> AssistantConversation?
     /// Newest first.
-    func conversations(memberID: UUID) async -> [AssistantConversation]
-    func save(_ conversation: AssistantConversation) async throws
-    func deleteAll(memberID: UUID) async
-    func deleteAll() async
+    func savedConversationSummaries(memberID: UUID) async throws -> [AssistantConversationSummary]
+    func saveConversation(_ conversation: AssistantConversation) async throws
+    func deleteConversation(_ id: UUID) async throws
+    func deleteAllConversations() async throws
 }
 
-actor InMemoryAssistantConversationStore: AssistantConversationStoring {
-    private var conversations: [UUID: AssistantConversation] = [:]
-
-    func conversation(_ id: UUID) -> AssistantConversation? { conversations[id] }
-
-    func conversations(memberID: UUID) -> [AssistantConversation] {
-        conversations.values.filter { $0.memberID == memberID }.sorted { $0.updatedAt > $1.updatedAt }
+extension SQLiteReportRepository: AssistantConversationStoring {
+    func savedConversation(_ id: UUID) async throws -> AssistantConversation? { try await assistantConversation(id) }
+    func savedConversationSummaries(memberID: UUID) async throws -> [AssistantConversationSummary] {
+        try await assistantConversationSummaries(memberID: memberID)
     }
-
-    func save(_ conversation: AssistantConversation) throws {
-        if conversations[conversation.id] == nil,
-           conversations.values.filter({ $0.memberID == conversation.memberID }).count >= AssistantLimits.maxConversationsPerMember {
-            throw AssistantConversationStoreError.tooManyConversations
-        }
-        conversations[conversation.id] = conversation
-    }
-
-    func deleteAll(memberID: UUID) {
-        conversations = conversations.filter { $0.value.memberID != memberID }
-    }
-
-    func deleteAll() { conversations.removeAll() }
+    func saveConversation(_ conversation: AssistantConversation) async throws { try await saveAssistantConversation(conversation) }
+    func deleteConversation(_ id: UUID) async throws { try await deleteAssistantConversation(id) }
+    func deleteAllConversations() async throws { try await deleteAllAssistantConversations() }
 }
 
 /// What the user agreed to send in the confirmation sheet: this member's pack, as fingerprinted,
@@ -133,6 +115,8 @@ enum AssistantServiceError: Error, Equatable, Sendable {
     /// The pack, the CLI or the model changed since the consent was given.
     case consentRequired
     case conversationFull
+    /// The member already keeps `AssistantLimits.maxConversationsPerMember` saved conversations.
+    case tooManyConversations
     case invalidQuestion
     /// The library is being deleted or replaced.
     case libraryUnavailable
@@ -142,7 +126,7 @@ enum AssistantServiceError: Error, Equatable, Sendable {
 }
 
 /// Member chat for the App: reads packs, binds consent to what is sent and to whom, runs one turn
-/// inside the library lifecycle, and keeps completed turns only.
+/// and saves it inside the library lifecycle, and keeps completed turns only.
 final class LiveAssistantService: Sendable {
     private let library: any AssistantLibraryReading
     private let store: any AssistantConversationStoring
@@ -167,9 +151,12 @@ final class LiveAssistantService: Sendable {
         self.makeBackend = makeBackend
     }
 
-    /// The production service: the bridge XPC service embedded in the App bundle.
-    static func overXPC(library: any AssistantLibraryReading, lifecycle: LibraryLifecycleCoordinator) -> LiveAssistantService {
-        LiveAssistantService(library: library, store: InMemoryAssistantConversationStore(), lifecycle: lifecycle) { settings in
+    /// The production service: the bridge XPC service embedded in the App bundle, and conversations
+    /// saved in the library.
+    static func overXPC(
+        library: any AssistantLibraryReading & AssistantConversationStoring, lifecycle: LibraryLifecycleCoordinator
+    ) -> LiveAssistantService {
+        LiveAssistantService(library: library, store: library, lifecycle: lifecycle) { settings in
             BridgeAssistantProvider.overXPC(settings: try AssistantCLISettings(executablePath: settings.executablePath, proxy: settings.proxy))
         }
     }
@@ -229,8 +216,10 @@ final class LiveAssistantService: Sendable {
 
         var conversation: AssistantConversation
         if let conversationID {
-            guard let existing = await store.conversation(conversationID), existing.memberID == pack.memberID,
-                  existing.provider == consent.receiver else { throw AssistantServiceError.consentRequired }
+            guard let existing = try await stored({ try await self.store.savedConversation(conversationID) }),
+                  existing.memberID == pack.memberID, existing.provider == consent.receiver else {
+                throw AssistantServiceError.consentRequired
+            }
             conversation = existing
         } else {
             conversation = try AssistantConversation(
@@ -245,28 +234,45 @@ final class LiveAssistantService: Sendable {
             model: consent.receiver.model, instructions: AssistantPrompt.instructions,
             input: AssistantPrompt.input(pack: pack, history: conversation.resendWindow().turns, question: question)
         )
-        let reply: AssistantProviderReply
+        let started = conversation
+        let store = store
         do {
-            reply = try await lifecycle.withActiveOperation { try await self.run(backend, request).get() }
+            // The turn and its save are one active operation: deleting or replacing the library
+            // waits for both, or cancels the turn first.
+            return try await lifecycle.withActiveOperation {
+                let reply = try await self.run(backend, request).get()
+                try self.requireUsable()
+                let updated: AssistantConversation
+                do {
+                    updated = try started.appending(AssistantTurn(
+                        ordinal: started.turns.count, question: question, answer: reply.answer,
+                        completedAt: Date(), sources: pack.manifest
+                    ))
+                } catch AssistantConversationError.answerTooLarge {
+                    throw AssistantServiceError.provider(.outputTooLarge)
+                } catch {
+                    throw AssistantServiceError.provider(.failed(exitCode: nil))
+                }
+                do {
+                    try await store.saveConversation(updated)
+                    // What the user sees is what was saved.
+                    guard let saved = try await store.savedConversation(updated.id) else { throw AssistantServiceError.storage }
+                    return saved
+                } catch LibraryReportError.resourceLimit {
+                    throw AssistantServiceError.tooManyConversations
+                } catch let error as AssistantServiceError {
+                    throw error
+                } catch {
+                    throw AssistantServiceError.storage
+                }
+            }
         } catch let failure as AssistantFailure {
             throw AssistantServiceError.provider(failure)
+        } catch let error as AssistantServiceError {
+            throw error
         } catch {
             throw AssistantServiceError.libraryUnavailable
         }
-        try requireUsable()
-
-        do {
-            conversation = try conversation.appending(AssistantTurn(
-                ordinal: conversation.turns.count, question: question, answer: reply.answer,
-                completedAt: Date(), sources: pack.manifest
-            ))
-        } catch AssistantConversationError.answerTooLarge {
-            throw AssistantServiceError.provider(.outputTooLarge)
-        } catch {
-            throw AssistantServiceError.provider(.failed(exitCode: nil))
-        }
-        do { try await store.save(conversation) } catch { throw AssistantServiceError.storage }
-        return conversation
     }
 
     func recordStates(_ ids: [UUID]) async throws -> [UUID: AssistantRecordState] {
@@ -274,30 +280,53 @@ final class LiveAssistantService: Sendable {
         do { return try await library.assistantRecordStates(ids) } catch { throw AssistantServiceError.storage }
     }
 
-    func conversations(memberID: UUID) async -> [AssistantConversation] {
-        await store.conversations(memberID: memberID)
+    /// One member's saved conversations, newest first.
+    func summaries(memberID: UUID) async throws -> [AssistantConversationSummary] {
+        try requireUsable()
+        return try await stored { try await self.store.savedConversationSummaries(memberID: memberID) }
     }
 
-    func discardConversations(memberID: UUID) async {
-        await store.deleteAll(memberID: memberID)
+    func conversation(_ id: UUID) async throws -> AssistantConversation? {
+        try requireUsable()
+        return try await stored { try await self.store.savedConversation(id) }
     }
 
-    /// Stops every running turn and forgets every conversation, for turning the feature off.
-    func discardAll() async {
+    func deleteConversation(_ id: UUID) async throws {
+        try requireUsable()
+        try await stored { try await self.store.deleteConversation(id) }
+    }
+
+    /// Deletes every saved conversation of every member, as asked for in Settings.
+    func deleteAllConversations() async throws {
+        try requireUsable()
+        try await stored { try await self.store.deleteAllConversations() }
+    }
+
+    /// Stops every running turn, for turning the feature off. Saved conversations stay.
+    func stopRunningTurns() {
         cancelRunningTurns()
-        await store.deleteAll()
     }
 
-    /// The library is going away: stop, forget, and refuse further work.
+    /// The library is going away: stop and refuse further work. Nothing is written; the library
+    /// itself is being deleted or replaced.
     func revoke() async {
         state.withLock { $0.revoked = true }
-        await discardAll()
+        cancelRunningTurns()
     }
 
     // MARK: - Private
 
     private func requireUsable() throws {
         if state.withLock({ $0.revoked }) { throw AssistantServiceError.libraryUnavailable }
+    }
+
+    /// A store call inside the library lifecycle, with its failures as service errors.
+    private func stored<T: Sendable>(_ body: @escaping @Sendable () async throws -> T) async throws -> T {
+        do {
+            return try await lifecycle.withActiveOperation(body)
+        } catch {
+            throw state.withLock({ $0.revoked }) ? AssistantServiceError.libraryUnavailable : AssistantServiceError.storage
+        }
     }
 
     private func backend(for settings: AssistantSettings) throws -> any AssistantBackend {

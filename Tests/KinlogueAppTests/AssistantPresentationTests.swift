@@ -8,7 +8,7 @@ import Testing
 struct AssistantPresentationTests {
     static let issues: [AssistantIssue] = [
         .disabled, .invalidSettings, .noConfirmedRecords, .memberArchived, .selection, .libraryUnavailable,
-        .consentRequired, .conversationFull, .invalidQuestion, .storage,
+        .consentRequired, .conversationFull, .tooManyConversations, .invalidQuestion, .storage,
         .cli(.cliNotFound), .cli(.unsupportedLocation), .cli(.notLoggedIn), .cli(.unsupportedCLI),
         .cli(.toolUseDetected), .cli(.busy), .cli(.bridgeUnavailable), .cli(.rateLimited),
         .cli(.networkUnavailable), .cli(.timedOut), .cli(.outputTooLarge), .cli(.cancelled), .cli(.failed(exitCode: 1)),

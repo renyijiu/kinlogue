@@ -16,11 +16,11 @@
 
 ## 格式与完整性
 
-[DDL](../Sources/KinloguePlatform/Storage/SQLiteLibrarySchema.swift) 目前包括 18 个 STRICT 表：`library_state`、`members`、`originals`、`ocr_documents`、`reports`、`report_details`、`report_search`、`import_drafts`、`report_sources`、`inbox_items`、`inbox_content_terminals`、`inbox_transport_receipts`、`inbox_uploads`、`inbox_archive_receipts`、`dicom_studies`、`dicom_objects`、`dicom_series`、`dicom_instances`。UUID 使用 16 bytes，摘要 32 bytes，引用、顺序与领域边界由 FK、UNIQUE、CHECK 和后续语义 codec 共同约束。OCR 文档已由报告仓库存入独立表，DICOM 层级保留关系表；LAN 与 DICOM 业务 codec 已接通并由 App 使用。报告日期使用 REAL 保存领域 Date 的持久化精度，避免整数秒截断。
+[DDL](../Sources/KinloguePlatform/Storage/SQLiteLibrarySchema.swift) 目前（schema 版本 2）包括 21 个 STRICT 表：`library_state`、`members`、`originals`、`ocr_documents`、`reports`、`report_details`、`report_search`、`import_drafts`、`report_sources`、`inbox_items`、`inbox_content_terminals`、`inbox_transport_receipts`、`inbox_uploads`、`inbox_archive_receipts`、`dicom_studies`、`dicom_objects`、`dicom_series`、`dicom_instances`，以及版本 2 新增的成员对话三张表 `assistant_conversations`、`assistant_turns`、`assistant_turn_sources`。UUID 使用 16 bytes，摘要 32 bytes，引用、顺序与领域边界由 FK、UNIQUE、CHECK 和后续语义 codec 共同约束。OCR 文档已由报告仓库存入独立表，DICOM 层级保留关系表；LAN 与 DICOM 业务 codec 已接通并由 App 使用。报告日期使用 REAL 保存领域 Date 的持久化精度，避免整数秒截断。
 
-打开已有文件前只读核对 SQLite header、`application_id=0x4B4C4753`、`user_version=1` 和 DELETE 格式；未知库不自动迁移、改写或删除。打开后验证精确 schema、`quick_check`、外键和 `library_state` 的内容摘要。首次创建使用绑定 root inode/schema 的 [初始化 receipt](../Sources/KinloguePlatform/Storage/SQLiteLibraryInitialization.swift)，只恢复本次创建拥有的目录和库；未知文件保持原样。
+打开已有文件前只读核对 SQLite header、`application_id=0x4B4C4753`、`user_version` 为 1 或 2 和 DELETE 格式；其他版本和未知库不自动迁移、改写或删除。`user_version=1` 只作为唯一一次迁移的输入：普通打开时先按版本 1 的冻结 DDL 做完整校验（精确 schema、`quick_check`、外键、`library_state` 摘要），再在单个事务里建立三张对话表、写 `user_version=2`、把 `library_state` 的 schema identity 换成版本 2 并重算该行摘要，提交后按版本 2 重新校验。已有的行既不读取也不改写；被强退时 SQLite 的回滚日志只留下完整的版本 1 或完整的版本 2，下次打开继续迁移（[`SQLiteSchemaMigrationTests`](../Tests/KinlogueStorageProcessTests/SQLiteSchemaMigrationTests.swift) 用冻结的版本 1 资料库和真实进程强退核对）。`strictExisting` 打开不做迁移。更早的构建遇到版本 2 资料库照旧以“格式不受支持”失败关闭，不改写。打开后验证精确 schema、`quick_check`、外键和 `library_state` 的内容摘要。首次创建使用绑定 root inode/schema 的 [初始化 receipt](../Sources/KinloguePlatform/Storage/SQLiteLibraryInitialization.swift)，只恢复本次创建拥有的目录和库；未知文件保持原样。
 
-目前已经实现 `library_state`、`originals` 及报告域（成员、报告/详情/搜索投影、草稿、来源、OCR）的版本化、字段类型/长度分隔语义摘要。报告/草稿绑定来源数量与摘要、文档摘要；详情读取复核热投影、完整搜索字段和来源关系。LAN 行、上传归属与归档回执已有字段分隔语义摘要；DICOM codec 校验层级行、计数、集合摘要、图闭合与几何顺序；不能把 SQLite `quick_check` 当成语义验证的替代。SHA-256 只发现意外损坏，不提供认证、防篡改或防回滚。
+目前已经实现 `library_state`、`originals` 及报告域（成员、报告/详情/搜索投影、草稿、来源、OCR）的版本化、字段类型/长度分隔语义摘要。报告/草稿绑定来源数量与摘要、文档摘要；详情读取复核热投影、完整搜索字段和来源关系。LAN 行、上传归属与归档回执已有字段分隔语义摘要；成员对话的对话、轮次与发送清单行同样逐行摘要，读取时整段核对（轮次序号连续、计数一致、首个问题的列表摘录与轮次一致），引用的记录 ID 不设外键，记录删除后引用显示为“已删除”；DICOM codec 校验层级行、计数、集合摘要、图闭合与几何顺序；不能把 SQLite `quick_check` 当成语义验证的替代。SHA-256 只发现意外损坏，不提供认证、防篡改或防回滚。
 
 ## 原件事务与恢复
 
@@ -122,7 +122,7 @@ DICOM 导入先登记活动 operation，覆盖扫描、索引和原件间隙；�
 
 ## 逻辑恢复点与原件导出
 
-[logical-v1](../Sources/KinlogueCore/Backup/BackupLogicalV1.swift) 用固定领域顺序、有界长度记录、版本头、计数和 SHA-256 footer 表达完整 committed 图，包括 OCR 复核、LAN 终态/历史归档回执及规范化 DICOM。它不包含 SQLite schema 或数据库文件。两个独立冻结夹具验证当前 reader 能恢复既有 wire bytes；未知版本和早先的文件树格式恢复点在替换前明确拒绝，保留输入和当前资料库。
+[逻辑流](../Sources/KinlogueCore/Backup/BackupLogicalV1.swift) 用固定领域顺序、有界长度记录、版本头、计数和 SHA-256 footer 表达完整 committed 图，包括 OCR 复核、LAN 终态/历史归档回执及规范化 DICOM。它不包含 SQLite schema 或数据库文件。writer 写逻辑版本 2：在所有既有记录之后，每段保存的成员对话一条记录（含轮次与发送清单），footer 的计数随之多一项。reader 接受版本 1 和 2：版本 1 恢复为没有对话的当前资料库，恢复后的严格校验按输入的版本重新编码并比较摘要。两个版本 1 冻结夹具和一个版本 2 冻结夹具验证当前 reader 能恢复既有 wire bytes；未知版本和早先的文件树格式恢复点在替换前明确拒绝，保留输入和当前资料库。更早的构建遇到版本 2 恢复点按未知版本拒绝。
 
 [捕获](../Sources/KinloguePlatform/Backup/SQLiteLogicalBackupSource.swift) 在同一 admission 内完成 SQL 数量/长度预检、revision、可达原件 metadata pin 和应用自有数据库的内部副本；随后释放 admission，在固定副本上逐项严格验证和输出逻辑记录。源库继续 DELETE/EXTRA 配置；[临时副本](../Sources/KinloguePlatform/Backup/SQLiteLogicalCaptureDatabase.swift) 仅用于一致性读取，拥有私有目录、原子持久化的 inode receipt 和受限缓存。启动在单实例 owner 下、打开数据库前回收可证明归属的副本，未知或被替换对象保留。内部复制按数据库已分配页增长，包含空闲页；超过 5 秒捕获预算会失败，不能由本机近上限一次通过推断所有理论大文档组合均可在 5 秒内捕获。
 

@@ -365,7 +365,7 @@ struct AppShellView: View {
             }
             Button(AppLocalization.string("保留"), role: .cancel) {}
         } message: {
-            Text(AppLocalization.string("只有没有关联记录或草稿时才能删除；否则请先重分配或逐条删除关联内容。"))
+            Text(AppLocalization.string("只有没有关联记录或草稿时才能删除；否则请先重分配或逐条删除关联内容。这位成员保存的 AI 对话会一并删除。"))
         }
     }
 

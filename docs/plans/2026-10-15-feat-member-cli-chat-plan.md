@@ -10,7 +10,7 @@ status: active
 
 # 成员对话：接入本机已安装的 Codex CLI
 
-本文是设计与验收契约，记录决策与实施单元，**不充当当前能力清单**；当前能力与承诺以 [`../../PRIVACY.md`](../../PRIVACY.md)、[`../../README.md`](../../README.md)、[`project-overview.md`](../project-overview.md) 和[成员对话验收矩阵](../acceptance/member-chat-matrix.md)为准。2026-10-16 状态：第 9 节决策已全部确定，U0–U6 已实现，U7 尚未开始，第 7 节的人工矩阵尚未执行。CLI 选项的依据见[来源笔记](../sources/2026-10-15-local-cli-noninteractive-flags.md)，其中标为“未核实”的内容都由 U0 实测。
+本文是设计与验收契约，记录决策与实施单元，**不充当当前能力清单**；当前能力与承诺以 [`../../PRIVACY.md`](../../PRIVACY.md)、[`../../README.md`](../../README.md)、[`project-overview.md`](../project-overview.md) 和[成员对话验收矩阵](../acceptance/member-chat-matrix.md)为准。2026-10-16 状态：第 9 节决策已全部确定，U0–U7 已实现；第 7 节的人工矩阵中，经真实 Codex 的 bridge 段与边界问题已检查，界面与失败场景尚未执行。CLI 选项的依据见[来源笔记](../sources/2026-10-15-local-cli-noninteractive-flags.md)，其中标为“未核实”的内容都由 U0 实测。
 
 2026-10-15 修订：用户决定首版只接入 Codex（D6），并要求设计上能兼容以后保存对话，因此新增第 4.9 节和实施单元 U7；随后用户确定 D8：保存的对话放进主资料库并进入恢复点，同意为此做资料库第一次 schema 迁移（v1→v2）；又确定 D4：U7 在首版之后单独发布；随后 D2、D3、D5、D7 和两个默认值 E1、E2 均按建议确定，只剩 D1 由 U0 决定。U0 已于同日执行（[证据笔记](../sources/2026-10-15-codex-u0-probe-evidence.md)），按约定规则确定 D1 为方案 A，并据实测修订第 4.2、4.3 节。
 

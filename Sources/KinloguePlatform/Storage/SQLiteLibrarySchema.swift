@@ -2,13 +2,16 @@ import Foundation
 import GRDB
 import KinlogueCore
 
-/// Development format; no migration from a JSON vault or another SQLite schema.
+/// The library format. Version 2 is current. Version 1 is accepted only as the input of the one
+/// migration, v1 to v2, which adds the saved member-chat tables (decisions.md, 2026-10-16); no other
+/// version, JSON vault or SQLite schema is migrated.
 enum SQLiteLibrarySchema {
     static let applicationID = 0x4B4C4753 // KLGS
-    static let version = 1
+    static let version = 2
     static let maximumPayloadBytes = LibraryStorageLimits.maximumEntityJSONBytes
 
-    static let statements: [(name: String, sql: String)] = [
+    /// Version 1, frozen as the migration's input. Never edit these statements; add a version.
+    static let statementsV1: [(name: String, sql: String)] = [
         ("library_state", """
         CREATE TABLE library_state (
             singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
@@ -341,7 +344,69 @@ enum SQLiteLibrarySchema {
         """)
     ]
 
-    static let identity = ContentDigest.sha256(Data(statements.map(\.sql).joined(separator: "\n").utf8))
+    /// Added by version 2: saved member chats. A source keeps its record ID without a foreign key,
+    /// so a citation of a deleted report still reads as "deleted".
+    static let assistantStatements: [(name: String, sql: String)] = [
+        ("assistant_conversations", """
+        CREATE TABLE assistant_conversations (
+            id BLOB PRIMARY KEY NOT NULL CHECK(length(id) = 16),
+            member_id BLOB NOT NULL REFERENCES members(id),
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            provider_kind TEXT NOT NULL CHECK(provider_kind IN ('codex')),
+            cli_version TEXT NOT NULL CHECK(length(CAST(cli_version AS BLOB)) BETWEEN 1 AND 128),
+            model TEXT NOT NULL CHECK(length(CAST(model AS BLOB)) BETWEEN 1 AND 128),
+            prompt_version INTEGER NOT NULL CHECK(prompt_version > 0),
+            turn_count INTEGER NOT NULL CHECK(turn_count >= 0 AND turn_count <= 20),
+            first_question TEXT CHECK(first_question IS NULL OR length(CAST(first_question AS BLOB)) <= 65536),
+            content_hash BLOB NOT NULL CHECK(length(content_hash) = 32)
+        ) STRICT
+        """),
+        ("assistant_conversation_member", "CREATE INDEX assistant_conversation_member ON assistant_conversations(member_id, updated_at, id)"),
+        ("assistant_turns", """
+        CREATE TABLE assistant_turns (
+            id BLOB PRIMARY KEY NOT NULL CHECK(length(id) = 16),
+            conversation_id BLOB NOT NULL REFERENCES assistant_conversations(id),
+            ordinal INTEGER NOT NULL CHECK(ordinal >= 0 AND ordinal < 20),
+            question TEXT NOT NULL CHECK(length(CAST(question AS BLOB)) BETWEEN 1 AND 65536),
+            answer TEXT NOT NULL CHECK(length(CAST(answer AS BLOB)) BETWEEN 1 AND 32768),
+            completed_at REAL NOT NULL,
+            content_hash BLOB NOT NULL CHECK(length(content_hash) = 32),
+            UNIQUE(conversation_id, ordinal)
+        ) STRICT
+        """),
+        ("assistant_turn_sources", """
+        CREATE TABLE assistant_turn_sources (
+            turn_id BLOB NOT NULL REFERENCES assistant_turns(id),
+            position INTEGER NOT NULL CHECK(position >= 0 AND position < 20),
+            label TEXT NOT NULL CHECK(length(label) BETWEEN 2 AND 5),
+            record_id BLOB NOT NULL CHECK(length(record_id) = 16),
+            record_revision INTEGER NOT NULL CHECK(record_revision >= 0),
+            projection_digest BLOB NOT NULL CHECK(length(projection_digest) = 32),
+            content_hash BLOB NOT NULL CHECK(length(content_hash) = 32),
+            PRIMARY KEY(turn_id, position),
+            UNIQUE(turn_id, label)
+        ) STRICT
+        """)
+    ]
+
+    static let statements = statementsV1 + assistantStatements
+
+    /// The exact statements of `version`, or none for a version this build does not read.
+    static func statements(forVersion version: Int) -> [(name: String, sql: String)] {
+        switch version {
+        case 1: statementsV1
+        case 2: statements
+        default: []
+        }
+    }
+
+    static func identity(forVersion version: Int) -> Data {
+        ContentDigest.sha256(Data(statements(forVersion: version).map(\.sql).joined(separator: "\n").utf8))
+    }
+
+    static let identity = identity(forVersion: version)
+    static let identityV1 = identity(forVersion: 1)
 
     static func create(in db: Database) throws {
         for statement in statements { try db.execute(sql: statement.sql) }
@@ -354,13 +419,23 @@ enum SQLiteLibrarySchema {
         try db.execute(sql: "PRAGMA user_version = \(version)")
     }
 
-    static func validate(in db: Database) throws {
+    /// The `user_version` of a library this build can open, current or migratable, or nil.
+    static func readableVersion(in db: Database) throws -> Int? {
         guard try Int.fetchOne(db, sql: "PRAGMA application_id") == applicationID,
-              try Int.fetchOne(db, sql: "PRAGMA user_version") == version else {
+              let found = try Int.fetchOne(db, sql: "PRAGMA user_version"), found == 1 || found == version else { return nil }
+        return found
+    }
+
+    static func validate(in db: Database) throws { try validate(in: db, version: version) }
+
+    static func validate(in db: Database, version expectedVersion: Int) throws {
+        guard try Int.fetchOne(db, sql: "PRAGMA application_id") == applicationID,
+              try Int.fetchOne(db, sql: "PRAGMA user_version") == expectedVersion,
+              !statements(forVersion: expectedVersion).isEmpty else {
             throw SQLiteLibraryError.unsupportedFormat
         }
         let rows = try Row.fetchAll(db, sql: "SELECT name, sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY name")
-        let expected = Dictionary(uniqueKeysWithValues: statements)
+        let expected = Dictionary(uniqueKeysWithValues: statements(forVersion: expectedVersion))
         guard rows.count == expected.count,
               rows.allSatisfy({ row in expected[row["name"] as String] == row["sql"] as String }) else {
             throw SQLiteLibraryError.damaged
@@ -369,7 +444,7 @@ enum SQLiteLibrarySchema {
               try Row.fetchOne(db, sql: "PRAGMA foreign_key_check") == nil else {
             throw SQLiteLibraryError.damaged
         }
-        _ = try SQLiteLibraryState.read(from: db)
+        _ = try SQLiteLibraryState.read(from: db, identity: identity(forVersion: expectedVersion))
         guard try Int.fetchOne(db, sql: "SELECT count(*) FROM members") ?? 0 <= 256,
               try Int.fetchOne(db, sql: "SELECT count(*) FROM reports") ?? 0 <= 20_000,
               try Int.fetchOne(db, sql: "SELECT count(*) FROM import_drafts") ?? 0 <= 20_000,
@@ -386,5 +461,41 @@ enum SQLiteLibrarySchema {
                     SELECT original_id FROM report_sources UNION SELECT original_id FROM inbox_items UNION SELECT original_id FROM dicom_objects
                   ) JOIN originals ON originals.id = original_id WHERE lifecycle != 'live' LIMIT 1
                   """) == nil else { throw SQLiteLibraryError.damaged }
+        if expectedVersion >= 2 {
+            guard try Int.fetchOne(db, sql: "SELECT count(*) FROM assistant_conversations") ?? 0 <= 256 * AssistantLimits.maxConversationsPerMember,
+                  try Row.fetchOne(db, sql: "SELECT member_id FROM assistant_conversations GROUP BY member_id HAVING count(*) > ? LIMIT 1",
+                                   arguments: [AssistantLimits.maxConversationsPerMember]) == nil,
+                  try Row.fetchOne(db, sql: """
+                      SELECT c.id FROM assistant_conversations c LEFT JOIN assistant_turns t ON t.conversation_id = c.id
+                      GROUP BY c.id HAVING count(t.id) != c.turn_count OR (count(t.id) > 0 AND (min(t.ordinal) != 0 OR max(t.ordinal) != count(t.id) - 1))
+                      LIMIT 1
+                      """) == nil,
+                  try Row.fetchOne(db, sql: "SELECT turn_id FROM assistant_turn_sources GROUP BY turn_id HAVING count(*) > ? LIMIT 1",
+                                   arguments: [AssistantLimits.maxPackRecords]) == nil else { throw SQLiteLibraryError.damaged }
+        }
     }
+
+    /// Adds version 2's tables and stamps the new version, inside the caller's transaction. Rows
+    /// already in the library are neither read nor rewritten, apart from the state row's identity.
+    static func migrateFromV1(in db: Database, fault: (SQLiteMigrationFaultPoint) throws -> Void) throws {
+        let state = try SQLiteLibraryState.read(from: db, identity: identityV1)
+        for statement in assistantStatements { try db.execute(sql: statement.sql) }
+        try fault(.afterTables)
+        try db.execute(sql: "PRAGMA user_version = \(version)")
+        try db.execute(sql: "UPDATE library_state SET schema_identity = ?, content_hash = ? WHERE singleton = 1",
+                       arguments: [identity, state.contentHash(identity: identity)])
+        try fault(.beforeCommit)
+    }
+}
+
+/// Where a test may stop the v1 to v2 migration, to show that only a whole v1 or a whole v2 remains.
+package enum SQLiteMigrationFaultPoint: CaseIterable, Sendable {
+    /// The v1 library has passed its checks; nothing is written yet.
+    case beforeTransaction
+    /// Inside the transaction: the new tables exist.
+    case afterTables
+    /// Inside the transaction: the version and the state row are updated, not yet committed.
+    case beforeCommit
+    /// Committed, before the v2 checks run.
+    case afterCommit
 }

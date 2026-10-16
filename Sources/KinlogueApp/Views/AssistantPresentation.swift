@@ -16,6 +16,20 @@ enum AssistantText {
         AppLocalization.string("正在等待 Codex 回答 · \(seconds) 秒", language: language)
     }
 
+    /// One saved conversation in the history list: when it was last updated and how it began.
+    static func historyTitle(_ summary: AssistantConversationSummary, language: AppLanguage = AppLocalization.selectedLanguage()) -> String {
+        let date = summary.updatedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened,
+                                                                 locale: AppLocalization.locale(for: language)))
+        let question = summary.firstQuestion.map { $0.count > 24 ? String($0.prefix(24)) + "…" : $0 }
+            ?? AppLocalization.string("尚无问题", language: language)
+        return AppLocalization.string("\(date) · \(question) · \(summary.turnCount) 轮", language: language)
+    }
+
+    static func otherReceiver(_ provider: AssistantProviderDescriptor, language: AppLanguage = AppLocalization.selectedLanguage()) -> String {
+        AppLocalization.string("这段对话由 \(receiver(cliVersion: provider.cliVersion, model: provider.model, language: language)) 生成；继续提问将开始一段新的对话。",
+                               language: language)
+    }
+
     /// Questions that ask for a description of the reports, never for a judgement.
     static func exampleQuestions(language: AppLanguage = AppLocalization.selectedLanguage()) -> [String] {
         [
@@ -53,6 +67,8 @@ extension AssistantIssue {
             AppLocalization.string("要发送的内容或接收方已变化，请重新确认后再提问。", language: language)
         case .conversationFull:
             AppLocalization.string("这次对话已达到轮数上限，请开始新对话。", language: language)
+        case .tooManyConversations:
+            AppLocalization.string("这位成员保存的对话已达上限，请先在“历史对话”中删除一些。", language: language)
         case .invalidQuestion:
             AppLocalization.string("请输入不超过 \(AssistantLimits.maxQuestionCharacters) 个字符的问题。", language: language)
         case .storage:

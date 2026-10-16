@@ -31,7 +31,7 @@
 | 备份 | 用户选择目录、metadata-only 状态加载与自动关闭、自动开关、离线有界退避及已覆盖状态收敛、2–30 份本地保留、generation/keep 围栏的单扫描批量清理、app-private 跨进程 lease 与 witness 高水位线性发布、pending 设置恢复/确认放弃、LAN 预处理结果随逻辑快照恢复而进行中的上传不进入恢复点、生产恢复事务逐 phase SIGKILL 收敛与 activation 后损坏回滚、手动备份、Finder 中显示恢复点和整库替换恢复；网盘远端状态未知 | [`backup-and-restore.md`](backup-and-restore.md) |
 | 报告 | 本机 OCR 只生成有来源候选；用户确认后才进入时间线、搜索和比较；搜索命中检验表格行时逐格列出原文，不解析数值、不判断正常与否 | [`import-and-ocr.md`](import-and-ocr.md)、[`decisions.md`](decisions.md) |
 | LAN | 用户显式开启的临时普通 HTTP 会话，绑定所选 Mac 接口并在 HTTP 前拒绝非同 IPv4/IPv6 网络前缀对端，仍只适用于可信任私人网络；成功配对推进浏览器 session generation，手机轮询再以 mutation epoch、revision 与取消 tombstone 防止陈旧状态回退 | [`lan-upload.md`](lan-upload.md) |
-| 成员对话 | 默认关闭的实验功能；用户开启并按对话确认后，单独签名的沙盒 bridge 经用户本机已登录的 Codex 发送一位成员的已确认报告投影；模型没有工具，回答不进入时间线、搜索或导出，对话只在内存；这是唯一的外发例外，不是匿名化 | [`../PRIVACY.md`](../PRIVACY.md)、[`acceptance/member-chat-matrix.md`](acceptance/member-chat-matrix.md) |
+| 成员对话 | 默认关闭的实验功能；用户开启并按对话确认后，单独签名的沙盒 bridge 经用户本机已登录的 Codex 发送一位成员的已确认报告投影；模型没有工具，回答不进入时间线、搜索或导出；对话保存在资料库并进入恢复点（schema 版本 2）；这是唯一的外发例外，不是匿名化 | [`../PRIVACY.md`](../PRIVACY.md)、[`acceptance/member-chat-matrix.md`](acceptance/member-chat-matrix.md) |
 | DICOM | 底层 DICOM-Swift 固定为 1.5.0，codec 依赖和资源仅进入独立 Helper；受限的辅助能力；支持边界窄、非诊断，不代表产品转向通用影像工作站 | [`dicom.md`](dicom.md) |
 | 发布 | 源码仓库已公开，但尚未正式发布可下载产品；GitHub CI 在 pull request 上只运行 macOS 26 基线，main push 与手工触发时再加 Xcode 27 预览矩阵；每个系统用两个互斥 runner 覆盖同一全局主测试账本，另用一个独立 runner 并行验证 clean-source bundle 与 DICOM XPC，强制终止不得冒充成功；验收扫描所需 `ripgrep` 由固定版本与 SHA-256 的 CI 引导提供；版本 tag 还必须可从 canonical `main` 到达才能进入构建 | [`testing-and-release.md`](testing-and-release.md)、[`acceptance/current-release.md`](acceptance/current-release.md) |
 

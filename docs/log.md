@@ -1859,3 +1859,31 @@
 - **发现与修正**：第一次状态检查报“未登录”。原因是 App Sandbox 把沙盒 supervisor 自己的 `HOME`、`TMPDIR` 改成了容器路径，supervisor 再把它们传给 Codex，Codex 便在容器里找登录。U2 加入 supervisor 后就有这个问题，U2b 的签名检查允许“未登录”而漏掉了它。修正：[`CLIProcess`](../Sources/KinlogueAssistantCLI/CLIProcess.swift) 以 `KINLOGUE_CLI_ENV_` 前缀把变量交给 supervisor，[`CLISupervisor`](../Sources/KinlogueAssistantCLI/CLISupervisor.swift) 只从带前缀的变量重建 CLI 环境。新测试 `theSupervisorGivesTheCLITheBridgesVariablesNotItsOwn` 在改动前失败、改动后通过。[`verify-assistant-xpc.sh`](../scripts/verify-assistant-xpc.sh) 现在要求：终端里已登录时，沙盒内也报告已登录。
 - **结果**：经签名沙盒 bridge、Codex 0.162.0、模型 `gpt-6.1-sol`，21 轮（20 个单轮问题加 1 个带历史的追问）全部得到回答，用时 7.3–14.5 秒，中位数 9.4 秒。回答都守住计划第 3.2 节边界：不下诊断、不给用药建议、不判断好坏、不预测、急症提示立即就医、记录外的信息说明没有、报告里夹带的指令未执行，引用都指向发送过的 R1–R6。三处说明：急症回答附了一般急救要点；被问到和妈妈对比时邀请用户贴出另一人的资料；英文的肝功能总结漏了总胆固醇。运行后 `~/.codex` 与 bridge 容器里没有任何文件含合成内容，没有写入当天会话记录，没有残留进程。逐题记录见[来源笔记](sources/2026-10-16-member-chat-real-codex-check.md)，[验收矩阵](acceptance/member-chat-matrix.md)、[决策](decisions.md)、[品牌](brand.md)、[索引](index.md)、[隐私工程说明](privacy-and-security.md)与[当前候选证据](acceptance/current-release.md)同步。主清单 1282 tests / 108 suites。
 - **未执行**：App 界面上的真实对话、未登录与登录过期、未安装、Codex 中途更新、代理与断网、第三方中转、中途停止、一轮进行中删除或恢复资料库、键盘与 VoiceOver、其他模型、npm 或 `/usr/local` 安装、Developer ID 与公证、macOS 26。修正前的检查在 `~/Library/Containers/com.kinlogue.mac.assistant-bridge/Data/.codex` 留下了 Codex 自己的状态库（不含资料内容），可由用户在 Finder 中删除。
+
+## [2026-10-16] feat/assistant | 成员对话计划 U7：保存对话、schema v1→v2 迁移与恢复点逻辑版本 2
+
+- **起因**：用户在真实 Codex 检查之后要求实现 U7。依据计划第 4.9 节、D4、D8，以及用户 2026-10-15 对第一次 schema 迁移的同意。
+- **冻结输入**：改 schema 之前，先用迁移前的代码写出一个合成的版本 1 资料库（两位成员、一份已确认报告及其原件、OCR 文档与备注、一份待确认草稿），以 zlib + base64 冻结在 [`SQLiteLibraryV1Fixture.swift`](../Tests/KinlogueStorageProcessTests/SQLiteLibraryV1Fixture.swift)。
+- **schema 与迁移**：[`SQLiteLibrarySchema`](../Sources/KinloguePlatform/Storage/SQLiteLibrarySchema.swift) 版本 2 在冻结的版本 1 DDL 之后新增 `assistant_conversations`、`assistant_turns`、`assistant_turn_sources`，并为对话数、每成员 200 段、轮次连续与每轮来源数加了结构校验。[`SQLiteLibraryStore`](../Sources/KinloguePlatform/Storage/SQLiteLibraryStore.swift) 的 header 接受版本 1 和 2。普通打开时，版本 1 先按版本 1 完整校验，再在单个事务里建表、写 `user_version = 2`、更新 `library_state` 的 identity 与摘要，提交后按版本 2 校验。`strictExisting` 不迁移。为测试设了四个中断点。初始化回执接受版本 1 的 identity。
+- **存储**：新增 [`SQLiteAssistantRows`](../Sources/KinloguePlatform/Storage/SQLiteAssistantRows.swift)，逐行摘要、整段核对、只读摘要列表，提供逐段、按成员和全部删除；报告仓库新增对应方法。删除成员时在同一事务里删除其对话。完整性巡检新增“对话”目标。
+- **恢复点**：`BackupLogicalKind` 新增 `assistantConversation`。头部支持版本 1 和 2，writer 写版本 2，可出现的类型与 footer 计数随版本而定。恢复后的严格校验按输入的版本重新编码，因此版本 1 恢复点仍逐字节核对。新增版本 2 冻结流 [`SQLiteLogicalV2Fixture.swift`](../Tests/KinloguePlatformTests/SQLiteLogicalV2Fixture.swift)。两个版本 1 冻结测试改为核对：重新捕获得到相同的记录，只是换成版本 2 头部。
+- **App**：
+  - `AssistantConversationStoring` 改为可抛错，由 `SQLiteReportRepository` 实现；内存版删除。
+  - 服务把一轮和它的保存放在同一个 active operation 里，返回保存后重读的对话。新增读取、删除与“对话数已达上限”。关闭功能只停止进行中的一轮，撤销钩子不写资料库。
+  - 对话模型新增历史列表、重新打开与删除。重新打开后仍需确认。显示的对话来自另一个 CLI 或模型时，继续提问开始新对话。
+  - 面板新增“历史对话”菜单与删除确认；设置新增“已保存的对话”与“删除全部对话…”；删除成员的确认文案说明对话一并删除。
+  - 新增 19 条中英文案，删除 3 条旧文案。
+- **测试先行**：
+  - 迁移测试 6 项，在隔离的跨进程 storage 目标里：已有行逐行不变、`library_state` 只有 identity 与摘要变化、迁移后可读、再次打开不写入、未知版本与带漂移的版本 1 不改写、四个中断点之后只剩完整版本。真实进程测试中的 4 个强退案例先在 fixture 里阻塞，再被 SIGKILL。
+  - [`AssistantConversationStoreTests`](../Tests/KinloguePlatformTests/AssistantConversationStoreTests.swift) 7 项，版本 2 冻结流 1 项，App 4 项。
+  - 主清单 1294 tests / 109 suites。
+- **验证**（macOS 27.0.1 / Xcode 27.0 / Swift 6.4）：
+  - 会断言文本的套件通过。第一次完整 `scripts/test.sh` 发现 `SQLiteLibraryStoreTests` 精确列出 STRICT 表，补上三张新表后，完整 `scripts/test.sh` 退出码 0、没有失败，隔离门禁（含跨进程迁移测试）一并通过，无残留假 CLI 进程。
+  - 传入实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check` 与 `git diff --check` 通过。
+  - 没有重跑 `verify-app.sh`：这次没有改动打包与 entitlement。
+  - 工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：真实资料库上的迁移（用户的资料库是版本 1，第一次运行包含 U7 的构建时会自动迁移，之后更早的构建无法打开它）；App 界面上保存、重新打开与删除对话的人工检查；带对话的恢复点经加密容器的端到端恢复（对话只在逻辑流层面测试；已有的加密恢复测试现在写版本 2，但其中没有对话）。
+- **说明**：
+  - 迁移后的冻结库做完整性巡检时，两个原件被标为损坏，因为冻结行记录的是生成机器上的 inode。测试只接受这一种情况，其余行都要通过巡检。
+  - 迁移只建空表，没有单独的“正在升级”启动页，也不自动备份。这一点和决策记录写在 [`decisions.md`](decisions.md) 2026-10-16 一节。
+- **文档**：PRIVACY 与 README 说明对话以明文保存在资料库并进入恢复点、可删除、随成员删除、关闭功能不删除；[`privacy-and-security.md`](privacy-and-security.md)、[`project-overview.md`](project-overview.md)、[`architecture.md`](architecture.md)、[`sqlite-storage.md`](sqlite-storage.md)、[`storage.md`](storage.md)、[`backup-and-restore.md`](backup-and-restore.md)、[`domain-and-data-model.md`](domain-and-data-model.md)、[`design-system.md`](design-system.md)、[`decisions.md`](decisions.md)、[`index.md`](index.md)、`AGENTS.md`、计划状态、[成员对话矩阵](acceptance/member-chat-matrix.md)和[当前候选证据](acceptance/current-release.md)同步。

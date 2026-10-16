@@ -14,13 +14,15 @@ enum AssistantIssue: Equatable, Sendable {
     /// The pack, the CLI or the model changed; the user has to confirm again.
     case consentRequired
     case conversationFull
+    case tooManyConversations
     case invalidQuestion
     case storage
     case cli(AssistantFailure)
 }
 
-/// One member's conversation: the pack to send, the consent for it, and the turns so far. A
-/// generation fence drops results for a member, pack or library that is no longer current.
+/// One member's conversation: the pack to send, the consent for it, the turns so far, and the
+/// member's saved conversations. A generation fence drops results for a member, pack or library that
+/// is no longer current.
 @MainActor
 final class AssistantConversationModel: ObservableObject {
     enum Phase: Equatable, Sendable {
@@ -41,6 +43,8 @@ final class AssistantConversationModel: ObservableObject {
     @Published private(set) var issue: AssistantIssue?
     @Published private(set) var includeOrganization = false
     @Published private(set) var recordStates: [UUID: AssistantRecordState] = [:]
+    /// The member's saved conversations, newest first.
+    @Published private(set) var history: [AssistantConversationSummary] = []
     /// The question of the turn that is running, shown until its answer arrives.
     @Published private(set) var pendingQuestion: String?
     @Published private(set) var sendingStartedAt: Date?
@@ -60,6 +64,13 @@ final class AssistantConversationModel: ObservableObject {
     }
 
     var hasConsent: Bool { consent != nil }
+
+    /// False when the conversation on screen came from another CLI or model than the one consented
+    /// to; the next question then starts a new conversation.
+    var continuesShownConversation: Bool {
+        guard let conversation, let consent else { return true }
+        return conversation.provider == consent.receiver
+    }
 
     /// Before the library has been asked, a cited record counts as unchanged.
     func citationStatus(of source: AssistantTurnSource) -> AssistantCitationStatus {
@@ -90,9 +101,14 @@ final class AssistantConversationModel: ObservableObject {
             show(Self.issue(for: error), phase: .unavailable)
             return
         }
-        let latest = await service.conversations(memberID: memberID).first
+        let summaries = (try? await service.summaries(memberID: memberID)) ?? []
         guard generation == self.generation else { return }
-        conversation = latest
+        history = summaries
+        if let latest = summaries.first {
+            let loaded = try? await service.conversation(latest.id)
+            guard generation == self.generation else { return }
+            conversation = loaded
+        }
         await refreshRecordStates(generation: generation)
         guard generation == self.generation else { return }
         phase = .needsConsent
@@ -102,9 +118,7 @@ final class AssistantConversationModel: ObservableObject {
     func confirm() {
         guard !locked, phase == .needsConsent, let pack, let cliStatus else { return }
         do {
-            let consent = try service.consent(pack: pack, status: cliStatus)
-            self.consent = consent
-            if let conversation, conversation.provider != consent.receiver { self.conversation = nil }
+            consent = try service.consent(pack: pack, status: cliStatus)
             issue = nil
             phase = .ready
         } catch {
@@ -129,7 +143,7 @@ final class AssistantConversationModel: ObservableObject {
         }
         let generation = self.generation
         let settings = currentSettings()
-        let conversationID = conversation?.id
+        let conversationID = continuesShownConversation ? conversation?.id : nil
         phase = .sending
         issue = nil
         pendingQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -148,6 +162,7 @@ final class AssistantConversationModel: ObservableObject {
                 checkedRecordIDs.insert(entry.recordID)
             }
             phase = .ready
+            await refreshHistory(generation: generation)
         } catch {
             guard generation == self.generation else { return }
             endSending()
@@ -167,6 +182,46 @@ final class AssistantConversationModel: ObservableObject {
     func recheck() async {
         guard let memberID else { return }
         await open(memberID: memberID)
+    }
+
+    /// Shows a saved conversation of this member. Its consent is the one already given, if any.
+    func selectConversation(_ id: UUID) async {
+        guard !locked, phase != .sending, phase != .loading, memberID != nil, conversation?.id != id else { return }
+        let generation = self.generation
+        do {
+            let loaded = try await service.conversation(id)
+            guard generation == self.generation else { return }
+            guard let loaded, loaded.memberID == memberID else {
+                await refreshHistory(generation: generation)
+                return
+            }
+            conversation = loaded
+            issue = nil
+            recordStates = [:]
+            checkedRecordIDs = []
+            await refreshRecordStates(generation: generation)
+        } catch {
+            guard generation == self.generation else { return }
+            issue = Self.issue(for: error)
+        }
+    }
+
+    func deleteConversation(_ id: UUID) async {
+        guard !locked, phase != .sending, memberID != nil else { return }
+        let generation = self.generation
+        do {
+            try await service.deleteConversation(id)
+            guard generation == self.generation else { return }
+            if conversation?.id == id {
+                conversation = nil
+                recordStates = [:]
+                checkedRecordIDs = []
+            }
+            await refreshHistory(generation: generation)
+        } catch {
+            guard generation == self.generation else { return }
+            issue = Self.issue(for: error)
+        }
     }
 
     func startNewConversation() {
@@ -193,6 +248,7 @@ final class AssistantConversationModel: ObservableObject {
             self.consent = nil
             show(.consentRequired, phase: .needsConsent)
         }
+        await refreshHistory(generation: generation)
         await refreshRecordStates(generation: generation)
     }
 
@@ -201,7 +257,7 @@ final class AssistantConversationModel: ObservableObject {
         guard !locked else { return }
         if !settings.isEnabled {
             _ = reset(memberID: memberID)
-            await service.discardAll()
+            service.stopRunningTurns()
             show(.disabled, phase: .unavailable)
         } else if let memberID {
             await open(memberID: memberID)
@@ -214,8 +270,8 @@ final class AssistantConversationModel: ObservableObject {
         phase = .closed
     }
 
-    /// The library is being deleted or replaced: stop for good. The service forgets the
-    /// conversations through its lifecycle registration.
+    /// The library is being deleted or replaced: stop for good. The service stops its turn through
+    /// its lifecycle registration.
     func beginDestructiveVaultLifecycle() {
         _ = reset(memberID: nil)
         phase = .closed
@@ -240,6 +296,7 @@ final class AssistantConversationModel: ObservableObject {
         recordStates = [:]
         checkedRecordIDs = []
         includeOrganization = false
+        history = []
         return generation
     }
 
@@ -265,6 +322,18 @@ final class AssistantConversationModel: ObservableObject {
         }
     }
 
+    /// Rereads the member's saved conversations; one on screen that is no longer saved goes away.
+    private func refreshHistory(generation: UInt64) async {
+        guard let memberID, let summaries = try? await service.summaries(memberID: memberID),
+              generation == self.generation else { return }
+        history = summaries
+        if let shown = conversation, !summaries.contains(where: { $0.id == shown.id }) {
+            conversation = nil
+            recordStates = [:]
+            checkedRecordIDs = []
+        }
+    }
+
     private func refreshRecordStates(generation: UInt64) async {
         guard let conversation else { return }
         let ids = Set(conversation.turns.flatMap { $0.sources.map(\.recordID) })
@@ -284,6 +353,7 @@ final class AssistantConversationModel: ObservableObject {
         case .invalidSettings: .invalidSettings
         case .consentRequired: .consentRequired
         case .conversationFull: .conversationFull
+        case .tooManyConversations: .tooManyConversations
         case .invalidQuestion: .invalidQuestion
         case .libraryUnavailable: .libraryUnavailable
         case .storage, nil: .storage
