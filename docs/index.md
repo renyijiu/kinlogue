@@ -16,7 +16,7 @@
 - 想了解同步目录备份/恢复：读 [`backup-and-restore.md`](backup-and-restore.md)、实施计划和 [`acceptance/current-release.md`](acceptance/current-release.md)。
 - 想改界面或文案：读 [`design-system.md`](design-system.md) 和 [`localization.md`](localization.md)。
 - 想改名称、标语、应用图标或了解产品方向：读 [`brand.md`](brand.md)。
-- 想了解或修改成员对话（AI 对话，实验）：先读 [`../PRIVACY.md`](../PRIVACY.md) 的对应一节和 [`privacy-and-security.md`](privacy-and-security.md)，再读 [成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 与 [成员对话验收矩阵](acceptance/member-chat-matrix.md)；经真实 Codex 的人工门禁尚未执行。
+- 想了解或修改成员对话（AI 对话，实验）：先读 [`../PRIVACY.md`](../PRIVACY.md) 的对应一节和 [`privacy-and-security.md`](privacy-and-security.md)，再读 [成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 与 [成员对话验收矩阵](acceptance/member-chat-matrix.md)；真实 Codex 的 bridge 段与边界问题已检查，界面与失败场景的人工门禁尚未执行。
 
 当前最低系统已调整为 macOS 26，主要面向个人自用；Xcode 27 构建适配、CI Metal 组件准备、基线检查名兼容与 DICOM 崩溃恢复探针的重启等待预算见 [`testing-and-release.md`](testing-and-release.md)，转录编辑器的系统写作工具边界见 [`import-and-ocr.md`](import-and-ocr.md)；旧系统支持决策见 [`decisions.md`](decisions.md)，macOS 26/27 验收状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
 

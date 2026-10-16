@@ -70,7 +70,7 @@ public enum CLIProcess {
         guard let child = Spawned(
             path: (supervisor ?? executable).path,
             arguments: argv + arguments,
-            environment: environment,
+            environment: supervisor == nil ? environment : CLISupervisor.supervisorEnvironment(for: environment),
             workingDirectory: workingDirectory
         ) else {
             return CLIProcessResult(ending: .launchFailed, output: Data(), errorTail: "")

@@ -114,6 +114,32 @@ struct AssistantBridgeProcessTests {
     }
 
     @Test
+    func theSupervisorGivesTheCLITheBridgesVariablesNotItsOwn() throws {
+        // App Sandbox resets HOME and TMPDIR to the container when the sandboxed supervisor starts,
+        // so the CLI must get the values the bridge chose: Codex finds its login under the real home.
+        let home = try FakeHome(scenario: [:])
+        defer { home.remove() }
+        let supervisor = Process()
+        supervisor.executableURL = try fixtureExecutable()
+        supervisor.arguments = [CLISupervisor.flag, String(getpid()), "HOME,PATH", home.codexPath, "exec", "--json", "-"]
+        var environment = CLISupervisor.supervisorEnvironment(for: ["HOME": home.path, "PATH": "/usr/bin:/bin"])
+        environment["HOME"] = home.path + "/container-home-that-does-not-exist"
+        supervisor.environment = environment
+        let input = Pipe()
+        supervisor.standardInput = input
+        supervisor.standardOutput = FileHandle.nullDevice
+        supervisor.standardError = FileHandle.nullDevice
+        try supervisor.run()
+        input.fileHandleForWriting.write(Data("Input".utf8))
+        try input.fileHandleForWriting.close()
+        supervisor.waitUntilExit()
+
+        let record = try home.record()
+        #expect(Set(record["environmentKeys"] as? [String] ?? []) == ["HOME", "PATH"])
+        #expect(environment.keys.allSatisfy { $0 == "HOME" || $0.hasPrefix(CLISupervisor.environmentPrefix) })
+    }
+
+    @Test
     func theSupervisorKillsTheGroupWhenItsParentDies() throws {
         let home = try FakeHome(scenario: ["turn": "hang"])
         defer { home.remove() }

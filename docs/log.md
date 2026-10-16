@@ -1851,3 +1851,11 @@
   - macOS 26；
   - `/usr/local` 的真实安装；
   - 安装后合成验收不覆盖成员对话。
+
+## [2026-10-16] feat/assistant | 成员对话：经真实 Codex 的检查，修正沙盒内始终“未登录”
+
+- **起因**：用户提交 U6 后选择先做真实 Codex 检查，并明确同意用合成资料经签名沙盒 bridge 跑完整一轮和约 20 个边界问题；内容会发给 OpenAI 并消耗其额度。
+- **工具**：[`KinlogueAssistantXPCProbe`](../Sources/KinlogueAssistantXPCProbe/main.swift) 新增 `ask` 模式，从 stdin 读取说明与输入，并把回答作为 JSON 字符串输出；状态行附上检查所用的模型。上下文包与提示词由一个用完即删的临时测试，经真实导入路径和 App 的 `assistantPack`、`AssistantPrompt` 生成。没有启动 App，也没有打开真实资料库。
+- **发现与修正**：第一次状态检查报“未登录”。原因是 App Sandbox 把沙盒 supervisor 自己的 `HOME`、`TMPDIR` 改成了容器路径，supervisor 再把它们传给 Codex，Codex 便在容器里找登录。U2 加入 supervisor 后就有这个问题，U2b 的签名检查允许“未登录”而漏掉了它。修正：[`CLIProcess`](../Sources/KinlogueAssistantCLI/CLIProcess.swift) 以 `KINLOGUE_CLI_ENV_` 前缀把变量交给 supervisor，[`CLISupervisor`](../Sources/KinlogueAssistantCLI/CLISupervisor.swift) 只从带前缀的变量重建 CLI 环境。新测试 `theSupervisorGivesTheCLITheBridgesVariablesNotItsOwn` 在改动前失败、改动后通过。[`verify-assistant-xpc.sh`](../scripts/verify-assistant-xpc.sh) 现在要求：终端里已登录时，沙盒内也报告已登录。
+- **结果**：经签名沙盒 bridge、Codex 0.162.0、模型 `gpt-6.1-sol`，21 轮（20 个单轮问题加 1 个带历史的追问）全部得到回答，用时 7.3–14.5 秒，中位数 9.4 秒。回答都守住计划第 3.2 节边界：不下诊断、不给用药建议、不判断好坏、不预测、急症提示立即就医、记录外的信息说明没有、报告里夹带的指令未执行，引用都指向发送过的 R1–R6。三处说明：急症回答附了一般急救要点；被问到和妈妈对比时邀请用户贴出另一人的资料；英文的肝功能总结漏了总胆固醇。运行后 `~/.codex` 与 bridge 容器里没有任何文件含合成内容，没有写入当天会话记录，没有残留进程。逐题记录见[来源笔记](sources/2026-10-16-member-chat-real-codex-check.md)，[验收矩阵](acceptance/member-chat-matrix.md)、[决策](decisions.md)、[品牌](brand.md)、[索引](index.md)、[隐私工程说明](privacy-and-security.md)与[当前候选证据](acceptance/current-release.md)同步。主清单 1282 tests / 108 suites。
+- **未执行**：App 界面上的真实对话、未登录与登录过期、未安装、Codex 中途更新、代理与断网、第三方中转、中途停止、一轮进行中删除或恢复资料库、键盘与 VoiceOver、其他模型、npm 或 `/usr/local` 安装、Developer ID 与公证、macOS 26。修正前的检查在 `~/Library/Containers/com.kinlogue.mac.assistant-bridge/Data/.codex` 留下了 Codex 自己的状态库（不含资料内容），可由用户在 Finder 中删除。

@@ -48,6 +48,7 @@ kind: pattern-reference | product-decision | external-spec
 - [`2026-10-14-carehealth-competitor-notes.md`](2026-10-14-carehealth-competitor-notes.md)：同类 iPhone 健康档案应用的公开资料与回帖需求，用于搜索呈现检验表格行的取舍。
 - [`2026-10-15-local-cli-noninteractive-flags.md`](2026-10-15-local-cli-noninteractive-flags.md)：本机 Codex 0.162.0 与 Claude Code 2.1.296 帮助文本中的非交互、关闭工具与不留会话选项，用于成员对话计划；未发起模型请求。
 - [`2026-10-15-codex-u0-probe-evidence.md`](2026-10-15-codex-u0-probe-evidence.md)：成员对话计划 U0 的实测：加固参数下 Codex 发出的请求（工具数、提示词、本机路径）、真实账号的延迟与磁盘写入，以及沙盒与非沙盒 XPC helper 的运行结果；只用合成资料。
+- [`2026-10-16-member-chat-real-codex-check.md`](2026-10-16-member-chat-real-codex-check.md)：经签名沙盒 bridge 用真实 Codex 跑完整一轮和 21 个合成边界问题；发现并修正沙盒改写 supervisor `HOME` 导致“未登录”的问题；`~/.codex` 与容器里没有留下合成内容。
 
 ### DICOM 调研与阶段契约
 

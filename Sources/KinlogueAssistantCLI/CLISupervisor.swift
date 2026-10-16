@@ -7,10 +7,20 @@ import Foundation
 /// kills the whole group if the bridge dies first. Without it, a killed bridge would leave the CLI
 /// and anything it started running.
 ///
-/// The names are passed because Foundation adds variables of its own, such as
-/// `__CF_USER_TEXT_ENCODING`, to the supervisor's environment at launch.
+/// The CLI's variables arrive under `environmentPrefix` and the names are passed, because the
+/// supervisor's own environment is not the bridge's: Foundation adds variables such as
+/// `__CF_USER_TEXT_ENCODING`, and App Sandbox points `HOME` and `TMPDIR` at the container.
 public enum CLISupervisor {
     public static let flag = "--supervise"
+    /// The CLI's variables travel to the supervisor under this prefix. App Sandbox resets the
+    /// sandboxed supervisor's own `HOME` and `TMPDIR` to its container when it starts, so the
+    /// supervisor must not hand its own values on.
+    public static let environmentPrefix = "KINLOGUE_CLI_ENV_"
+
+    /// The supervisor's environment for a CLI that should get `environment`.
+    public static func supervisorEnvironment(for environment: [String: String]) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: environment.map { (environmentPrefix + $0.key, $0.value) })
+    }
     /// The supervisor's status when it could not start the CLI at all.
     public static let couldNotStartStatus: Int32 = 127
 
@@ -22,9 +32,10 @@ public enum CLISupervisor {
         let names = Set(arguments[3].split(separator: ",").map(String.init))
         let command = Array(arguments[4...])
         let argv = command.map { strdup($0) } + [nil]
-        let envp = ProcessInfo.processInfo.environment
-            .filter { names.contains($0.key) }
-            .map { strdup("\($0.key)=\($0.value)") } + [nil]
+        let own = ProcessInfo.processInfo.environment
+        let envp = names.sorted().compactMap { name in
+            own[environmentPrefix + name].map { strdup("\(name)=\($0)") }
+        } + [nil]
         var child: pid_t = 0
         let result = argv.withUnsafeBufferPointer { argvBuffer in
             envp.withUnsafeBufferPointer { envpBuffer in

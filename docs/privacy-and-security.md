@@ -69,7 +69,7 @@
 
 - `AssistantContextPackBuilder` / `SQLiteReportRepository.assistantPack`：只取一位成员的已确认报告，最新最多 20 份、正文合计不超过 60,000 字节，每份不超过 12,000 字节并标注截断；不含姓名、备注、文件名、原件或记录 ID，机构名称默认不放入；报告文字中能闭合输入标签的 `<` 会被转义。
 - `LiveAssistantService` / `AssistantConversationModel`：同意绑定上下文包指纹、CLI 版本、模型和提示词版本，只在内存里；每轮发送前重查 CLI 状态并核对指纹；每轮在 `LibraryLifecycleCoordinator.withActiveOperation` 内运行，整库删除或恢复会先撤销服务、取消进行中的一轮并清空对话。
-- `KinlogueAssistantBridge.xpc` / `CodexBridge` / `CLISupervisor`：bridge 以固定参数启动 Codex（`exec --json --ephemeral --ignore-user-config --ignore-rules --strict-config --sandbox read-only`，关闭会话历史、分析、遥测、网页搜索和子代理（agents），未列入白名单的功能逐个禁用，并改写模型目录去掉工具字段）；输入只走 stdin；环境变量只有 `HOME`、`USER`、`LOGNAME`、`PATH`、`LANG`、`LC_ALL`、每轮私有的 `TMPDIR` 和用户设置的代理变量，每轮的工作目录与临时目录用后删除。能力检查对本机回环模拟服务发一次请求，确认工具数为零、只有两条消息、模型一致、`store` 为 false 且不含本机路径，结果按可执行文件和模型缓存。子进程在独立进程组中运行，首字节 10 秒、整轮 180 秒超时，输出上限 2 MiB；`--supervise` 进程在 bridge 退出时结束整组。IPC 只传有界文本 DTO，不传文件句柄、记录 ID 或成员名。
+- `KinlogueAssistantBridge.xpc` / `CodexBridge` / `CLISupervisor`：bridge 以固定参数启动 Codex（`exec --json --ephemeral --ignore-user-config --ignore-rules --strict-config --sandbox read-only`，关闭会话历史、分析、遥测、网页搜索和子代理（agents），未列入白名单的功能逐个禁用，并改写模型目录去掉工具字段）；输入只走 stdin；环境变量只有 `HOME`（真实家目录）、`USER`、`LOGNAME`、`PATH`、`LANG`、`LC_ALL`、每轮私有的 `TMPDIR` 和用户设置的代理变量，每轮的工作目录与临时目录用后删除。App Sandbox 会把沙盒 supervisor 自己的 `HOME` 与 `TMPDIR` 改成容器路径，因此这些变量以 `KINLOGUE_CLI_ENV_` 前缀交给 supervisor，由它重建 CLI 的环境。能力检查对本机回环模拟服务发一次请求，确认工具数为零、只有两条消息、模型一致、`store` 为 false 且不含本机路径，结果按可执行文件和模型缓存。子进程在独立进程组中运行，首字节 10 秒、整轮 180 秒超时，输出上限 2 MiB；`--supervise` 进程在 bridge 退出时结束整组。IPC 只传有界文本 DTO，不传文件句柄、记录 ID 或成员名。
 
 这些保护主要解决“意外损坏、错误状态、资源滥用和错误路径写入”；它们不把明文文件变成加密文件。
 

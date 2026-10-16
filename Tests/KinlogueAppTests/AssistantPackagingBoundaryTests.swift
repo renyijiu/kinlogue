@@ -89,6 +89,7 @@ struct AssistantPackagingBoundaryTests {
             "the signed bridge does not carry exactly the production entitlements",
             "is an unsupported location",
             "inside the sandbox",
+            "finds its login inside the sandbox",
             "through the supervisor",
             "npm-style wrapper",
             "cancelling the client's task stops the turn",

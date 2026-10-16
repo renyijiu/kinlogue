@@ -77,7 +77,7 @@ swift scripts/render-app-icon.swift packaging
 3. 模型输出如何保持在非诊断边界内，以及它与用户已确认的来源转录如何区分。
 4. `README.md`、`PRIVACY.md`、[`privacy-and-security.md`](privacy-and-security.md) 和相关验收脚本如何同步改写。
 
-第一步按 [成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 实现：只做模型问答，由使用者本机已登录的 Codex CLI 提供模型（Claude Code 留待后续），在用户开启并确认后联网发送一位成员的已确认报告。它回答了上面第 2、3 项，第 4 项的改写见 [`decisions.md`](decisions.md) 2026-10-16 一节；经真实 Codex 的人工检查尚未执行。这项能力仍是实验，下面的候选文案继续不用。
+第一步按 [成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 实现：只做模型问答，由使用者本机已登录的 Codex CLI 提供模型（Claude Code 留待后续），在用户开启并确认后联网发送一位成员的已确认报告。它回答了上面第 2、3 项，第 4 项的改写见 [`decisions.md`](decisions.md) 2026-10-16 一节；经真实 Codex 的 bridge 段检查已于 2026-10-16 用合成资料完成，界面上的人工检查尚未执行。这项能力仍是实验，下面的候选文案继续不用。
 
 **落地时采用的品牌约束**（推断，待届时确认）：
 

@@ -142,8 +142,15 @@ for candidate in /opt/homebrew/bin/codex /usr/local/bin/codex; do
 done
 if [[ -n "$LOCAL_CODEX" ]]; then
   line="$(probe "$PRODUCTION_APP" status "$SERVICE")"
-  expect_line "the local Codex passes the capability check inside the sandbox" "$line" \
-    'kind=status failure=(none|notLoggedIn) version=[0-9]'
+  # The sandbox points the bridge's own HOME at its container; Codex must still find the login
+  # under the real home, so a Codex that is logged in outside must be logged in inside too.
+  if "$LOCAL_CODEX" login status 2>&1 | /usr/bin/grep -q 'Logged in'; then
+    expect_line "the local Codex passes the capability check and finds its login inside the sandbox" "$line" \
+      'kind=status failure=none version=[0-9][^ ]* loggedIn=true'
+  else
+    expect_line "the local Codex passes the capability check inside the sandbox" "$line" \
+      'kind=status failure=notLoggedIn version=[0-9]'
+  fi
 else
   echo "  not run: no Codex in /opt/homebrew/bin or /usr/local/bin"
 fi
