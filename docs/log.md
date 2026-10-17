@@ -1907,3 +1907,21 @@
   - 对话、主题与本地化相关套件 157 tests 通过；`lint.sh` 与 `git diff --check` 通过；`build-app.sh` 重新构建并签名。
   - 用户用 16:05 的构建在 App 中复测：面板完整显示，点击输入框后拼音组字不再被提示盖住，点击“查看将发送的报告全文”能展开全文。
 - **未执行**：完整 `scripts/test.sh`；`verify-app.sh`（打包与 entitlement 未改动）。
+
+## [2026-10-16] fix/assistant | 问题输入框改用带内边距的原生编辑器，输入法组字不再被遮住或清空
+
+- **现象**：上一条修正提交后复测，问题输入框里的中文仍像被遮住。
+- **原因**：
+  - 输入框仍是 SwiftUI `TextEditor`，首行紧贴可见区域上沿，输入中文时字形上部被遮住。记录编辑页 2026-08-10 修过同一问题，改用 [`InsetTextEditor`](../Sources/KinlogueApp/Views/RecordEditView.swift)。
+  - 改用 `InsetTextEditor` 后又发现：它在每次界面更新时，只要原生文本与 binding 不同就用 binding 覆盖原生文本，而输入法未提交的组字文本只在原生文本里，于是组字中任何一次界面更新都会清空组字。记录编辑页同样受影响。
+- **修正**：
+  - [`AssistantPanelView`](../Sources/KinlogueApp/Views/AssistantPanelView.swift) 的问题输入框改用 `InsetTextEditor`（8pt 内边距，外框高 88pt，文字位置不变），无障碍标签与提示改由原生文本视图提供。
+  - `InsetTextEditor` 增加可选的 `isComposing`，由原生文本视图的 `hasMarkedText()` 在文本或选区变化时更新；组字期间不再用 binding 覆盖原生文本。提示文字只在 `draft` 为空且不在组字时显示，取代上一条按焦点隐藏的做法：获得焦点但为空时仍显示提示。
+- **测试先行**：
+  - 新增 [`AssistantPanelLayoutTests`](../Tests/KinlogueAppTests/AssistantPanelLayoutTests.swift) 1 项：真实 `NSHostingView` 中输入框首个字形距可见区域上沿至少 8pt；旧实现按预期失败。
+  - [`RecordEditViewLayoutTests`](../Tests/KinlogueAppTests/RecordEditViewLayoutTests.swift) 新增 1 项：组字开始、提交、再组字、放弃时 `isComposing` 的变化，以及组字引起的界面更新不清空组字文本；先因缺少参数无法编译，加参数后因组字被清空而失败，修正后通过。
+  - [`AssistantViewSafetyTests`](../Tests/KinlogueAppTests/AssistantViewSafetyTests.swift) 的源码检查改为要求 `InsetTextEditor` 与组字条件。
+  - 主清单 1296 tests / 110 suites（`primary-test-shards.rb --inventory-summary` 核对）。
+- **验证**：临时离屏测试在面板输入框中设置组字文本，截图确认组字完整显示、提示隐藏，已提交文字后再组字正常，获得焦点且为空时提示仍在；临时测试已删除。会断言源码与文本的套件、对话与布局套件共 324 tests 通过；带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`git diff --check` 通过；`build-app.sh` 重新构建并签名。
+  - 用户 2026-10-17 用 17:40 的构建在 App 中复测问题输入框的拼音输入，结果正常。
+- **未执行**：完整 `scripts/test.sh`；`verify-app.sh`；记录编辑页的人工输入法检查（未单独确认）。

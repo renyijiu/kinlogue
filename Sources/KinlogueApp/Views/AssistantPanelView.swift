@@ -43,7 +43,7 @@ struct AssistantPanelView: View {
     @State private var draft = ""
     @State private var isConsentPresented = false
     @State private var pendingDeletion: UUID?
-    @FocusState private var isEditorFocused: Bool
+    @State private var isComposing = false
 
     private static let bottomID = "assistant-bottom"
 
@@ -348,17 +348,19 @@ struct AssistantPanelView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextEditor(text: $draft)
-                .focused($isEditorFocused)
-                .writingToolsBehavior(.disabled)
-                .scrollContentBackground(.hidden)
-                .frame(height: 72)
-                .padding(8)
+            // SwiftUI's editor sets its first line against the clip bounds, which cuts off the top
+            // of Chinese text while an input method composes it; this one keeps an 8pt inset.
+            InsetTextEditor(
+                text: $draft,
+                accessibilityLabel: AppLocalization.string("问题"),
+                accessibilityHelp: AppLocalization.string("按 Command-Return 发送"),
+                isComposing: $isComposing
+            )
+                .frame(height: 88)
                 .kinlogueInputFrame()
                 .overlay(alignment: .topLeading) {
-                    // An input method keeps its uncommitted text out of `draft`, so the hint goes
-                    // when the editor takes focus rather than at the first committed character.
-                    if draft.isEmpty && !isEditorFocused {
+                    // An input method keeps its uncommitted text out of `draft` until it commits.
+                    if draft.isEmpty && !isComposing {
                         Text(AppLocalization.string("就已确认的报告提问"))
                             .foregroundStyle(KinlogueTheme.onVariantSubtle)
                             .padding(.horizontal, 13)
@@ -368,8 +370,6 @@ struct AssistantPanelView: View {
                     }
                 }
                 .disabled(model.phase != .ready)
-                .accessibilityLabel(AppLocalization.string("问题"))
-                .accessibilityHint(AppLocalization.string("按 Command-Return 发送"))
                 .accessibilityIdentifier("assistant-question")
             HStack(spacing: 12) {
                 if draft.count > AssistantLimits.maxQuestionCharacters * 9 / 10 {

@@ -38,15 +38,16 @@ struct AssistantViewSafetyTests {
     func theQuestionEditorSendsWithCommandReturnAndWaitsForTheInputMethod() throws {
         let panel = try view("AssistantPanelView.swift")
 
-        #expect(panel.contains("TextEditor(text: $draft)"))
-        #expect(panel.contains(".writingToolsBehavior(.disabled)"))
+        // The inset editor keeps the first line off the clip bounds and turns Writing Tools off.
+        #expect(panel.contains("InsetTextEditor("))
+        #expect(!panel.contains("TextEditor(text:"))
         #expect(panel.contains(".keyboardShortcut(.return, modifiers: .command)"))
         #expect(panel.contains("TextInputComposition.isActive(in: NSApp.keyWindow?.firstResponder)"))
         #expect(!panel.contains(".onSubmit"), "Return adds a line; only Command-Return sends")
         // An input method's uncommitted text is not in `draft` yet; a hint shown until the first
         // committed character would sit on top of it.
-        #expect(panel.contains(".focused($isEditorFocused)"))
-        #expect(panel.contains("if draft.isEmpty && !isEditorFocused {"))
+        #expect(panel.contains("isComposing: $isComposing"))
+        #expect(panel.contains("if draft.isEmpty && !isComposing {"))
     }
 
     @Test

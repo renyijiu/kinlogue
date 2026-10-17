@@ -334,11 +334,13 @@ struct InsetTextEditor: NSViewRepresentable {
     @Binding var text: String
     let accessibilityLabel: String
     let accessibilityHelp: String
+    /// True while an input method holds uncommitted text, which `text` does not contain yet.
+    var isComposing: Binding<Bool>?
 
     private static let contentInset = NSSize(width: 8, height: 8)
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
+        Coordinator(text: $text, isComposing: isComposing)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -369,6 +371,7 @@ struct InsetTextEditor: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.text = $text
+        context.coordinator.isComposing = isComposing
         guard let textView = scrollView.documentView as? NSTextView else { return }
 
         if textView.isEditable != isEnabled {
@@ -386,22 +389,39 @@ struct InsetTextEditor: NSViewRepresentable {
         if textView.textContainerInset != Self.contentInset {
             textView.textContainerInset = Self.contentInset
         }
-        if textView.string != text {
+        // While an input method composes, `textView.string` holds text the binding does not have
+        // yet; writing the binding back would discard the composition.
+        if !textView.hasMarkedText(), textView.string != text {
             textView.string = text
         }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
+        var isComposing: Binding<Bool>?
 
-        init(text: Binding<String>) {
+        init(text: Binding<String>, isComposing: Binding<Bool>?) {
             self.text = text
+            self.isComposing = isComposing
         }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
+            reportComposition(of: textView)
             guard text.wrappedValue != textView.string else { return }
             text.wrappedValue = textView.string
+        }
+
+        /// Marking, committing and discarding uncommitted text each move the selection.
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            reportComposition(of: textView)
+        }
+
+        private func reportComposition(of textView: NSTextView) {
+            let composing = textView.hasMarkedText()
+            guard let isComposing, isComposing.wrappedValue != composing else { return }
+            isComposing.wrappedValue = composing
         }
     }
 }
