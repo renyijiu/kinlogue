@@ -1925,3 +1925,14 @@
 - **验证**：临时离屏测试在面板输入框中设置组字文本，截图确认组字完整显示、提示隐藏，已提交文字后再组字正常，获得焦点且为空时提示仍在；临时测试已删除。会断言源码与文本的套件、对话与布局套件共 324 tests 通过；带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`git diff --check` 通过；`build-app.sh` 重新构建并签名。
   - 用户 2026-10-17 用 17:40 的构建在 App 中复测问题输入框的拼音输入，结果正常。
 - **未执行**：完整 `scripts/test.sh`；`verify-app.sh`；记录编辑页的人工输入法检查（未单独确认）。
+
+## [2026-10-17] verify/assistant | 成员对话分支在 `501e56f` 上完整跑一遍自动化门禁
+
+- **环境**：macOS 27.0.1、Xcode 27.1（27A9275，当天凌晨自动更新，前几天的记录为 27.0）、Swift 6.4。
+- **先遇到的问题**：更新后第一次完整 `scripts/test.sh` 在构建阶段就停止，没有执行任何测试：DICOM-Swift 的 `WindowingShaders.metal` 需要 Metal Toolchain，`xcrun metal` 报告缺少工具链，在沙盒外运行结果相同，`xcodebuild -showComponent` 却显示已安装。经用户同意运行 `xcodebuild -downloadComponent MetalToolchain` 重新下载（27A266a）后恢复。这是本机工具链状态，与仓库代码无关。
+- **结果**（工作树干净，HEAD `501e56f`）：
+  - 完整 `scripts/test.sh` 退出码 0，用时约 10 分钟，没有失败；72 次分片与隔离门禁运行共执行 1336 项测试，主清单 1296 tests / 110 suites（`primary-test-shards.rb --inventory-summary` 核对）。
+  - `scripts/verify-app.sh --require-clean-source` 通过，验证报告绑定 `501e56f`；本机 ad-hoc 签名，Developer ID 与公证未执行。
+  - `scripts/verify-assistant-xpc.sh` 通过：能力检查对本机回环替身运行，不消耗额度；假 CLI 回答、取消与强杀 bridge 后没有残留进程。
+  - 带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过。
+- **未执行**：Developer ID 签名与公证；macOS 26 机器；键盘、VoiceOver 与错误情形的人工检查；记录编辑页的人工输入法检查。这条日志本身未提交时，上述结果对应的是 `501e56f`，不是包含本条日志的提交。
