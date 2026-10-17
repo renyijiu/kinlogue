@@ -81,8 +81,19 @@ public final class CodexBridge: Sendable {
         let cancellation: CLICancellation
     }
 
+    /// What `codex debug models` offers: the default for a request without a model, and the
+    /// models the user may pick.
+    private struct ModelListing: Sendable {
+        var defaultModel: String?
+        var choices: [KinlogueAssistantModelChoice] = []
+        /// The CLI never ran.
+        var couldNotStart = false
+    }
+
     private struct State: Sendable {
         var capabilities: [Identity: Capability] = [:]
+        /// Per executable file, so a turn's status check does not list the models again.
+        var listings: [Identity: ModelListing] = [:]
         var running: Running?
     }
 
@@ -107,7 +118,8 @@ public final class CodexBridge: Sendable {
                 failure: notFound(configuration.executablePath)
             )
         }
-        let capability = capability(of: executable, model: model, proxy: configuration.proxy)
+        let listing = modelListing(executable, proxy: configuration.proxy)
+        let capability = capability(of: executable, model: model, listing: listing, proxy: configuration.proxy)
         let loggedIn = (try? withRun { run in
             let result = short(executable, ["login", "status"], run: run, proxy: configuration.proxy)
             return CodexInvocation.isLoggedIn(statusOutput: result.errorTail + String(decoding: result.output, as: UTF8.self),
@@ -119,7 +131,9 @@ public final class CodexBridge: Sendable {
             isLoggedIn: loggedIn,
             isVerifiedVersion: capability.version.map(CodexInvocation.isVerified(version:)) ?? false,
             failure: capability.failure ?? (loggedIn ? nil : .notLoggedIn),
-            model: capability.model
+            model: capability.model,
+            defaultModel: listing.defaultModel,
+            models: listing.choices
         )
     }
 
@@ -212,10 +226,12 @@ public final class CodexBridge: Sendable {
 
     // MARK: - Capability check
 
-    private func capability(of executable: CLIExecutable.Located, model requested: String?, proxy: [String: String]) -> Capability {
-        let first = requested == nil ? firstModel(executable, proxy: proxy) : nil
-        guard let model = requested ?? first?.model else {
-            return Capability(version: nil, disabledFeatures: [], failure: first?.couldNotStart == true ? .unsupportedLocation : .unsupportedCLI)
+    private func capability(
+        of executable: CLIExecutable.Located, model requested: String?, listing: ModelListing = ModelListing(), proxy: [String: String]
+    ) -> Capability {
+        // The listing only supplies the default; a turn always names its model.
+        guard let model = requested ?? listing.defaultModel else {
+            return Capability(version: nil, disabledFeatures: [], failure: listing.couldNotStart ? .unsupportedLocation : .unsupportedCLI)
         }
         guard let identity = identity(of: executable.resolved, model: model) else {
             return Capability(version: nil, disabledFeatures: [], failure: .cliNotFound)
@@ -231,12 +247,21 @@ public final class CodexBridge: Sendable {
         return checked
     }
 
-    private func firstModel(_ executable: CLIExecutable.Located, proxy: [String: String]) -> (model: String?, couldNotStart: Bool) {
-        (try? withRun { run in
+    private func modelListing(_ executable: CLIExecutable.Located, proxy: [String: String]) -> ModelListing {
+        let identity = identity(of: executable.resolved, model: "")
+        if let identity, let cached = state.withLock({ $0.listings[identity] }) { return cached }
+        let listing = (try? withRun { run -> ModelListing in
             let result = short(executable, ["debug", "models"], run: run, proxy: proxy, limits: catalogLimits)
-            guard result.exitCode == 0 else { return (nil, result.couldNotStart) }
-            return ((try? CodexModelCatalog.slugs(result.output))?.first(where: KinlogueAssistantText.isToken), false)
-        }) ?? (nil, false)
+            guard result.exitCode == 0 else { return ModelListing(couldNotStart: result.couldNotStart) }
+            return ModelListing(
+                defaultModel: (try? CodexModelCatalog.slugs(result.output))?.first(where: KinlogueAssistantText.isToken),
+                choices: (try? CodexModelCatalog.choices(result.output)) ?? []
+            )
+        }) ?? ModelListing()
+        if let identity, listing.defaultModel != nil {
+            state.withLock { $0.listings[identity] = listing }
+        }
+        return listing
     }
 
     private func check(_ executable: CLIExecutable.Located, model: String, run: RunDirectory, proxy: [String: String]) -> Capability {

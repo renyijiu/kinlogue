@@ -38,6 +38,21 @@ package struct AssistantCLIStatus: Equatable, Sendable {
     package let failure: AssistantFailure?
     /// The model the checks ran with; the default model for a turn.
     package let model: String?
+    /// The model a turn without a chosen one uses: the first in the CLI's catalog.
+    package var defaultModel: String? = nil
+    /// The models the CLI shows in its own picker, in its order.
+    package var models: [AssistantModelOption] = []
+}
+
+/// A model the user may pick: the CLI's slug and the name the CLI shows for it.
+package struct AssistantModelOption: Equatable, Hashable, Sendable {
+    package let slug: String
+    package let displayName: String
+
+    package init(slug: String, displayName: String) {
+        self.slug = slug
+        self.displayName = displayName
+    }
 }
 
 /// The assistant provider backed by the bridge XPC service. Each turn is one request; cancelling
@@ -67,7 +82,8 @@ package final class BridgeAssistantProvider: AssistantProvider {
         return AssistantCLIStatus(
             executablePath: status.executablePath, cliVersion: status.cliVersion, isLoggedIn: status.isLoggedIn,
             isVerifiedVersion: status.isVerifiedVersion, failure: status.failure.map { Self.failure($0, exitCode: nil) },
-            model: status.model
+            model: status.model, defaultModel: status.defaultModel,
+            models: status.models.map { AssistantModelOption(slug: $0.slug, displayName: $0.displayName) }
         )
     }
 

@@ -105,6 +105,40 @@ struct AssistantSettingsModelTests {
         #expect(conversation.issue == .disabled)
     }
 
+    /// The chat panel's model menu saves at once, like the switch, and leaves other unsaved fields alone.
+    @Test
+    func choosingAModelSavesItAndAsksTheOpenConversationAgain() async throws {
+        let fixture = try await AssistantServiceFixture()
+        defer { fixture.close() }
+        let (defaults, suite) = try Self.defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = AssistantSettingsStore(defaults: defaults)
+        store.update(.enabled)
+        let conversation = AssistantConversationModel(service: fixture.service, settings: { store.settings })
+        let model = AssistantSettingsModel(store: store, service: fixture.service, conversation: conversation, isAvailable: true)
+        await model.check()
+        await conversation.open(memberID: fixture.member.id)
+        conversation.confirm()
+        #expect(model.status?.models.map(\.slug) == ["gpt-synthetic-mini", "gpt-synthetic"])
+        #expect(model.status?.defaultModel == "gpt-synthetic")
+
+        model.draft.proxy = "http://127.0.0.1:6152"
+        await model.selectModel("gpt-synthetic-mini")
+        #expect(store.settings.model == "gpt-synthetic-mini")
+        #expect(store.settings.proxy.isEmpty, "the menu saves the model only")
+        #expect(model.draft == .init(model: "gpt-synthetic-mini", proxy: "http://127.0.0.1:6152"))
+        #expect(model.status?.model == "gpt-synthetic-mini")
+        #expect(conversation.phase == .needsConsent, "another model needs another consent")
+        #expect(conversation.cliStatus?.model == "gpt-synthetic-mini")
+
+        await model.selectModel(nil)
+        #expect(store.settings.model == nil)
+        #expect(conversation.cliStatus?.model == "gpt-synthetic")
+
+        await model.selectModel("--config")
+        #expect(store.settings.model == nil, "a name the bridge would refuse is not saved")
+    }
+
     @Test
     func theFeatureIsOfferedOnlyWhenTheBridgeIsInTheAppBundle() throws {
         let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()

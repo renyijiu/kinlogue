@@ -7932,6 +7932,46 @@
           }
         }
       }
+    },
+    "Codex 默认（%@）": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex default (%@)"
+          }
+        }
+      }
+    },
+    "Codex 默认": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex default"
+          }
+        }
+      }
+    },
+    "%@（不在 Codex 列表中）": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (not in Codex's list)"
+          }
+        }
+      }
+    },
+    "选择 Codex 使用的模型；更换后需要重新确认发送内容": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose the model Codex uses; after a change, confirm what is sent again"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -56,11 +56,16 @@ struct AssistantViewSafetyTests {
         let sheet = try view("AssistantConsentSheet.swift")
 
         #expect(!panel.contains("model.confirm()"), "the panel opens the sheet; it never confirms by itself")
+        // The receiver line may change the model: it saves the setting, after which the open
+        // conversation asks for consent again, and it is closed while a turn runs.
+        #expect(panel.contains("await settings.selectModel("))
+        #expect(panel.contains(".disabled(model.phase == .sending || model.phase == .loading || model.isCheckingCLI)"))
         #expect(sheet.contains("model.confirm()"))
         #expect(sheet.contains("model.pack?.renderedRecords()") || sheet.contains("pack.renderedRecords()"))
         #expect(sheet.contains("model.setIncludeOrganization("))
         #expect(sheet.contains(".kinlogueSheetCanvas()"))
-        #expect(sheet.contains(".disabled(model.phase != .needsConsent)"))
+        // Consent waits for the check of changed settings, so it never goes to the previous receiver.
+        #expect(sheet.contains(".disabled(model.phase != .needsConsent || model.isCheckingCLI)"))
         // A disclosure label takes no clicks on macOS; the words that open the full text must.
         #expect(sheet.contains("DisclosureGroup(isExpanded: $showsFullText)"))
         #expect(sheet.contains("Button(AppLocalization.string(\"查看将发送的报告全文\")) { showsFullText.toggle() }"))

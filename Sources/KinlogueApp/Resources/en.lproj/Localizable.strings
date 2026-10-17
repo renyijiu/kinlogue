@@ -20,6 +20,8 @@
 	<string>%@ original, viewed only in app memory</string>
 	<key>%@记录，%@</key>
 	<string>%1$@ record, %2$@</string>
+	<key>%@（不在 Codex 列表中）</key>
+	<string>%@ (not in Codex's list)</string>
 	<key>%@，%@</key>
 	<string>%1$@, %2$@</string>
 	<key>%@，%@，%@</key>
@@ -54,6 +56,10 @@
 	<string>The Codex account has reached its usage limit. Try again later.</string>
 	<key>Codex 路径</key>
 	<string>Codex path</string>
+	<key>Codex 默认</key>
+	<string>Codex default</string>
+	<key>Codex 默认（%@）</key>
+	<string>Codex default (%@)</string>
 	<key>MR · %lld × %lld · %lld 张</key>
 	<string>MR · %1$lld × %2$lld · %3$lld slices</string>
 	<key>PDF 原文字层</key>
@@ -1394,6 +1400,8 @@
 	<string>Fit</string>
 	<key>选择</key>
 	<string>Choose</string>
+	<key>选择 Codex 使用的模型；更换后需要重新确认发送内容</key>
+	<string>Choose the model Codex uses; after a change, confirm what is sent again</string>
 	<key>选择一个已下载到本机的 .kinloguebackup 恢复点。恢复会先完整验证，不会在确认前修改当前资料库。</key>
 	<string>Choose a .kinloguebackup restore point downloaded to this Mac. Kinlogue verifies it fully and will not change the current library before confirmation.</string>
 	<key>选择一条记录</key>

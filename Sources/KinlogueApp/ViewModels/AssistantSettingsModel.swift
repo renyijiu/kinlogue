@@ -76,6 +76,17 @@ final class AssistantSettingsModel: ObservableObject {
         }
     }
 
+    /// The chat panel's model menu: saves the model at once, as the switch does, and keeps unsaved
+    /// edits of the other fields as a draft. Nil is Codex's default.
+    func selectModel(_ model: String?) async {
+        guard model.map(AssistantCLISettings.isValidModel) ?? true, model != settings.model else { return }
+        var next = settings
+        next.model = model
+        var kept = draft
+        kept.model = model ?? ""
+        await apply(next, draft: kept)
+    }
+
     func revertDraft() {
         draft = Self.draft(for: settings)
         draftIssue = nil
@@ -121,10 +132,10 @@ final class AssistantSettingsModel: ObservableObject {
 
     // MARK: - Private
 
-    private func apply(_ next: AssistantSettings) async {
+    private func apply(_ next: AssistantSettings, draft kept: Draft? = nil) async {
         store.update(next)
         settings = store.settings
-        draft = Self.draft(for: settings)
+        draft = kept ?? Self.draft(for: settings)
         draftIssue = nil
         generation &+= 1
         status = nil

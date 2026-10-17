@@ -1936,3 +1936,32 @@
   - `scripts/verify-assistant-xpc.sh` 通过：能力检查对本机回环替身运行，不消耗额度；假 CLI 回答、取消与强杀 bridge 后没有残留进程。
   - 带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过。
 - **未执行**：Developer ID 签名与公证；macOS 26 机器；键盘、VoiceOver 与错误情形的人工检查；记录编辑页的人工输入法检查。这条日志本身未提交时，上述结果对应的是 `501e56f`，不是包含本条日志的提交。
+
+## [2026-10-17] feat/assistant | 成员对话可以从本机 Codex 的模型列表中选择模型
+
+- **需求**：用户反馈“无法选择模型”。此前设置页只有自由填写的模型文本框，面板只显示当前模型。用户选择在设置页和对话面板都提供选择，二者改的是同一个设置。
+- **依据**：bridge 的状态检查本来就运行 `codex debug models` 取默认模型。本机 Codex 的模型缓存显示每个模型有 `slug`、`display_name`、`visibility`（list / hide）与 `priority`；只读查看了字段名和公开的模型名，没有读取账号信息。
+- **实现**：
+  - [`CodexModelCatalog.choices`](../Sources/KinlogueAssistantCLI/CodexInvocation.swift) 从同一份输出取出 `visibility` 为 list（或未给出）的模型，按 `priority`、再按目录顺序排列，最多 32 个；slug 必须是 token，显示名不安全时退回 slug。
+  - [`KinlogueAssistantStatus`](../Sources/KinlogueAssistantIPC/AssistantIPC.swift) 新增 `defaultModel` 与 `models`（slug 与显示名），编码前校验数量、唯一性、token 与有界显示名。[`CodexBridge`](../Sources/KinlogueAssistantCLI/CodexBridge.swift) 每次状态检查都附上列表，成功的列表按可执行文件缓存，发送前的状态检查不再多跑一次进程；默认模型仍是目录中第一个 token slug，与之前一致。
+  - [`AssistantSettingsSection`](../Sources/KinlogueApp/Views/AssistantSettingsSection.swift) 有列表时用下拉菜单（“Codex 默认（名称）”、Codex 列出的模型、已保存但不在列表中的模型），没有列表时回退为文本框；状态行显示模型的显示名。
+  - [`AssistantPanelView`](../Sources/KinlogueApp/Views/AssistantPanelView.swift) 头部的接收方一行成为同样的菜单，经 [`AssistantSettingsModel.selectModel`](../Sources/KinlogueApp/ViewModels/AssistantSettingsModel.swift) 立即保存模型，保留设置页其他未保存的草稿；打开的对话随之重新检查并要求重新确认，发送中菜单不可用。
+  - 新增 4 条中英文案；README、项目概览、隐私与安全、设计系统第 27 条（同时把过时的 `TextEditor` 改为 `InsetTextEditor`）和成员对话矩阵同步。
+- **测试**：Platform 新增 2 项（列表解析：隐藏、排序、去重、不安全 slug 与显示名、上限；状态 IPC 拒绝不安全的列表），假 CLI 目录加入一个可见、一个隐藏模型，provider 测试核对两种检查下都带同一列表与默认模型；App 新增 2 项（菜单项与中英文案；从面板选择后保存、保留其他草稿、对话要求重新确认、拒绝不合法名称），视图源码检查增加菜单经设置模型保存且发送中不可用。主清单 1300 tests / 110 suites。App 两项先因缺少 `selectModel` 无法编译；Platform 测试与实现在同一步写成，没有单独记录失败的运行。
+- **真实环境门禁**：[`verify-assistant-xpc.sh`](../scripts/verify-assistant-xpc.sh) 的探针输出增加列表数量与默认模型；终端里已登录时，要求沙盒内的本机 Codex 列出至少一个模型并给出默认模型，假 CLI 一侧要求恰好列出 2 个（隐藏的不列出）。[`AssistantPackagingBoundaryTests`](../Tests/KinlogueAppTests/AssistantPackagingBoundaryTests.swift) 先要求脚本包含这项检查并按预期失败，补上后通过。
+- **验证**（macOS 27.0.1 / Xcode 27.1 / Swift 6.4，工作树未提交）：
+  - 临时离屏测试渲染设置页下拉菜单和面板菜单，以及从面板选择后设置页显示新模型、面板回到“发送前请确认”；临时测试已删除。
+  - 完整 `scripts/test.sh` 退出码 0，没有失败（72 次运行共 1340 项测试）；此后只改了探针输出、验证脚本和对应的源码文本检查，相关套件重跑通过。
+  - `verify-assistant-xpc.sh` 通过，包括本机真实 Codex 在签名沙盒 bridge 中列出模型（只运行 `codex debug models` 与本机模拟服务，不耗额度，不发送资料）。
+  - 带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过；`build-app.sh` 重新构建并签名。
+- **未执行**：VoiceOver 读菜单。在 App 中用真实 Codex 选择模型的复测见下一条。
+
+## [2026-10-17] fix/assistant | 切换模型不再重新加载对话面板
+
+- **现象**：用户复测模型选择时反馈，切换模型会把会话重新刷新加载。
+- **原因**：设置保存后 [`AssistantConversationModel.settingsChanged`](../Sources/KinlogueApp/ViewModels/AssistantConversationModel.swift) 总是重新走一遍 `open`：清空状态、显示“正在准备对话…”，再重读上下文包、历史和最新一段对话，屏幕上正在看的旧对话或刚开始的新对话被替换；即使接收方没变，同意也被丢掉。
+- **修正**：对话界面正在显示（已就绪或待确认）且上下文包已读取时，设置变化只重新检查接收方：上下文包、历史、显示中的对话和输入框都保留；新接收方与已同意的相同（同一 CLI 版本、模型与上下文包）时保留同意，否则提示 `consentRequired` 并要求重新确认；检查失败时显示对应问题。检查期间 `isCheckingCLI` 为真，确认、发送和模型菜单都不可用，接收方一行旁显示小进度指示，避免把同意给到旧接收方；较早的检查结果被丢弃。关闭功能、不可用状态和发送中的设置变化仍按原流程处理。
+- **测试先行**：[`AssistantConversationModelTests`](../Tests/KinlogueAppTests/AssistantConversationModelTests.swift) 新增 1 项：显示历史中的旧对话时切换模型，对话、历史与上下文包不变，要求重新确认，确认后下一问开始新对话；显式选择与默认相同的模型时同意保留。旧实现按预期失败 3 处。视图源码检查改为要求确认页与面板在检查期间不可用。主清单 1301 tests / 110 suites。
+- **验证**：临时离屏测试渲染发送一轮后切换模型的面板，对话保留、头部显示新模型、Warning 与确认 Card 出现；临时测试已删除。对话与会断言源码与文本的套件共 329 tests 通过；带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过；`build-app.sh` 重新构建并签名。
+  - 用户用 22:50 的构建在 App 中用真实 Codex 复测：在设置页与面板选择模型、切换后面板不重新加载，结果正常。
+- **未执行**：本次改动只在 App 层，没有重跑完整 `scripts/test.sh` 与 `verify-assistant-xpc.sh`（上一条记录的两项在本次改动前通过）。

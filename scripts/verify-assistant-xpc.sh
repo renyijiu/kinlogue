@@ -147,6 +147,8 @@ if [[ -n "$LOCAL_CODEX" ]]; then
   if "$LOCAL_CODEX" login status 2>&1 | /usr/bin/grep -q 'Logged in'; then
     expect_line "the local Codex passes the capability check and finds its login inside the sandbox" "$line" \
       'kind=status failure=none version=[0-9][^ ]* loggedIn=true'
+    expect_line "the local Codex lists the models it shows, with a default" "$line" \
+      'models=[1-9][0-9]* default=[A-Za-z0-9]'
   else
     expect_line "the local Codex passes the capability check inside the sandbox" "$line" \
       'kind=status failure=notLoggedIn version=[0-9]'
@@ -179,6 +181,8 @@ echo "Verification entitlements (one extra read-only folder):"
 line="$(probe "$TEST_APP" status "$TEST_SERVICE" --executable "$PROBE_ROOT/test/bin/codex" --model gpt-synthetic)"
 expect_line "the capability check runs its loopback stand-in inside the sandbox" "$line" \
   'kind=status failure=none version=0\.162\.0 loggedIn=true'
+expect_line "the bridge lists the models it shows, without the hidden one" "$line" \
+  'models=2 default=gpt-synthetic$'
 line="$(probe "$TEST_APP" respond "$TEST_SERVICE" --executable "$PROBE_ROOT/test/bin/codex" --model gpt-synthetic)"
 expect_line "a turn returns the CLI's answer through the supervisor" "$line" \
   'kind=answer version=0\.162\.0 text=fake_answer_bytes=[0-9]+'

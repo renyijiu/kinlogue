@@ -40,6 +40,8 @@ struct AssistantPanelView: View {
     let onShowRecord: (UUID) -> Void
     let onOpenSettings: () -> Void
     let onClose: () -> Void
+    /// Turns the receiver line into a menu of the models Codex lists; nil shows it as text.
+    var modelSettings: AssistantSettingsModel? = nil
     @State private var draft = ""
     @State private var isConsentPresented = false
     @State private var pendingDeletion: UUID?
@@ -114,14 +116,26 @@ struct AssistantPanelView: View {
                 .buttonStyle(.kinlogueGhost(.neutral))
                 .help(AppLocalization.string("返回报告详情"))
             }
-            if !scopeLines.isEmpty {
+            if receiverLine != nil || packLine != nil {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
-                        ForEach(scopeLines, id: \.self) { line in
-                            Text(line)
-                                .font(.callout)
-                                .foregroundStyle(KinlogueTheme.onVariant)
-                                .fixedSize(horizontal: false, vertical: true)
+                        if let receiverLine {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                if let modelSettings, let status = model.cliStatus, !status.models.isEmpty {
+                                    AssistantModelMenuButton(settings: modelSettings, status: status, title: receiverLine)
+                                        .disabled(model.phase == .sending || model.phase == .loading || model.isCheckingCLI)
+                                } else {
+                                    scopeText(receiverLine)
+                                }
+                                if model.isCheckingCLI {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                        .accessibilityLabel(AppLocalization.string("正在检查 Codex…"))
+                                }
+                            }
+                        }
+                        if let packLine {
+                            scopeText(packLine)
                         }
                     }
                     Spacer(minLength: 8)
@@ -168,16 +182,24 @@ struct AssistantPanelView: View {
         model.pack.map { AssistantPackSummary(pack: $0, damagedCount: model.damagedRecordIDs.count) }
     }
 
-    /// Who receives the chat, then what it sends.
-    private var scopeLines: [String] {
-        var lines: [String] = []
-        if let status = model.cliStatus, status.failure == nil, let version = status.cliVersion, let name = status.model {
-            lines.append(AssistantText.receiver(cliVersion: version, model: name))
+    /// Who receives the chat.
+    private var receiverLine: String? {
+        guard let status = model.cliStatus, status.failure == nil, let version = status.cliVersion, let name = status.model else {
+            return nil
         }
-        if let summary {
-            lines.append([summary.reports(), summary.dateRange(), summary.size()].compactMap { $0 }.joined(separator: " · "))
-        }
-        return lines
+        return AssistantText.receiver(cliVersion: version, model: name)
+    }
+
+    /// What the chat sends.
+    private var packLine: String? {
+        summary.map { [$0.reports(), $0.dateRange(), $0.size()].compactMap { $0 }.joined(separator: " · ") }
+    }
+
+    private func scopeText(_ line: String) -> some View {
+        Text(line)
+            .font(.callout)
+            .foregroundStyle(KinlogueTheme.onVariant)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Content
@@ -333,6 +355,7 @@ struct AssistantPanelView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Button(AppLocalization.string("查看并确认…")) { isConsentPresented = true }
                 .buttonStyle(.kinloguePrimary)
+                .disabled(model.isCheckingCLI)
                 .accessibilityIdentifier("assistant-review-consent")
         }
         .padding(16)
@@ -401,7 +424,8 @@ struct AssistantPanelView: View {
 
     private var canSend: Bool {
         let question = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        return model.phase == .ready && !question.isEmpty && question.count <= AssistantLimits.maxQuestionCharacters
+        return model.phase == .ready && !model.isCheckingCLI && !question.isEmpty
+            && question.count <= AssistantLimits.maxQuestionCharacters
     }
 
     private func send() {
@@ -425,6 +449,37 @@ struct AssistantPanelView: View {
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         withAnimation { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+    }
+}
+
+/// The receiver line as a menu of the models Codex lists. Choosing one saves the setting; the open
+/// conversation then asks for consent again, because the receiver changed.
+private struct AssistantModelMenuButton: View {
+    @ObservedObject var settings: AssistantSettingsModel
+    let status: AssistantCLIStatus
+    let title: String
+
+    var body: some View {
+        Menu {
+            ForEach(AssistantModelMenu.items(options: status.models, defaultModel: status.defaultModel, selected: settings.settings.model)) { item in
+                Button {
+                    Task { await settings.selectModel(item.id.isEmpty ? nil : item.id) }
+                } label: {
+                    if item.id == (settings.settings.model ?? "") {
+                        Label(item.title, systemImage: "checkmark")
+                    } else {
+                        Text(item.title)
+                    }
+                }
+            }
+        } label: {
+            Text(title)
+                .font(.callout)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(AppLocalization.string("选择 Codex 使用的模型；更换后需要重新确认发送内容"))
+        .accessibilityIdentifier("assistant-model-menu")
     }
 }
 

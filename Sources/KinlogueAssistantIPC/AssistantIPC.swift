@@ -14,6 +14,9 @@ public enum KinlogueAssistantIPCLimits {
     public static let maximumFieldBytes = 128
     public static let maximumPathBytes = 1_024
     public static let maximumProxyValueBytes = 512
+    /// The models a status may offer for the user to pick, and the length of one shown name.
+    public static let maximumModelChoices = 32
+    public static let maximumModelNameBytes = 128
     /// The only environment variables the App may pass on to the CLI.
     public static let proxyKeys: Set<String> = ["HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY"]
 }
@@ -98,6 +101,23 @@ public struct KinlogueAssistantStatusRequest: Codable, Equatable, Sendable {
     }
 }
 
+/// A model the user may pick: the CLI's slug and the name the CLI shows for it.
+public struct KinlogueAssistantModelChoice: Codable, Equatable, Sendable {
+    public let slug: String
+    public let displayName: String
+
+    public init(slug: String, displayName: String) {
+        self.slug = slug
+        self.displayName = displayName
+    }
+
+    public func validate() throws {
+        guard KinlogueAssistantText.isToken(slug), KinlogueAssistantText.isDisplayName(displayName) else {
+            throw KinlogueAssistantIPCValidationError.invalidField
+        }
+    }
+}
+
 /// What the settings page shows: the resolved executable, its version, login state, and the first
 /// reason it cannot be used, if any.
 public struct KinlogueAssistantStatus: Codable, Equatable, Sendable {
@@ -110,6 +130,10 @@ public struct KinlogueAssistantStatus: Codable, Equatable, Sendable {
     public let failure: KinlogueAssistantFailureCode?
     /// The model the checks ran with: the requested one, or the first in the CLI's catalog.
     public let model: String?
+    /// The model a request without one uses: the first in the CLI's catalog.
+    public let defaultModel: String?
+    /// The models the CLI shows in its own picker, in its order.
+    public let models: [KinlogueAssistantModelChoice]
 
     public init(
         executablePath: String?,
@@ -117,7 +141,9 @@ public struct KinlogueAssistantStatus: Codable, Equatable, Sendable {
         isLoggedIn: Bool,
         isVerifiedVersion: Bool,
         failure: KinlogueAssistantFailureCode?,
-        model: String? = nil
+        model: String? = nil,
+        defaultModel: String? = nil,
+        models: [KinlogueAssistantModelChoice] = []
     ) {
         self.executablePath = executablePath
         self.cliVersion = cliVersion
@@ -125,14 +151,20 @@ public struct KinlogueAssistantStatus: Codable, Equatable, Sendable {
         self.isVerifiedVersion = isVerifiedVersion
         self.failure = failure
         self.model = model
+        self.defaultModel = defaultModel
+        self.models = models
     }
 
     public func validate() throws {
         guard executablePath.map({ $0.utf8.count <= KinlogueAssistantIPCLimits.maximumPathBytes }) ?? true,
               cliVersion.map(KinlogueAssistantText.isToken) ?? true,
-              model.map(KinlogueAssistantText.isToken) ?? true else {
+              model.map(KinlogueAssistantText.isToken) ?? true,
+              defaultModel.map(KinlogueAssistantText.isToken) ?? true,
+              models.count <= KinlogueAssistantIPCLimits.maximumModelChoices,
+              Set(models.map(\.slug)).count == models.count else {
             throw KinlogueAssistantIPCValidationError.invalidField
         }
+        for model in models { try model.validate() }
     }
 }
 
@@ -197,6 +229,13 @@ public enum KinlogueAssistantText {
         return value.unicodeScalars.allSatisfy { scalar in
             scalar.isASCII && (CharacterSet.alphanumerics.contains(scalar) || ".-_:".unicodeScalars.contains(scalar))
         }
+    }
+
+    /// A name the CLI shows for a model: non-blank, trimmed, within the budget, no control characters.
+    public static func isDisplayName(_ value: String) -> Bool {
+        value.utf8.count <= KinlogueAssistantIPCLimits.maximumModelNameBytes
+            && !value.isEmpty && value == value.trimmingCharacters(in: .whitespacesAndNewlines)
+            && !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
     }
 
     /// Non-blank, within the byte budget, and free of NUL.

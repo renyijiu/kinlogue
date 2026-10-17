@@ -103,6 +103,27 @@ struct AssistantPresentationTests {
     }
 
     @Test
+    func modelMenuOffersCodexDefaultTheListedModelsAndASavedUnlistedOne() {
+        let options = [AssistantModelOption(slug: "gpt-a", displayName: "GPT A"), .init(slug: "gpt-b", displayName: "GPT B")]
+
+        let chinese = AssistantModelMenu.items(options: options, defaultModel: "gpt-b", selected: nil, language: .simplifiedChinese)
+        #expect(chinese.map(\.id) == ["", "gpt-a", "gpt-b"])
+        #expect(chinese.map(\.title) == ["Codex 默认（GPT B）", "GPT A", "GPT B"])
+
+        let english = AssistantModelMenu.items(options: options, defaultModel: "gpt-b", selected: "gpt-old", language: .english)
+        #expect(english.map(\.id) == ["", "gpt-a", "gpt-b", "gpt-old"])
+        #expect(english.first?.title == "Codex default (GPT B)")
+        #expect(english.last?.title == "gpt-old (not in Codex's list)")
+        #expect(AssistantModelMenu.items(options: options, defaultModel: "gpt-a", selected: "gpt-a", language: .english).count == 3)
+
+        #expect(AssistantModelMenu.items(options: [], defaultModel: nil, selected: nil, language: .english).map(\.title) == ["Codex default"])
+        #expect(AssistantModelMenu.items(options: [], defaultModel: "gpt-x", selected: nil, language: .simplifiedChinese).map(\.title)
+            == ["Codex 默认（gpt-x）"])
+        #expect(AssistantModelMenu.name(of: "gpt-a", in: options) == "GPT A")
+        #expect(AssistantModelMenu.name(of: "gpt-x", in: options) == "gpt-x")
+    }
+
+    @Test
     func answersKeepEmphasisAndLineBreaksButNoLinks() {
         let text = AssistantAnswerFormatting.attributed(
             "**Glucose** 5.1 [R1]\nSee [the site](https://example.com) and <https://example.org>\n\n- item"

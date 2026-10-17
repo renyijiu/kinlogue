@@ -36,6 +36,7 @@ func run() async -> String {
         guard let status = try? KinlogueAssistantIPCCodec.decodeStatus(data) else { return "KL_PROBE kind=undecodable" }
         return "KL_PROBE kind=status failure=\(status.failure?.rawValue ?? "none") version=\(status.cliVersion ?? "none")"
             + " loggedIn=\(status.isLoggedIn) verified=\(status.isVerifiedVersion) model=\(status.model ?? "none")"
+            + " models=\(status.models.count) default=\(status.defaultModel ?? "none")"
     }
     var instructions = "Synthetic verification instructions."
     var input = "<question>\nSynthetic verification\n</question>\n"

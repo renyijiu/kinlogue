@@ -1,4 +1,5 @@
 import Foundation
+import KinlogueAssistantIPC
 
 public enum CodexAdapterError: Error, Equatable, Sendable {
     case malformedFeatureList
@@ -181,6 +182,27 @@ public enum CodexModelCatalog {
         let slugs = models.compactMap { $0["slug"] as? String }.filter { !$0.isEmpty }
         guard slugs.count == models.count else { throw CodexAdapterError.malformedModelCatalog }
         return slugs
+    }
+
+    /// The models Codex shows in its own picker (`visibility` "list", or none given), ordered by
+    /// `priority` and then catalog position. A slug that is not a token is left out; a shown name
+    /// that is unsafe to display falls back to the slug.
+    public static func choices(_ data: Data) throws -> [KinlogueAssistantModelChoice] {
+        guard data.count <= maximumBytes,
+              let catalog = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let models = catalog["models"] as? [[String: Any]], !models.isEmpty else {
+            throw CodexAdapterError.malformedModelCatalog
+        }
+        var seen = Set<String>()
+        let shown = models.enumerated().compactMap { position, model -> (rank: Int, position: Int, choice: KinlogueAssistantModelChoice)? in
+            guard let slug = model["slug"] as? String, KinlogueAssistantText.isToken(slug),
+                  (model["visibility"] as? String ?? "list") == "list", seen.insert(slug).inserted else { return nil }
+            let name = (model["display_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let displayName = name.flatMap { KinlogueAssistantText.isDisplayName($0) ? $0 : nil } ?? slug
+            return ((model["priority"] as? Int) ?? .max, position, KinlogueAssistantModelChoice(slug: slug, displayName: displayName))
+        }
+        return shown.sorted { ($0.rank, $0.position) < ($1.rank, $1.position) }
+            .prefix(KinlogueAssistantIPCLimits.maximumModelChoices).map(\.choice)
     }
 
     public static func rewrite(_ data: Data) throws -> Data {

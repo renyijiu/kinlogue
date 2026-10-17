@@ -90,6 +90,7 @@ struct AssistantPackagingBoundaryTests {
             "is an unsupported location",
             "inside the sandbox",
             "finds its login inside the sandbox",
+            "lists the models it shows",
             "through the supervisor",
             "npm-style wrapper",
             "cancelling the client's task stops the turn",

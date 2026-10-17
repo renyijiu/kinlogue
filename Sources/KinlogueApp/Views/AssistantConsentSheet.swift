@@ -47,7 +47,7 @@ struct AssistantConsentSheet: View {
                         if model.hasConsent { onClose() }
                     }
                     .buttonStyle(.kinloguePrimary)
-                    .disabled(model.phase != .needsConsent)
+                    .disabled(model.phase != .needsConsent || model.isCheckingCLI)
                     .accessibilityIdentifier("assistant-consent-confirm")
                 }
             }

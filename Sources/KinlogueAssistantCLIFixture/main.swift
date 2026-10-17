@@ -221,7 +221,7 @@ case "features":
         print(name.padding(toLength: 36, withPad: " ", startingAt: 0) + stage.padding(toLength: 19, withPad: " ", startingAt: 0) + String(on))
     }
 case "debug":
-    print(#"{"models":[{"slug":"gpt-synthetic","tool_mode":"code_mode_only","apply_patch_tool_type":"freeform","experimental_supported_tools":["clock"]}]}"#)
+    print(#"{"models":[{"slug":"gpt-synthetic","display_name":"GPT Synthetic","visibility":"list","priority":2,"tool_mode":"code_mode_only","apply_patch_tool_type":"freeform","experimental_supported_tools":["clock"]},{"slug":"gpt-synthetic-hidden","display_name":"Hidden","visibility":"hide","priority":0},{"slug":"gpt-synthetic-mini","display_name":"GPT Synthetic Mini","visibility":"list","priority":1}]}"#)
 case "exec":
     if arguments.contains("--help") {
         let flags = CodexInvocation.requiredExecFlags.filter {

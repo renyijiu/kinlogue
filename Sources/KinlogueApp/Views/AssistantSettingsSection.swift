@@ -107,7 +107,9 @@ struct AssistantSettingsSection: View {
                 row(AppLocalization.string("Codex 位置"), settings.status?.executablePath ?? "—")
                 row(AppLocalization.string("版本"), settings.status?.cliVersion ?? "—")
                 row(AppLocalization.string("登录"), loginText)
-                row(AppLocalization.string("模型"), settings.status?.model ?? "—")
+                row(AppLocalization.string("模型"), settings.status.flatMap { status in
+                    status.model.map { AssistantModelMenu.name(of: $0, in: status.models) }
+                } ?? "—")
             }
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 checkResult
@@ -161,11 +163,7 @@ struct AssistantSettingsSection: View {
                     prompt: AppLocalization.string("留空则在 /opt/homebrew 和 /usr/local 中查找"),
                     identifier: "assistant-settings-path"
                 )
-                field(
-                    AppLocalization.string("模型"), text: $settings.draft.model,
-                    prompt: AppLocalization.string("留空则使用 Codex 的默认模型"),
-                    identifier: "assistant-settings-model"
-                )
+                modelRow
                 field(
                     AppLocalization.string("代理"), text: $settings.draft.proxy,
                     prompt: AppLocalization.string("例如 http://127.0.0.1:7890，留空则不使用"),
@@ -187,6 +185,32 @@ struct AssistantSettingsSection: View {
                     .disabled(!settings.hasUnsavedChanges)
                     .accessibilityIdentifier("assistant-settings-save")
             }
+        }
+    }
+
+    /// A menu of the models the checked Codex lists; a text field when there is no list to offer.
+    @ViewBuilder
+    private var modelRow: some View {
+        if let status = settings.status, !status.models.isEmpty {
+            GridRow {
+                Text(AppLocalization.string("模型"))
+                    .foregroundStyle(KinlogueTheme.onVariant)
+                    .gridColumnAlignment(.trailing)
+                Picker(AppLocalization.string("模型"), selection: $settings.draft.model) {
+                    ForEach(AssistantModelMenu.items(options: status.models, defaultModel: status.defaultModel, selected: settings.draft.model)) {
+                        Text($0.title).tag($0.id)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityIdentifier("assistant-settings-model")
+            }
+        } else {
+            field(
+                AppLocalization.string("模型"), text: $settings.draft.model,
+                prompt: AppLocalization.string("留空则使用 Codex 的默认模型"),
+                identifier: "assistant-settings-model"
+            )
         }
     }
 

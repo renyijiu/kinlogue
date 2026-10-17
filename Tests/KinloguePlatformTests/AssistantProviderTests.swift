@@ -78,6 +78,15 @@ struct AssistantProviderTests {
         #expect(status.executablePath?.hasSuffix("/KinlogueAssistantCLIFixture") == true)
         #expect(status.model == "gpt-synthetic")
         #expect(await ready.provider.status(model: nil).model == "gpt-synthetic", "the first model of the CLI's catalog")
+        // The models a user may pick: the shown ones in Codex's order, whichever model was checked.
+        for checked in [nil, "gpt-synthetic-mini"] {
+            let listed = await ready.provider.status(model: checked)
+            #expect(listed.defaultModel == "gpt-synthetic")
+            #expect(listed.models == [
+                AssistantModelOption(slug: "gpt-synthetic-mini", displayName: "GPT Synthetic Mini"),
+                AssistantModelOption(slug: "gpt-synthetic", displayName: "GPT Synthetic"),
+            ])
+        }
 
         let loggedOut = try ProviderSetup(scenario: ["check": "clean", "loggedOut": true])
         defer { loggedOut.remove() }

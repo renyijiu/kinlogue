@@ -258,7 +258,9 @@ final class FakeAssistantBackend: AssistantBackend {
         let (version, failure) = state.withLock { ($0.cliVersion, $0.failure) }
         return AssistantCLIStatus(
             executablePath: "/opt/homebrew/Caskroom/codex/synthetic/bin/codex", cliVersion: version, isLoggedIn: failure != .notLoggedIn,
-            isVerifiedVersion: version == "0.162.0", failure: failure, model: model ?? "gpt-synthetic"
+            isVerifiedVersion: version == "0.162.0", failure: failure, model: model ?? "gpt-synthetic",
+            defaultModel: "gpt-synthetic",
+            models: [.init(slug: "gpt-synthetic-mini", displayName: "GPT Synthetic Mini"), .init(slug: "gpt-synthetic", displayName: "GPT Synthetic")]
         )
     }
 

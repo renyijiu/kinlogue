@@ -211,6 +211,45 @@ struct AssistantConversationModelTests {
         #expect(try await fixture.service.conversation(older.id) == nil)
     }
 
+    /// Another model changes the receiver only: the panel keeps what it shows and asks again.
+    @Test
+    func changingTheModelKeepsWhatIsOnScreenAndAsksForConsentAgain() async throws {
+        let fixture = try await AssistantServiceFixture()
+        defer { fixture.close() }
+        var settings = AssistantSettings.enabled
+        let model = AssistantConversationModel(service: fixture.service, settings: { settings })
+        await model.open(memberID: fixture.member.id)
+        model.confirm()
+        await model.send("Older question")
+        let older = try #require(model.conversation)
+        model.startNewConversation()
+        await model.send("Newer question")
+        await model.selectConversation(older.id)
+        let pack = model.pack
+        let history = model.history
+
+        settings.model = "gpt-synthetic-mini"
+        await model.settingsChanged(to: settings)
+        #expect(model.conversation == older, "the conversation on screen stays")
+        #expect(model.history == history)
+        #expect(model.pack == pack)
+        #expect(model.cliStatus?.model == "gpt-synthetic-mini")
+        #expect(model.phase == .needsConsent, "another receiver needs another consent")
+        #expect(model.issue == .consentRequired)
+        #expect(!model.isCheckingCLI)
+        model.confirm()
+        #expect(model.phase == .ready)
+        #expect(!model.continuesShownConversation, "the next question starts a new conversation")
+
+        settings.model = nil
+        await model.settingsChanged(to: settings)
+        model.confirm()
+        settings.model = "gpt-synthetic"
+        await model.settingsChanged(to: settings)
+        #expect(model.phase == .ready, "naming the default model keeps the same receiver and its consent")
+        #expect(model.conversation == older)
+    }
+
     @Test
     func reopeningAMemberShowsTheLatestSavedConversationButAsksForConsentAgain() async throws {
         let fixture = try await AssistantServiceFixture()

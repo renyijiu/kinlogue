@@ -48,6 +48,8 @@ final class AssistantConversationModel: ObservableObject {
     /// The question of the turn that is running, shown until its answer arrives.
     @Published private(set) var pendingQuestion: String?
     @Published private(set) var sendingStartedAt: Date?
+    /// Changed settings are being checked; nothing can be confirmed or sent until the result is in.
+    @Published private(set) var isCheckingCLI = false
 
     private let service: LiveAssistantService
     private let currentSettings: @MainActor () -> AssistantSettings
@@ -57,6 +59,7 @@ final class AssistantConversationModel: ObservableObject {
     private var locked = false
     private var sending: Task<AssistantConversation, any Error>?
     private var refreshAfterSending = false
+    private var cliCheck: UInt64 = 0
 
     init(service: LiveAssistantService, settings: @escaping @MainActor () -> AssistantSettings) {
         self.service = service
@@ -116,7 +119,7 @@ final class AssistantConversationModel: ObservableObject {
 
     /// The user confirmed the sheet: send this pack to this CLI and model.
     func confirm() {
-        guard !locked, phase == .needsConsent, let pack, let cliStatus else { return }
+        guard !locked, phase == .needsConsent, !isCheckingCLI, let pack, let cliStatus else { return }
         do {
             consent = try service.consent(pack: pack, status: cliStatus)
             issue = nil
@@ -136,7 +139,7 @@ final class AssistantConversationModel: ObservableObject {
     }
 
     func send(_ question: String) async {
-        guard !locked, phase != .sending else { return }
+        guard !locked, phase != .sending, !isCheckingCLI else { return }
         guard phase == .ready, let consent, let pack else {
             issue = .consentRequired
             return
@@ -252,13 +255,16 @@ final class AssistantConversationModel: ObservableObject {
         await refreshRecordStates(generation: generation)
     }
 
-    /// Settings were saved. Turning the feature off stops and forgets everything.
+    /// Settings were saved. Turning the feature off stops and forgets everything; while the
+    /// conversation is on screen, other changes only check the receiver again.
     func settingsChanged(to settings: AssistantSettings) async {
         guard !locked else { return }
         if !settings.isEnabled {
             _ = reset(memberID: memberID)
             service.stopRunningTurns()
             show(.disabled, phase: .unavailable)
+        } else if pack != nil, phase == .ready || phase == .needsConsent {
+            await recheckReceiver(settings)
         } else if let memberID {
             await open(memberID: memberID)
         }
@@ -286,6 +292,8 @@ final class AssistantConversationModel: ObservableObject {
         sending?.cancel()
         endSending()
         refreshAfterSending = false
+        cliCheck &+= 1
+        isCheckingCLI = false
         self.memberID = memberID
         pack = nil
         damagedRecordIDs = []
@@ -298,6 +306,33 @@ final class AssistantConversationModel: ObservableObject {
         includeOrganization = false
         history = []
         return generation
+    }
+
+    /// Checks the CLI that `settings` name and keeps the pack, the history and the conversation on
+    /// screen. The consent holds only for the same receiver and pack.
+    private func recheckReceiver(_ settings: AssistantSettings) async {
+        let generation = self.generation
+        cliCheck &+= 1
+        let check = cliCheck
+        isCheckingCLI = true
+        defer { if check == cliCheck { isCheckingCLI = false } }
+        do {
+            let status = try await service.status(settings: settings)
+            guard generation == self.generation, check == cliCheck else { return }
+            cliStatus = status
+            if let failure = status.failure {
+                consent = nil
+                show(.cli(failure), phase: .unavailable)
+                return
+            }
+            if let consent, let pack, (try? service.consent(pack: pack, status: status)) == consent { return }
+            consent = nil
+            show(.consentRequired, phase: .needsConsent)
+        } catch {
+            guard generation == self.generation, check == cliCheck else { return }
+            consent = nil
+            show(Self.issue(for: error), phase: .unavailable)
+        }
     }
 
     private func endSending() {

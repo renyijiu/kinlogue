@@ -40,6 +40,36 @@ enum AssistantText {
     }
 }
 
+/// The models the settings page and the chat panel offer: Codex's default, the models Codex lists,
+/// and a saved model Codex no longer lists, so choosing never drops it silently.
+enum AssistantModelMenu {
+    struct Item: Identifiable, Equatable {
+        /// The model to save; empty for Codex's default.
+        let id: String
+        let title: String
+    }
+
+    static func items(
+        options: [AssistantModelOption],
+        defaultModel: String?,
+        selected: String?,
+        language: AppLanguage = AppLocalization.selectedLanguage()
+    ) -> [Item] {
+        let defaultTitle = defaultModel.map { AppLocalization.string("Codex 默认（\(name(of: $0, in: options))）", language: language) }
+            ?? AppLocalization.string("Codex 默认", language: language)
+        var items = [Item(id: "", title: defaultTitle)] + options.map { Item(id: $0.slug, title: $0.displayName) }
+        if let selected, !selected.isEmpty, !options.contains(where: { $0.slug == selected }) {
+            items.append(Item(id: selected, title: AppLocalization.string("\(selected)（不在 Codex 列表中）", language: language)))
+        }
+        return items
+    }
+
+    /// The name Codex shows for `slug`, or the slug itself.
+    static func name(of slug: String, in options: [AssistantModelOption]) -> String {
+        options.first { $0.slug == slug }?.displayName ?? slug
+    }
+}
+
 extension AssistantIssue {
     /// A stopped answer and an expired consent are expected turns of a conversation, not failures.
     var tone: KinlogueStatusTone {

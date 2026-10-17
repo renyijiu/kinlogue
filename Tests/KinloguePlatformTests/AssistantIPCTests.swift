@@ -30,7 +30,9 @@ struct AssistantIPCTests {
 
         let status = KinlogueAssistantStatus(
             executablePath: "/opt/homebrew/Caskroom/codex/0.162.0/bin/codex",
-            cliVersion: "0.162.0", isLoggedIn: true, isVerifiedVersion: true, failure: nil
+            cliVersion: "0.162.0", isLoggedIn: true, isVerifiedVersion: true, failure: nil,
+            model: "gpt-synthetic-mini", defaultModel: "gpt-synthetic",
+            models: [.init(slug: "gpt-synthetic-mini", displayName: "GPT Synthetic Mini"), .init(slug: "gpt-synthetic", displayName: "合成模型")]
         )
         #expect(try KinlogueAssistantIPCCodec.decodeStatus(KinlogueAssistantIPCCodec.encode(status)) == status)
         let statusRequest = try KinlogueAssistantStatusRequest(configuration: .init(executablePath: nil, proxy: [:]))
@@ -71,6 +73,29 @@ struct AssistantIPCTests {
             { try turn(input: String(repeating: "x", count: KinlogueAssistantIPCLimits.maximumInputBytes + 1)) },
         ] {
             #expect(throws: KinlogueAssistantIPCValidationError.invalidField) { _ = try invalid() }
+        }
+    }
+
+    @Test
+    func statusRejectsUnsafeModelChoices() throws {
+        func status(default defaultModel: String? = nil, _ models: [KinlogueAssistantModelChoice]) -> KinlogueAssistantStatus {
+            KinlogueAssistantStatus(
+                executablePath: nil, cliVersion: "0.162.0", isLoggedIn: true, isVerifiedVersion: true, failure: nil,
+                defaultModel: defaultModel, models: models
+            )
+        }
+
+        _ = try KinlogueAssistantIPCCodec.encode(status(default: "gpt-a", [.init(slug: "gpt-a", displayName: "GPT A")]))
+        for invalid in [
+            status(default: "-c", []),
+            status([.init(slug: "-c", displayName: "Injected")]),
+            status([.init(slug: "gpt-a", displayName: " ")]),
+            status([.init(slug: "gpt-a", displayName: "a\nb")]),
+            status([.init(slug: "gpt-a", displayName: String(repeating: "x", count: KinlogueAssistantIPCLimits.maximumModelNameBytes + 1))]),
+            status([.init(slug: "gpt-a", displayName: "A"), .init(slug: "gpt-a", displayName: "B")]),
+            status((0...KinlogueAssistantIPCLimits.maximumModelChoices).map { .init(slug: "gpt-\($0)", displayName: "M\($0)") }),
+        ] {
+            #expect(throws: KinlogueAssistantIPCValidationError.invalidField) { _ = try KinlogueAssistantIPCCodec.encode(invalid) }
         }
     }
 

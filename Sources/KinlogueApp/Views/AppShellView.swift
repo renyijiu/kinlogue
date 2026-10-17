@@ -501,7 +501,8 @@ struct AppShellView: View {
                         Task { await model.selectRecord(id) }
                     },
                     onOpenSettings: { selectedSidebarSection = .settings },
-                    onClose: { isAssistantShown = false }
+                    onClose: { isAssistantShown = false },
+                    modelSettings: assistantSettings
                 )
                 // A member keeps its chat while the report is shown; another member starts afresh.
                 .task(id: memberID) {

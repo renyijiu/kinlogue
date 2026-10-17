@@ -126,6 +126,38 @@ struct AssistantCodexAdapterTests {
     }
 
     @Test
+    func modelChoicesListTheShownModelsInCodexOrder() throws {
+        let catalog: [String: Any] = ["models": [
+            ["slug": "gpt-b", "display_name": "GPT B", "visibility": "list", "priority": 2],
+            ["slug": "gpt-hidden", "display_name": "Hidden", "visibility": "hide", "priority": 0],
+            ["slug": "gpt-a", "display_name": " GPT A ", "visibility": "list", "priority": 1],
+            ["slug": "gpt-unranked", "display_name": "Unranked"],
+            ["slug": "-c", "display_name": "Injected", "priority": 3],
+            ["slug": "gpt-control", "display_name": "Bad\u{7}Name", "priority": 4],
+            ["slug": "gpt-long", "display_name": String(repeating: "x", count: KinlogueAssistantIPCLimits.maximumModelNameBytes + 1), "priority": 5],
+            ["slug": "gpt-b", "display_name": "Duplicate", "priority": 6],
+        ]]
+
+        let choices = try CodexModelCatalog.choices(JSONSerialization.data(withJSONObject: catalog))
+
+        // Hidden models and slugs that could read as options are left out; unranked ones go last.
+        #expect(choices.map(\.slug) == ["gpt-a", "gpt-b", "gpt-control", "gpt-long", "gpt-unranked"])
+        #expect(choices.map(\.displayName) == ["GPT A", "GPT B", "gpt-control", "gpt-long", "Unranked"])
+        #expect(throws: Never.self) { try KinlogueAssistantStatus(
+            executablePath: nil, cliVersion: nil, isLoggedIn: false, isVerifiedVersion: false, failure: nil, models: choices
+        ).validate() }
+
+        let many: [String: Any] = ["models": (0..<100).map { ["slug": "gpt-\($0)", "priority": $0] }]
+        let capped = try CodexModelCatalog.choices(JSONSerialization.data(withJSONObject: many))
+        #expect(capped.count == KinlogueAssistantIPCLimits.maximumModelChoices)
+        #expect(capped.first?.slug == "gpt-0")
+
+        for invalid in [Data("[]".utf8), Data(#"{"models":[]}"#.utf8), Data("x".utf8)] {
+            #expect(throws: CodexAdapterError.malformedModelCatalog) { try CodexModelCatalog.choices(invalid) }
+        }
+    }
+
+    @Test
     func eventStreamYieldsTheLastAgentMessageOnlyAfterTheTurnCompletes() throws {
         var events = CodexEventAccumulator()
         for line in [
