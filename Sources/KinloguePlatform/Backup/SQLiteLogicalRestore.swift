@@ -78,10 +78,12 @@ enum SQLiteLogicalRestore {
         })
         var restored: Set<UUID> = []
         var streamVersion = BackupLogicalHeaderV1.currentVersion
+        var headerVersion = BackupLogicalHeaderV1.currentVersion
         try store.write { db in
             guard try Int.fetchOne(db, sql: "SELECT count(*) FROM members") == 0,
                   try Int.fetchOne(db, sql: "SELECT count(*) FROM originals") == 0 else { throw SQLiteLogicalBackupError.invalidStream }
             let header = try SQLiteLogicalStream.read(byteCount: spool.byteCount, read: spool.read, receiveHeader: { header in
+                headerVersion = header.version
                 let state = SQLiteLibraryState(libraryID: header.libraryID, generation: header.generation, commitID: header.commitID)
                 guard try SQLiteLogicalBackupSource.revision(header) == manifest.revisionPair else { throw SQLiteLogicalBackupError.invalidStream }
                 try db.execute(sql: "UPDATE library_state SET library_id=?,generation=?,commit_id=?,content_hash=? WHERE singleton=1",
@@ -148,7 +150,11 @@ enum SQLiteLogicalRestore {
                 case .assistantConversation:
                     // Its member was restored earlier in the stream; its cited reports need not exist.
                     let value: AssistantConversation = try canonical(record)
-                    guard value.id == (try record.id) else { throw SQLiteLogicalBackupError.invalidStream }
+                    // A stream holds only what a library of its version can.
+                    let maximumSources = BackupLogicalHeaderV1.maximumTurnSources(forVersion: headerVersion)
+                    guard value.id == (try record.id), value.turns.allSatisfy({ $0.sources.count <= maximumSources }) else {
+                        throw SQLiteLogicalBackupError.invalidStream
+                    }
                     do { try SQLiteAssistantRows.save(value, db) } catch { throw SQLiteLogicalBackupError.invalidStream }
                 }
             }

@@ -63,7 +63,7 @@ extension SQLiteReportRepository {
     package nonisolated func assistantRecordStates(_ ids: [UUID]) async throws -> [UUID: AssistantRecordState] {
         try await LibraryStorageExecutor.run {
             let unique = Array(Set(ids))
-            guard unique.count <= AssistantLimits.maxPackRecords * AssistantLimits.maxTurnsPerConversation else {
+            guard unique.count <= AssistantLimits.maxTurnSources * AssistantLimits.maxTurnsPerConversation else {
                 throw LibraryReportError.resourceLimit
             }
             let records = try store.read { db in unique.compactMap { try? usableRecord($0, db) } }

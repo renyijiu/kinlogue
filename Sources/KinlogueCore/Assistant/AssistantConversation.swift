@@ -164,7 +164,7 @@ package struct AssistantTurn: Codable, Hashable, Identifiable, Sendable {
             throw AssistantConversationError.invalidAnswer
         }
         guard answer.utf8.count <= AssistantLimits.maxAnswerBytes else { throw AssistantConversationError.answerTooLarge }
-        guard sources.count <= AssistantLimits.maxPackRecords else { throw AssistantConversationError.tooManySources }
+        guard sources.count <= AssistantLimits.maxTurnSources else { throw AssistantConversationError.tooManySources }
         guard Set(sources.map(\.label)).count == sources.count else {
             throw AssistantConversationError.duplicateSourceLabel
         }

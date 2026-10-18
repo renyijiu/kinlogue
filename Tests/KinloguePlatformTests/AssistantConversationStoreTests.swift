@@ -135,7 +135,7 @@ struct AssistantConversationStoreTests {
 
         let snapshot = try await SQLiteLogicalBackupSource(store: library.store).prepare()
         defer { snapshot.release() }
-        #expect(snapshot.header.version == 2)
+        #expect(snapshot.header.version == 3)
         let records = try snapshot.logicalRecordsForTesting()
         let saved = try #require(records.first { $0.kind == .assistantConversation })
         #expect(try saved.decode(AssistantConversation.self) == value)
@@ -148,6 +148,37 @@ struct AssistantConversationStoreTests {
         _ = try restoreSnapshot(snapshot, into: restoredStore)
         let restored = SQLiteReportRepository(store: restoredStore)
         #expect(try await restored.assistantConversation(value.id) == value)
+    }
+
+    /// A version-2 stream holds what a version-2 library can: at most 20 sources a turn.
+    @Test(arguments: [(2, 20, true), (2, 21, false), (3, 21, true), (3, AssistantLimits.maxTurnSources, true)])
+    func aStreamCarriesOnlyTheSourcesItsVersionAllows(version: Int, sources: Int, restores: Bool) throws {
+        let member = try FamilyMember(displayName: "Synthetic stream member")
+        var value = try AssistantConversation(
+            memberID: member.id, createdAt: Date(timeIntervalSince1970: 100),
+            provider: AssistantProviderDescriptor(kind: .codex, cliVersion: "0.162.0", model: "gpt-synthetic"), promptVersion: 1
+        )
+        value = try value.appending(AssistantTurn(
+            ordinal: 0, question: "Synthetic question", answer: "Synthetic answer [R1]", completedAt: Date(timeIntervalSince1970: 200),
+            sources: try (1...sources).map { try AssistantTurnSource(label: "R\($0)", recordID: UUID(), recordRevision: 0,
+                                                                 projectionDigest: Data(repeating: 7, count: 32)) }
+        ))
+        let header = try BackupLogicalHeaderV1(version: version, libraryID: UUID(), generation: 1, commitID: UUID())
+        var stream = Data()
+        let writer = try SQLiteLogicalStream.Writer(header: header) { stream.append($0) }
+        try writer.append(SQLiteLogicalRecord(kind: .member, id: member.id, payload: CanonicalVaultJSON.encode(member)))
+        try writer.append(SQLiteLogicalRecord(kind: .assistantConversation, id: value.id, payload: CanonicalVaultJSON.encode(value)))
+        try writer.finish()
+
+        let root = try sqliteTestRoot()
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+        let store = try SQLiteLibraryStore(rootURL: root)
+        defer { try? store.close() }
+        if restores {
+            _ = try restoreStream(stream, into: store)
+        } else {
+            #expect(throws: SQLiteLogicalBackupError.invalidStream) { _ = try restoreStream(stream, into: store) }
+        }
     }
 
     @Test
@@ -173,6 +204,18 @@ private func conversation(member: UUID, pack: AssistantContextPack, questions: [
 }
 
 /// Restores a captured snapshot into an empty store the way an encrypted restore point would.
+/// Restores a stream without originals into an empty store.
+private func restoreStream(_ stream: Data, into store: SQLiteLibraryStore) throws -> SQLiteLogicalValidation {
+    let spool = try SQLiteLogicalSpool(parent: store.rootURL.deletingLastPathComponent())
+    defer { spool.release() }
+    try spool.append(stream); try spool.seal()
+    let header = try SQLiteLogicalStream.read(byteCount: stream.count, read: spool.read) { _ in }
+    let entry = try BackupManifestEntry(kind: .logicalSegment, path: "logical/00000000.data", plaintextByteCount: UInt64(stream.count),
+        plaintextDigest: ContentDigest.sha256(stream), firstFrameIndex: 0,
+        frameCount: BackupManifestEntry.requiredFrameCount(for: UInt64(stream.count)))
+    return try SQLiteLogicalRestore.restore(spool: spool, manifest: BackupManifest(revisionPair: SQLiteLogicalBackupSource.revision(header), entries: [entry]), store: store)
+}
+
 private func restoreSnapshot(_ snapshot: SQLiteLogicalBackupSnapshot, into store: SQLiteLibraryStore) throws -> SQLiteLogicalValidation {
     let stream = try snapshot.spool.read(offset: 0, count: snapshot.spool.byteCount)
     let spool = try SQLiteLogicalSpool(parent: store.rootURL.deletingLastPathComponent())

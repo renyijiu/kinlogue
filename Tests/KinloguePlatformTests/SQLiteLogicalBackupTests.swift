@@ -220,9 +220,9 @@ func sqliteLogicalFrozenV1RestoresIntoAppSchemaAndRemainsByteExact() async throw
     #expect(result.memberCount == 1 && result.recordCount == 1 && result.inboxItemCount == 1)
     let after = try await SQLiteLogicalBackupSource(store: store).prepare()
     defer { after.release() }
-    // The writer now produces logical version 2: the same records under a version-2 header, with
+    // The writer now produces the current logical version: the same records under its header, with
     // no conversations. Restore itself checked the library against the version-1 bytes.
-    try expectSameRecordsInVersionTwo(after, as: fixture.stream)
+    try expectSameRecordsInCurrentVersion(after, as: fixture.stream)
     let records = try after.logicalRecordsForTesting()
     let reportDocument = try #require(records.first { $0.kind == .reportDocument }).decode(BackupLogicalReportDocumentV1.self)
     #expect(reportDocument.document.reviewState?.userNote == "Synthetic review note")
@@ -249,7 +249,8 @@ func sqliteLogicalFrozenV2RestoresSavedChatsAndRemainsByteExact() async throws {
     #expect(conversation.turns[0].sources.map(\.label) == ["R1"])
     let after = try await SQLiteLogicalBackupSource(store: store).prepare()
     defer { after.release() }
-    #expect(try after.spool.read(offset: 0, count: after.spool.byteCount) == fixture.stream)
+    // Restore checked the library against the version-2 bytes; the writer now uses version 3.
+    try expectSameRecordsInCurrentVersion(after, as: fixture.stream)
 }
 
 private func sqliteRestoreFrozen(_ fixture: SQLiteLogicalFrozenFixture, store: SQLiteLibraryStore) throws -> SQLiteLogicalValidation {
@@ -474,7 +475,7 @@ func sqliteLogicalFrozenRecoveryStatesAndReplayHistoryRemainPortable() async thr
     _ = try sqliteRestoreFrozen(fixture, store: store)
     let snapshot = try await SQLiteLogicalBackupSource(store: store).prepare()
     defer { snapshot.release() }
-    try expectSameRecordsInVersionTwo(snapshot, as: fixture.stream)
+    try expectSameRecordsInCurrentVersion(snapshot, as: fixture.stream)
     let records = try snapshot.logicalRecordsForTesting()
     let document = try #require(records.first { $0.kind == .reportDocument }).decode(BackupLogicalReportDocumentV1.self)
     #expect(document.document.blocks.count == 1)
@@ -567,16 +568,17 @@ func sqliteLogicalBackupDigestFailureQuarantinesWithoutReadingOriginalTwice(stri
 
 /// A version-2 capture of a library restored from a version-1 stream: the same header fields and the
 /// same records, byte for byte, with no conversations.
-private func expectSameRecordsInVersionTwo(_ snapshot: SQLiteLogicalBackupSnapshot, as versionOne: Data,
+private func expectSameRecordsInCurrentVersion(_ snapshot: SQLiteLogicalBackupSnapshot, as older: Data,
                                            sourceLocation: SourceLocation = #_sourceLocation) throws {
     func parse(_ bytes: Data) throws -> (BackupLogicalHeaderV1, [SQLiteLogicalRecord]) {
         var records: [SQLiteLogicalRecord] = []
         let header = try SQLiteLogicalStream.read(byteCount: bytes.count, read: { bytes.subdata(in: $0..<($0 + $1)) }) { records.append($0) }
         return (header, records)
     }
-    let (oldHeader, oldRecords) = try parse(versionOne)
+    let (oldHeader, oldRecords) = try parse(older)
     let (newHeader, newRecords) = try parse(try snapshot.spool.read(offset: 0, count: snapshot.spool.byteCount))
-    #expect(oldHeader.version == 1 && newHeader.version == 2, sourceLocation: sourceLocation)
+    #expect(oldHeader.version < BackupLogicalHeaderV1.currentVersion, sourceLocation: sourceLocation)
+    #expect(newHeader.version == BackupLogicalHeaderV1.currentVersion, sourceLocation: sourceLocation)
     #expect(oldHeader.libraryID == newHeader.libraryID && oldHeader.generation == newHeader.generation
         && oldHeader.commitID == newHeader.commitID, sourceLocation: sourceLocation)
     #expect(newRecords.map(\.kind) == oldRecords.map(\.kind), sourceLocation: sourceLocation)

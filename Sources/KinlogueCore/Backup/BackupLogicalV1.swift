@@ -29,16 +29,23 @@ package enum BackupLogicalKind: UInt8, CaseIterable, Sendable {
     }
 }
 
-/// The stream header. Version 1 is the original format; version 2 adds saved member chats. Writers
-/// produce the current version; readers accept both.
+/// The stream header. Version 1 is the original format; version 2 adds saved member chats; version 3
+/// lets a saved turn keep up to `AssistantLimits.maxTurnSources` sources instead of 20, matching
+/// library schema v3. Writers produce the current version; readers accept every version, since a
+/// restore point is how an older library reaches the current schema.
 package struct BackupLogicalHeaderV1: Codable, Equatable, Sendable {
-    package static let currentVersion = 2
-    package static let supportedVersions = 1...2
+    package static let currentVersion = 3
+    package static let supportedVersions = 1...3
 
     package let version: Int
     package let libraryID: UUID
     package let generation: Int64
     package let commitID: UUID
+    /// Sources one saved turn may keep in a stream of `version`: 20 before version 3.
+    package static func maximumTurnSources(forVersion version: Int) -> Int {
+        version >= 3 ? AssistantLimits.maxTurnSources : 20
+    }
+
     package init(version: Int = currentVersion, libraryID: UUID, generation: Int64, commitID: UUID) throws {
         guard generation >= 0, Self.supportedVersions.contains(version) else { throw BackupContractError.invalidField }
         self.version = version; self.libraryID = libraryID; self.generation = generation; self.commitID = commitID

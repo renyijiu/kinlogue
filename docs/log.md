@@ -1863,7 +1863,7 @@
 ## [2026-10-16] feat/assistant | 成员对话计划 U7：保存对话、schema v1→v2 迁移与恢复点逻辑版本 2
 
 - **起因**：用户在真实 Codex 检查之后要求实现 U7。依据计划第 4.9 节、D4、D8，以及用户 2026-10-15 对第一次 schema 迁移的同意。
-- **冻结输入**：改 schema 之前，先用迁移前的代码写出一个合成的版本 1 资料库（两位成员、一份已确认报告及其原件、OCR 文档与备注、一份待确认草稿），以 zlib + base64 冻结在 [`SQLiteLibraryV1Fixture.swift`](../Tests/KinlogueStorageProcessTests/SQLiteLibraryV1Fixture.swift)。
+- **冻结输入**：改 schema 之前，先用迁移前的代码写出一个合成的版本 1 资料库（两位成员、一份已确认报告及其原件、OCR 文档与备注、一份待确认草稿），以 zlib + base64 冻结在 `SQLiteLibraryV1Fixture.swift`（2026-10-18 已删除）。
 - **schema 与迁移**：[`SQLiteLibrarySchema`](../Sources/KinloguePlatform/Storage/SQLiteLibrarySchema.swift) 版本 2 在冻结的版本 1 DDL 之后新增 `assistant_conversations`、`assistant_turns`、`assistant_turn_sources`，并为对话数、每成员 200 段、轮次连续与每轮来源数加了结构校验。[`SQLiteLibraryStore`](../Sources/KinloguePlatform/Storage/SQLiteLibraryStore.swift) 的 header 接受版本 1 和 2。普通打开时，版本 1 先按版本 1 完整校验，再在单个事务里建表、写 `user_version = 2`、更新 `library_state` 的 identity 与摘要，提交后按版本 2 校验。`strictExisting` 不迁移。为测试设了四个中断点。初始化回执接受版本 1 的 identity。
 - **存储**：新增 [`SQLiteAssistantRows`](../Sources/KinloguePlatform/Storage/SQLiteAssistantRows.swift)，逐行摘要、整段核对、只读摘要列表，提供逐段、按成员和全部删除；报告仓库新增对应方法。删除成员时在同一事务里删除其对话。完整性巡检新增“对话”目标。
 - **恢复点**：`BackupLogicalKind` 新增 `assistantConversation`。头部支持版本 1 和 2，writer 写版本 2，可出现的类型与 footer 计数随版本而定。恢复后的严格校验按输入的版本重新编码，因此版本 1 恢复点仍逐字节核对。新增版本 2 冻结流 [`SQLiteLogicalV2Fixture.swift`](../Tests/KinloguePlatformTests/SQLiteLogicalV2Fixture.swift)。两个版本 1 冻结测试改为核对：重新捕获得到相同的记录，只是换成版本 2 头部。
@@ -1965,3 +1965,26 @@
 - **验证**：临时离屏测试渲染发送一轮后切换模型的面板，对话保留、头部显示新模型、Warning 与确认 Card 出现；临时测试已删除。对话与会断言源码与文本的套件共 329 tests 通过；带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过；`build-app.sh` 重新构建并签名。
   - 用户用 22:50 的构建在 App 中用真实 Codex 复测：在设置页与面板选择模型、切换后面板不重新加载，结果正常。
 - **未执行**：本次改动只在 App 层，没有重跑完整 `scripts/test.sh` 与 `verify-assistant-xpc.sh`（上一条记录的两项在本次改动前通过）。
+
+## [2026-10-18] plan/assistant | 提议：成员对话的分层上下文包
+
+- **起因**：用户问发送内容能否加入影像信息。核实后，影像检查在库里只有确认日期、序列与对象数量，检查类型只能是 MR（或仅保留文档），部位没有保存。用户随后提出先把成员全部检查文字整理聚合成初始上下文，认为“最新 20 份”过于绝对。
+- **依据**：20 份 / 60,000 字节来自 U0 探针的规模（20 份约 92 KB、约 2.5 万输入 token、17 秒），原计划承诺的“预览里增删报告”没有界面；已确认结果的表格行按制表符分格，可由 [`ReportedResultLine`](../Sources/KinlogueCore/Domain/ReportedResultLine.swift) 原样拆分；每轮来源上限与 20 份绑定（[`AssistantConversation.swift`](../Sources/KinlogueCore/Assistant/AssistantConversation.swift)）；继续已保存对话时只比较接收方，不比较提示词版本。
+- **产出**：[分层上下文包计划](plans/2026-10-18-feat-member-chat-layered-context-plan.md)（`status: proposed`）：本机确定性聚合，不用模型写总结；目录、结论与标记项、只合并同名项目的检验汇总、预算内的最新全文，总预算约 100 KB 并给出各层子上限；提示词 v2 全文；指纹 v2；确认页逐层列出；只保存被引用的来源；提示词版本不同的对话继续提问时开始新对话。原计划第 4.4 节和计划目录已链接。
+- **未执行**：没有改代码；等待用户审阅第 10 节的问题后再实施。
+
+## [2026-10-18] feat/storage | 资料库 schema 版本 3、首发前不做原地迁移（分层上下文包 L0）
+
+- **起因**：用户审阅[分层上下文包计划](plans/2026-10-18-feat-member-chat-layered-context-plan.md)后确定其余四项（预算按第 4 节、目录 300 份、改任意报告都要重新确认、结论层覆盖全部报告、保留与全文的重复）。开始 L1 前核对发现，schema 版本 2 的 `assistant_turn_sources` 写死 `CHECK(position < 20)`，校验也按 20 计；计划第 8 节“schema 不变”的说法是错的。用户选择现在升到版本 3。
+- **过程**：先实现了原地迁移：版本 1 直接迁到 3，版本 2 只重建来源表。为此用迁移前的代码冻结了一个版本 2 资料库，写了 11 项迁移测试（含真实进程强退），完整 `scripts/test.sh` 通过（1347 项执行，无失败）。随后用户提出 App 还没发布、可以去掉迁移逻辑，选择只认当前版本、经恢复点升级。原地迁移连同 2026-10-16 的 v1→v2 迁移一并删除（决策见 [`decisions.md`](decisions.md) 2026-10-18，2026-10-16 条已标为被取代）。
+- **最终实现**：
+  - [`AssistantLimits.maxTurnSources`](../Sources/KinlogueCore/Assistant/AssistantLimits.swift) 为 300，`AssistantTurn` 按它校验；`maxPackRecords` 仍是 20，留给 L1。
+  - [`SQLiteLibrarySchema`](../Sources/KinloguePlatform/Storage/SQLiteLibrarySchema.swift) 只有当前版本 3（来源表每轮 300），去掉冻结的旧 DDL、按版本的校验、迁移函数与迁移故障点；[`SQLiteLibraryStore`](../Sources/KinloguePlatform/Storage/SQLiteLibraryStore.swift) 的文件头预检与打开流程回到只认当前版本，`SQLiteLibraryState` 去掉按 identity 的辅助方法；初始化收据只接受当前 identity；存储跨进程夹具去掉迁移挂起操作。
+  - 恢复点逻辑流升到版本 3，reader 接受版本 1 至 3；[`SQLiteLogicalRestore`](../Sources/KinloguePlatform/Backup/SQLiteLogicalRestore.swift) 按 [`BackupLogicalHeaderV1.maximumTurnSources(forVersion:)`](../Sources/KinlogueCore/Backup/BackupLogicalV1.swift) 拒绝版本 2 流里超过 20 个来源的轮次。
+  - 删除 U7 的版本 1 资料库夹具与迁移测试，以及本次的版本 2 资料库夹具与迁移测试。
+- **测试先行**：
+  - [`SQLiteLibraryStoreTests`](../Tests/KinloguePlatformTests/SQLiteLibraryStoreTests.swift) 新增：版本 1、2 和更新的版本都以“格式不受支持”被拒且字节不变；在仍带迁移的代码上，版本 1、2 按预期失败（进入迁移校验后报“损坏”）。
+  - [`AssistantConversationStoreTests`](../Tests/KinloguePlatformTests/AssistantConversationStoreTests.swift) 新增各版本流的来源上限（版本 2 的 21 个被拒，20 个与版本 3 的 21、300 个可以恢复）；冻结的版本 1、版本 2 流照常恢复并以版本 3 重新写出同样的记录；Core 来源上限测试改为 300。
+  - 主清单 1303 tests / 110 suites；隔离的 storage 目标 17 tests / 1 suite。
+- **验证**（macOS 27.0.1 / Xcode 27.1 / Swift 6.4，工作树未提交）：去掉迁移后完整 `scripts/test.sh` 退出码 0，没有失败（72 次运行共 1337 项测试）；带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过。旧日志里指向已删除夹具的一处链接改为代码名并注明已删除，措辞未改。
+- **未执行**：`verify-app.sh`（工作树未提交）；用户真实资料库（版本 2）需要先用当前构建做恢复点，再在新构建中恢复，之后更早的构建无法打开它。

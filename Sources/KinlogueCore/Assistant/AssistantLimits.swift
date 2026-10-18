@@ -9,6 +9,8 @@ package enum AssistantLimits {
     package static let maxPackBytes = 60_000
     /// UTF-8 bytes of one record body; a longer body is cut and marked as cut.
     package static let maxRecordBytes = 12_000
+    /// Sources one saved turn keeps. Schema v3 holds this many; v2 held 20.
+    package static let maxTurnSources = 300
     package static let maxQuestionCharacters = 2_000
     package static let maxAnswerBytes = 32 * 1024
     package static let maxTurnsPerConversation = 20

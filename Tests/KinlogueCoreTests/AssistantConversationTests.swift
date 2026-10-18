@@ -52,8 +52,10 @@ func assistantTurnValidatesQuestionAnswerAndSources() throws {
         try turn(answer: String(repeating: "a", count: AssistantLimits.maxAnswerBytes + 1))
     }
     #expect(throws: AssistantConversationError.duplicateSourceLabel) { try turn(sources: [source, source]) }
+    // Schema v3 keeps up to 300 sources a turn; v2 kept 20.
+    try turn(sources: try (1...AssistantLimits.maxTurnSources).map { try turnSource(label: "R\($0)") })
     #expect(throws: AssistantConversationError.tooManySources) {
-        try turn(sources: try (1...(AssistantLimits.maxPackRecords + 1)).map { try turnSource(label: "R\($0)") })
+        try turn(sources: try (1...(AssistantLimits.maxTurnSources + 1)).map { try turnSource(label: "R\($0)") })
     }
     #expect(throws: AssistantConversationError.invalidSource) { _ = try AssistantTurnSource(
         label: "R1", recordID: UUID(), recordRevision: 0, projectionDigest: Data([1])
