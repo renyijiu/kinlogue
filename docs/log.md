@@ -2005,3 +2005,10 @@
 - **离屏核对**：临时测试渲染 9 份合成报告的确认页与面板：逐层列出、无结论时不显示该行、面板显示“9 份报告 · 全文 9 份”；临时测试已删除。
 - **验证**（macOS 27.0.1 / Xcode 27.1 / Swift 6.4，工作树未提交）：完整 `scripts/test.sh` 退出码 0，没有失败；带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过。
 - **未执行**：经真实 Codex 的延迟与 token 测量（需要用户另行同意、消耗额度）；`verify-app.sh`（工作树未提交）；App 内人工检查（用户的真实资料库需先经恢复点升到 schema 版本 3）。
+
+## [2026-10-19] verify/assistant | 在 `dc50a2b` 上跑打包与签名 bridge 门禁
+
+- **范围**：分层上下文包 L1–L4 提交后，工作树干净，HEAD `dc50a2b`；macOS 27.0.1 / Xcode 27.1 / Swift 6.4。完整 `scripts/test.sh` 与 lint、文档、隐私、本地化门禁已在同一份代码上通过（见 2026-10-18 的 L1–L4 条）。
+- **`scripts/verify-app.sh --require-clean-source`**：通过，验证报告绑定 `dc50a2b`；本机 ad-hoc 签名，Developer ID 与公证未执行。
+- **`scripts/verify-assistant-xpc.sh`**：通过，11 项全部通过，包括本机 Codex 在签名沙盒 bridge 中通过能力检查、找到登录并列出模型与默认模型（只连本机模拟服务、不耗额度、不发送资料），以及取消与强杀 bridge 后没有残留进程。
+- **未执行**：经真实 Codex 的分层上下文包延迟与 token 测量；成员对话矩阵中的人工检查（未登录、未安装、代理与断网、键盘与 VoiceOver）；macOS 26 机器。本分支尚未合入 `main`，资料库已是 schema 版本 3 时，`main` 的构建会以“格式不受支持”拒绝它。
