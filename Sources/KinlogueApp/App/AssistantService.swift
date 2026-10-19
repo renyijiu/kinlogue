@@ -181,6 +181,13 @@ final class LiveAssistantService: Sendable {
         }
     }
 
+    /// The reports an answer cites, in the order the pack lists them. A turn keeps only these: the
+    /// pack may number hundreds, and a citation shows only through its own source.
+    static func citedSources(_ answer: String, in manifest: [AssistantTurnSource]) -> [AssistantTurnSource] {
+        let cited = Set(AssistantCitationParser.labels(in: answer))
+        return manifest.filter { cited.contains($0.label) }
+    }
+
     /// The consent for sending `pack` to the CLI and model `status` reports.
     func consent(pack: AssistantContextPack, status: AssistantCLIStatus) throws -> AssistantConsent {
         guard status.failure == nil, let version = status.cliVersion, let model = status.model,
@@ -217,7 +224,8 @@ final class LiveAssistantService: Sendable {
         var conversation: AssistantConversation
         if let conversationID {
             guard let existing = try await stored({ try await self.store.savedConversation(conversationID) }),
-                  existing.memberID == pack.memberID, existing.provider == consent.receiver else {
+                  existing.memberID == pack.memberID,
+                  existing.continues(with: consent.receiver, promptVersion: AssistantPrompt.version) else {
                 throw AssistantServiceError.consentRequired
             }
             conversation = existing
@@ -246,7 +254,7 @@ final class LiveAssistantService: Sendable {
                 do {
                     updated = try started.appending(AssistantTurn(
                         ordinal: started.turns.count, question: question, answer: reply.answer,
-                        completedAt: Date(), sources: pack.manifest
+                        completedAt: Date(), sources: Self.citedSources(reply.answer, in: pack.manifest)
                     ))
                 } catch AssistantConversationError.answerTooLarge {
                     throw AssistantServiceError.provider(.outputTooLarge)

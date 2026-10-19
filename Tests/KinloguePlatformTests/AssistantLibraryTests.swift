@@ -8,7 +8,7 @@ import Testing
 /// transaction and digested with the Platform's SHA-256.
 struct AssistantLibraryTests {
     @Test
-    func packsDrawOnTheNewestConfirmedReportsOfOneMember() async throws {
+    func packsIndexEveryConfirmedReportOfOneMember() async throws {
         let library = try AssistantTestLibrary()
         defer { library.close() }
         let member = try await library.member("Synthetic member")
@@ -21,14 +21,33 @@ struct AssistantLibraryTests {
 
         let load = try await library.repository.assistantPack(memberID: member.id)
 
-        #expect(load.pack.entries.count == AssistantLimits.maxPackRecords)
-        #expect(load.pack.entries.map(\.recordID) == Array(records[3...]).map(\.id))
-        #expect(load.pack.omittedRecordCount == 3)
+        #expect(load.pack.entries.map(\.recordID) == records.map(\.id))
+        #expect(load.pack.omittedRecordCount == 0)
+        #expect(load.pack.resultItemCount == 1, "every report's Glucose row is in one group")
         #expect(load.damagedRecordIDs.isEmpty)
         #expect(!load.pack.renderedRecords().contains("Foreign result"))
         #expect(!load.pack.entries.contains { $0.recordID == foreign.id })
         let expected = try AssistantContextPackBuilder.projectionDigest(of: records[22], digest: ContentDigest.sha256)
         #expect(load.pack.entries.last?.projectionDigest == expected)
+    }
+
+    /// The query reads the newest reports up to the index cap and counts the rest.
+    @Test
+    func packsStopAtTheIndexCapAndCountTheRest() async throws {
+        let library = try AssistantTestLibrary()
+        defer { library.close() }
+        let member = try await library.member("Synthetic member")
+        var records: [HealthRecord] = []
+        for day in 1...(AssistantLimits.maxPackRecords + 2) {
+            records.append(try await library.confirmed(member, day: day, results: "V\(day)"))
+        }
+
+        let load = try await library.repository.assistantPack(memberID: member.id)
+
+        #expect(load.pack.entries.count == AssistantLimits.maxPackRecords)
+        #expect(load.pack.entries.first?.recordID == records[2].id)
+        #expect(load.pack.omittedRecordCount == 2)
+        #expect(load.pack.byteCount <= AssistantLimits.maxPackBytes)
     }
 
     @Test

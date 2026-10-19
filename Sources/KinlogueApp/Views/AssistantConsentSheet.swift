@@ -77,13 +77,17 @@ struct AssistantConsentSheet: View {
     private var sent: some View {
         section(AppLocalization.string("会发送")) {
             if let summary {
-                bullet(AppLocalization.string("已确认报告的日期、标题、检查结果、结论和标记项：\(scope(of: summary))"))
+                // Each layer of the pack, as the plan's section 7.1 lists them.
+                ForEach([summary.index(), summary.conclusions(), summary.results(), summary.fullTexts()].compactMap { $0 }, id: \.self) {
+                    bullet($0)
+                }
                 if model.includeOrganization {
                     bullet(AppLocalization.string("这些报告的检查机构名称"))
                 }
                 bullet(AppLocalization.string("你的问题，以及这次对话中之前的问答"))
                 bullet(AppLocalization.string("续页的固定说明：只依据这些报告回答、标注来源、不做诊断或治疗建议"))
-                ForEach([summary.omitted(), summary.truncated(), summary.damaged()].compactMap { $0 }, id: \.self) { note in
+                ForEach([summary.omitted(), summary.omittedConclusions(), summary.omittedResultRows(), summary.omittedResultItems(),
+                         summary.truncated(), summary.damaged()].compactMap { $0 }, id: \.self) { note in
                     Text(note)
                         .foregroundStyle(KinlogueTheme.onVariant)
                 }
@@ -135,14 +139,10 @@ struct AssistantConsentSheet: View {
             .padding(.top, 8)
         } label: {
             // On macOS only the disclosure arrow takes clicks; the words open the full text too.
-            Button(AppLocalization.string("查看将发送的报告全文")) { showsFullText.toggle() }
+            Button(AppLocalization.string("查看将发送的全部内容")) { showsFullText.toggle() }
                 .buttonStyle(.kinlogueGhost)
         }
         .accessibilityIdentifier("assistant-consent-full-text")
-    }
-
-    private func scope(of summary: AssistantPackSummary) -> String {
-        [summary.reports(), summary.dateRange(), summary.size()].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

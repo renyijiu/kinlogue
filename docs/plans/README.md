@@ -13,7 +13,7 @@ status: navigation
 
 ## 实施中的计划
 
-- [`2026-10-18-feat-member-chat-layered-context-plan.md`](2026-10-18-feat-member-chat-layered-context-plan.md)：成员对话的上下文包改为本机确定性的分层聚合（全部已确认报告的目录、结论与标记项、按项目名汇总的检验行，加预算内的最新全文），总预算约 100 KB；只保存被引用的来源。修订成员对话计划第 4.4 节；用户 2026-10-18 审阅确定，实施中。
+- [`2026-10-18-feat-member-chat-layered-context-plan.md`](2026-10-18-feat-member-chat-layered-context-plan.md)：成员对话的上下文包改为本机确定性的分层聚合（全部已确认报告的目录、结论与标记项、按项目名汇总的检验行，加预算内的最新全文），总预算约 100 KB；只保存被引用的来源。修订成员对话计划第 4.4 节；用户 2026-10-18 审阅确定，L0–L3 已实施，App 内人工检查待执行。
 - [`2026-10-10-2322-refactor-sqlite-architecture-plan.md`](2026-10-10-2322-refactor-sqlite-architecture-plan.md)：先修备份/去重与任务所有权，再完成 SQLite 查询、逻辑备份和一次生产切换。进度和证据见[日志](../log.md)，计划本身不回填执行结果。
 
 ## 已实施的决策记录

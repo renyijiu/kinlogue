@@ -192,7 +192,7 @@ struct AssistantPanelView: View {
 
     /// What the chat sends.
     private var packLine: String? {
-        summary.map { [$0.reports(), $0.dateRange(), $0.size()].compactMap { $0 }.joined(separator: " · ") }
+        summary?.scopeLine()
     }
 
     private func scopeText(_ line: String) -> some View {
@@ -288,7 +288,8 @@ struct AssistantPanelView: View {
                     .accessibilityIdentifier("assistant-issue")
             }
             if let shown = model.conversation, !model.continuesShownConversation {
-                Text(AssistantText.otherReceiver(shown.provider))
+                Text(shown.promptVersion == AssistantPrompt.version
+                     ? AssistantText.otherReceiver(shown.provider) : AssistantText.olderVersion())
                     .font(.callout)
                     .foregroundStyle(KinlogueTheme.onVariant)
                     .fixedSize(horizontal: false, vertical: true)

@@ -270,6 +270,12 @@ package struct AssistantConversation: Codable, Hashable, Identifiable, Sendable 
         }
     }
 
+    /// Whether a new question may continue this conversation: the same CLI and model, and the same
+    /// prompt version, since earlier answers cite labels numbered by their prompt's pack.
+    package func continues(with receiver: AssistantProviderDescriptor, promptVersion: Int) -> Bool {
+        provider == receiver && self.promptVersion == promptVersion
+    }
+
     package func appending(_ turn: AssistantTurn) throws -> Self {
         guard turns.count < AssistantLimits.maxTurnsPerConversation else { throw AssistantConversationError.tooManyTurns }
         guard turn.ordinal == turns.count else { throw AssistantConversationError.invalidOrdinal }

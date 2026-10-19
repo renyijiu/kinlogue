@@ -68,7 +68,7 @@ struct AssistantViewSafetyTests {
         #expect(sheet.contains(".disabled(model.phase != .needsConsent || model.isCheckingCLI)"))
         // A disclosure label takes no clicks on macOS; the words that open the full text must.
         #expect(sheet.contains("DisclosureGroup(isExpanded: $showsFullText)"))
-        #expect(sheet.contains("Button(AppLocalization.string(\"查看将发送的报告全文\")) { showsFullText.toggle() }"))
+        #expect(sheet.contains("Button(AppLocalization.string(\"查看将发送的全部内容\")) { showsFullText.toggle() }"))
     }
 
     @Test

@@ -11,7 +11,7 @@ status: active
 
 # 成员对话：分层上下文包
 
-本文修订[成员对话计划](2026-10-15-feat-member-cli-chat-plan.md)第 4.4 节的预算与包结构，以及受它影响的第 4.5 节提示词、第 4.6 节同意和第 4.9 节保存的发送清单。它是**待审阅的设计**，不描述当前能力；当前实现仍是“最新的最多 20 份、合计 60,000 字节”，见 [`AssistantContextPack`](../../Sources/KinlogueCore/Assistant/AssistantContextPack.swift) 与 [`AssistantLimits`](../../Sources/KinlogueCore/Assistant/AssistantLimits.swift)。
+本文修订[成员对话计划](2026-10-15-feat-member-cli-chat-plan.md)第 4.4 节的预算与包结构，以及受它影响的第 4.5 节提示词、第 4.6 节同意和第 4.9 节保存的发送清单。本修订经用户 2026-10-18 审阅确定，L0–L3 已在同日实施（[`AssistantContextPack`](../../Sources/KinlogueCore/Assistant/AssistantContextPack.swift)、[`AssistantLimits`](../../Sources/KinlogueCore/Assistant/AssistantLimits.swift)）；当前能力以 [`PRIVACY.md`](../../PRIVACY.md)、[`README.md`](../../README.md) 和代码为准，本文是设计与决策记录。
 
 ## 1. 为什么改
 
@@ -106,7 +106,9 @@ Results:
 | 全文 | 从最新开始 | 剩余预算，单份 12,000 | 至少约 30,000 字节 |
 | 合计 | | 100,000 字节 | |
 
-这些估计按合成数据推算，实施时用一个合成的 200 份报告成员实测各层用量（见第 8 节）。
+这些估计按合成数据推算，实施时用一个合成的 200 份报告成员实测各层用量（见第 9 节 L4）。
+
+**实测（2026-10-18，合成数据）**：200 份报告（约 60% 检验单、每份 15–30 行、项目名取自 40 个，约 25% 叙述性影像报告，其余为其他报告），原文约 204 KB。包共 99,696 字节、构建 58 ms：目录 200 份 10.2 KB；有结论的 127 份全部列入，22.4 KB；检验汇总 40 个项目、2,896 行中列入最新的 641 行，28.7 KB，每个项目都有最新值；全文为最新 38 份，35.9 KB。检验单多的成员，汇总层是主要瓶颈，可以考虑以后去掉全文层里与汇总重复的表格行，把预算让给汇总（审阅结果第 5 项暂定保留重复）。
 
 ## 5. 提示词 v2
 

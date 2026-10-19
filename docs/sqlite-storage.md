@@ -68,7 +68,7 @@ pin 固定 descriptor 和文件身份，不在快照捕获时读取全部原件�
 
 报告 staging 或发布失败时，即使尚未返回 original ID，也按本次 operation 精确回收。丢失响应先核对 live 原件、草稿和完整来源身份；草稿已进入 processing 等后续合法状态仍返回已创建。草稿缺失或来源已更换不误报成功，未知 inode 保留并报错。
 
-成员对话的[上下文包读取](../Sources/KinloguePlatform/Assistant/AssistantLibrary.swift)在一次读取中取得成员、该成员已确认报告的总数，以及按时间线日期取最新的 20 份（或按 ID 读取所选的报告），交给 Core 构建器并用 Platform 的 SHA-256 计算摘要；读取失败的报告列为损坏并略去，不让整包失败。`assistantRecordStates` 按 ID 读回记录的 revision 与投影摘要，用于判断旧回答的引用是否仍一致；读不到的报告视为不存在。两者都没有新增持久化字段（尚未接入 App，见[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md)）。
+成员对话的[上下文包读取](../Sources/KinloguePlatform/Assistant/AssistantLibrary.swift)在一次读取中取得成员、该成员已确认报告的总数，以及按时间线日期取最新的最多 300 份（或按 ID 读取所选的报告），交给 Core 构建器并用 Platform 的 SHA-256 计算摘要；读取失败的报告列为损坏并略去，不让整包失败。`assistantRecordStates` 按 ID 读回记录的 revision 与投影摘要，用于判断旧回答的引用是否仍一致；读不到的报告视为不存在。两者都没有新增持久化字段（见[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md)与[分层上下文包计划](plans/2026-10-18-feat-member-chat-layered-context-plan.md)）。
 
 [查询契约](../Sources/KinlogueCore/Domain/LibraryReportQuery.swift) 每页最多 100 个摘要，每页都携带同次读取的 `LibraryRevision`，游标另绑定 query/member。摘要 title/reportType/organization/conclusion 分别最多 160/128/128/512 个 Unicode scalar；完整转录保留在详情和独立搜索表。普通列表不读取详情、OCR 或完整搜索文本；搜索复用 `RecordQuery` 的 Foundation 本地化子串规则，保持字段边界、中文短词、成员名及 confirmed-only 语义，不包含用户 notes 或原始 OCR。搜索扫描可取消，不中断随后无关查询。
 

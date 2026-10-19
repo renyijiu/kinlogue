@@ -40,7 +40,9 @@ struct AssistantServiceTests {
         #expect(first.turns.count == 1)
         #expect(second.id == first.id)
         #expect(second.turns.map(\.question) == ["空腹血糖是多少？", "还有别的吗？"])
-        #expect(second.turns[0].sources == pack.manifest)
+        // A turn keeps only the reports its answer cites ("Synthetic answer [R1]").
+        #expect(pack.manifest.count == 2)
+        #expect(second.turns[0].sources == [pack.manifest[0]])
         #expect(second.provider == consent.receiver)
         #expect(second.memberID == fixture.member.id)
         let requests = fixture.backend.requests

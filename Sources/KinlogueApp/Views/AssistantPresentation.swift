@@ -30,6 +30,10 @@ enum AssistantText {
                                language: language)
     }
 
+    static func olderVersion(language: AppLanguage = AppLocalization.selectedLanguage()) -> String {
+        AppLocalization.string("这段对话来自较早版本的续页；继续提问将开始一段新的对话。", language: language)
+    }
+
     /// Questions that ask for a description of the reports, never for a judgement.
     static func exampleQuestions(language: AppLanguage = AppLocalization.selectedLanguage()) -> [String] {
         [
@@ -155,35 +159,102 @@ extension AssistantSettingsIssue {
     }
 }
 
-/// What a pack holds, in the terms the scope bar and the confirmation sheet use.
+/// What a pack holds, layer by layer, in the terms the scope bar and the confirmation sheet use.
 struct AssistantPackSummary: Equatable {
+    /// Reports in the index.
     let reportCount: Int
     /// `yyyy-MM-dd` per report, nil for a report without a timeline date.
     let dates: [String?]
     let byteCount: Int
+    /// Confirmed reports outside the index.
     let omittedCount: Int
+    /// Full texts cut to their limit.
     let truncatedCount: Int
     let damagedCount: Int
+    let conclusionCount: Int
+    let omittedConclusionCount: Int
+    let resultItemCount: Int
+    let resultRowCount: Int
+    let omittedResultRowCount: Int
+    let omittedResultItemCount: Int
+    let fullTextCount: Int
 
-    init(reportCount: Int, dates: [String?], byteCount: Int, omittedCount: Int, truncatedCount: Int, damagedCount: Int) {
+    init(
+        reportCount: Int, dates: [String?], byteCount: Int, omittedCount: Int, truncatedCount: Int, damagedCount: Int,
+        conclusionCount: Int = 0, omittedConclusionCount: Int = 0, resultItemCount: Int = 0, resultRowCount: Int = 0,
+        omittedResultRowCount: Int = 0, omittedResultItemCount: Int = 0, fullTextCount: Int = 0
+    ) {
         self.reportCount = reportCount
         self.dates = dates
         self.byteCount = byteCount
         self.omittedCount = omittedCount
         self.truncatedCount = truncatedCount
         self.damagedCount = damagedCount
+        self.conclusionCount = conclusionCount
+        self.omittedConclusionCount = omittedConclusionCount
+        self.resultItemCount = resultItemCount
+        self.resultRowCount = resultRowCount
+        self.omittedResultRowCount = omittedResultRowCount
+        self.omittedResultItemCount = omittedResultItemCount
+        self.fullTextCount = fullTextCount
     }
 
     init(pack: AssistantContextPack, damagedCount: Int) {
         self.init(
             reportCount: pack.entries.count, dates: pack.entries.map(\.date), byteCount: pack.byteCount,
             omittedCount: pack.omittedRecordCount, truncatedCount: pack.entries.filter(\.isTruncated).count,
-            damagedCount: damagedCount
+            damagedCount: damagedCount, conclusionCount: pack.entries.filter(\.hasConclusion).count,
+            omittedConclusionCount: pack.omittedConclusionCount, resultItemCount: pack.resultItemCount,
+            resultRowCount: pack.resultRowCount, omittedResultRowCount: pack.omittedResultRowCount,
+            omittedResultItemCount: pack.omittedResultItemCount, fullTextCount: pack.entries.filter { $0.fullText != nil }.count
         )
     }
 
     func reports(language: AppLanguage = AppLocalization.selectedLanguage()) -> String {
-        AppLocalization.string("\(reportCount) 份报告", language: language)
+        Self.reports(reportCount, language: language)
+    }
+
+    private static func reports(_ count: Int, language: AppLanguage) -> String {
+        AppLocalization.string("\(count) 份报告", language: language)
+    }
+
+    /// The panel's scope line: reports, how many in full, the months they span, and the size.
+    func scopeLine(language: AppLanguage = AppLocalization.selectedLanguage()) -> String {
+        [reports(language: language), AppLocalization.string("全文 \(fullTextCount) 份", language: language),
+         dateRange(language: language), size()].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    func index(language: AppLanguage = AppLocalization.selectedLanguage()) -> String {
+        AppLocalization.string("报告目录：\(reports(language: language))，每份一行日期和标题", language: language)
+    }
+
+    func conclusions(language: AppLanguage = AppLocalization.selectedLanguage()) -> String? {
+        conclusionCount > 0
+            ? AppLocalization.string("结论与标记项：\(Self.reports(conclusionCount, language: language))", language: language) : nil
+    }
+
+    func results(language: AppLanguage = AppLocalization.selectedLanguage()) -> String? {
+        guard resultItemCount > 0 else { return nil }
+        let items = AppLocalization.string("\(resultItemCount) 个项目", language: language)
+        let rows = AppLocalization.string("\(resultRowCount) 行", language: language)
+        return AppLocalization.string("检验汇总：\(items)、\(rows)", language: language)
+    }
+
+    func fullTexts(language: AppLanguage = AppLocalization.selectedLanguage()) -> String? {
+        fullTextCount > 0
+            ? AppLocalization.string("完整检查结果：最新的 \(Self.reports(fullTextCount, language: language))", language: language) : nil
+    }
+
+    func omittedConclusions(language: AppLanguage = AppLocalization.selectedLanguage()) -> String? {
+        omittedConclusionCount > 0 ? AppLocalization.string("另有 \(omittedConclusionCount) 份较早报告的结论没有列入", language: language) : nil
+    }
+
+    func omittedResultRows(language: AppLanguage = AppLocalization.selectedLanguage()) -> String? {
+        omittedResultRowCount > 0 ? AppLocalization.string("另有 \(omittedResultRowCount) 条较早的检验结果没有列入", language: language) : nil
+    }
+
+    func omittedResultItems(language: AppLanguage = AppLocalization.selectedLanguage()) -> String? {
+        omittedResultItemCount > 0 ? AppLocalization.string("另有 \(omittedResultItemCount) 个检验项目没有列入", language: language) : nil
     }
 
     /// Year and month of the oldest and newest dated report.

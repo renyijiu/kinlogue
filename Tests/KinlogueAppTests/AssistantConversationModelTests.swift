@@ -250,6 +250,36 @@ struct AssistantConversationModelTests {
         #expect(model.conversation == older)
     }
 
+    /// Earlier answers cite labels numbered by the prompt they were written under.
+    @Test
+    func aConversationFromAnEarlierPromptVersionIsShownButNotContinued() async throws {
+        let fixture = try await AssistantServiceFixture()
+        defer { fixture.close() }
+        let receiver = try AssistantProviderDescriptor(kind: .codex, cliVersion: "0.162.0", model: "gpt-synthetic")
+        let source = try AssistantTurnSource(label: "R1", recordID: UUID(), recordRevision: 0, projectionDigest: Data(repeating: 3, count: 32))
+        let earlier = try AssistantConversation(
+            memberID: fixture.member.id, createdAt: Date(timeIntervalSince1970: 100), provider: receiver,
+            promptVersion: AssistantPrompt.version - 1
+        ).appending(AssistantTurn(
+            ordinal: 0, question: "Earlier question", answer: "Earlier answer [R1]",
+            completedAt: Date(timeIntervalSince1970: 200), sources: [source]
+        ))
+        try await fixture.library.repository.saveAssistantConversation(earlier)
+
+        let model = AssistantConversationModel(service: fixture.service, settings: { .enabled })
+        await model.open(memberID: fixture.member.id)
+        #expect(model.conversation == earlier)
+        model.confirm()
+        #expect(model.phase == .ready)
+        #expect(!model.continuesShownConversation)
+
+        await model.send("New question")
+        let started = try #require(model.conversation)
+        #expect(started.id != earlier.id)
+        #expect(started.promptVersion == AssistantPrompt.version)
+        #expect(Set(model.history.map(\.id)) == [earlier.id, started.id])
+    }
+
     @Test
     func reopeningAMemberShowsTheLatestSavedConversationButAsksForConsentAgain() async throws {
         let fixture = try await AssistantServiceFixture()

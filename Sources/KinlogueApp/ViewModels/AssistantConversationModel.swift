@@ -69,10 +69,10 @@ final class AssistantConversationModel: ObservableObject {
     var hasConsent: Bool { consent != nil }
 
     /// False when the conversation on screen came from another CLI or model than the one consented
-    /// to; the next question then starts a new conversation.
+    /// to, or from an earlier prompt version; the next question then starts a new conversation.
     var continuesShownConversation: Bool {
         guard let conversation, let consent else { return true }
-        return conversation.provider == consent.receiver
+        return conversation.continues(with: consent.receiver, promptVersion: AssistantPrompt.version)
     }
 
     /// Before the library has been asked, a cited record counts as unchanged.

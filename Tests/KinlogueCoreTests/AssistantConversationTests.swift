@@ -3,6 +3,18 @@ import Testing
 @testable import KinlogueCore
 
 @Test
+func assistantConversationContinuesOnlyWithTheSameReceiverAndPromptVersion() throws {
+    let receiver = try AssistantProviderDescriptor(kind: .codex, cliVersion: "0.162.0", model: "gpt-synthetic")
+    let older = try AssistantConversation(memberID: UUID(), createdAt: Date(timeIntervalSince1970: 0), provider: receiver, promptVersion: 1)
+
+    #expect(older.continues(with: receiver, promptVersion: 1))
+    // Earlier answers cite labels numbered by the earlier prompt's pack.
+    #expect(!older.continues(with: receiver, promptVersion: 2))
+    #expect(!older.continues(with: try AssistantProviderDescriptor(kind: .codex, cliVersion: "0.162.0", model: "gpt-other"),
+                             promptVersion: 1))
+}
+
+@Test
 func assistantCitationLabelsAreReadFromSquareAndCornerBracketsOnly() {
     let answer = """
     Glucose was 5.1 [R1][R2]、5.3【R3】, see also [R2, R4] and [R5；R6].

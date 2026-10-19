@@ -1988,3 +1988,20 @@
   - 主清单 1303 tests / 110 suites；隔离的 storage 目标 17 tests / 1 suite。
 - **验证**（macOS 27.0.1 / Xcode 27.1 / Swift 6.4，工作树未提交）：去掉迁移后完整 `scripts/test.sh` 退出码 0，没有失败（72 次运行共 1337 项测试）；带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过。旧日志里指向已删除夹具的一处链接改为代码名并注明已删除，措辞未改。
 - **未执行**：`verify-app.sh`（工作树未提交）；用户真实资料库（版本 2）需要先用当前构建做恢复点，再在新构建中恢复，之后更早的构建无法打开它。
+
+## [2026-10-18] feat/assistant | 分层上下文包 L1–L4：本机聚合全部已确认报告、提示词 v2、只保存被引用的来源
+
+- **依据**：[分层上下文包计划](plans/2026-10-18-feat-member-chat-layered-context-plan.md)（用户 2026-10-18 审阅确定）与已提交的 L0（schema 版本 3）。
+- **L1 Core**：
+  - [`AssistantContextPackBuilder`](../Sources/KinlogueCore/Assistant/AssistantContextPack.swift) 按四层构建：目录（最多 300 份、16 KB）、结论与标记项（24 KB，每份 600 字节）、按完全相同的项目名汇总的表格行（30 KB，先保证每个项目的最新一行，再按新到旧补充）、剩余预算内最新报告的标题与完整结果（每份 12 KB），合计不超过 100,000 字节。每层有溢出说明；编号按时间从旧到新，新增报告不改变已有编号。
+  - [`AssistantLimits`](../Sources/KinlogueCore/Assistant/AssistantLimits.swift) 新增各层子上限，`maxPackRecords` 由 20 改为 300、`maxPackBytes` 由 60,000 改为 100,000。
+  - 同意指纹升为 `consent.v2`，绑定包结构版本、每份目录内报告的编号与 revision 和完整渲染文本；投影摘要不变，旧回答的引用状态照旧判断。
+  - [`AssistantPrompt`](../Sources/KinlogueCore/Assistant/AssistantPrompt.swift) 升到版本 2，说明四个部分只是原文的重排、同名才合并、没有全文时如何说明；转义加入四个新标签。
+  - `AssistantConversation.continues(with:promptVersion:)`：提示词版本不同的已保存对话继续提问时开始新对话，面板说明“这段对话来自较早版本的续页”。
+- **L2 Platform**：[`assistantPack`](../Sources/KinloguePlatform/Assistant/AssistantLibrary.swift) 按新的上限读取最新的最多 300 份并统计总数。
+- **L3 App**：确认页“会发送”逐层列出数量并说明未列入的部分，折叠区改名“查看将发送的全部内容”；面板发送范围显示全文份数；[`LiveAssistantService`](../Sources/KinlogueApp/App/AssistantService.swift) 每轮只保存回答引用的来源。新增 12 条中英文案（含单复数），删除 2 条不再使用的文案。
+- **测试先行**：Core 包测试改写并新增 6 项（目录与上限、编号稳定、结论层覆盖与溢出、同名汇总、每项最新行、全文预算不跳过），Core 续写规则 1 项，Platform 读取上限 1 项，App 2 项（较早提示词版本不续写、逐层文案）；服务测试改为只保存被引用的来源。先因缺少新字段无法编译，实现后通过。主清单 1313 tests / 110 suites。
+- **L4 测量**（合成数据，见计划第 4 节）：200 份报告、原文约 204 KB，包 99,696 字节、构建 58 ms；目录 10.2 KB，结论 127 份全部列入 22.4 KB，检验汇总 40 项、2,896 行中最新 641 行 28.7 KB，全文最新 38 份 35.9 KB。检验单多时汇总层是瓶颈。
+- **离屏核对**：临时测试渲染 9 份合成报告的确认页与面板：逐层列出、无结论时不显示该行、面板显示“9 份报告 · 全文 9 份”；临时测试已删除。
+- **验证**（macOS 27.0.1 / Xcode 27.1 / Swift 6.4，工作树未提交）：完整 `scripts/test.sh` 退出码 0，没有失败；带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过。
+- **未执行**：经真实 Codex 的延迟与 token 测量（需要用户另行同意、消耗额度）；`verify-app.sh`（工作树未提交）；App 内人工检查（用户的真实资料库需先经恢复点升到 schema 版本 3）。

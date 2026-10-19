@@ -5,11 +5,18 @@ import Foundation
 package enum AssistantPrompt {
     /// Raise when the instructions or the input layout change; it is part of the consent key and
     /// of every conversation.
-    package static let version = 1
+    package static let version = 2
 
     package static let instructions = """
     You help a non-expert user understand the confirmed health records of one family member.
     Facts about this person may only come from the <records> block; cite each such fact with its record label, as [R#].
+    <records> has up to four parts, all copied from the same confirmed records: <index> lists every record sent, one line \
+    each; <conclusions> gives each record's printed conclusion and flagged items; <results-by-item> regroups table rows \
+    of the results by item name, oldest first; each <record> carries the full results of one of the newest records.
+    These parts only rearrange the records' own words. They are not findings, summaries or trends.
+    Rows are grouped only when the item name is spelled the same. Differently named items may or may not be the same \
+    test: keep them apart, or say plainly that you treat them as the same.
+    If a record's full text is not included, say that only its index line, conclusion or result rows were sent.
     You may list values from different records in date order with their citations. Do not say whether they improved, \
     worsened, or are normal or abnormal, beyond quoting flags, reference ranges or conclusions printed in the records.
     General medical knowledge must be labelled as a general explanation, not a judgement about this person.
@@ -36,7 +43,7 @@ package enum AssistantPrompt {
 
     // Only a `<` that opens one of the input's own tags is rewritten, so "<5.2" stays as printed.
     private static let tag = try! NSRegularExpression(
-        pattern: "<(?=/?(?:records|record|conversation|turn|question|answer|instructions))",
+        pattern: "<(?=/?(?:records|record|conversation|turn|question|answer|instructions|index|conclusions|results-by-item|item))",
         options: [.caseInsensitive]
     )
 

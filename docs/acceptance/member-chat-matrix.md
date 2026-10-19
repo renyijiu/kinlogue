@@ -9,7 +9,7 @@
 | CLI | 只支持 Codex。`0.162.0` 的加固参数经真实请求验证；其他版本在每项能力检查都通过时仍可使用，界面标为“未验证的版本” | [U0 证据](../sources/2026-10-15-codex-u0-probe-evidence.md)、`CodexInvocation.verifiedVersions` |
 | 账号 | 只支持 Codex 自己登录的 OpenAI 账号；不加载用户的 Codex 配置，因此不支持第三方中转 | 计划 E2 |
 | 安装位置 | `/opt/homebrew/` 下的安装经真实 Codex 验证；`/usr/local/` 只验证了同一机制；家目录下的 nvm、volta、bun 等位置报“不支持的安装位置” | 计划第 4.2 节 |
-| 发送内容 | 一位成员最新的最多 20 份已确认报告的日期、标题、检查结果、结论和标记项，问答历史和问题；机构名称默认不发送 | `AssistantContextPackBuilder`、[`PRIVACY.md`](../../PRIVACY.md) |
+| 发送内容 | 一位成员已确认报告在本机分层整理成的上下文：最多 300 份的目录、结论与标记项、按项目名汇总的表格行、预算内最新报告的全文，合计约 100 KB；问答历史和问题；机构名称默认不发送；每轮只保存回答引用的来源 | `AssistantContextPackBuilder`、[`PRIVACY.md`](../../PRIVACY.md) |
 | 保存 | 每轮完成后保存在资料库（schema 版本 3），进入恢复点（逻辑版本 3），可逐段或全部删除，随成员删除；同意从不保存 | 计划 D4、D8，[`decisions.md`](../decisions.md) 2026-10-16 |
 
 ## 自动化证据

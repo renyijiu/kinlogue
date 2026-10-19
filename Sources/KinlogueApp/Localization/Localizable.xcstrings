@@ -6941,16 +6941,6 @@
         }
       }
     },
-    "已确认报告的日期、标题、检查结果、结论和标记项：%@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dates, titles, results, conclusions and flagged items of confirmed reports: %@"
-          }
-        }
-      }
-    },
     "这些报告的检查机构名称": {
       "localizations": {
         "en": {
@@ -7007,16 +6997,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Not sent by default. Changing this needs a new confirmation."
-          }
-        }
-      }
-    },
-    "查看将发送的报告全文": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show the full report text to be sent"
           }
         }
       }
@@ -7969,6 +7949,186 @@
           "stringUnit": {
             "state": "translated",
             "value": "Choose the model Codex uses; after a change, confirm what is sent again"
+          }
+        }
+      }
+    },
+    "这段对话来自较早版本的续页；继续提问将开始一段新的对话。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This conversation comes from an earlier version of Kinlogue; asking another question starts a new conversation."
+          }
+        }
+      }
+    },
+    "报告目录：%@，每份一行日期和标题": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Index: %@, one line each with date and title"
+          }
+        }
+      }
+    },
+    "结论与标记项：%@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conclusions and flagged items: %@"
+          }
+        }
+      }
+    },
+    "%lld 个项目": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld item"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld items"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld 行": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld row"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld rows"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "检验汇总：%@、%@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lab results by item: %1$@, %2$@"
+          }
+        }
+      }
+    },
+    "完整检查结果：最新的 %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full results: the newest %@"
+          }
+        }
+      }
+    },
+    "另有 %lld 份较早报告的结论没有列入": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld older report's conclusion is not listed"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld older reports' conclusions are not listed"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "另有 %lld 条较早的检验结果没有列入": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld older result row is not listed"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld older result rows are not listed"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "另有 %lld 个检验项目没有列入": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld more item is not listed"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld more items are not listed"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "查看将发送的全部内容": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show everything that will be sent"
+          }
+        }
+      }
+    },
+    "全文 %lld 份": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld in full"
           }
         }
       }

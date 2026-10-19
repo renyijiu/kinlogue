@@ -184,6 +184,8 @@
 	<string>Choose a family member in the sidebar first</string>
 	<key>入院日期</key>
 	<string>Admission Date</string>
+	<key>全文 %lld 份</key>
+	<string>%lld in full</string>
 	<key>全部</key>
 	<string>All</string>
 	<key>全部记录</key>
@@ -436,6 +438,8 @@
 	<string>Integrity check failed; retry available</string>
 	<key>完整性检查未通过，资料库操作已停止</key>
 	<string>Integrity check failed; library operations have stopped</string>
+	<key>完整检查结果：最新的 %@</key>
+	<string>Full results: the newest %@</string>
 	<key>完整预览</key>
 	<string>Full Preview</string>
 	<key>完整预览，PDF 第 %lld 页</key>
@@ -564,8 +568,6 @@
 	<string>Signed in</string>
 	<key>已确认信息</key>
 	<string>Confirmed Information</string>
-	<key>已确认报告的日期、标题、检查结果、结论和标记项：%@</key>
-	<string>Dates, titles, results, conclusions and flagged items of confirmed reports: %@</string>
 	<key>已识别到 %lld 个日期，请展开选择；也可以手动选择。</key>
 	<string>Detected date candidates: %lld. Expand to choose one, or select a date manually.</string>
 	<key>已退出比较选择模式</key>
@@ -720,6 +722,8 @@
 	<string>Reports</string>
 	<key>报告日期</key>
 	<string>Report Date</string>
+	<key>报告目录：%@，每份一行日期和标题</key>
+	<string>Index: %@, one line each with date and title</string>
 	<key>报告类型</key>
 	<string>Report Type</string>
 	<key>报告自带标记</key>
@@ -930,8 +934,8 @@
 	<string>View Original</string>
 	<key>查看发送内容</key>
 	<string>Review What Is Sent</string>
-	<key>查看将发送的报告全文</key>
-	<string>Show the full report text to be sent</string>
+	<key>查看将发送的全部内容</key>
+	<string>Show everything that will be sent</string>
 	<key>查看已有资料</key>
 	<string>View Existing Record</string>
 	<key>查看并确认…</key>
@@ -960,6 +964,8 @@
 	<string>Conclusion</string>
 	<key>检查结论（逐字）</key>
 	<string>Conclusion (Verbatim)</string>
+	<key>检验汇总：%@、%@</key>
+	<string>Lab results by item: %1$@, %2$@</string>
 	<key>模型</key>
 	<string>Model</string>
 	<key>模型名称只能包含英文字母、数字和 . - _ :，并以字母或数字开头。</key>
@@ -1180,6 +1186,8 @@
 	<string>Manage %@</string>
 	<key>管理续页的显示语言和本机数据。</key>
 	<string>Manage Kinlogue's display language and local data.</string>
+	<key>结论与标记项：%@</key>
+	<string>Conclusions and flagged items: %@</string>
 	<key>继续</key>
 	<string>Continue</string>
 	<key>继续并选择位置…</key>
@@ -1374,6 +1382,8 @@
 	<string>This record was updated in another window. Reloading the latest version will replace unsaved edits on this page.</string>
 	<key>这次对话已达到轮数上限，请开始新对话。</key>
 	<string>This chat has reached its turn limit. Start a new chat.</string>
+	<key>这段对话来自较早版本的续页；继续提问将开始一段新的对话。</key>
+	<string>This conversation comes from an earlier version of Kinlogue; asking another question starts a new conversation.</string>
 	<key>这段对话由 %@ 生成；继续提问将开始一段新的对话。</key>
 	<string>This chat came from %@; a new question starts a new chat.</string>
 	<key>这组影像超出当前支持范围</key>

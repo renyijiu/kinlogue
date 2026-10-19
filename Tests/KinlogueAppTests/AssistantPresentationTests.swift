@@ -100,6 +100,9 @@ struct AssistantPresentationTests {
         #expect(AssistantText.waiting(seconds: 1, language: .english) == "Waiting for Codex to answer · 1 second")
         #expect(AssistantText.waiting(seconds: 12, language: .english) == "Waiting for Codex to answer · 12 seconds")
         #expect(AssistantText.waiting(seconds: 12, language: .simplifiedChinese) == "正在等待 Codex 回答 · 12 秒")
+        #expect(AssistantText.olderVersion(language: .simplifiedChinese) == "这段对话来自较早版本的续页；继续提问将开始一段新的对话。")
+        #expect(AssistantText.olderVersion(language: .english)
+            == "This conversation comes from an earlier version of Kinlogue; asking another question starts a new conversation.")
     }
 
     @Test
@@ -170,6 +173,53 @@ struct AssistantPresentationTests {
         #expect(summary.dateRange(language: .english) == "2001-06 to 2002-06")
         #expect(summary.byteCount == load.pack.byteCount)
         #expect(summary.omitted(language: .english) == nil)
+        // Both synthetic reports have one "Glucose" row and fit in full.
+        #expect(summary.resultItemCount == 1 && summary.resultRowCount == 2)
+        #expect(summary.fullTextCount == 2)
+        #expect(summary.conclusionCount == 0)
+    }
+
+    @Test
+    func layeredSummaryReadsEachLayerInBothLanguages() {
+        let summary = AssistantPackSummary(
+            reportCount: 86, dates: ["2019-04-02", "2024-03-01"], byteCount: 98_000, omittedCount: 0, truncatedCount: 1, damagedCount: 0,
+            conclusionCount: 40, omittedConclusionCount: 46, resultItemCount: 31, resultRowCount: 312,
+            omittedResultRowCount: 1, omittedResultItemCount: 2, fullTextCount: 9
+        )
+        #expect(summary.index(language: .simplifiedChinese) == "报告目录：86 份报告，每份一行日期和标题")
+        #expect(summary.index(language: .english) == "Index: 86 reports, one line each with date and title")
+        #expect(summary.conclusions(language: .simplifiedChinese) == "结论与标记项：40 份报告")
+        #expect(summary.conclusions(language: .english) == "Conclusions and flagged items: 40 reports")
+        #expect(summary.results(language: .simplifiedChinese) == "检验汇总：31 个项目、312 行")
+        #expect(summary.results(language: .english) == "Lab results by item: 31 items, 312 rows")
+        #expect(summary.fullTexts(language: .simplifiedChinese) == "完整检查结果：最新的 9 份报告")
+        #expect(summary.fullTexts(language: .english) == "Full results: the newest 9 reports")
+        #expect(summary.omittedConclusions(language: .simplifiedChinese) == "另有 46 份较早报告的结论没有列入")
+        #expect(summary.omittedConclusions(language: .english) == "46 older reports' conclusions are not listed")
+        #expect(summary.omittedResultRows(language: .simplifiedChinese) == "另有 1 条较早的检验结果没有列入")
+        #expect(summary.omittedResultRows(language: .english) == "1 older result row is not listed")
+        #expect(summary.omittedResultItems(language: .simplifiedChinese) == "另有 2 个检验项目没有列入")
+        #expect(summary.omittedResultItems(language: .english) == "2 more items are not listed")
+        #expect(summary.scopeLine(language: .simplifiedChinese).hasPrefix("86 份报告 · 全文 9 份 · 2019-04 至 2024-03 · "))
+        #expect(summary.scopeLine(language: .english).hasPrefix("86 reports · 9 in full · 2019-04 to 2024-03 · "))
+
+        let single = AssistantPackSummary(
+            reportCount: 1, dates: [nil], byteCount: 10, omittedCount: 0, truncatedCount: 0, damagedCount: 0,
+            conclusionCount: 1, omittedConclusionCount: 1, resultItemCount: 1, resultRowCount: 1,
+            omittedResultRowCount: 2, omittedResultItemCount: 1, fullTextCount: 1
+        )
+        #expect(single.results(language: .english) == "Lab results by item: 1 item, 1 row")
+        #expect(single.omittedConclusions(language: .english) == "1 older report's conclusion is not listed")
+        #expect(single.omittedResultRows(language: .english) == "2 older result rows are not listed")
+        #expect(single.omittedResultItems(language: .english) == "1 more item is not listed")
+
+        let bare = AssistantPackSummary(reportCount: 1, dates: [nil], byteCount: 10, omittedCount: 0, truncatedCount: 0, damagedCount: 0)
+        #expect(bare.conclusions(language: .english) == nil)
+        #expect(bare.results(language: .english) == nil)
+        #expect(bare.fullTexts(language: .english) == nil)
+        #expect(bare.omittedConclusions(language: .english) == nil)
+        #expect(bare.omittedResultRows(language: .english) == nil)
+        #expect(bare.omittedResultItems(language: .english) == nil)
     }
 
     private func containsHan(_ text: String) -> Bool {
