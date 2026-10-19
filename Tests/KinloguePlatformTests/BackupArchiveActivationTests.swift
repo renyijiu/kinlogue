@@ -1,68 +1,37 @@
-import CryptoKit
 import Darwin
 import Foundation
 import KinlogueCore
 import Testing
 @_spi(Testing) @testable import KinloguePlatform
 
-// Restore preparation and whole-root activation against the SQLite library. A restore that
-// reopens and edits every repository is in `SQLiteLogicalBackupTests`; real process deaths at
-// each activation phase are in `SQLiteLogicalRestoreProcessTests`.
+// Restore preparation from a backup archive and whole-root activation against the SQLite
+// library. Hostile archives are in `BackupArchiveRestoreTests`; a restore that reopens and edits
+// every repository is in `SQLiteLogicalBackupTests`; real process deaths at each activation
+// phase are in `SQLiteLogicalRestoreProcessTests`.
 
-@Suite("Encrypted checkpoint restore", .serialized)
-struct EncryptedCheckpointRestoreTests {
+@Suite("Backup archive activation", .serialized)
+struct BackupArchiveActivationTests {
     @Test
-    func readerRejectsTheFileTreeFormatBeforeStagingWithoutCallingItDamaged() async throws {
+    func aDamagedArchiveLeavesTheLibraryAndTheFileUnchanged() async throws {
         try await withRestoreFixture { fixture in
-            let root = try fixture.destinationRoot("file-tree-format")
-            let parent = root.deletingLastPathComponent()
+            let root = try fixture.destinationRoot("damaged")
             let owner = try SQLiteLibraryOwner(rootURL: root)
             let store = try SQLiteLibraryStore(owner: owner)
             defer { try? store.close() }
             let member = try FamilyMember(displayName: "Synthetic preserved member")
             try await SQLiteReportRepository(store: store).saveMember(member, replacing: nil)
             let before = try restoreTreeSnapshot(at: root)
-            let names = try FileManager.default.contentsOfDirectory(atPath: parent.path).sorted()
-            let checkpointBytes = try Data(contentsOf: fixture.fileTreeCheckpointURL)
+            var bytes = try Data(contentsOf: fixture.checkpointURL)
+            bytes[bytes.count / 2] ^= 0xff
+            let damaged = fixture.base.appendingPathComponent("damaged.zip")
+            try bytes.write(to: damaged)
 
             let verifier = try BackupRestoreVerifier(owner: owner)
-            await #expect(throws: BackupRestoreError.unsupportedFormat) {
-                _ = try await verifier.prepare(
-                    checkpointURL: fixture.fileTreeCheckpointURL,
-                    recoveryCode: fixture.recoveryCode
-                )
-            }
-
-            #expect(try restoreTreeSnapshot(at: root) == before)
-            #expect(try FileManager.default.contentsOfDirectory(atPath: parent.path).sorted() == names)
-            #expect(try Data(contentsOf: fixture.fileTreeCheckpointURL) == checkpointBytes)
-            #expect(try await SQLiteReportRepository(store: store).member(member.id) == member)
-        }
-    }
-
-    @Test
-    func wrongRecoveryCodeLeavesTheLibraryAndTheCheckpointUnchanged() async throws {
-        try await withRestoreFixture { fixture in
-            let root = try fixture.destinationRoot("wrong-code")
-            let owner = try SQLiteLibraryOwner(rootURL: root)
-            let store = try SQLiteLibraryStore(owner: owner)
-            defer { try? store.close() }
-            let member = try FamilyMember(displayName: "Synthetic preserved member")
-            try await SQLiteReportRepository(store: store).saveMember(member, replacing: nil)
-            let before = try restoreTreeSnapshot(at: root)
-            let checkpointBytes = try Data(contentsOf: fixture.checkpointURL)
-
-            let verifier = try BackupRestoreVerifier(owner: owner)
-            await #expect(throws: BackupRestoreError.authenticationFailed) {
-                _ = try await verifier.prepare(
-                    checkpointURL: fixture.checkpointURL,
-                    recoveryCode: try BackupRecoveryCode.encode(seed: Data(repeating: 0xEE, count: 32))
-                )
-            }
+            await #expect(throws: (any Error).self) { _ = try await verifier.prepare(archiveURL: damaged) }
 
             #expect(try restoreTreeSnapshot(at: root) == before)
             #expect(try restoreArtifacts(in: root.deletingLastPathComponent()).isEmpty)
-            #expect(try Data(contentsOf: fixture.checkpointURL) == checkpointBytes)
+            #expect(try Data(contentsOf: damaged) == bytes)
             #expect(try await SQLiteReportRepository(store: store).member(member.id) == member)
         }
     }
@@ -76,10 +45,7 @@ struct EncryptedCheckpointRestoreTests {
             let oldMember = try FamilyMember(displayName: "Synthetic previous member")
             try await SQLiteReportRepository(store: old).saveMember(oldMember, replacing: nil)
 
-            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(
-                checkpointURL: fixture.checkpointURL,
-                recoveryCode: fixture.recoveryCode
-            )
+            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(archiveURL: fixture.checkpointURL)
             // Preparing touches nothing in the library that is still open.
             #expect(try await SQLiteReportRepository(store: old).member(oldMember.id) == oldMember)
 
@@ -112,10 +78,7 @@ struct EncryptedCheckpointRestoreTests {
             let owner = try SQLiteLibraryOwner(rootURL: root)
             let oldMember = try await seedClosedLibrary(owner: owner)
             let before = try restoreTreeSnapshot(at: root)
-            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(
-                checkpointURL: fixture.checkpointURL,
-                recoveryCode: fixture.recoveryCode
-            )
+            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(archiveURL: fixture.checkpointURL)
 
             let interrupted = try BackupRestoreTransaction(
                 owner: owner,
@@ -141,10 +104,7 @@ struct EncryptedCheckpointRestoreTests {
             let root = try fixture.destinationRoot("renumbered-forward")
             let owner = try SQLiteLibraryOwner(rootURL: root)
             _ = try await seedClosedLibrary(owner: owner)
-            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(
-                checkpointURL: fixture.checkpointURL,
-                recoveryCode: fixture.recoveryCode
-            )
+            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(archiveURL: fixture.checkpointURL)
             let interrupted = try BackupRestoreTransaction(
                 owner: owner,
                 failureInjector: { $0 == .afterNewRootActivation }
@@ -172,10 +132,7 @@ struct EncryptedCheckpointRestoreTests {
             let owner = try SQLiteLibraryOwner(rootURL: root)
             _ = try await seedClosedLibrary(owner: owner)
             let before = try restoreTreeSnapshot(at: root)
-            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(
-                checkpointURL: fixture.checkpointURL,
-                recoveryCode: fixture.recoveryCode
-            )
+            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(archiveURL: fixture.checkpointURL)
             let interrupted = try BackupRestoreTransaction(
                 owner: owner,
                 failureInjector: { $0 == .afterIntent }
@@ -205,10 +162,7 @@ struct EncryptedCheckpointRestoreTests {
             let root = try fixture.destinationRoot("abandoned-preflight")
             let parent = root.deletingLastPathComponent()
             let owner = try SQLiteLibraryOwner(rootURL: root)
-            _ = try await BackupRestoreVerifier(owner: owner).prepare(
-                checkpointURL: fixture.checkpointURL,
-                recoveryCode: fixture.recoveryCode
-            )
+            _ = try await BackupRestoreVerifier(owner: owner).prepare(archiveURL: fixture.checkpointURL)
             #expect(try !restoreArtifacts(in: parent).isEmpty)
             // A directory that only looks like staging has no receipt, so it is not ours to remove.
             let unowned = parent.appendingPathComponent(
@@ -230,11 +184,8 @@ struct EncryptedCheckpointRestoreTests {
 
 private struct RestoreFixture {
     let base: URL
-    /// A checkpoint of the source library in the logical format the App writes.
+    /// A backup archive of the source library, as the App writes it.
     let checkpointURL: URL
-    /// A correctly signed and encrypted checkpoint in the earlier file-tree layout.
-    let fileTreeCheckpointURL: URL
-    let recoveryCode: String
     let sourceMember: FamilyMember
     let revisionPair: BackupRevisionPair
 
@@ -269,78 +220,17 @@ private func withRestoreFixture(_ body: (RestoreFixture) async throws -> Void) a
     try await sink.write(original).value
     _ = try await sink.finish()
 
-    let enrollment = try BackupKeyHierarchy.makeEnrollment()
-    let signer = try BackupDeviceSigner(
-        descriptor: enrollment.descriptor,
-        authorization: enrollment.authorization,
-        deviceSigningSeed: enrollment.deviceSigningSeed
-    )
-    func writeCheckpoint(
-        named name: String,
-        entries: [BackupContainerEntrySource],
-        revisionPair: BackupRevisionPair
-    ) async throws -> URL {
-        let bytes = RestoreLockedBytes()
-        _ = try await EncryptedBackupContainerWriter().write(
-            entries: entries,
-            revisionPair: revisionPair,
-            sequence: 1,
-            signer: signer,
-            sink: .init(write: bytes.append, readBackSource: bytes.source)
-        )
-        let url = base.appendingPathComponent(name)
-        try bytes.data.write(to: url, options: .withoutOverwriting)
-        #expect(chmod(url.path, 0o600) == 0)
-        return url
-    }
-
-    let snapshot = try await SQLiteLogicalBackupSource(store: source).prepare()
-    let revisionPair = snapshot.revisionPair
-    let checkpointURL: URL
-    do {
-        defer { snapshot.release() }
-        checkpointURL = try await writeCheckpoint(
-            named: "logical.kinloguebackup",
-            entries: snapshot.sources(),
-            revisionPair: revisionPair
-        )
-    }
+    let revisionPair = try SQLiteLogicalBackupSource(store: source).currentRevision()
+    let checkpointURL = base.appendingPathComponent("logical.zip")
+    _ = try await BackupArchiveWriter(store: source).write(to: .file(checkpointURL), content: .synthetic)
     try source.close()
-    let fileTreeCheckpointURL = try await writeCheckpoint(
-        named: "file-tree.kinloguebackup",
-        entries: [
-            fileTreeEntry(.vaultCatalog, path: "library.json", bytes: Data("{}".utf8)),
-            fileTreeEntry(.lanInboxManifest, path: "lan-inbox/inbox.json", bytes: Data("{}".utf8)),
-            fileTreeEntry(.vaultObject, path: "objects/payload.bin", bytes: Data("synthetic file-tree object".utf8)),
-        ],
-        revisionPair: revisionPair
-    )
 
     try await body(RestoreFixture(
         base: base,
         checkpointURL: checkpointURL,
-        fileTreeCheckpointURL: fileTreeCheckpointURL,
-        recoveryCode: enrollment.recoveryCode,
         sourceMember: member,
         revisionPair: revisionPair
     ))
-}
-
-private func fileTreeEntry(
-    _ kind: BackupManifestEntry.Kind,
-    path: String,
-    bytes: Data
-) -> BackupContainerEntrySource {
-    BackupContainerEntrySource(
-        kind: kind,
-        path: path,
-        plaintextByteCount: UInt64(bytes.count),
-        plaintextDigest: Data(SHA256.hash(data: bytes))
-    ) { offset, maximum in
-        guard offset <= UInt64(bytes.count) else { return Data() }
-        let start = Int(offset)
-        return Data(bytes[start..<min(bytes.count, start + maximum)])
-    }
 }
 
 /// Creates a library with one member under `owner` and leaves its database closed.
@@ -355,21 +245,6 @@ private func seedClosedLibrary(owner: SQLiteLibraryOwner) async throws -> Family
     }
     try store.close()
     return member
-}
-
-private final class RestoreLockedBytes: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage = Data()
-    func append(_ bytes: Data) { lock.withLock { storage.append(bytes) } }
-    var data: Data { lock.withLock { storage } }
-    func source() -> BackupContainerByteSource {
-        let snapshot = data
-        return .init(byteCount: UInt64(snapshot.count)) { offset, count in
-            guard offset <= UInt64(snapshot.count) else { return Data() }
-            let start = Int(offset)
-            return Data(snapshot[start..<min(snapshot.count, start + count)])
-        }
-    }
 }
 
 private struct RestoreTreeEntry: Equatable {

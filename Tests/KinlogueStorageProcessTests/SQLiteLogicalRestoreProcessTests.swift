@@ -21,17 +21,17 @@ func sqliteLogicalRestoreSurvivesRealRootPhaseCrashesAndRollsBackDamage(scenario
         let metadata = try LANInboxTransportMetadata(displayName: LANInboxDisplayName(rawValue: "Synthetic.bin"), declaredByteCount: original.count)
         guard case let .sink(sink) = try await inbox.startItemUpload(transport: transport, metadata: metadata, attemptRevision: 1) else { throw SQLiteLibraryError.damaged }
         try await sink.write(original).value; _ = try await sink.finish()
-        let snapshot = try await SQLiteLogicalBackupSource(store: source).prepare()
-        let captured = snapshot.revisionPair
-        let enrollment = try BackupKeyHierarchy.makeEnrollment()
-        let output = SQLiteLogicalProcessBytes()
-        let signer = try BackupDeviceSigner(descriptor: enrollment.descriptor, authorization: enrollment.authorization, deviceSigningSeed: enrollment.deviceSigningSeed)
-        _ = try await EncryptedBackupContainerWriter().write(entries: snapshot.sources(), revisionPair: captured, sequence: 1,
-            signer: signer, sink: .init(write: output.append, readBackSource: output.source))
-        snapshot.release(); try source.close()
-        let checkpoint = parent.appendingPathComponent("logical.kinloguebackup")
-        try output.data.write(to: checkpoint); #expect(chmod(checkpoint.path, 0o600) == 0)
-        try Data(enrollment.recoveryCode.utf8).write(to: parent.appendingPathComponent("logical-recovery.txt"))
+        let captured = try SQLiteLogicalBackupSource(store: source).currentRevision()
+        _ = try await BackupArchiveWriter(store: source).write(
+            to: .file(parent.appendingPathComponent("logical.zip")),
+            content: BackupArchiveContent(
+                labels: BackupArchiveLabels(undated: "Undated", pendingFolder: "Pending", phoneFolder: "Phone", otherFolder: "Other"),
+                creator: try BackupArchiveIndex.Creator(app: "Kinlogue", version: "test", build: "test"),
+                readmeFileName: "README.txt",
+                readmeText: "Synthetic process restore backup"
+            )
+        )
+        try source.close()
         var oldFiles: [String: Data] = [:]
         if existing {
             let old = try SQLiteLibraryStore(rootURL: fixture.rootURL)
@@ -80,19 +80,6 @@ func sqliteLogicalRestoreSurvivesRealRootPhaseCrashesAndRollsBackDamage(scenario
             #expect(!FileManager.default.fileExists(atPath: fixture.rootURL.path))
         }
         #expect(try FileManager.default.contentsOfDirectory(atPath: parent.path).allSatisfy { !$0.hasSuffix(".staging") && !$0.hasSuffix(".preflight.json") && !$0.hasPrefix(".kinlogue-restore-rollback-") && !$0.hasPrefix(".kinlogue-restore-transaction-") })
-    }
-}
-
-private final class SQLiteLogicalProcessBytes: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage = Data()
-    var data: Data { lock.withLock { storage } }
-    func append(_ bytes: Data) { lock.withLock { storage.append(bytes) } }
-    func source() -> BackupContainerByteSource {
-        let bytes = data
-        return .init(byteCount: UInt64(bytes.count)) { offset, count in
-            let start = Int(offset); return bytes.subdata(in: start..<min(bytes.count, start + count))
-        }
     }
 }
 

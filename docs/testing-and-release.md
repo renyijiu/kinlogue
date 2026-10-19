@@ -103,14 +103,14 @@ ad-hoc 签名适用于本机开发和知情测试者手动安装，但没有 Dev
 - macOS 26/27 独立机器；
 - iOS Safari/Android Chrome 真机、网络隔离、防火墙和锁屏/睡眠/网络变化；
 - 真实 `NSSavePanel`、外置卷、覆盖保存和打印；
-- 真实 Powerbox 备份目录、外置盘/NAS，以及阿里云盘/百度网盘等客户端的上传、占位文件、冲突副本与删除传播；
-- 干净 Mac 上仅凭恢复码与 `.kinloguebackup` 的完整人工恢复；
+- 真实 Powerbox 备份文件夹、外置盘/NAS，以及阿里云盘/百度网盘等客户端的上传、占位文件、冲突副本、替换文件与删除传播；
+- 干净 Mac 上仅凭一个备份压缩包的完整人工恢复，以及访达和 Windows 对包内中文路径的解压；
 - Developer ID、notarization 和任何需要用户接受系统提示的发布动作。
 
 报告状态只使用 `passed`、`pendingManual`、`notExecuted` 和 `blocked`。任何 `passed` 都必须绑定具体 revision、工件和环境，不能从历史低层测试推断当前候选已通过。
 
 ## 存储规模探针
 
-[`run-storage-scale-probe.sh`](../scripts/run-storage-scale-probe.sh) 复用非发布 `KinlogueStorageProcessFixture` 的合成数据入口，规模性能不进入主测试清单。它只在受控临时目录生成数据并由脚本清理，执行前预留源库、恢复点和恢复库同时存在的容量。`--tier reports-1000 --tier reports-20000 --tier photos-20000` 分别测小库、近对象上限与约 10 GiB 原件：每档生成一个 SQLite 资料库，再依次测量打开到首批摘要（三次）、搜索、短操作、逻辑捕获，以及完整的加密发布、严格恢复和 reconcile；`photos` 档不重复搜索和操作采样。`--tier capacity-20000` 是自成一体的一档：暂存 20,000 个唯一原件后做完整的发布与严格恢复。昂贵的 inbox 增长测量须显式传 `--inbox`。输出的是 min/median/max 等实测值，不作为生产 p95 验收。
+[`run-storage-scale-probe.sh`](../scripts/run-storage-scale-probe.sh) 复用非发布 `KinlogueStorageProcessFixture` 的合成数据入口，规模性能不进入主测试清单。它只在受控临时目录生成数据并由脚本清理，执行前预留源库、备份包和恢复库同时存在的容量。`--tier reports-1000 --tier reports-20000 --tier photos-20000` 分别测小库、近对象上限与约 10 GiB 原件：每档生成一个 SQLite 资料库，再依次测量打开到首批摘要（三次）、搜索、短操作、逻辑捕获，以及完整的备份写入、严格恢复和 reconcile；`photos` 档不重复搜索和操作采样。`--tier capacity-20000` 是自成一体的一档：暂存 20,000 个唯一原件后做完整的备份写入与严格恢复。昂贵的 inbox 增长测量须显式传 `--inbox`。输出的是 min/median/max 等实测值，不作为生产 p95 验收。
 
-脚本的档位在删除 JSON 存储时改为驱动 SQLite 的各项命令；改写后只实跑过最小的 `reports-100` 档（2026-10-13，macOS 27.0.1，各阶段退出码 0），其余档位没有重跑。此前的实测数字来自直接调用同一批探针命令，见 [首批实测](storage-refactor-measurement-2026-10-11.md) 与 [搜索复测](storage-search-measurement-2026-10-12.md)。样本机、档位、数据形状和实测/估算区别必须随结果记录；不默认运行昂贵的 `--all`。
+脚本的档位在删除 JSON 存储时改为驱动 SQLite 的各项命令；改写后只实跑过最小的 `reports-100` 档（2026-10-13，macOS 27.0.1，各阶段退出码 0），其余档位没有重跑。2026-10-19 起备份阶段改为写入 ZIP 备份包（[`BackupArchiveWriter`](../Sources/KinloguePlatform/Backup/BackupArchiveWriter.swift)）后再恢复；这一改动之后的任何档位都还没有实跑，此前的规模数字是加密恢复点的结果。此前的实测数字来自直接调用同一批探针命令，见 [首批实测](storage-refactor-measurement-2026-10-11.md) 与 [搜索复测](storage-search-measurement-2026-10-12.md)。样本机、档位、数据形状和实测/估算区别必须随结果记录；不默认运行昂贵的 `--all`。

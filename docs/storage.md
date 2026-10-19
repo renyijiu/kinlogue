@@ -36,7 +36,7 @@ DICOM 导入开始前先在 `dicom-import-journals/` 原子写入归属收据，
 
 ## 其他格式的目录
 
-[SQLiteLibraryStore](../Sources/KinloguePlatform/Storage/SQLiteLibraryStore.swift) 在打开已有文件前只读核对 SQLite header、`application_id`、`user_version` 和日志模式。根目录里出现它不认识的内容时返回“格式不受支持”，不迁移、不改写、不删除：早先版本留下的 `library.json` 资料库、未知 schema 和其他非空目录都按此处理，[回归](../Tests/KinloguePlatformTests/SQLiteLibraryStoreTests.swift) 核对目录内容和字节保持不变。启动页说明格式不受支持，只提供从恢复点恢复的入口。在这样的目录上确认恢复，会用恢复点的内容整根替换它，下一次启动打开恢复后的资料库；被替换的旧目录先移到资料库旁，由下一次启动收敛时删除，之后不再保留（[回归](../Tests/KinlogueAppTests/SQLiteAppStartupTests.swift)）。把已有 JSON 资料迁入需要另行验证的离线转换，本分支没有提供；这部分代码已经删除，需要它的人只能从 Git 历史取回，转换结果只能以恢复点的形式经上述恢复入口装入。早先版本写出的文件树格式恢复点同样被拒绝，见 [`backup-and-restore.md`](backup-and-restore.md)。
+[SQLiteLibraryStore](../Sources/KinloguePlatform/Storage/SQLiteLibraryStore.swift) 在打开已有文件前只读核对 SQLite header、`application_id`、`user_version` 和日志模式。根目录里出现它不认识的内容时返回“格式不受支持”，不迁移、不改写、不删除：早先版本留下的 `library.json` 资料库、未知 schema 和其他非空目录都按此处理，[回归](../Tests/KinloguePlatformTests/SQLiteLibraryStoreTests.swift) 核对目录内容和字节保持不变。启动页说明格式不受支持，只提供从备份恢复的入口。在这样的目录上确认恢复，会用备份包的内容整根替换它，下一次启动打开恢复后的资料库；被替换的旧目录先移到资料库旁，由下一次启动收敛时删除，之后不再保留（[回归](../Tests/KinlogueAppTests/SQLiteAppStartupTests.swift)）。把已有 JSON 资料迁入需要另行验证的离线转换，本分支没有提供；这部分代码已经删除，需要它的人只能从 Git 历史取回，转换结果只能以备份包的形式经上述恢复入口装入。早先版本写出的文件树格式和加密格式恢复点同样不能读取，见 [`backup-and-restore.md`](backup-and-restore.md)。
 
 ## 文件系统安全与删除
 
@@ -73,22 +73,18 @@ DICOM 另有以下门禁：
 
 上限在构造或解码时、提交前和持有提交权的最终检查中重新核对；超限的提交在写入之前被拒绝。LAN inbox 另有待确认项、传输回执、并发和内存上限，见 [`lan-upload.md`](lan-upload.md)。产品决策明确不设固定的存储字节配额；文件系统写入失败时当前文件不会发布为可处理项，并提供清理或重试的路径。
 
-## 已确认原始文件导出
+## 备份与导出
 
-[SQLiteOriginalArchiveSource](../Sources/KinloguePlatform/Export/SQLiteOriginalArchiveSource.swift) 在一次受协调的读取里取得导出清单，并 pin 住清单里的原件。清单只包含 `.confirmed` 报告的每一条来源行和 `.confirmed` DICOM study 的原件；同一原件被两条来源行引用时仍按两行输出。条目总数上限为 30,000，超过已完成 writer characterization 的边界时在读取原件之前失败关闭。草稿、待确认的 DICOM、OCR 文档、LAN inbox 和没有引用的原件都不可达。只查询来源的元数据，不加载 OCR 或报告详情。
+资料库对外只有一种副本：明文 ZIP 备份包。它在一次受协调的读取里捕获一个提交的逻辑数据流并 pin 住全部可达原件，之后的合法编辑或删除不改变这份备份；写 ZIP 条目时才打开原件的只读 descriptor，逐块核对长度、SHA-256 和读取前后的文件身份，发布前再整体核对一次 pin。工作文件写在目标同卷的私有 item-replacement 目录里，完整读回校验后才发布：写入备份文件夹时排他重命名、从不覆盖，导出到所选位置时原子替换。目标在资料库内、非 `.zip`、symlink 或非 regular replacement 均被拒绝。
 
-pin 记下原件的元数据并阻止文件被回收，所以准备之后发生的合法编辑或删除不改变这次导出的内容；写每个 ZIP 条目时才打开该原件的只读 descriptor，逐块读取并核对长度、SHA-256 和读取前后的文件身份，发布前再整体核对一次 pin。一次准备只能用于一次导出，导出结束时归还 pin。
-
-`OriginalArchiveExporter` 使用 ZIPFoundation `0.9.20` 的 stored entry 和 64 KiB provider 逐块 `pread`。work archive 位于目标同卷的私有 item-replacement directory，名称不带 `.zip`；新目标由该 API 生成的零字节 placeholder 会在写入前移除。写入后同步文件、重新打开并逐 entry 解压复核路径、数量、长度和摘要。只有这些步骤全部成功才原子 move/replace 用户目标：普通文件 authority 路径绑定目标和 work 父目录 descriptor 并以 `renameat` 发布，目录替换时按已捕获 inode 清除 placeholder/work；`NSSavePanel` security scope 路径使用 `NSFileCoordinator` 提供的协调 URL 与 Foundation replace/move，不额外要求未获授权的父目录访问。提交阶段不再接受取消；发布后还会尽力同步父目录，但 `NSSavePanel` 只授予目标文件而未授予父目录时的 `EACCES` / `EPERM`，以及文件系统明确不支持目录同步的错误，不会把已完整校验和原子发布的 ZIP 误报为失败；真正的目录 I/O 错误仍报告“发布状态不确定”。目标在资料库内、非 `.zip`、symlink 或非 regular replacement 均被拒绝。
-
-输出目录和文件名只由用户可见的成员名、确认日期、稳定序号、清洗后的报告显示名和类型扩展构成；DICOM 使用通用的 `.dcm` 名称。内部 UUID、原件或 study ID、摘要、原始路径和 DICOM UID 不进入 ZIP。该 ZIP 不含恢复所需的清单，不能当作资料库备份。
+`files/` 下的路径只由清洗后的成员名、日期、稳定序号、清洗后的来源名和类型扩展构成；内部 UUID、摘要、原始路径和 DICOM UID 只出现在索引与数据流里，不进入原件路径。格式、保留和恢复见 [`backup-and-restore.md`](backup-and-restore.md)。
 
 ## 版本、备份与未来路线
 
 - 数据库 schema 尚未随正式版本发布，开发期间仍可调整；不提供旧 JSON 资料库或更早实验数据库的自动迁移。DICOM 只接受 ordering policy v2，其他 policy version 失败关闭。
 - 空目录可以初始化为当前格式；未知的非空目录、损坏的数据库或不受支持的版本都不会被当成新资料库覆盖。
-- 当前版本提供用户选择目录的加密 `.kinloguebackup` 恢复点与整库替换恢复，但不提供云同步、网盘 API、iCloud 或 CloudKit。恢复点覆盖已提交的完整领域图和原件；显式的原始文件 ZIP 只是不可恢复的明文交接副本。
-- 备份的本机配置和恢复事务收据位于资料库之外、同一可信 Application Support 目录下，避免整根替换复制旧设备身份或移走自己的恢复记录。恢复的暂存和回滚目录只存在于同一个 app 私有父目录，不写入用户选择的同步目录。
-- 恢复点使用独立的密码学认证；活动资料库仍是明文，SHA-256 只用来发现意外损坏和本机去重。将来若加入活动资料库加密或云同步，仍必须提供显式迁移、密钥生命周期和失败恢复协议，不能把当前的 SHA-256 改称认证。
+- 当前版本提供写入用户所选位置的明文 ZIP 备份与整库替换恢复，但不提供云同步、网盘 API、iCloud 或 CloudKit。备份覆盖已提交的完整领域图和原件。
+- 备份设置、账本和恢复事务收据位于资料库之外、同一可信 Application Support 目录下，避免整根替换移走自己的记录。恢复的暂存和回滚目录只存在于同一个 app 私有父目录，不写入用户选择的文件夹。
+- 资料库和备份都是明文，SHA-256 只用来发现意外损坏和本机去重。将来若加入资料库或备份加密、或云同步，仍必须提供显式迁移、密钥生命周期和失败恢复协议，不能把当前的 SHA-256 改称认证。
 
 完整格式、自动化、保留和恢复顺序见 [`backup-and-restore.md`](backup-and-restore.md)。

@@ -108,7 +108,7 @@ SwiftUI 主操作统一使用 `.buttonStyle(.kinloguePrimary)`。手机页面的
 - 时间线卡片的常规与选中描边必须使用组件内描边；记录紧邻排列时，后一张卡片不能覆盖前一张卡片的下边界。
 - 原生 `List` 行不统一缩放。缩放整个系统列表行容易造成选中位置跳动，也不符合 macOS 列表行为。
 - 常规非交互信息卡使用 Container，不增加悬停或按压反馈，避免暗示可点击。
-- 所有 sheet 使用与主窗口相同的 Surface 画布（`.kinlogueSheetCanvas()`）。只读信息块使用 Container + Outline；承载控件或作为弹窗主体的块（手机接收说明卡、二维码、恢复码、设置卡片）使用 Card + Outline。两者统一通过 `.kinloguePanel(_:)` 绘制。
+- 所有 sheet 使用与主窗口相同的 Surface 画布（`.kinlogueSheetCanvas()`）。只读信息块使用 Container + Outline；承载控件或作为弹窗主体的块（手机接收说明卡、二维码、设置卡片）使用 Card + Outline。两者统一通过 `.kinloguePanel(_:)` 绘制。
 - 多行文本输入统一使用 `.kinlogueInputFrame()`（Card + Outline，8pt 圆角），SwiftUI `TextEditor` 需同时隐藏系统滚动背景。
 - 原件预览的工具条、来源导航和文档底色使用 Container，不使用系统窗口背景色或 Material。
 
@@ -125,10 +125,10 @@ SwiftUI 主操作统一使用 `.buttonStyle(.kinloguePrimary)`。手机页面的
 9. 手机上传待确认列表继续使用原生 `List(selection:)` 支持单选和多选，但不能把固定浅色行背景与系统选中白字混用。选中行背景使用叠在 Surface 上的 Selection（保持不透明，系统选中高亮不能透出），文件名使用 On Surface，状态/大小/日期使用 On Variant，预览与重试使用 Primary，删除使用 Danger；这些前景色由行内文本和 `.kinlogueGhost` 按钮显式设置，避免窗口焦点变化后被系统选中前景覆盖。
 10. 侧边栏中的“添加家庭成员”“待确认”和“待确认影像”属于命令，不属于导航选择。它们使用独立的全宽行按钮与矩形命中区域，不附加 `.selectionDisabled()`；文字、行内空白和尾随箭头都必须触发同一个动作。命令行与导航行使用相同的 On Variant 前景、悬停与按下底色和 2pt Primary 焦点描边，但没有选中态；“识别失败，点按重试”同样是命令行，尾部的放弃按钮是独立的 Danger 图标按钮。
 11. 已确认医学影像检查作为时间线卡片与报告同列，不另设列表。检查卡片使用与报告相同的 Interactive Card：选中时为 2pt Primary 组件内描边并附加 `.isSelected` 无障碍 trait，比较选择进行中禁用。时间线顶部的“全部 / 报告 / 影像”筛选使用可点选的功能标签而不是系统分段控件，避免系统强调色覆盖 Warm Sanctuary 色板：当前项为 Selected 标签并带对勾，其他项为 Neutral 标签，悬停与按下状态见“功能标签”；状态不只靠颜色表达。资料库中没有已确认检查时不显示筛选。中栏时间线与右侧详情必须分别直接观察同一个影像选择模型；选中检查后右侧摘要和操作立即替换报告详情，不能等待父级导航或其他无关状态刷新。实现与门禁见 [`TimelineView`](../Sources/KinlogueApp/Views/TimelineView.swift)、[`KinlogueThemeSourceTests`](../Tests/KinlogueAppTests/KinlogueThemeSourceTests.swift) 和 [`DICOMStudyDetailViewTests`](../Tests/KinlogueAppTests/DICOMStudyDetailViewTests.swift)。筛选标签的悬停与按下反馈，以及筛选标签与卡片的 Tab/VoiceOver 行为仍需人工矩阵复核。
-12. 整个本机资料库的删除不放在主窗口工具栏。入口只位于“设置 → 数据管理”的普通 Card 内，按钮保留 `role: .destructive` 语义并使用破坏性按钮样式；设置卡片右侧的语言选择器、备份目录、原始文件导出和删除操作使用同宽、右对齐的控制列，备份与恢复动作行也沿卡片右内边距对齐。进入删除弹窗后还必须输入当前界面展示的精确短语才能启用最终操作，中文为“彻底删除”，英文为“Permanently Delete”。
+12. 整个本机资料库的删除不放在主窗口工具栏。入口只位于“设置 → 数据管理”的普通 Card 内，按钮保留 `role: .destructive` 语义并使用破坏性按钮样式；设置卡片右侧的语言选择器、选择备份文件夹、导出备份、从备份恢复和删除操作使用同宽、右对齐的控制列，备份文件夹内的动作行沿卡片右内边距对齐。进入删除弹窗后还必须输入当前界面展示的精确短语才能启用最终操作，中文为“彻底删除”，英文为“Permanently Delete”。
 13. 窗口工具栏中的纯图标操作必须提供随 App 语言解析的原生悬停帮助文本。提示应描述点击后的操作，而不是复述 SF Symbol 外观；当按钮行为随状态变化时，提示也必须同步更新。现有菜单快捷键继续由系统菜单公开，不在帮助文本中维护第二份快捷键映射。
 14. 已确认记录编辑页的“检查结果”“检查结论”和“我的备注”使用同一原生多行文本组件。文本容器四周至少保留 8pt 内容边距，并使用 Card + Outline 明确输入范围；不能只增加外层留白或最小高度，因为那不会把首行字形移出 `NSTextView` 的裁切边界。
-15. “导出全部原始文件”与删除使用两个独立设置 Card；导出是普通操作，使用次要按钮样式，不使用破坏性样式。导出 sheet 必须先显示明文、非备份和外部副本保留范围，再允许打开系统保存面板。写入和验证阶段显示线性进度、文件数与字节数并提供取消；最终提交阶段移除取消入口并禁止交互式关闭。成功态提供“在访达中显示”和“完成”，失败、空内容和取消均有明确文本/SF Symbol，不能只靠颜色区分。完整键盘、保存面板和 VoiceOver 公告仍需人工验收。
+15. “数据备份与导出”分区的备份文件夹、导出备份、从备份恢复与“数据管理”分区的删除使用独立设置 Card；备份、导出和恢复是普通操作，使用主要或次要按钮样式，不使用破坏性样式。备份文件夹卡片始终显示“备份文件不加密”的警示。导出 sheet 必须先显示明文、整份含全家资料和外部副本由用户保管的范围，再允许打开系统保存面板。写入和验证阶段显示线性进度与字节数并提供取消；最终提交阶段移除取消入口并禁止交互式关闭。成功态提供“在访达中显示”和“完成”，失败和取消均有明确文本/SF Symbol，不能只靠颜色区分。完整键盘、保存面板和 VoiceOver 公告仍需人工验收。
 16. DICOM 待确认 review 在初始加载、保存、删除以及仍为 `needsReview` 的稳定状态下都禁止交互式关闭，根视图 Escape 与 sheet dismissal 使用同一 policy；初始加载失败或已确认检查的稳定 review 保留明确关闭路径。删除检查或整库时，相关 Viewer 窗口先清空像素并等待底层 close，再由系统 dismiss；不能只关闭当前发起操作的一个窗口。
 17. 报告复核在重新识别、确认、稍后处理或删除进行中禁用整个编辑表单，避免请求已经捕获字段后仍接受无法保存的新输入；失败结束后恢复编辑。原件仍可供核对。实现与门禁见 [`ImportReviewView`](../Sources/KinlogueApp/Views/ImportReviewView.swift) 和 [`ImportReviewViewSafetyTests`](../Tests/KinlogueAppTests/ImportReviewViewSafetyTests.swift)。
 18. 报告详情随已接受的 catalog 快照更新到当前记录 revision，同时保留仍有效的原件选择与不可变原件；已打开编辑页仍保留自己的 revision，冲突后由用户明确重新载入。见 [`AppModelTests`](../Tests/KinlogueAppTests/AppModelTests.swift)。
@@ -161,8 +161,8 @@ SwiftUI 主操作统一使用 `.buttonStyle(.kinloguePrimary)`。手机页面的
 | 所有 sheet 画布 | Surface；页眉、表单和页脚不再分色 |
 | 取消、关闭与普通操作 | Secondary Button（工具栏、系统确认框和 DICOM Viewer 控制条除外） |
 | 行内图标与紧凑文字操作 | Ghost Button |
-| 设置中的本机数据管理 | 导出与删除使用独立普通 Card + Outline；右侧控件固定 intrinsic 尺寸后使用同宽右对齐列，操作的右边缘与卡片右内边距一致。导出使用次要按钮，删除使用破坏性按钮；主工具栏不提供这两个整库入口 |
-| 原始文件导出 sheet | 600×480 固定工作区；warning/checking/choosing/exporting/cancelling/cancelled/empty/failed/succeeded 语义状态。进度只显示聚合计数与大小，不显示敏感路径；active/commit 阶段禁止交互式关闭 |
+| 设置中的备份、导出与本机数据管理 | 备份文件夹、导出、恢复与删除使用独立普通 Card + Outline；右侧控件固定 intrinsic 尺寸后使用同宽右对齐列，操作的右边缘与卡片右内边距一致。导出与恢复使用次要按钮，删除使用破坏性按钮；主工具栏不提供这些整库入口 |
+| 导出备份 sheet | 600×480 固定工作区；warning/choosing/exporting/cancelling/cancelled/failed/succeeded 语义状态。进度只显示字节数，不显示敏感路径；active/commit 阶段禁止交互式关闭 |
 | 详情信息块、搜索框 | Container + Outline |
 | 已确认记录多行编辑器 | 原生 `NSTextView`；文本容器 8pt 内容边距；Card + Outline；三个多行字段保持一致 |
 | 内嵌原件预览 | 报告详情、导入确认、已确认记录编辑、报告对比和手机上传页序统一按预览区宽度等比显示；超出区域可独立滚动；工具栏提供 60%–240% 缩放，图片额外提供左右 90° 旋转；旋转只属于当前查看状态，不修改原件、来源顺序或 OCR；只有宿主提供独立查看器时才显示“查看原图”入口。图片解码与 PDF 文档打开、所选页元数据读取、当前页栅格化都在各自的串行 actor 中完成；PDF open 只发布页数，不预扫全部页面。主线程只发布不可变图像；页码或渲染尺寸变化会取消旧请求并拒绝晚到结果。 |

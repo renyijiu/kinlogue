@@ -1,14 +1,14 @@
 import SwiftUI
 
-struct OriginalExportView: View {
-    @ObservedObject var model: OriginalExportModel
+struct BackupExportView: View {
+    @ObservedObject var model: BackupExportModel
     let onChooseDestination: () -> Void
     let onClose: () -> Void
     let onShowInFinder: (URL) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            Label(AppLocalization.string("导出全部原始文件"), systemImage: "archivebox")
+            Label(AppLocalization.string("导出备份"), systemImage: "archivebox")
                 .font(.title2.weight(.semibold))
 
             ScrollView {
@@ -16,8 +16,6 @@ struct OriginalExportView: View {
                     switch model.phase {
                     case .warning:
                         warningContent
-                    case .checking:
-                        centeredProgress(AppLocalization.string("正在检查可导出的原始文件…"))
                     case .choosing:
                         centeredProgress(AppLocalization.string("正在等待选择保存位置…"))
                     case .exporting:
@@ -30,18 +28,12 @@ struct OriginalExportView: View {
                             systemImage: "xmark.circle",
                             description: Text(AppLocalization.string("未发布不完整的压缩包。"))
                         )
-                    case .empty:
-                        ContentUnavailableView(
-                            AppLocalization.string("没有可导出的原始文件"),
-                            systemImage: "archivebox",
-                            description: Text(AppLocalization.string("确认后的报告和医学影像原件会出现在这里。"))
-                        )
                     case .failed:
                         ContentUnavailableView(
                             AppLocalization.string("导出未完成"),
                             systemImage: "exclamationmark.triangle",
                             description: Text(
-                                model.userErrorMessage
+                                model.errorMessage
                                     ?? AppLocalization.string("导出未完成，可以稍后重试。")
                             )
                         )
@@ -59,23 +51,23 @@ struct OriginalExportView: View {
         .frame(minWidth: 480, idealWidth: 600, minHeight: 480)
         .kinlogueSheetCanvas()
         .interactiveDismissDisabled(isDismissDisabled)
-        .accessibilityIdentifier("original-export-sheet")
+        .accessibilityIdentifier("backup-export-sheet")
     }
 
     private var warningContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label(
-                AppLocalization.string("导出的压缩包包含未加密的健康资料"),
+                AppLocalization.string("备份文件不加密，包含全部健康资料"),
                 systemImage: "exclamationmark.shield"
             )
             .font(.headline)
             .foregroundStyle(KinlogueTheme.warning)
 
-            Text(AppLocalization.string("只会导出已确认报告和医学影像的原始文件，并按家庭成员和日期排列。"))
+            Text(AppLocalization.string("压缩包包含资料库的全部内容：家庭成员、报告、识别文字、草稿、手机上传和原始文件，可以用“从备份恢复…”整库恢复。"))
             VStack(alignment: .leading, spacing: 10) {
-                warningRow(AppLocalization.string("不包含 OCR、转录、备注、目录或草稿。"))
-                warningRow(AppLocalization.string("这是提供给医生查看的副本，不是资料库备份，不能用于恢复续页。"))
-                warningRow(AppLocalization.string("导出后文件由您保管；删除续页资料库不会删除已导出的副本。"))
+                warningRow(AppLocalization.string("原始文件按家庭成员和日期排列，解压后可以直接打开或打印。"))
+                warningRow(AppLocalization.string("整份备份含有全家所有人的资料，不要直接交给医生；可以只发送某位成员的文件夹。"))
+                warningRow(AppLocalization.string("导出后的文件由你保管，续页不会再管理或删除它。"))
             }
             .foregroundStyle(KinlogueTheme.onVariant)
         }
@@ -93,10 +85,6 @@ struct OriginalExportView: View {
             Text(progressTitle)
                 .font(.headline)
             if let progress = model.progress {
-                let totalFiles = AppLocalization.string("\(progress.totalEntryCount) 个文件")
-                Text(AppLocalization.string("已处理 \(progress.completedEntryCount) / \(totalFiles)"))
-                .monospacedDigit()
-                .foregroundStyle(KinlogueTheme.onVariant)
                 Text(AppLocalization.string(
                     "\(formattedByteCount(progress.completedByteCount)) / \(formattedByteCount(progress.totalByteCount))"
                 ))
@@ -115,13 +103,13 @@ struct OriginalExportView: View {
                 .font(.system(size: 42))
                 .foregroundStyle(KinlogueTheme.success)
                 .accessibilityHidden(true)
-            Text(AppLocalization.string("原始文件已导出"))
+            Text(AppLocalization.string("备份已导出"))
                 .font(.title3.weight(.semibold))
             if let result = model.result {
-                Text(result.destinationURL.lastPathComponent)
+                Text(result.url.lastPathComponent)
                     .lineLimit(2)
                     .truncationMode(.middle)
-                Text(AppLocalization.string("共 \(result.entryCount) 个文件，\(formattedByteCount(result.totalByteCount))"))
+                Text(AppLocalization.string("包含 \(result.originalCount) 个原件，压缩包 \(formattedByteCount(result.byteCount))"))
                 .foregroundStyle(KinlogueTheme.onVariant)
             }
             Text(AppLocalization.string("压缩包位于续页资料库之外，请妥善保管。"))
@@ -140,15 +128,12 @@ struct OriginalExportView: View {
                 Button(AppLocalization.string("取消"), action: onClose)
                     .buttonStyle(.kinlogueSecondary)
                     .keyboardShortcut(.cancelAction)
-                    .accessibilityIdentifier("original-export-close")
+                    .accessibilityIdentifier("backup-export-close")
                 Spacer()
                 Button(AppLocalization.string("继续并选择位置…"), action: onChooseDestination)
                     .buttonStyle(.kinloguePrimary)
                     .keyboardShortcut(.defaultAction)
-                    .accessibilityIdentifier("original-export-continue")
-            case .checking:
-                cancelButton
-                Spacer()
+                    .accessibilityIdentifier("backup-export-continue")
             case .choosing:
                 Spacer()
             case .exporting:
@@ -158,7 +143,7 @@ struct OriginalExportView: View {
                 Spacer()
             case .cancelling:
                 Spacer()
-            case .cancelled, .empty:
+            case .cancelled:
                 Button(AppLocalization.string("关闭"), action: onClose)
                     .buttonStyle(.kinlogueSecondary)
                     .keyboardShortcut(.cancelAction)
@@ -173,20 +158,20 @@ struct OriginalExportView: View {
                     onChooseDestination()
                 }
                 .buttonStyle(.kinloguePrimary)
-                .accessibilityIdentifier("original-export-retry")
+                .accessibilityIdentifier("backup-export-retry")
             case .succeeded:
-                if let destinationURL = model.result?.destinationURL {
+                if let destinationURL = model.result?.url {
                     Button(AppLocalization.string("在访达中显示")) {
                         onShowInFinder(destinationURL)
                     }
                     .buttonStyle(.kinlogueSecondary)
-                    .accessibilityIdentifier("original-export-show-in-finder")
+                    .accessibilityIdentifier("backup-export-show-in-finder")
                 }
                 Spacer()
                 Button(AppLocalization.string("完成"), action: onClose)
                     .buttonStyle(.kinloguePrimary)
                     .keyboardShortcut(.defaultAction)
-                    .accessibilityIdentifier("original-export-done")
+                    .accessibilityIdentifier("backup-export-done")
             }
         }
     }
@@ -197,20 +182,20 @@ struct OriginalExportView: View {
         }
         .buttonStyle(.kinlogueSecondary)
         .keyboardShortcut(.cancelAction)
-        .accessibilityIdentifier("original-export-cancel")
+        .accessibilityIdentifier("backup-export-cancel")
     }
 
     private var isDismissDisabled: Bool {
         switch model.phase {
-        case .checking, .choosing, .exporting, .cancelling: true
-        case .warning, .cancelled, .empty, .failed, .succeeded: false
+        case .choosing, .exporting, .cancelling: true
+        case .warning, .cancelled, .failed, .succeeded: false
         }
     }
 
     private var progressTitle: String {
         switch model.progress?.phase {
         case .preparing, nil: AppLocalization.string("正在准备导出…")
-        case .writing: AppLocalization.string("正在复制原始文件…")
+        case .writing: AppLocalization.string("正在写入备份…")
         case .verifying: AppLocalization.string("正在验证压缩包…")
         case .committing: AppLocalization.string("正在保存压缩包，请勿关闭续页…")
         }
@@ -226,7 +211,7 @@ struct OriginalExportView: View {
             .accessibilityElement(children: .combine)
     }
 
-    private func formattedByteCount(_ byteCount: Int) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(byteCount), countStyle: .file)
+    private func formattedByteCount(_ byteCount: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(clamping: byteCount), countStyle: .file)
     }
 }

@@ -3,132 +3,6 @@ import KinloguePlatform
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct BackupSetupView: View {
-    @ObservedObject var model: BackupModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text(AppLocalization.string("保存数据备份恢复码"))
-                .font(.title2.bold())
-            Text(AppLocalization.string("恢复码是读取加密恢复点所必需的。请把它完整保存在密码管理器或其他独立位置；续页无法替你找回。"))
-                .foregroundStyle(KinlogueTheme.onVariant)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let recoveryCode = model.recoveryCode {
-                Text(recoveryCode)
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .kinloguePanel(.card)
-                    .accessibilityHidden(true)
-                Text(AppLocalization.string("恢复码显示在屏幕上。为避免旁人通过辅助功能听到，续页不会朗读这段敏感内容。"))
-                    .font(.caption)
-                    .foregroundStyle(KinlogueTheme.onVariant)
-            } else {
-                ProgressView(AppLocalization.string("正在准备加密备份…"))
-            }
-
-            Toggle(
-                AppLocalization.string("我已将恢复码完整保存在独立位置"),
-                isOn: $model.hasConfirmedIndependentSave
-            )
-            .accessibilityIdentifier("backup-recovery-code-saved")
-
-            SecureField(
-                AppLocalization.string("完整回输恢复码"),
-                text: $model.recoveryCodeReentry
-            )
-            .textFieldStyle(.roundedBorder)
-            .accessibilityIdentifier("backup-recovery-code-reentry")
-
-            if let failure = model.failureText {
-                KinlogueStatusLabel(failure, tone: .danger)
-                    .accessibilityIdentifier("backup-setup-error")
-            }
-
-            HStack {
-                Button(AppLocalization.string("取消"), role: .cancel) {
-                    model.cancelSetup()
-                }
-                .buttonStyle(.kinlogueSecondary)
-                Spacer()
-                Button(AppLocalization.string("验证并启用备份")) {
-                    Task { await model.completeSetup() }
-                }
-                .buttonStyle(.kinloguePrimary)
-                .keyboardShortcut(.defaultAction)
-                .disabled(model.recoveryCode == nil)
-                .accessibilityIdentifier("backup-enable")
-            }
-        }
-        .padding(28)
-        .frame(width: 540)
-        .kinlogueSheetCanvas()
-        .interactiveDismissDisabled()
-        .accessibilityIdentifier("backup-setup-sheet")
-    }
-}
-
-struct PendingBackupEnrollmentView: View {
-    @ObservedObject var model: BackupModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text(AppLocalization.string("继续未完成的备份设置"))
-                .font(.title2.bold())
-            Text(AppLocalization.string("输入你在首次设置时独立保存的完整恢复码。续页会继续使用原有备份身份，不会生成新的恢复码。"))
-                .foregroundStyle(KinlogueTheme.onVariant)
-                .fixedSize(horizontal: false, vertical: true)
-
-            SecureField(
-                AppLocalization.string("恢复码"),
-                text: $model.pendingEnrollmentRecoveryCode
-            )
-            .textFieldStyle(.roundedBorder)
-            .disabled(model.isPendingEnrollmentOperation)
-            .accessibilityIdentifier("backup-pending-recovery-code")
-
-            if let failure = model.failureText {
-                KinlogueStatusLabel(failure, tone: .danger)
-                    .accessibilityIdentifier("backup-pending-error")
-            }
-
-            HStack {
-                Button(AppLocalization.string("取消"), role: .cancel) {
-                    model.cancelPendingEnrollmentRecovery()
-                }
-                .buttonStyle(.kinlogueSecondary)
-                .disabled(model.isPendingEnrollmentOperation)
-                Spacer()
-                Button {
-                    Task { await model.resumePendingEnrollment() }
-                } label: {
-                    if model.isPendingEnrollmentOperation {
-                        ProgressView(AppLocalization.string("正在验证恢复码…"))
-                    } else {
-                        Text(AppLocalization.string("验证并完成设置"))
-                    }
-                }
-                .buttonStyle(.kinloguePrimary)
-                .keyboardShortcut(.defaultAction)
-                .disabled(
-                    model.isPendingEnrollmentOperation
-                        || model.pendingEnrollmentRecoveryCode
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                            .isEmpty
-                )
-                .accessibilityIdentifier("backup-pending-resume")
-            }
-        }
-        .padding(28)
-        .frame(width: 540)
-        .kinlogueSheetCanvas()
-        .interactiveDismissDisabled(model.isPendingEnrollmentOperation)
-        .accessibilityIdentifier("backup-pending-enrollment-sheet")
-    }
-}
-
 struct RestoreBackupView: View {
     @ObservedObject var model: RestoreModel
 
@@ -157,16 +31,16 @@ struct RestoreBackupView: View {
         .accessibilityIdentifier("restore-backup-sheet")
         .fileImporter(
             isPresented: $model.isFileImporterPresented,
-            allowedContentTypes: [UTType(filenameExtension: "kinloguebackup") ?? .data],
+            allowedContentTypes: [.zip],
             allowsMultipleSelection: false
         ) { result in
             switch result {
             case .success(let urls):
-                guard let checkpointURL = urls.first else {
+                guard let archiveURL = urls.first else {
                     model.importerCancelled()
                     return
                 }
-                Task { await model.prepare(checkpointURL) }
+                Task { await model.prepare(archiveURL) }
             case .failure:
                 model.importerCancelled()
             }
@@ -178,27 +52,27 @@ struct RestoreBackupView: View {
         switch model.phase {
         case .idle:
             EmptyView()
-        case .enteringRecoveryCode:
-            Text(AppLocalization.string("选择一个已下载到本机的 .kinloguebackup 恢复点。恢复会先完整验证，不会在确认前修改当前资料库。"))
+        case .choosing:
+            Text(AppLocalization.string("选择一个续页备份压缩包（.zip）。续页会先完整验证，确认之前不会修改当前资料库。"))
                 .foregroundStyle(KinlogueTheme.onVariant)
                 .fixedSize(horizontal: false, vertical: true)
-            SecureField(AppLocalization.string("恢复码"), text: $model.recoveryCode)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("restore-recovery-code")
-            Button(AppLocalization.string("选择恢复点…")) {
-                model.chooseCheckpoint()
+            Text(AppLocalization.string("备份在网盘里时，请先确认它已完整下载到这台 Mac。"))
+                .font(.caption)
+                .foregroundStyle(KinlogueTheme.onVariant)
+            Button(AppLocalization.string("选择备份文件…")) {
+                model.chooseBackup()
             }
             .buttonStyle(.kinloguePrimary)
-            .accessibilityIdentifier("restore-choose-checkpoint")
-        case .authenticating:
-            ProgressView(AppLocalization.string("正在验证恢复点…"))
+            .accessibilityIdentifier("restore-choose-backup")
+        case .verifying:
+            ProgressView(AppLocalization.string("正在验证备份…"))
             Text(AppLocalization.string("此阶段可以取消；当前资料库不会被替换。"))
                 .font(.caption)
                 .foregroundStyle(KinlogueTheme.onVariant)
         case .awaitingReplaceConfirmation(let summary):
             restoreSummary(summary)
             KinlogueWarningNotice(
-                AppLocalization.string("这会替换而不是合并当前资料库，并移除本机备份设置。外部恢复点会保留。")
+                AppLocalization.string("这会替换而不是合并当前资料库。备份文件夹设置会保留，但自动备份会关闭，需要时请重新打开。")
             )
             Button(AppLocalization.string("确认替换本机资料库"), role: .destructive) {
                 Task { await model.confirmReplacement() }
@@ -241,39 +115,36 @@ struct RestoreBackupView: View {
                 tone: .danger
             )
             .fixedSize(horizontal: false, vertical: true)
-            Text(AppLocalization.string("当前资料库不会因验证失败而被替换。你可以取消后重新选择恢复点。"))
+            Text(AppLocalization.string("当前资料库不会因验证失败而被替换。你可以取消后重新选择备份。"))
                 .foregroundStyle(KinlogueTheme.onVariant)
         }
     }
 
     private func restoreSummary(_ summary: BackupRestoreSummary) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(AppLocalization.string("已验证的恢复点概要"))
+            Text(AppLocalization.string("已验证的备份概要"))
                 .font(.headline)
             summaryRow(
-                AppLocalization.string("家庭成员"),
-                value: String(summary.memberCount)
+                AppLocalization.string("备份时间"),
+                value: summary.createdAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened)
+                    .locale(AppLocalization.locale(for: AppLocalization.selectedLanguage())))
             )
+            if !summary.creatorVersion.isEmpty {
+                summaryRow(AppLocalization.string("写入它的续页版本"), value: summary.creatorVersion)
+            }
+            summaryRow(AppLocalization.string("家庭成员"), value: String(summary.memberCount))
+            summaryRow(AppLocalization.string("健康记录"), value: String(summary.recordCount))
+            summaryRow(AppLocalization.string("手机上传项目"), value: String(summary.inboxItemCount))
+            summaryRow(AppLocalization.string("原始文件"), value: String(summary.originalCount))
             summaryRow(
-                AppLocalization.string("健康记录"),
-                value: String(summary.recordCount)
-            )
-            summaryRow(
-                AppLocalization.string("手机上传项目"),
-                value: String(summary.inboxItemCount)
-            )
-            summaryRow(
-                AppLocalization.string("解密后大小"),
-                value: ByteCountFormatter.string(
-                    fromByteCount: Int64(clamping: summary.plaintextByteCount),
-                    countStyle: .file
-                )
+                AppLocalization.string("资料大小"),
+                value: ByteCountFormatter.string(fromByteCount: Int64(clamping: summary.plaintextByteCount), countStyle: .file)
             )
         }
         .padding(14)
         .kinloguePanel()
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(AppLocalization.string("不包含健康内容的恢复点概要"))
+        .accessibilityLabel(AppLocalization.string("不包含健康内容的备份概要"))
     }
 
     private func summaryRow(_ label: String, value: String) -> some View {

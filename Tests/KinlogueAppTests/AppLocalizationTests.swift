@@ -186,27 +186,27 @@ struct AppLocalizationTests {
         )
         #expect(
             AppLocalization.string(
-                "导出原始文件…",
+                "导出备份到…",
                 language: .english
-            ) == "Export Originals…"
+            ) == "Export Backup To…"
         )
         #expect(
             AppLocalization.string(
-                "导出的压缩包包含未加密的健康资料",
+                "备份文件不加密，包含全部健康资料",
                 language: .english
-            ) == "The exported ZIP contains unencrypted health information"
+            ) == "Backup files are not encrypted and contain all health information"
         )
         #expect(
             AppLocalization.string(
-                "续页只能验证所选目录里的本地恢复点，无法证明网盘客户端已经上传。",
+                "数据备份与导出",
                 language: .simplifiedChinese
-            ) == "续页只能验证所选目录里的本地恢复点，无法证明网盘客户端已经上传。"
+            ) == "数据备份与导出"
         )
         #expect(
             AppLocalization.string(
-                "续页只能验证所选目录里的本地恢复点，无法证明网盘客户端已经上传。",
+                "数据备份与导出",
                 language: .english
-            ) == "Kinlogue can verify only the local restore point in the selected folder. It cannot prove that a cloud-drive client uploaded it."
+            ) == "Backup & Export"
         )
         #expect(
             AppLocalization.string(
@@ -217,29 +217,22 @@ struct AppLocalizationTests {
     }
 
     @Test
-    func exportProgressAndResultCopyPreserveTypedValuesInEnglish() {
-        let completed = 1
-        let total = 2
+    func backupResultAndArchiveCopyPreserveTypedValuesInEnglish() {
         let size = "10 MB"
+        #expect(AppLocalization.string("包含 \(1) 个原件，压缩包 \(size)", language: .english) == "1 original, ZIP 10 MB")
+        #expect(AppLocalization.string("包含 \(2) 个原件，压缩包 \(size)", language: .english) == "2 originals, ZIP 10 MB")
+        #expect(AppLocalization.string("\(size) / \("20 MB")", language: .english) == "10 MB / 20 MB")
+        let readme = AppLocalization.string("""
+        续页备份
 
-        #expect(
-            AppLocalization.string(
-                "已处理 \(completed) / \(AppLocalization.string("\(total) 个文件", language: .english))",
-                language: .english
-            ) == "1 of 2 files processed"
-        )
-        #expect(
-            AppLocalization.string(
-                "共 \(total) 个文件，\(size)",
-                language: .english
-            ) == "2 files, 10 MB"
-        )
-        #expect(
-            AppLocalization.string(
-                "共 \(completed) 个文件，\(size)",
-                language: .english
-            ) == "1 file, 10 MB"
-        )
+        这个压缩包是续页资料库的完整备份，没有加密。任何拿到它的人都能看到其中全部家庭成员、报告、识别文字和原始文件。
+
+        files 文件夹按家庭成员和日期存放原始文件，可以直接打开、打印，或把某位成员的文件夹发给医生。名称以“_\("A")”“_\("B")”“_\("C")”开头的文件夹里是尚未整理的原件。
+
+        kinlogue-backup.json 和 data 文件夹用于恢复，请不要修改。恢复时在续页的“设置 → 数据备份与导出”中选择“从备份恢复…”，再选中这个压缩包；恢复会替换当前资料库。
+        """, language: .english)
+        #expect(readme.hasPrefix("Kinlogue Backup\n\nThis ZIP file is a complete backup"))
+        #expect(readme.contains("“_A”, “_B” or “_C”"))
     }
 
     @Test
@@ -318,19 +311,19 @@ struct AppLocalizationTests {
 
     @Test
     func preservesTypedInterpolationAcrossLanguages() {
-        let count = 2
+        let count = 2, size = "3 MB"
 
         #expect(
             AppLocalization.string(
-                "\(count) 个文件",
+                "包含 \(count) 个原件，压缩包 \(size)",
                 locale: Locale(identifier: "zh-Hans")
-            ) == "2 个文件"
+            ) == "包含 2 个原件，压缩包 3 MB"
         )
         #expect(
             AppLocalization.string(
-                "\(count) 个文件",
+                "包含 \(count) 个原件，压缩包 \(size)",
                 locale: Locale(identifier: "en")
-            ) == "2 files"
+            ) == "2 originals, ZIP 3 MB"
         )
     }
 

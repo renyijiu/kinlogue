@@ -3,7 +3,7 @@ import KinloguePlatform
 
 protocol BackupRestoreServicing: Sendable {
     func reconcileBeforeStartingServices() async throws
-    func prepare(checkpointURL: URL, recoveryCode: String) async throws -> BackupRestoreSummary
+    func prepare(archiveURL: URL) async throws -> BackupRestoreSummary
     func cancelPreparedRestore() async throws
     func activatePreparedRestore() async throws -> BackupRestoreActivationResult
 }
@@ -28,10 +28,7 @@ actor LiveRestoreService: BackupRestoreServicing {
         _ = try await service.reconcileBeforeStartingServices()
     }
 
-    func prepare(
-        checkpointURL: URL,
-        recoveryCode: String
-    ) async throws -> BackupRestoreSummary {
+    func prepare(archiveURL: URL) async throws -> BackupRestoreSummary {
         guard !isActivating else { throw BackupRestoreError.activationConflict }
         let generation = invalidatePendingPreparation()
         await cancelPreparation()
@@ -43,10 +40,7 @@ actor LiveRestoreService: BackupRestoreServicing {
         guard generation == operationGeneration else { throw CancellationError() }
         let task = Task {
             try Task.checkCancellation()
-            let next = try await service.prepare(
-                checkpointURL: checkpointURL,
-                recoveryCode: recoveryCode
-            )
+            let next = try await service.prepare(archiveURL: archiveURL)
             guard generation == operationGeneration, !isActivating, !Task.isCancelled else {
                 try await service.cancel(next)
                 throw CancellationError()

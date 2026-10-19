@@ -1,234 +1,63 @@
 import Foundation
-import KinlogueCore
-import KinloguePlatform
 
 enum BackupOperationCoordinatorError: Error, Equatable, Sendable {
     case operationInProgress
     case destructiveOperationInProgress
-    case semantic(BackupSemanticError)
 }
 
-struct BackupCheckpointCreation: Sendable {
-    let revisionPair: BackupRevisionPair
-}
-
-enum BackupCleanupOutcome: Equatable, Sendable {
-    case complete
-    case deferred(BackupSemanticError)
-}
-
-struct BackupOperationResult: Sendable {
-    let revisionPair: BackupRevisionPair
-    let verifiedAt: Date
-    let cleanup: BackupCleanupOutcome
-}
-
-protocol BackupCheckpointCreating: Sendable {
-    func createCheckpoint(
-        configuration: BackupLocalConfiguration
-    ) async throws -> BackupCheckpointCreation
-}
-
-protocol BackupRetentionExecuting: Sendable {
-    func applyRetention(
-        configuration: BackupLocalConfiguration,
-        now: Date
-    ) async -> BackupCleanupOutcome
-}
-
-protocol BackupAutomaticRunning: Sendable {
-    func runAutomaticBackup(
-        expectedPair: BackupRevisionPair,
-        at: Date
-    ) async throws -> BackupOperationResult
-}
-
-/// One app-owned serialization point for checkpoint creation, automatic work,
-/// retention, and future U6 destructive transactions. The Settings view is an
-/// observer and cannot accidentally create a second writer by being reopened.
-actor BackupOperationCoordinator: BackupAutomaticRunning {
+/// One serialization point for every archive the App writes (manual, automatic and one-off
+/// exports) and for whole-library replacement. A restore or a deletion takes the destructive
+/// fence, which cancels an unpublished backup and waits for it before anything is replaced.
+actor BackupOperationCoordinator {
     private struct ActiveOperation {
         let id: UUID
-        let task: Task<BackupOperationResult, Error>
+        let cancel: @Sendable () -> Void
+        let wait: @Sendable () async -> Void
     }
 
-    private let configurationStore: BackupLocalConfigurationStore
-    private let checkpointCreator: any BackupCheckpointCreating
-    private let retentionExecutor: any BackupRetentionExecuting
-    private let clock: @Sendable () -> Date
-    private var activeOperation: ActiveOperation?
+    private var active: ActiveOperation?
     private var destructiveFenceHeld = false
 
-    init(
-        configurationStore: BackupLocalConfigurationStore,
-        checkpointCreator: any BackupCheckpointCreating,
-        retentionExecutor: any BackupRetentionExecuting,
-        clock: @escaping @Sendable () -> Date = { Date() }
-    ) {
-        self.configurationStore = configurationStore
-        self.checkpointCreator = checkpointCreator
-        self.retentionExecutor = retentionExecutor
-        self.clock = clock
+    var isBusy: Bool { active != nil || destructiveFenceHeld }
+
+    func run<Result: Sendable>(_ operation: @escaping @Sendable () async throws -> Result) async throws -> Result {
+        guard !destructiveFenceHeld else { throw BackupOperationCoordinatorError.destructiveOperationInProgress }
+        guard active == nil else { throw BackupOperationCoordinatorError.operationInProgress }
+        let id = UUID()
+        let task = Task<Result, Error> { try await operation() }
+        active = ActiveOperation(id: id, cancel: { task.cancel() }, wait: { _ = await task.result })
+        defer { finish(id) }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
-    func backUpNow(at now: Date = Date()) async throws -> BackupOperationResult {
-        try await startBackup(expectedPair: nil, at: now, recordsCoverage: true)
-    }
-
-    func runAutomaticBackup(
-        expectedPair: BackupRevisionPair,
-        at now: Date
-    ) async throws -> BackupOperationResult {
-        try await startBackup(expectedPair: expectedPair, at: now, recordsCoverage: false)
+    func cancelActiveOperation() {
+        active?.cancel()
     }
 
     func cancelForApplicationTermination() {
-        activeOperation?.task.cancel()
+        active?.cancel()
     }
 
     func withDestructiveFence<Result: Sendable>(
         _ operation: @escaping @Sendable () async throws -> Result
     ) async throws -> Result {
-        guard !destructiveFenceHeld else {
-            throw BackupOperationCoordinatorError.destructiveOperationInProgress
-        }
+        guard !destructiveFenceHeld else { throw BackupOperationCoordinatorError.destructiveOperationInProgress }
         destructiveFenceHeld = true
-        if let activeOperation {
-            activeOperation.task.cancel()
-            _ = await activeOperation.task.result
-            finishOperation(id: activeOperation.id)
-        }
         defer { destructiveFenceHeld = false }
+        if let active {
+            active.cancel()
+            await active.wait()
+            finish(active.id)
+        }
         return try await operation()
     }
 
-    private func startBackup(
-        expectedPair: BackupRevisionPair?,
-        at now: Date,
-        recordsCoverage: Bool
-    ) async throws -> BackupOperationResult {
-        guard !destructiveFenceHeld else {
-            throw BackupOperationCoordinatorError.destructiveOperationInProgress
-        }
-        guard activeOperation == nil else {
-            throw BackupOperationCoordinatorError.operationInProgress
-        }
-        let id = UUID()
-        let configurationStore = self.configurationStore
-        let checkpointCreator = self.checkpointCreator
-        let retentionExecutor = self.retentionExecutor
-        let clock = self.clock
-        // Capturing, encrypting and verifying a checkpoint waits on storage and file I/O.
-        let operation: @Sendable () async throws -> BackupOperationResult = {
-            try Task.checkCancellation()
-            guard let configuration = try await configurationStore.load(),
-                  configuration.phase == .enabled else {
-                throw BackupOperationCoordinatorError.semantic(.notConfigured)
-            }
-            let creation: BackupCheckpointCreation
-            do {
-                creation = try await checkpointCreator.createCheckpoint(
-                    configuration: configuration
-                )
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch let error as BackupOperationCoordinatorError {
-                throw error
-            } catch let error as EncryptedCheckpointWriterError {
-                throw Self.mapWriterError(error)
-            } catch let error as BackupRepositoryError {
-                switch error {
-                case .historyFork:
-                    throw BackupOperationCoordinatorError.semantic(.repositoryHistoryFork)
-                case .resourceLimit:
-                    throw BackupOperationCoordinatorError.semantic(.resourceLimitExceeded)
-                case .offline:
-                    throw BackupOperationCoordinatorError.semantic(.repositoryOffline)
-                case .identityChanged:
-                    throw BackupOperationCoordinatorError.semantic(.repositoryIdentityConflict)
-                case .verificationFailed, .ioFailure, .synchronizationFailed:
-                    throw BackupOperationCoordinatorError.semantic(.verificationFailed)
-                }
-            } catch {
-                throw BackupOperationCoordinatorError.semantic(.verificationFailed)
-            }
-            if let expectedPair, creation.revisionPair != expectedPair {
-                throw BackupOperationCoordinatorError.semantic(.sourceChanged)
-            }
-            // Match the durable witness precision before comparing its time.
-            let verifiedAt = Date(
-                timeIntervalSince1970: (clock().timeIntervalSince1970 * 1_000).rounded() / 1_000
-            )
-
-            var latest = try await configurationStore.load()
-            guard let loaded = latest, loaded.phase == .enabled else {
-                throw BackupOperationCoordinatorError.semantic(.identityNeedsEnrollment)
-            }
-            if recordsCoverage {
-                latest = try await configurationStore.markBackupSuccess(
-                    creation.revisionPair,
-                    verifiedAt: verifiedAt,
-                    expectedRevision: loaded.revision
-                )
-            }
-            guard let retentionConfiguration = latest else {
-                throw BackupOperationCoordinatorError.semantic(.identityNeedsEnrollment)
-            }
-            let cleanup = await retentionExecutor.applyRetention(
-                configuration: retentionConfiguration,
-                now: verifiedAt
-            )
-            return BackupOperationResult(
-                revisionPair: creation.revisionPair,
-                verifiedAt: verifiedAt,
-                cleanup: cleanup
-            )
-        }
-        let task = Task<BackupOperationResult, Error> { try await LibraryStorageExecutor.run(operation) }
-        activeOperation = .init(id: id, task: task)
-        defer { finishOperation(id: id) }
-        return try await task.value
-    }
-
-    private func finishOperation(id: UUID) {
-        guard activeOperation?.id == id else { return }
-        activeOperation = nil
-    }
-
-    private nonisolated static func mapWriterError(
-        _ error: EncryptedCheckpointWriterError
-    ) -> BackupOperationCoordinatorError {
-        switch error {
-        case .sourceChanged:
-            .semantic(.sourceChanged)
-        case .repositoryIdentityChanged:
-            .semantic(.repositoryIdentityConflict)
-        case .capacityInsufficient:
-            .semantic(.capacityInsufficient)
-        case .publicationIndeterminate:
-            .semantic(.publicationIndeterminate)
-        case .invalidConfiguration:
-            .semantic(.identityNeedsEnrollment)
-        case .resourceLimit:
-            .semantic(.resourceLimitExceeded)
-        case .finalAlreadyExists, .verificationFailed, .ioFailure:
-            .semantic(.verificationFailed)
-        }
-    }
-}
-
-struct LocalDirectoryRetentionAdapter: BackupRetentionExecuting {
-    let executor: BackupRetentionExecutor
-
-    func applyRetention(
-        configuration: BackupLocalConfiguration,
-        now: Date
-    ) async -> BackupCleanupOutcome {
-        switch await executor.execute(configuration: configuration, now: now) {
-        case .complete:
-            return .complete
-        case .deferred(let error):
-            return .deferred(error)
-        }
+    private func finish(_ id: UUID) {
+        guard active?.id == id else { return }
+        active = nil
     }
 }

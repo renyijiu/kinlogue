@@ -70,8 +70,7 @@ struct RestoreModelTests {
             securityScope: RestoreScope()
         )
         model.present()
-        model.recoveryCode = "synthetic-code"
-        await model.prepare(URL(fileURLWithPath: "/selected.kinloguebackup"))
+        await model.prepare(URL(fileURLWithPath: "/selected.zip"))
 
         let replacement = Task { await model.confirmReplacement() }
         let revocationStarted = await gate.waitUntilStarted()
@@ -96,14 +95,13 @@ struct RestoreModelTests {
     }
 
     @Test
-    func selectedCheckpointIsScopedOnlyForPreparationAndSummaryNeedsConfirmation() async throws {
+    func selectedBackupIsScopedOnlyForPreparationAndSummaryNeedsConfirmation() async throws {
         let service = RestoreModelService()
         let scope = RestoreScope()
         let model = RestoreModel(service: service, securityScope: scope)
         model.present()
-        model.recoveryCode = "synthetic-code"
 
-        await model.prepare(URL(fileURLWithPath: "/selected.kinloguebackup"))
+        await model.prepare(URL(fileURLWithPath: "/selected.zip"))
 
         guard case let .awaitingReplaceConfirmation(summary) = model.phase else {
             Issue.record("Expected replacement confirmation")
@@ -112,17 +110,16 @@ struct RestoreModelTests {
         #expect(summary.memberCount == 2)
         #expect(summary.recordCount == 3)
         #expect(await scope.events == ["start", "stop"])
-        #expect(await service.prepareCodes == ["synthetic-code"])
+        #expect(await service.preparedURLs == [URL(fileURLWithPath: "/selected.zip")])
         #expect(await service.activationCount == 0)
     }
 
     @Test
-    func confirmationActivatesAndClearsSensitiveInput() async {
+    func confirmationActivatesAndRequiresARestart() async {
         let service = RestoreModelService()
         let model = RestoreModel(service: service, securityScope: RestoreScope())
         model.present()
-        model.recoveryCode = "synthetic-code"
-        await model.prepare(URL(fileURLWithPath: "/selected.kinloguebackup"))
+        await model.prepare(URL(fileURLWithPath: "/selected.zip"))
 
         await model.confirmReplacement()
 
@@ -130,7 +127,6 @@ struct RestoreModelTests {
             Issue.record("Expected restart-required state")
             return
         }
-        #expect(model.recoveryCode.isEmpty)
         #expect(await service.activationCount == 1)
         #expect(model.isDismissDisabled)
     }
@@ -140,13 +136,11 @@ struct RestoreModelTests {
         let service = RestoreModelService()
         let model = RestoreModel(service: service, securityScope: RestoreScope())
         model.present()
-        model.recoveryCode = "synthetic-code"
-        await model.prepare(URL(fileURLWithPath: "/selected.kinloguebackup"))
+        await model.prepare(URL(fileURLWithPath: "/selected.zip"))
 
         await model.cancel()
 
         #expect(model.phase == .idle)
-        #expect(model.recoveryCode.isEmpty)
         #expect(await service.cancelCount == 1)
         #expect(await service.activationCount == 0)
     }
@@ -157,9 +151,8 @@ struct RestoreModelTests {
         await service.pausePreparation()
         let model = RestoreModel(service: service, securityScope: RestoreScope())
         model.present()
-        model.recoveryCode = "synthetic-code"
         let preparation = Task {
-            await model.prepare(URL(fileURLWithPath: "/selected.kinloguebackup"))
+            await model.prepare(URL(fileURLWithPath: "/selected.zip"))
         }
         await service.waitUntilPreparationEntered()
 
@@ -177,14 +170,12 @@ struct RestoreModelTests {
         let service = RestoreModelService(activationError: .activationConflict)
         let model = RestoreModel(service: service, securityScope: RestoreScope())
         model.present()
-        model.recoveryCode = "synthetic-code"
-        await model.prepare(URL(fileURLWithPath: "/selected.kinloguebackup"))
+        await model.prepare(URL(fileURLWithPath: "/selected.zip"))
 
         await model.confirmReplacement()
 
         #expect(model.phase == .failed(.activation))
         #expect(model.isDismissDisabled)
-        #expect(model.recoveryCode.isEmpty)
         await model.cancel()
         #expect(model.phase == .failed(.activation))
         model.present()
@@ -195,7 +186,7 @@ struct RestoreModelTests {
 
 private actor RestoreModelService: BackupRestoreServicing {
     private let activationError: BackupRestoreError?
-    private(set) var prepareCodes: [String] = []
+    private(set) var preparedURLs: [URL] = []
     private(set) var activationCount = 0
     private(set) var cancelCount = 0
     private(set) var hasPreparedRestore = false
@@ -211,10 +202,9 @@ private actor RestoreModelService: BackupRestoreServicing {
 
     func reconcileBeforeStartingServices() async throws {}
 
-    func prepare(checkpointURL: URL, recoveryCode: String) async throws -> BackupRestoreSummary {
+    func prepare(archiveURL: URL) async throws -> BackupRestoreSummary {
         let generation = preparationGeneration
-        _ = checkpointURL
-        prepareCodes.append(recoveryCode)
+        preparedURLs.append(archiveURL)
         prepareEntered = true
         prepareWaiters.forEach { $0.resume() }
         prepareWaiters.removeAll()
@@ -263,25 +253,47 @@ private actor RestoreScope: RestoreFileSecurityScope {
 }
 
 private func restoreModelSummary() -> BackupRestoreSummary {
-    let vault = try! BackupRevision(
-        generation: 1,
-        commitID: UUID(),
-        manifestDigest: Data(repeating: 1, count: 32)
-    )
-    let inbox = try! BackupRevision(
-        generation: 1,
-        commitID: UUID(),
-        manifestDigest: Data(repeating: 2, count: 32)
-    )
+    let revision = try! BackupRevision(generation: 1, commitID: UUID(), manifestDigest: Data(repeating: 1, count: 32))
     return .init(
-        checkpointID: try! BackupCheckpointID(bytes: Data(repeating: 3, count: 16)),
-        revisionPair: try! BackupRevisionPair(vault: vault, lanInbox: inbox),
-        sequence: 7,
+        backupID: UUID(),
+        revisionPair: try! BackupRevisionPair(vault: revision, lanInbox: revision),
+        createdAt: Date(timeIntervalSince1970: 1_800_000_000),
+        creatorVersion: "1.0",
         memberCount: 2,
         recordCount: 3,
         inboxItemCount: 4,
+        originalCount: 6,
         plaintextByteCount: 5,
-        formatVersion: .current,
         logicalDigest: Data(repeating: 0x5A, count: 32)
     )
+}
+
+@Suite("Restore model failures")
+@MainActor
+struct RestoreModelFailureTests {
+    @Test(arguments: [
+        (BackupRestoreError.notABackup, RestoreModelFailure.notABackup),
+        (.unsupportedFormat, .unsupportedFormat),
+        (.capacityInsufficient, .capacity),
+        (.graphInvalid, .invalidBackup),
+        (.invalidSource, .fileAccess),
+    ])
+    func preparationFailuresMapToTheirMessages(error: BackupRestoreError, failure: RestoreModelFailure) async {
+        let model = RestoreModel(service: FailingRestoreService(error: error), securityScope: RestoreScope())
+        model.present()
+        #expect(model.phase == .choosing)
+        await model.prepare(URL(fileURLWithPath: "/selected.zip"))
+        #expect(model.phase == .failed(failure))
+        #expect(model.failureText != nil)
+        #expect(!model.isDismissDisabled)
+    }
+}
+
+private actor FailingRestoreService: BackupRestoreServicing {
+    let error: BackupRestoreError
+    init(error: BackupRestoreError) { self.error = error }
+    func reconcileBeforeStartingServices() async throws {}
+    func prepare(archiveURL: URL) async throws -> BackupRestoreSummary { throw error }
+    func cancelPreparedRestore() async throws {}
+    func activatePreparedRestore() async throws -> BackupRestoreActivationResult { throw error }
 }

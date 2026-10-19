@@ -65,6 +65,17 @@ CHECKED_IN_MEDICAL_IMAGE="$(
 [[ -z "$CHECKED_IN_MEDICAL_IMAGE" ]] \
   || fail "a checked-in medical-image fixture is present; fixtures must be generated"
 
+CHECKED_IN_BACKUP="$(
+  /usr/bin/find . \
+    \( -path './.git' -o -path './.build' -o -path './dist' \) -prune -o \
+    -type f \
+    \( -iname '*.kinloguebackup' -o -name 'kinlogue-backup.json' \
+      -o -name '续页备份*.zip' -o -iname 'kinlogue backup*.zip' \) \
+    -print -quit
+)" || fail "the library backup audit could not be completed"
+[[ -z "$CHECKED_IN_BACKUP" ]] \
+  || fail "a library backup is present; backups hold a whole library in plaintext"
+
 if /usr/bin/grep -n -E -- \
     '(PatientName|PatientID|PatientBirthDate|0010[,[:space:]]*0010|0010[,[:space:]]*0020)' \
     Sources/KinlogueDICOMTestSupport/*.swift \

@@ -20,6 +20,7 @@
 | DICOM exact 包的进程隔离 | DICOM-Swift 1.5.0 只链接进单独签名、无网络 entitlement、无 Vault-root 权限的 XPC Helper；主 App/Core/Platform 不 import/link `DicomCore`，只通过有界 Foundation IPC contract 交换一个只读 descriptor 与最小 DTO。 | [`2026-08-06-001`](plans/2026-08-06-001-feat-dicom-mri-viewer-plan.md) KTD1–KTD2、[`release 边界探针`](sources/2026-08-07-dicom-swift-1.3.3-release-boundary.md)、[1.5.0 依赖核对](sources/dicom-swift-1.5.0-dependency-review-2026-09-16.md) |
 | DICOM 是受限辅助能力 | DICOM 只帮助保存检查原件和查看明确支持的二维灰度 MR；不扩张为诊断、测量、PACS 或通用影像工作站。 | [`dicom.md`](dicom.md)、[`project-overview.md`](project-overview.md) |
 | 已确认影像只经时间线进入 | 已确认检查与报告共用成员时间线和右栏详情，侧边栏不设“医学影像”导航项；“只看影像”由时间线类型筛选承担。数据层隔离不变：影像仍不进入 OCR、搜索或比较。 | 用户 2026-10-11 决策、[`dicom.md`](dicom.md)、[`design-system.md`](design-system.md) |
+| 明文 ZIP 备份 | 备份、导出与恢复只有一种文件：不加密的 `.zip`（索引 + logical-v1 数据 + 按成员排列的全部原件）。写进用户所选文件夹或保存面板所选位置；保留 1–30 份，只删除本机写入且未被改动的文件；恢复只读索引点名的条目并整库替换。不再读取加密 `.kinloguebackup`。 | 用户 2026-10-19 决策、[`backup-and-restore.md`](backup-and-restore.md)、[`PRIVACY.md`](../PRIVACY.md) |
 | 首发前 current-only | 项目未公开发布，只支持当前的 SQLite schema 与 ordering policy v2；开发期的 JSON 清单存储、v1/v2 reader/migrator、policy v1 和 predecessor/rollback 路径已删除。除恢复先前由用户明确发起、且已写入有效 durable deletion receipt 的整库删除外，旧开发 Vault、未知版本、未知非空目录和损坏布局继续非破坏性 fail closed；App 不自动迁移、覆盖或删除其字节，用户可在仓库外导出后手工重置。 | 用户 2026-08-12 决策、[`storage.md`](storage.md)、[`dicom.md`](dicom.md) |
 
 ## [2026-09-16] 最低系统调整为 macOS 26
@@ -73,7 +74,7 @@
 
 **未选择的替代方案**：打开资料库时把所有行的设备号改写成当前值——要在只读的打开路径上写库并重算行摘要，中断时留下一半新一半旧；去掉设备号列——改变表结构和行摘要，而项目只支持当前 schema；保留比较并提示用户“资料库已损坏”——数据完好，这是误报。
 
-**影响的代码/文档**：[`SQLiteLibraryOwner.swift`](../Sources/KinloguePlatform/Storage/SQLiteLibraryOwner.swift) 的 `isFile(recordedAs:)` 及其在原件生命周期、LAN 上传和逻辑备份来源中的调用点；[`BackupLocalConfigurationStore`](../Sources/KinloguePlatform/Backup/BackupLocalConfigurationStore.swift) 的 `removeForDestructiveReset`；[`sqlite-storage.md`](sqlite-storage.md)、[`backup-and-restore.md`](backup-and-restore.md)。
+**影响的代码/文档**：[`SQLiteLibraryOwner.swift`](../Sources/KinloguePlatform/Storage/SQLiteLibraryOwner.swift) 的 `isFile(recordedAs:)` 及其在原件生命周期、LAN 上传和逻辑备份来源中的调用点；`BackupLocalConfigurationStore` 的 `removeForDestructiveReset`；[`sqlite-storage.md`](sqlite-storage.md)、[`backup-and-restore.md`](backup-and-restore.md)。
 
 **当时没有处理的同类依赖**（已由下一条决策处理）：备份配置记录自身、备份目标目录的身份、恢复事务和整库删除的收据仍然记录并比较设备号。前两者在卷被重新编号后使备份需要重新设置；后两者只在一次操作中断、且恰好在下次启动前卷被重新编号时才会无法收敛。这些没有改动，也没有验证过界面在这些情况下的表现。
 
@@ -91,7 +92,9 @@
 
 **代价**：同一次运行里取得的两个身份之间也不再比较设备号。需要“在同一个卷上”的地方保留了显式的设备号比较；其余比较的双方本来就在同一个父目录之下。一个不同的卷上恰好有相同 inode 的目录，并且经同一个 bookmark 解析到、里面还有同一个备份集的有效内容，才会被当成同一个 repository，这种情况实际上只有整盘克隆会出现。
 
-**影响的代码/文档**：[`BackupLocalConfigurationStore.swift`](../Sources/KinloguePlatform/Backup/BackupLocalConfigurationStore.swift)、[`EncryptedCheckpointRestore.swift`](../Sources/KinloguePlatform/Backup/EncryptedCheckpointRestore.swift)、[`BackupRepository.swift`](../Sources/KinloguePlatform/Backup/BackupRepository.swift)、[`EncryptedCheckpointWriter.swift`](../Sources/KinloguePlatform/Backup/EncryptedCheckpointWriter.swift)、整库删除事务、初始化收据、捕获收据和 DICOM 暂存归属；[`backup-and-restore.md`](backup-and-restore.md)、[`sqlite-storage.md`](sqlite-storage.md)。
+**影响的代码/文档**：`BackupLocalConfigurationStore.swift`、`EncryptedCheckpointRestore.swift`、`BackupRepository.swift`、`EncryptedCheckpointWriter.swift`、整库删除事务、初始化收据、捕获收据和 DICOM 暂存归属；[`backup-and-restore.md`](backup-and-restore.md)、[`sqlite-storage.md`](sqlite-storage.md)。
+
+**后续**：本条列出的备份配置、repository 与验证记录已随 2026-10-19 的决策删除；新的设置存储、文件夹记录和账本沿用只比较 inode 的规则。
 
 **仍然含设备号、没有改动的地方**：owner 锁文件的命名（重新编号后改用新名字，不影响互斥）、安装验收运行的归属收据（只在一次验收运行内有效）以及各处同一次运行内的身份比较。
 
@@ -139,9 +142,33 @@
 
 **验证门禁**：定向测试与完整测试见 [`log.md`](log.md)，叙述命中的规模计时见 [搜索呈现测量](search-presentation-measurement-2026-10-14.md#叙述命中按句呈现的复测2026-10-15)。三种识别误读规则只来自合成核对，真实报告上的命中与误报没有核对；按新规则整理只用合成 block 验证过；键盘、VoiceOver 与窄窗口下的对照页仍属人工矩阵。
 
+## [2026-10-19] 备份去掉加密，与导出合并为一种明文 ZIP
+
+**问题**：备份与恢复和“导出原始文件”是两套写入器、两种文件。加密恢复点要求恢复码、设备签名身份、隐藏 repository、witness 与 publication lease，设置和排障都重；用户无法在 Finder 里看清备份里有什么、也无法自己管理份数。导出只含已确认原件，不能用来恢复。
+
+**选择**（用户 2026-10-19 提出合并、“接受明文备份的代价，4 个决定都按推荐来”；设计见 [明文 ZIP 备份计划](plans/2026-10-19-1715-feat-plain-zip-backup-export-plan.md)）：
+
+1. 只有一种文件：明文 `.zip`。包内是 `kinlogue-backup.json` 索引、说明文件、`data/library.klog`（logical-v1，格式不变）和 `files/` 下按成员与日期排列的全部原件，每个原件只出现一次。索引的 `encryption` 字段固定为 `"none"`，为以后整包外加一层加密预留。
+2. 立即备份和自动备份写进用户所选的文件夹本身（不建子文件夹），排他重命名、从不覆盖；“导出备份到…”写到保存面板所选位置，格式相同、可以恢复，不计入保留。
+3. 保留份数由用户设定（1–30，默认 5）。超出时直接删除，不移到废纸篓；只删除账本里记着的、本机写入且名字、inode、大小、修改时间都没变的单链接普通文件，对不上的从账本移除而不删除；新备份没发布并核对完成前一个旧文件也不删。
+4. 恢复直接选一个 `.zip`：整个文件当作不可信输入，只读索引点名的条目，逐项核对长度、CRC-32 和 SHA-256，包内名字从不用来建文件；沿用 staging、preflight 收据和 whole-root 恢复事务。恢复时关闭自动备份。
+5. 不再读取加密 `.kinloguebackup` 恢复点（决定 1）；不保留单独的“只含已确认原件”导出，给医生看时解压后发送对应成员的文件夹（决定 2）。
+
+**未选择的替代方案**：保留加密并只简化设置流程——恢复码和设备身份仍是主要负担，且备份仍不可直接浏览；保留旧恢复点的只读路径——要留下约 3,000 行密码学与容器代码，项目尚未发布、只影响自用；为医生保留单成员导出模式——同一写入器上的第二种不可恢复格式，用户需要区分两种文件；在所选文件夹里固定建“续页备份”子文件夹——用户可以在选择面板里自己新建；把多余备份移到废纸篓——外置盘和网络卷上未必可用，且不释放空间。
+
+**代价**：备份不再保密。拿到文件的人能读取全部成员、报告、OCR 转录和原件；放在网盘同步目录里时，网盘服务商和能登录该账号的人都能读取。SHA-256 与 CRC-32 只发现意外损坏，同时改了内容和索引的包会被当作有效备份。设置页、导出面板和包内说明文件写明备份不加密；[`PRIVACY.md`](../PRIVACY.md) 与 [`README.md`](../README.md) 建议把备份放在开启 FileVault 的磁盘、加密外置盘或加密磁盘映像上。整份备份含全家人的资料，不应直接交给医生。
+
+**影响的代码/文档**：新增 Core 的 [`BackupArchiveIndex`](../Sources/KinlogueCore/Backup/BackupArchiveIndex.swift)、[`BackupArchivePlan`](../Sources/KinlogueCore/Backup/BackupArchivePlan.swift)、[`BackupRetention`](../Sources/KinlogueCore/Backup/BackupRetention.swift)，Platform 的 [`BackupArchiveWriter`](../Sources/KinloguePlatform/Backup/BackupArchiveWriter.swift)、[`BackupArchiveReader`](../Sources/KinloguePlatform/Backup/BackupArchiveReader.swift)、[`BackupSettingsStore`](../Sources/KinloguePlatform/Backup/BackupSettingsStore.swift)、[`BackupFolderRetention`](../Sources/KinloguePlatform/Backup/BackupFolderRetention.swift)，App 的 [`BackupFolderAuthority`](../Sources/KinlogueApp/Backup/BackupFolderAuthority.swift)、[`LiveBackupService`](../Sources/KinlogueApp/Backup/LiveBackupService.swift)、[`BackupExportModel`](../Sources/KinlogueApp/ViewModels/BackupExportModel.swift) 与设置页“数据备份与导出”分区；[`BackupArchiveRestore`](../Sources/KinloguePlatform/Backup/BackupArchiveRestore.swift) 由加密恢复改为按索引读 ZIP。删除恢复码、密钥层级、HPKE/AES-GCM 容器、设备签名身份与信任记录、repository、witness、publication lease、旧导出器及其测试。专题页见 [`backup-and-restore.md`](backup-and-restore.md)、[`storage.md`](storage.md)、[`sqlite-storage.md`](sqlite-storage.md)、[`privacy-and-security.md`](privacy-and-security.md)，以及 [`README.md`](../README.md)、[`PRIVACY.md`](../PRIVACY.md)、[`SECURITY.md`](../SECURITY.md)。
+
+**迁移/回滚要求**：资料库 schema 与 logical-v1 不变，没有资料库迁移。旧版本在 `Application Support/Kinlogue/BackupIdentity/` 留下的设备私钥、恢复公钥和验证记录在启动时只按已知文件名移除；用户文件夹里的 `.kinloguebackup` 和隐藏 `.kinlogue-backup-v1` 目录不被改动，当前版本也不读取它们。需要用旧恢复点恢复的人只能使用旧版本 App，因此升级后应先做一份新的 ZIP 备份。回滚代码后旧版本不认识 ZIP，也不认识新的 `Backup/settings.json`，需要重新完成加密备份设置。
+
+**验证门禁**：自动化结果见 [`log.md`](log.md)。安装后的 App 上实际选择文件夹、备份、轮换与恢复，接近上限的 ZIP64 规模，阿里云盘、百度网盘客户端对文件夹的处理，外置盘与 NAS，Windows 与访达对中文路径的解压，以及键盘和 VoiceOver 均未执行，状态见 [`acceptance/current-release.md`](acceptance/current-release.md)。
+
 ## 已被 supersede 的早期决策
 
 [`2026-08-01-001-feat-kinlogue-macos-vault-plan.md`](plans/2026-08-01-001-feat-kinlogue-macos-vault-plan.md) 早期计划曾以“加密 Vault、Keychain、加密 backup/restore”为 MVP 方向；它已被明文 MVP 计划的 `supersedes` 字段覆盖。它仍然保留 threat model、早期 target 规划和未来安全升级的背景，但不能作为当前代码或隐私文案的事实来源。
+
+[`2026-08-19-1418-feat-encrypted-folder-backup-restore-plan.md`](plans/2026-08-19-1418-feat-encrypted-folder-backup-restore-plan.md) 的加密恢复点、恢复码和设备身份已由上面 2026-10-19 的决策取代，代码已删除；它只用于解释早期设计和威胁模型。
 
 “manifest 单一提交点”（先写 immutable objects，再原子发布 `library.json` / `inbox.json`）是 JSON 清单存储时期的规则，已由上面 2026-10-13 的决策取代；提交点现在是数据库事务。
 
@@ -159,7 +186,7 @@
 2. 指定版本 iOS Safari 与 Android Chrome 的地址、QR、配对、多文件、重试、重复跳过和生命周期矩阵。
 3. 锁屏、屏保、睡眠、快速用户切换、网络路径变化、退出/唤醒的安装后人工回执。
 4. 真实私有样本 OCR 抽检与键盘/VoiceOver 检查。
-5. 未来是否加入应用层加密、Keychain、可验证明文到加密迁移、备份/恢复或云同步；在决策完成前保持当前边界。
+5. 未来是否加入应用层加密、Keychain、可验证明文到加密迁移、备份加密或云同步；在决策完成前保持当前边界。
 6. 是否以及如何引入运动数据和模型问答（数据来源、本机或联网、非诊断边界、隐私承诺改写）；在决策完成前，HealthKit、互联网服务、趋势分析和诊断性输出继续属于当前明确不做。待决事项见 [`brand.md`](brand.md)。
 
 ## 决策更新规则

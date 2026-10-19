@@ -25,7 +25,7 @@ final class SQLiteLogicalSpool: @unchecked Sendable {
     private(set) var byteCount = 0
     private var sealed = false
     private let maximumByteCount: Int
-    init(parent: URL, maximumByteCount: Int = Int(BackupFormatLimits.maximumPlaintextByteCount)) throws {
+    init(parent: URL, maximumByteCount: Int = Int(BackupArchiveLimits.maximumPlaintextByteCount)) throws {
         self.maximumByteCount = maximumByteCount
         let identity = try SQLiteFileIdentity.directory(at: parent, privateMode: false)
         let directory = open(parent.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
@@ -195,6 +195,8 @@ final class SQLiteLogicalOriginalPins: @unchecked Sendable {
 
 // SAFETY: lock serializes descriptor reads and close; no caller receives the raw descriptor.
 final class SQLiteLogicalOriginalReader: @unchecked Sendable {
+    /// The largest single read; archive writing asks for 64 KiB at a time.
+    static let maximumChunkByteCount = 256 * 1_024
     private let lock = NSLock()
     private var descriptor: Int32
     private let original: SQLiteOriginal, token: SQLiteLogicalFileToken, store: SQLiteLibraryStore, epoch: UUID
@@ -206,7 +208,7 @@ final class SQLiteLogicalOriginalReader: @unchecked Sendable {
         try lock.withLock {
             try Task.checkCancellation()
             guard descriptor >= 0, offset <= UInt64(original.byteCount), maximumByteCount > 0,
-                  maximumByteCount <= BackupFormatLimits.maximumFramePlaintextByteCount else { throw SQLiteLogicalBackupError.sourceChanged }
+                  maximumByteCount <= Self.maximumChunkByteCount else { throw SQLiteLogicalBackupError.sourceChanged }
             try store.admission.withLock {
                 try store.validateRoot()
                 guard store.openEpoch == epoch else { throw SQLiteLibraryError.staleRoot }
@@ -252,51 +254,12 @@ package final class SQLiteLogicalBackupSnapshot: Sendable {
     let spool: SQLiteLogicalSpool
     let pins: SQLiteLogicalOriginalPins
     let header: BackupLogicalHeaderV1
-    let segments: [(offset: Int, count: Int, digest: Data)]
     package var logicalByteCount: Int { spool.byteCount }
-    package var entryCount: Int { segments.count + pins.originals.count }
+    package var originalCount: Int { pins.originals.count }
     package var totalPlaintextByteCount: UInt64 { UInt64(spool.byteCount) + pins.originals.values.reduce(0) { $0 + UInt64($1.byteCount) } }
-    package var maximumContainerByteCount: UInt64 { get throws { try manifest().maximumContainerByteCount } }
     init(header: BackupLogicalHeaderV1, spool: SQLiteLogicalSpool, pins: SQLiteLogicalOriginalPins, captureDuration: TimeInterval) throws {
         self.header = header; self.spool = spool; self.pins = pins; self.captureDuration = captureDuration
         revisionPair = try SQLiteLogicalBackupSource.revision(header)
-        var segments: [(Int, Int, Data)] = []
-        var offset = 0
-        while offset < spool.byteCount {
-            let count = min(1_024 * 1_024 * 1_024, spool.byteCount - offset)
-            var hasher = SHA256(); var position = 0
-            while position < count { let chunk = try spool.read(offset: offset + position, count: min(64 * 1_024, count - position)); hasher.update(data: chunk); position += chunk.count }
-            segments.append((offset, count, Data(hasher.finalize()))); offset += count
-        }
-        self.segments = segments
-        _ = try manifest()
-    }
-    func manifest() throws -> BackupManifest {
-        var next: UInt64 = 0
-        let entries = try sources().sorted { $0.path < $1.path }.map { source in
-            let frames = try BackupManifestEntry.requiredFrameCount(for: source.plaintextByteCount)
-            defer { next += UInt64(frames) }
-            return try BackupManifestEntry(kind: source.kind, path: source.path, plaintextByteCount: source.plaintextByteCount,
-                plaintextDigest: source.plaintextDigest, firstFrameIndex: next, frameCount: frames)
-        }
-        return try BackupManifest(revisionPair: revisionPair, entries: entries)
-    }
-    package func sources() -> [BackupContainerEntrySource] {
-        let logical = segments.enumerated().map { index, segment in
-            BackupContainerEntrySource(kind: .logicalSegment, path: String(format: "logical/%08d.data", index), plaintextByteCount: UInt64(segment.count), plaintextDigest: segment.digest) { [spool] in
-                try spool.validate()
-                return BackupContainerOpenedEntrySource(read: { offset, count in
-                    guard offset <= UInt64(segment.count), count > 0 else { throw SQLiteLogicalBackupError.invalidStream }
-                    return try spool.read(offset: segment.offset + Int(offset), count: min(count, segment.count - Int(offset)))
-                }, close: {})
-            }
-        }
-        return logical + pins.originals.values.sorted { $0.id.uuidString < $1.id.uuidString }.map { original in
-            BackupContainerEntrySource(kind: .original, path: "originals/\(original.id.uuidString.lowercased()).data", plaintextByteCount: UInt64(original.byteCount), plaintextDigest: original.sha256) { [pins] in
-                let opened = try pins.open(original.id)
-                return BackupContainerOpenedEntrySource(read: opened.read, close: opened.close, onDigestMismatch: opened.reportDigestMismatch)
-            }
-        }
     }
     package func validate() throws { try spool.validate(); try pins.validate() }
     package func release() { spool.release(); pins.release() }
@@ -330,6 +293,12 @@ package struct SQLiteLogicalBackupSource: Sendable {
         let state = try store.state()
         return try Self.revision(BackupLogicalHeaderV1(libraryID: state.libraryID, generation: state.generation, commitID: state.commitID))
     }
+    /// The commit a backup taken now would hold; a short read under the admission lock.
+    package func currentLibraryRevision() throws -> BackupLibraryRevision {
+        let state = try store.state()
+        return try BackupLibraryRevision(libraryID: state.libraryID, generation: state.generation, commitID: state.commitID)
+    }
+
     static func revision(_ header: BackupLogicalHeaderV1) throws -> BackupRevisionPair {
         guard header.version == 1, header.generation >= 0 else { throw SQLiteLogicalBackupError.unsupportedVersion }
         let digest = SQLiteContentHash.hash(domain: "logical-revision:1", values: [.blob(header.libraryID.sqliteBytes), .integer(header.generation), .blob(header.commitID.sqliteBytes)])

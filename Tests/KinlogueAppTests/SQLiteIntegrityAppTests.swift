@@ -107,7 +107,7 @@ struct SQLiteIntegrityAppTests {
                 pipelineInstaller: { channel, _, _, _ in channel.eventLoop.makeSucceededFuture(()) })
         }))
         let closeGate = AsyncOperationGate()
-        let services = LiveAppServiceEnvironment(dataService: live.dataService, originalExportService: live.originalExportService,
+        let services = LiveAppServiceEnvironment(dataService: live.dataService,
             destroyService: live.destroyService, lanInboxService: lan, dicomSliceServiceFactory: { IntegrityGatedSlices(closeGate: closeGate) },
             dicomImportMetrics: nil, lifecycle: context.lifecycle, commitChanges: live.commitChanges)
         let composition = AppComposition.makeOpened(identity: fixture.identity, services: services, context: context, database: database)
@@ -279,7 +279,7 @@ struct SQLiteIntegrityAppTests {
     }
 
     @Test(arguments: [false, true])
-    func originalExportFailuresQuarantineOnlyTheRelatedReport(missing: Bool) async throws {
+    func backupFailuresQuarantineOnlyTheRelatedReport(missing: Bool) async throws {
         let fixture = try SQLiteAppQueryFixture()
         defer { fixture.destroy() }
         let member = try FamilyMember(displayName: "Synthetic export integrity")
@@ -289,9 +289,9 @@ struct SQLiteIntegrityAppTests {
         let url = fixture.store.originalsURL.appendingPathComponent(bad.sources.first.attachmentID.uuidString.lowercased() + ".data")
         if missing { try FileManager.default.moveItem(at: url, to: fixture.base.appendingPathComponent("owned-export-evidence")) }
         else { try Data(repeating: 0, count: "export integrity".utf8.count).write(to: url) }
-        let service = LiveOriginalExportService(store: fixture.store, lifecycle: LibraryLifecycleCoordinator())
-        await #expect(throws: (any Error).self) {
-            try await service.export(to: fixture.base.appendingPathComponent("export.zip"), undatedToken: "undated", progress: { _ in })
+        let writer = BackupArchiveWriter(store: fixture.store)
+        await #expect(throws: BackupArchiveWriteError.sourceChanged) {
+            _ = try await writer.write(to: .file(fixture.base.appendingPathComponent("export.zip")), content: BackupArchiveText.content())
         }
         await #expect(throws: SQLiteLibraryError.damaged) { try await fixture.reports.record(bad.id) }
         #expect(try await fixture.reports.record(good.id) == good)

@@ -7,13 +7,12 @@
 | 面 | 当前实现 | 不应声称 |
 | --- | --- | --- |
 | 本地存储 | App Sandbox 内的明文数据库和原件文件；有 revision、行摘要、路径和权限检查 | 应用层加密、保密存储、抗恶意回滚 |
-| 备份 | 用户选择目录中的自包含 checkpoint 使用 HPKE + AES-GCM 认证加密、设备签名和完整正式文件回读 | 活动 Vault 已加密、网盘已经上传、远端保留 N 份、全局最新性 |
-| 密钥 | 不使用 Keychain；恢复 seed/私钥不持久化，本机只保存不能解密 checkpoint 的设备签名 seed 与恢复根公钥 | 服务端找回恢复码、设备身份能解密、同登录会话恶意软件防护 |
+| 备份 | 用户选择的文件夹或文件中的明文 ZIP：索引 + logical-v1 数据流 + 全部原件；发布前完整读回校验；保留只删本机写入且未被改动的文件 | 备份已加密、防篡改、网盘已经上传、远端保留 N 份 |
+| 密钥 | 不使用 Keychain，也不生成或保存任何密钥；早期加密备份留在本机的设备密钥与公钥在启动时移除 | 任何形式的加密或认证 |
 | 完整性 | SHA-256 检测意外截断、缺失和错误引用，并参与本机精确去重；数据库行摘要与原件元数据交叉校验 | 密码学认证、签名、防篡改或攻击者重写防护 |
 | 网络 | 用户主动开启的临时 LAN listener；只绑定所选本机地址并在 HTTP 前限制为其已验证 IPv4/IPv6 前缀；普通 HTTP；pairing + cookie + CSRF + session generation | TLS、公共网络安全、跨前缀远程访问或云同步 |
 | OCR | macOS Vision/PDFKit 本机处理 | 云端 OCR、医学诊断或治疗建议 |
-| 供应链 | SwiftPM exact versions + resolved commit；SwiftNIO/ZIPFoundation 锁定版本高于本次复核的公开修复线；GitHub Actions 固定完整 SHA | 未启用远端扫描时的“零漏洞”、DICOM 解码器或备份密码学已独立审计 |
-| 原始文件导出 | 用户明确选择目标后生成一个未加密 ZIP；只含已确认原始附件，发布后由用户保管 | 加密容器、备份/恢复格式、导出副本仍受 App 删除控制 |
+| 供应链 | SwiftPM exact versions + resolved commit；SwiftNIO/ZIPFoundation 锁定版本高于本次复核的公开修复线；GitHub Actions 固定完整 SHA | 未启用远端扫描时的“零漏洞”、DICOM 解码器或 ZIP 解析已独立审计 |
 | 发布 | ad-hoc signed arm64 candidate；可作为带明确警告的 GitHub Pre-release 供知情测试者手动下载 | Developer ID、notarization、Apple 恶意软件检查或正式公共发布准备完成 |
 
 能访问当前 macOS 用户资料的其他用户/软件，以及 Time Machine、APFS snapshot 和外部副本，都在当前明文 MVP 的保护承诺之外。
@@ -32,13 +31,14 @@
 - LAN 未配对访问、旧 cookie/CSRF、过度 poll、过量并发或 body memory pressure；
 - 真实病历进入 Git、日志、测试、App bundle、临时目录或验收报告；
 - 误把 OCR/规则候选当成确认后的医学事实。
-- 通过导出名称泄漏内部 UUID/digest/path、路径穿越或名称碰撞，以及失败/取消后留下看似成功的 `.zip`。
-- 同步目录中的 symlink/hardlink/FIFO/父目录替换、恶意超限容器、截断/重排/替换、并发恢复点分叉，以及失败恢复留下私有明文 staging。
+- 通过备份内原件路径泄漏内部 UUID/digest/path、路径穿越或名称碰撞，以及失败/取消后留下看似成功的 `.zip`。
+- 恢复时把 ZIP 当作不可信输入：路径穿越的条目名、重名条目、索引与内容不符、声明大小与实际膨胀不符、超量条目、源文件在读取中被替换，以及失败恢复留下私有 staging。
+- 保留清理误删用户自己的文件：只删除账本中记录、名字/inode/大小/修改时间都未变的本机写入文件。
 
 ### 明确不承诺的风险
 
 - 同一登录会话中的恶意软件、管理员/root、已解锁屏幕的系统截图、实时内存取证；
-- 其他系统服务对明文 Application Support、备份或快照的读取；
+- 其他系统服务对明文 Application Support、备份或快照的读取；任何拿到备份压缩包的人（包括网盘服务商）读取或改写其中内容；
 - 普通 HTTP 在不可信 LAN 上被窃听或篡改；
 - ad-hoc 候选包的开发者身份、Apple 恶意软件检查或公共分发信任链；下载者需要自行核对 SHA-256，并在理解风险后手工覆盖 Gatekeeper。
 
@@ -53,11 +53,11 @@
 - `LANHTTPHandler`：authority/origin/framing、header/body deadlines、认证先于 body/remote ID、粗粒度 phone error mapping。
 - `SQLiteLANInboxStore` / `LANUploadSink`：接收字节之前登记上传的归属和实际 inode；完成后在同一 inode 上校验长度与摘要，一个事务发布原件、队列项和回执；取消和恢复只清理归属可以证明的文件。
 - `LANSessionLifecycleMonitor` / `LibraryLifecycleCoordinator`：停止事件撤销 credential、关闭连接和删除前关闭接收入口。
-- `OriginalArchivePlan` / `OriginalArchiveExporter`：只选择已确认原始附件；输出名称经过 Unicode、保留名、路径分隔符、长度和碰撞处理，不包含内部 ID。导出 pin 住准备时可达的原件，逐项通过 no-follow descriptor 流式复核长度/digest，写入同卷私有非 `.zip` 暂存，全量验证后才原子发布；取消和提交前失败不会留下成功外观的 partial。`LibraryLifecycleCoordinator` 让整库删除先取消并等待已进入的导出，提交阶段不可取消。
-- `BackupKeyHierarchy` / `BackupLocalConfigurationStore`：CryptoKit 域分离派生恢复签名与 HPKE 根；恢复 seed 不持久化。app-private 0700/0600 canonical 配置绑定 bookmark、repository identity、public roots、device authorization、scheduler 和 full-reader witness，missing/corrupt/mismatch 均失败关闭。
-- `EncryptedBackupContainerWriter` / `BackupContainerReader` / `BackupTrustVerifier`：manifest 加密、256 KiB 有界 frame、fresh DEK/nonce domain、HPKE envelope、AES-GCM 与 signed footer；public-only 验证不接触恢复 seed，seed-only reader 先验证签名与 ciphertext commitment，再解密和解释 entry。
-- `SQLiteLogicalBackupSource` / `EncryptedCheckpointWriter` / `BackupRepository`：在一次 admission 内固定 revision、pin 住可达原件并取得数据库的内部副本，之后在副本上逐项严格验证并流式输出逻辑记录；原件在读取时才通过 no-follow descriptor 打开并复核；repository 只处理固定 opaque direct-child regular leaves，排他发布、同 inode private full-reader 后才签发 durable witness。unknown/corrupt/fork 状态阻止 writer 或 retention。
-- `BackupRestoreVerifier` / `BackupRestoreTransaction`：首个 staging 明文字节前先持久化 preflight receipt；只在 app-private 同卷 staging 解密并 strict reopen，确认后以 root-bound typed receipt 执行 replace/rollback，启动时先收敛遗留事务。本机配置删除位于 destructive fence 内，外部 checkpoint 不受影响。
+- `BackupArchivePlan` / `BackupArchiveIndex`：给每个原件分配经过 Unicode、保留名、路径分隔符、长度和碰撞处理的路径，原件路径不含内部 ID；索引只接受 `files/` 下的相对路径，拒绝 `..`、绝对路径、反斜杠、控制字符、重名和超量。
+- `SQLiteLogicalBackupSource` / `BackupArchiveWriter`：在一次 admission 内固定 revision、pin 住可达原件并取得数据库的内部副本，之后在副本上逐项严格验证并流式输出逻辑记录；原件在写入时才通过 no-follow descriptor 打开并复核长度/digest/身份。工作文件写在同卷私有非 `.zip` 暂存，全量读回校验后才发布：文件夹内 `RENAME_EXCL`，保存面板目标原子替换；取消和提交前失败不会留下成功外观的 partial。`LibraryLifecycleCoordinator` 让整库删除、恢复和完整性停机先取消并等待已进入的备份或导出，提交阶段不可取消。
+- `BackupSettingsStore` / `BackupFolderAuthority` / `BackupFolderRetention`：app-private 0700/0600 记录 bookmark、目录 inode、调度状态与账本，不记录备份内容；每次使用重新解析 bookmark 并核对 inode；保留只删除账本中身份完全一致的文件，其余只从账本移除。
+- `BackupArchiveReader`：no-follow 打开所选文件；只读取索引点名的条目，按名字精确查找，不用条目名在磁盘建文件；逐条目限长、核对 CRC-32 与 SHA-256，读完复核源文件身份。
+- `BackupRestoreVerifier` / `BackupRestoreTransaction`：首个 staging 字节前先持久化 preflight receipt；只在 app-private 同卷 staging 重建并 strict reopen，确认后以 root-bound typed receipt 执行 replace/rollback，启动时先收敛遗留事务。切换中关闭自动备份；外部备份文件不受影响。
 - `DICOMPart10Envelope` / `KinlogueDICOMIPC`：主进程只做有界 Part 10 envelope 与 typed DTO 校验；跨进程只传一个只读 descriptor 和受大小限制的 `Data`，不传 URL、路径或 Vault authority。
 - `DICOMFolderScanner` / `DICOMStudyStaging` / `DICOMImportJournal`：security-scoped source 只通过 no-follow descriptor traversal 读取；staging 使用同卷、opaque UUID、私有权限和只读文件。receipt 在首个 staged byte 前持久化并绑定目录 identity；重启清理按资料库登记的归属判断，拒绝 symlink/replacement，失败时保留 opaque receipt 重试。
 - `KinlogueDICOMDecoderHelper.xpc`：exact DICOM-Swift 1.5.0 只链接进独立 App Sandbox Helper。Helper entitlement 只有 App Sandbox，无 network client/server、inherit、用户文件或 Vault-root 权限；创建私有临时文件后、写入前立即 unlink，通过仍打开的 descriptor 保存有界独立副本，并以 `/dev/fd` 交给 decoder。最后一个 descriptor 关闭或进程退出后由内核回收，crash/watchdog 不依赖 defer 删除具名原件；解析由硬 watchdog 有界终止。VOI LUT Function 只按单 tag 惰性读取，非 `LINEAR` 函数拒绝，不通过 `getAllTags()` 展开无关自由文本。主 App 没有 `DicomCore` 或 DICOM 网络实现，也没有解码失败时的进程内 fallback；真实进程门禁用合成自由文本/URL canary 验证 unified log 不泄漏且 Helper 运行时无 network socket。
@@ -85,8 +85,8 @@
 - 手机完整上传的唯一原件保留在 Mac 待确认队列，直到用户明确删除或把所选项成功归档；不会自动过期。手机只可在当前会话中取消尚未保存的文件，不能删除 Mac 已发布的待确认项。
 - 提交后 Vault 原件由 record/draft/source ownership 持有；删除 inbox 副本不会删除已经归档的原件。
 - Vault destroy 只删除 App 管理的当前目录，并对目标 inode/path 做绑定检查；它不承诺清除外部副本。
-- 已发布的导出 ZIP 位于用户选择的位置，已经离开 Vault 生命周期；Vault destroy 不删除、跟踪或安全擦除它。用户界面必须在导出前说明这是未加密副本且不能恢复资料库。
-- 已发布的 `.kinloguebackup` 同样位于外部 repository；Vault destroy 或 restore 不删除它。retention 只处理当前 backup set 中经过认证、完整验证并满足 24 小时连续观察的恢复点，且不承诺第三方客户端远端已经上传或删除。
+- 已发布的备份 ZIP 位于用户选择的位置，已经离开 Vault 生命周期；Vault destroy 或 restore 不删除、跟踪或安全擦除它，只移除本机的备份设置与账本。用户界面在设置页和导出前说明这是未加密的完整副本。
+- 保留清理只针对本机账本记录的、仍未被改动的文件，且不承诺第三方客户端远端已经上传或删除；早期版本写入的 `.kinloguebackup` 和隐藏 `.kinlogue-backup-v1` 目录不被改动。
 - 删除失败或发生部分删除时，receipt/quarantine 让后续运行只继续处理已验证的同一目标，不能借路径替换删除另一个 Vault。
 
 ## Agent 和测试禁区
@@ -94,6 +94,7 @@
 - 真实病历只能在仓库外做私密人工验收，且不得复制、截图、日志化或放入测试结果。
 - DICOM 自动化只能在运行时生成不含 Patient Name/ID/Birth Date 等身份 tag 的 synthetic fixture；仓库和 bundle 门禁拒绝 checked-in `.dcm`、`.dicom`、`.nii` 和 `.nii.gz` fixture。当前 Mac 的 U7 安装验收只使用该生成器；此外，一份经用户明确授权、始终位于仓库外的私有 MRI 样本已完成隔离完整导入并通过，未保留样本、路径、身份 tag、UID、像素或截图。这个结果只覆盖当前 Mac 上的一份样本，更广的厂商、检查类型与独立系统矩阵仍未执行。
 - `scripts/privacy-guard.sh` 默认拒绝仓库内 PDF、JPEG、PNG、HEIC 和 TIFF 等受支持报告原件扩展，只精确放行已审查的 AppIcon 文件路径与摘要锁定的合成产品预览；新增图片也必须逐路径评审，不能通过目录级通配放行。该扩展名门禁不声称能语义识别任意 PHI；已知敏感值仍通过 `KINLOGUE_FORBIDDEN_VALUES` 扫描，代码、文档和其他扩展中的身份信息继续受仓库禁区约束。
+- `scripts/privacy-guard.sh` 与 `scripts/privacy-history-guard.sh` 还拒绝当前树和历史中的备份包（`kinlogue-backup.json`、`续页备份*.zip`、`Kinlogue Backup*.zip`、`.kinloguebackup`），`.gitignore` 也忽略这些名字。
 - `scripts/privacy-history-guard.sh` 通过 Git object database 扫描准备公开的 reachable refs，覆盖曾提交后删除的医疗/报告类附件、备份或签名容器、`.env`/私钥路径、完整格式的恢复码、常见凭据模式、精确私密资料库存证据和调用方提供的 forbidden values；`.env.example` 是唯一环境文件名例外。门禁只报告规则类别，不回显命中路径或内容；它不能替代公开托管平台上的 PR、Issue、Actions log、release asset 和 fork 审计。
 - 不要使用真实文件名来验证去重、展示名、OCR 或 LAN；使用生成 fixture 和 run-scoped canary。
 - 不要因为调试方便打开内容日志、保存 cookie/验证码、把 App Sandbox 路径写进报告或把整页 PDF 输出到终端。
@@ -108,4 +109,4 @@ README 的合成产品预览 `docs/assets/kinlogue-overview-2026-10.jpg` 也经�
 
 ## 未来安全升级边界
 
-当前只有外部备份容器使用应用层认证加密；活动 Vault 仍为明文，也仍不使用 Keychain。内置云同步、活动 Vault 加密和多设备合并仍属于后续独立决策。任何升级必须同时提供迁移格式、密钥生命周期、失败恢复、重启校验、旧数据保留/删除策略和新的 threat model；不得把备份容器的加密能力扩大描述为整个产品已经加密。
+资料库与备份都不使用应用层加密，也不使用 Keychain。早先的备份认证加密已于 2026-10-19 按用户决定移除（见 [`decisions.md`](decisions.md)）；备份索引保留 `encryption` 字段，将来可以在整个 ZIP 外加一层而不改内部结构。内置云同步、资料库或备份加密和多设备合并仍属于后续独立决策。任何升级必须同时提供迁移格式、密钥生命周期、失败恢复、重启校验、旧数据保留/删除策略和新的 threat model。

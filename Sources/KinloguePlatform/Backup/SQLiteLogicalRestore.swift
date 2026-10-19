@@ -65,20 +65,25 @@ enum SQLiteLogicalRestore {
         return result
     }
 
-    static func restore(spool: SQLiteLogicalSpool, manifest: BackupManifest, store: SQLiteLibraryStore,
+    /// What the container that carried a logical stream says about one original.
+    struct ExpectedOriginal: Equatable, Sendable {
+        let byteCount: UInt64
+        let sha256: Data
+        let contentType: String
+    }
+
+    /// Rebuilds the library in `store` from the logical stream. The originals must already be
+    /// staged under their identifiers, and must be exactly those `originals` describes.
+    static func restore(spool: SQLiteLogicalSpool, originals originalEntries: [UUID: ExpectedOriginal], revisionPair: BackupRevisionPair,
+                        store: SQLiteLibraryStore,
                         check: () throws -> Void = { try Task.checkCancellation() }) throws -> SQLiteLogicalValidation {
-        guard manifest.isLogical else { throw SQLiteLogicalBackupError.unsupportedVersion }
-        let originalEntries = Dictionary(uniqueKeysWithValues: try manifest.entries.filter { $0.kind == .original }.map { entry -> (UUID, BackupManifestEntry) in
-            guard let id = UUID(uuidString: String(entry.path.dropFirst(10).dropLast(5))) else { throw SQLiteLogicalBackupError.invalidStream }
-            return (id, entry)
-        })
         var restored: Set<UUID> = []
         try store.write { db in
             guard try Int.fetchOne(db, sql: "SELECT count(*) FROM members") == 0,
                   try Int.fetchOne(db, sql: "SELECT count(*) FROM originals") == 0 else { throw SQLiteLogicalBackupError.invalidStream }
             let header = try SQLiteLogicalStream.read(byteCount: spool.byteCount, read: spool.read, receiveHeader: { header in
                 let state = SQLiteLibraryState(libraryID: header.libraryID, generation: header.generation, commitID: header.commitID)
-                guard try SQLiteLogicalBackupSource.revision(header) == manifest.revisionPair else { throw SQLiteLogicalBackupError.invalidStream }
+                guard try SQLiteLogicalBackupSource.revision(header) == revisionPair else { throw SQLiteLogicalBackupError.invalidStream }
                 try db.execute(sql: "UPDATE library_state SET library_id=?,generation=?,commit_id=?,content_hash=? WHERE singleton=1",
                     arguments: [state.libraryID.sqliteBytes, state.generation, state.commitID.sqliteBytes, state.contentHash])
             }) { record in
@@ -91,7 +96,8 @@ enum SQLiteLogicalRestore {
                 case .original:
                     let value: BackupLogicalOriginalV1 = try canonical(record)
                     guard value.id == (try record.id), let entry = originalEntries[value.id],
-                          value.byteCount >= 0, UInt64(value.byteCount) == entry.plaintextByteCount, value.sha256 == entry.plaintextDigest else { throw SQLiteLogicalBackupError.invalidStream }
+                          value.byteCount >= 0, UInt64(value.byteCount) == entry.byteCount, value.sha256 == entry.sha256,
+                          entry.contentType == value.contentType else { throw SQLiteLogicalBackupError.invalidStream }
                     _ = try BackupLogicalOriginalV1(id: value.id, byteCount: value.byteCount, sha256: value.sha256, contentType: value.contentType)
                     let url = store.originalsURL.appendingPathComponent(value.id.uuidString.lowercased() + ".data")
                     let identity = try SQLiteFileIdentity.regular(at: url)
@@ -142,7 +148,7 @@ enum SQLiteLogicalRestore {
                     try SQLiteDICOMRows.insertStudy(value.header(), index: value.index, operationID: UUID(), db)
                 }
             }
-            guard restored == Set(originalEntries.keys), try SQLiteLogicalBackupSource.revision(header) == manifest.revisionPair else { throw SQLiteLogicalBackupError.invalidStream }
+            guard restored == Set(originalEntries.keys), try SQLiteLogicalBackupSource.revision(header) == revisionPair else { throw SQLiteLogicalBackupError.invalidStream }
             try SQLiteLogicalRows.bounds(db)
         }
         let result = try SQLiteLogicalBackupSource(store: store).validateStrict(check: check)

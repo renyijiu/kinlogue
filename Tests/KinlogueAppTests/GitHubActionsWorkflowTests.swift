@@ -39,6 +39,9 @@ struct GitHubActionsWorkflowTests {
             "*.key",
             "*.p12",
             "*.kinloguebackup",
+            "续页备份*.zip",
+            "Kinlogue Backup*.zip",
+            "kinlogue-backup.json",
             "*.xcarchive",
             "DerivedData/",
         ] {

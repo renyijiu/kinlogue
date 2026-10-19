@@ -46,7 +46,7 @@ func sqliteLogicalStrictOpenCannotRepairAStagedOriginal() throws {
 }
 
 @Test
-func sqliteLogicalEncryptedRestoreReopensAndEditsActualRepositories() async throws {
+func sqliteLogicalArchiveRestoreReopensAndEditsActualRepositories() async throws {
     let root = try sqliteTestRoot()
     let base = root.deletingLastPathComponent()
     defer { try? FileManager.default.removeItem(at: base) }
@@ -75,34 +75,29 @@ func sqliteLogicalEncryptedRestoreReopensAndEditsActualRepositories() async thro
     let imported = try await DICOMImportWorkflow(repository: dicomRepository, decoder: SQLiteDICOMDecoder()).importDirectory(dicomDirectory, securityScope: .notRequiredForTesting)
     let details = try await dicomRepository.details(imported.studyID)
     _ = try await dicomRepository.confirm(imported.studyID, expectedRevision: details.study.contentRevision, memberID: member.id, effectiveDate: Date(timeIntervalSince1970: 1786000000))
-    let snapshot = try await SQLiteLogicalBackupSource(store: store).prepare()
-    defer { snapshot.release() }
-    // The captured namespace survives a later legal deletion and delayed original GC.
-    try await SQLiteReportRepository(store: store).deleteRecord(record.id, expectedRevision: record.revision)
-    let enrollment = try BackupKeyHierarchy.makeEnrollment()
-    let signer = try BackupDeviceSigner(descriptor: enrollment.descriptor, authorization: enrollment.authorization, deviceSigningSeed: enrollment.deviceSigningSeed)
-    let output = SQLiteLogicalTestBytes()
-    _ = try await EncryptedBackupContainerWriter().write(entries: snapshot.sources(), revisionPair: snapshot.revisionPair,
-        sequence: 1, signer: signer, sink: .init(write: output.append, readBackSource: output.source))
-    let checkpoint = base.appendingPathComponent("synthetic.kinloguebackup")
-    try output.data.write(to: checkpoint); #expect(chmod(checkpoint.path, 0o600) == 0)
+
+    let archiveURL = base.appendingPathComponent("synthetic.zip")
+    let written = try await BackupArchiveWriter(store: store).write(to: .file(archiveURL), content: .synthetic)
+    #expect(written.counts.members == 1 && written.counts.records == 1 && written.counts.inboxItems == 1)
+    #expect(written.counts.dicomStudies == 1 && written.counts.originals == 4)
+    let zip = try Archive(url: archiveURL, accessMode: .read)
+    let paths = Array(zip).map(\.path)
+    #expect(paths.filter { $0.hasPrefix("files/") }.count == 4)
+    #expect(paths.contains { $0.hasPrefix("files/_Phone/0001 - Synthetic.bin") })
+    #expect(paths.filter { $0.contains("- DICOM 0001/") }.count == 2)
+
     for late in [false, true] {
         let lowRoot = base.appendingPathComponent(late ? "late-capacity" : "early-capacity")
         let lowOwner = try SQLiteLibraryOwner(rootURL: lowRoot)
-        let capacity = SQLiteLogicalCapacitySequence(late: late)
-        let lowVerifier = try BackupRestoreVerifier(owner: lowOwner, availableCapacity: capacity.available)
-        await #expect(throws: BackupRestoreError.capacityInsufficient) {
-            _ = try await lowVerifier.prepare(checkpointURL: checkpoint, recoveryCode: enrollment.recoveryCode)
-        }
+        let lowVerifier = try BackupRestoreVerifier(owner: lowOwner, availableCapacity: SQLiteLogicalCapacitySequence(late: late).available)
+        await #expect(throws: BackupRestoreError.capacityInsufficient) { _ = try await lowVerifier.prepare(archiveURL: archiveURL) }
         #expect(!FileManager.default.fileExists(atPath: lowRoot.path))
         #expect(try FileManager.default.contentsOfDirectory(atPath: base.path).allSatisfy { !$0.hasSuffix(".staging") && !$0.hasSuffix(".preflight.json") })
     }
     let destination = base.appendingPathComponent("restored")
     let owner = try SQLiteLibraryOwner(rootURL: destination)
-    let verifier = try BackupRestoreVerifier(owner: owner)
-    let prepared = try await verifier.prepare(checkpointURL: checkpoint, recoveryCode: enrollment.recoveryCode)
-    #expect(prepared.summary.logicalDigest.count == 32)
-    #expect(prepared.summary.memberCount == 1 && prepared.summary.inboxItemCount == 1)
+    let prepared = try await BackupRestoreVerifier(owner: owner).prepare(archiveURL: archiveURL)
+    #expect(prepared.summary.memberCount == 1 && prepared.summary.inboxItemCount == 1 && prepared.summary.originalCount == 4)
     let transaction = try BackupRestoreTransaction(owner: owner)
     _ = try await transaction.activate(prepared: prepared, resetWriter: {})
     #expect(try await transaction.reconcile() == .committed)
@@ -110,11 +105,10 @@ func sqliteLogicalEncryptedRestoreReopensAndEditsActualRepositories() async thro
     defer { try? restored.close() }
     let repository = SQLiteReportRepository(store: restored)
     #expect(try await repository.member(member.id) == member)
-    let restoredInbox = try SQLiteLANInboxStore(store: restored)
-    let after = try await restoredInbox.loadSnapshot()
+    let after = try await SQLiteLANInboxStore(store: restored).loadSnapshot()
     #expect(after.items == before.items && after.transportReceipts == before.transportReceipts)
     let restoredItem = try #require(after.items.first)
-    #expect(try await restoredInbox.loadPreprocessedDocument(itemID: restoredItem.id, expectedRevision: restoredItem.revision) == lanDocument)
+    #expect(try await SQLiteLANInboxStore(store: restored).loadPreprocessedDocument(itemID: restoredItem.id, expectedRevision: restoredItem.revision) == lanDocument)
     #expect(try await repository.record(record.id) == record)
     let restoredDocument = try restored.read { db in try SQLiteReportRows.document(record.ocrDocumentObjectID!, sources: record.sources,
         expectedHash: Data.fetchOne(db, sql: "SELECT document_hash FROM reports WHERE record_id=?", arguments: [record.id.sqliteBytes]), db) }
@@ -122,31 +116,12 @@ func sqliteLogicalEncryptedRestoreReopensAndEditsActualRepositories() async thro
     let restoredDICOM = try SQLiteDICOMRepository(store: restored)
     #expect(try await restoredDICOM.details(imported.studyID).study.retainedObjectCount == 2)
     #expect(try await restoredDICOM.details(imported.studyID).series.count == 1)
-    let archive = OriginalArchiveExporter(store: restored)
-    let preparation = try await archive.prepare(undatedToken: "Undated")
-    #expect(preparation.entryCount == 4)
-    try await repository.deleteRecord(record.id, expectedRevision: record.revision)
-    let zipURL = base.appendingPathComponent("originals.zip")
-    #expect(try await archive.export(preparation, to: zipURL).entryCount == 4)
-    let zip = try Archive(url: zipURL, accessMode: .read)
-    #expect(Array(zip).count == 4)
+    // The restored library writes the same backup again.
+    let again = try await BackupArchiveWriter(store: restored).write(to: .file(base.appendingPathComponent("again.zip")), content: .synthetic)
+    #expect(again.library == written.library && again.counts == written.counts)
     var changed = member; changed.displayName = "Restored edited member"
     try await repository.saveMember(changed, replacing: member)
     #expect(try await repository.member(member.id) == changed)
-}
-
-private final class SQLiteLogicalTestBytes: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage = Data()
-    func append(_ bytes: Data) { lock.withLock { storage.append(bytes) } }
-    var data: Data { lock.withLock { storage } }
-    func source() -> BackupContainerByteSource {
-        let snapshot = data
-        return .init(byteCount: UInt64(snapshot.count)) { offset, count in
-            let start = Int(offset)
-            return Data(snapshot[start..<min(snapshot.count, start + count)])
-        }
-    }
 }
 
 struct SQLiteLogicalFrozenFixture: Codable { let stream: Data; let originals: [SQLiteLogicalFrozenOriginal] }
@@ -227,8 +202,8 @@ func sqliteLogicalFrozenV1RestoresIntoAppSchemaAndRemainsByteExact() async throw
     let study = try #require(records.first { $0.kind == .dicom }).decode(BackupLogicalDICOMV1.self)
     #expect(study.index.retainedObjects.count == 2 && study.index.instances.count == 1)
     #expect(BackupLogicalKind.reportDocument.maximumCount == 40_000)
-    // 4 TiB uses at most 4096 streaming ranges, fitting alongside every legal original.
-    #expect(4_096 + BackupLogicalKind.original.maximumCount < BackupFormatLimits.maximumEntryCount)
+    // Every legal original fits in one archive beside the index, read-me and data stream.
+    #expect(BackupLogicalKind.original.maximumCount <= BackupArchiveLimits.maximumOriginalCount)
 }
 
 private func sqliteRestoreFrozen(_ fixture: SQLiteLogicalFrozenFixture, store: SQLiteLibraryStore) throws -> SQLiteLogicalValidation {
@@ -236,22 +211,18 @@ private func sqliteRestoreFrozen(_ fixture: SQLiteLogicalFrozenFixture, store: S
     defer { spool.release() }
     try spool.append(fixture.stream); try spool.seal()
     let header = try SQLiteLogicalStream.read(byteCount: fixture.stream.count, read: spool.read) { _ in }
-    var entries: [BackupManifestEntry] = []
-    var frame: UInt64 = 0
-    func entry(_ kind: BackupManifestEntry.Kind, _ path: String, _ data: Data) throws {
-        let count = try BackupManifestEntry.requiredFrameCount(for: UInt64(data.count))
-        entries.append(try BackupManifestEntry(kind: kind, path: path, plaintextByteCount: UInt64(data.count), plaintextDigest: ContentDigest.sha256(data), firstFrameIndex: frame, frameCount: count))
-        frame += UInt64(count)
-    }
-    try entry(.logicalSegment, "logical/00000000.data", fixture.stream)
+    var expected: [UUID: SQLiteLogicalRestore.ExpectedOriginal] = [:]
+    let declared = try SQLiteLogicalStream.recordsForTesting(fixture.stream)
+        .filter { $0.kind == .original }.map { try $0.decode(BackupLogicalOriginalV1.self) }
     for original in fixture.originals.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
-        let path = "originals/\(original.id.uuidString.lowercased()).data"
-        let url = store.rootURL.appendingPathComponent(path)
+        let url = store.rootURL.appendingPathComponent("originals/\(original.id.uuidString.lowercased()).data")
         try original.bytes.write(to: url, options: .withoutOverwriting)
         #expect(chmod(url.path, 0o600) == 0)
-        try entry(.original, path, original.bytes)
+        let contentType = declared.first { $0.id == original.id }?.contentType ?? "public.data"
+        expected[original.id] = .init(byteCount: UInt64(original.bytes.count), sha256: ContentDigest.sha256(original.bytes), contentType: contentType)
     }
-    return try SQLiteLogicalRestore.restore(spool: spool, manifest: BackupManifest(revisionPair: SQLiteLogicalBackupSource.revision(header), entries: entries), store: store)
+    return try SQLiteLogicalRestore.restore(spool: spool, originals: expected,
+        revisionPair: SQLiteLogicalBackupSource.revision(header), store: store)
 }
 
 @Test(arguments: ["unknown-version", "length", "footer-count", "footer-digest", "trailing", "truncated", "unknown-kind"])
@@ -530,15 +501,11 @@ func sqliteLogicalBackupDigestFailureQuarantinesWithoutReadingOriginalTwice(stri
     if strictValidation {
         #expect(throws: SQLiteLogicalBackupError.sourceChanged) { try source.validateStrict() }
     } else {
-        let snapshot = try await source.prepare()
-        defer { snapshot.release() }
-        let enrollment = try BackupKeyHierarchy.makeEnrollment()
-        let signer = try BackupDeviceSigner(descriptor: enrollment.descriptor, authorization: enrollment.authorization, deviceSigningSeed: enrollment.deviceSigningSeed)
-        let output = SQLiteLogicalTestBytes()
-        await #expect(throws: BackupContainerError.sourceIntegrityFailure) {
-            try await EncryptedBackupContainerWriter().write(entries: snapshot.sources(), revisionPair: snapshot.revisionPair,
-                sequence: 1, signer: signer, sink: .init(write: output.append, readBackSource: output.source))
+        let destination = root.deletingLastPathComponent().appendingPathComponent("integrity.zip")
+        await #expect(throws: BackupArchiveWriteError.sourceChanged) {
+            _ = try await BackupArchiveWriter(store: store).write(to: .file(destination), content: .synthetic)
         }
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
     }
     #expect(store.originalReadMetrics.verifiedReadByteCount - before == UInt64(original.byteCount))
     await #expect(throws: SQLiteLibraryError.damaged) { try await repository.record(record.id) }

@@ -4,8 +4,8 @@ import KinloguePlatform
 
 enum RestoreModelPhase: Equatable {
     case idle
-    case enteringRecoveryCode
-    case authenticating
+    case choosing
+    case verifying
     case awaitingReplaceConfirmation(BackupRestoreSummary)
     case activating
     case restartRequired(BackupRestoreSummary)
@@ -14,7 +14,7 @@ enum RestoreModelPhase: Equatable {
 
 enum RestoreModelFailure: Equatable {
     case fileAccess
-    case authentication
+    case notABackup
     case unsupportedFormat
     case capacity
     case invalidBackup
@@ -27,13 +27,8 @@ protocol RestoreFileSecurityScope: Sendable {
 }
 
 struct SystemRestoreFileSecurityScope: RestoreFileSecurityScope {
-    func startAccessing(_ url: URL) async -> Bool {
-        url.startAccessingSecurityScopedResource()
-    }
-
-    func stopAccessing(_ url: URL) async {
-        url.stopAccessingSecurityScopedResource()
-    }
+    func startAccessing(_ url: URL) async -> Bool { url.startAccessingSecurityScopedResource() }
+    func stopAccessing(_ url: URL) async { url.stopAccessingSecurityScopedResource() }
 }
 
 @MainActor
@@ -45,7 +40,6 @@ final class RestoreModel: ObservableObject {
     private var operationGeneration: UInt64 = 0
 
     @Published private(set) var phase: RestoreModelPhase = .idle
-    @Published var recoveryCode = ""
     @Published var isFileImporterPresented = false
 
     init(
@@ -64,10 +58,8 @@ final class RestoreModel: ObservableObject {
 
     var isDismissDisabled: Bool {
         switch phase {
-        case .activating, .restartRequired, .failed(.activation):
-            true
-        default:
-            false
+        case .activating, .restartRequired, .failed(.activation): true
+        default: false
         }
     }
 
@@ -75,15 +67,15 @@ final class RestoreModel: ObservableObject {
         guard case .failed(let failure) = phase else { return nil }
         return switch failure {
         case .fileAccess:
-            AppLocalization.string("无法读取所选恢复点，请确认文件已下载到本机后重试。")
-        case .authentication:
-            AppLocalization.string("恢复码错误，或恢复点未通过身份验证。")
+            AppLocalization.string("无法读取所选文件，请确认它已完整下载到这台 Mac 后重试。")
+        case .notABackup:
+            AppLocalization.string("所选文件不是续页备份。")
         case .unsupportedFormat:
-            AppLocalization.string("此恢复点需要更新版本的续页。")
+            AppLocalization.string("这份备份需要更新版本的续页。")
         case .capacity:
             AppLocalization.string("本机没有足够空间安全恢复这份资料库。")
         case .invalidBackup:
-            AppLocalization.string("恢复点不完整或已损坏，当前资料库没有变化。")
+            AppLocalization.string("备份不完整或已损坏，当前资料库没有变化。")
         case .activation:
             AppLocalization.string("资料库替换未完成，请重新启动续页以安全收敛。")
         }
@@ -92,8 +84,7 @@ final class RestoreModel: ObservableObject {
     func present() {
         guard !isDismissDisabled else { return }
         _ = beginOperation()
-        recoveryCode = ""
-        phase = .enteringRecoveryCode
+        phase = .choosing
     }
 
     func reconcileBeforeStartingServices() async -> Bool {
@@ -106,42 +97,32 @@ final class RestoreModel: ObservableObject {
         }
     }
 
-    func chooseCheckpoint() {
-        guard !recoveryCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            phase = .failed(.authentication)
-            return
-        }
+    func chooseBackup() {
         isFileImporterPresented = true
     }
 
-    func prepare(_ checkpointURL: URL) async {
+    func prepare(_ archiveURL: URL) async {
         isFileImporterPresented = false
         let generation = beginOperation()
-        let code = recoveryCode
-        phase = .authenticating
-        guard await securityScope.startAccessing(checkpointURL) else {
+        phase = .verifying
+        guard await securityScope.startAccessing(archiveURL) else {
             guard generation == operationGeneration else { return }
             phase = .failed(.fileAccess)
             return
         }
         guard generation == operationGeneration else {
-            await securityScope.stopAccessing(checkpointURL)
+            await securityScope.stopAccessing(archiveURL)
             return
         }
         do {
-            let summary = try await service.prepare(
-                checkpointURL: checkpointURL,
-                recoveryCode: code
-            )
-            await securityScope.stopAccessing(checkpointURL)
-            guard generation == operationGeneration else {
-                // The service owns obsolete preparation cleanup. A global
-                // cancel here could revoke a newer result across the await.
-                return
-            }
+            let summary = try await service.prepare(archiveURL: archiveURL)
+            await securityScope.stopAccessing(archiveURL)
+            // The service cleans up a preparation that lost its generation; a cancel here
+            // could revoke a newer one across the await.
+            guard generation == operationGeneration else { return }
             phase = .awaitingReplaceConfirmation(summary)
         } catch {
-            await securityScope.stopAccessing(checkpointURL)
+            await securityScope.stopAccessing(archiveURL)
             guard generation == operationGeneration else { return }
             phase = .failed(Self.map(error, activation: false))
         }
@@ -156,11 +137,9 @@ final class RestoreModel: ObservableObject {
         do {
             let result = try await service.activatePreparedRestore()
             guard generation == operationGeneration else { return }
-            recoveryCode = ""
             phase = .restartRequired(result.summary)
         } catch {
             guard generation == operationGeneration else { return }
-            recoveryCode = ""
             phase = .failed(Self.map(error, activation: true))
         }
     }
@@ -170,7 +149,6 @@ final class RestoreModel: ObservableObject {
         let generation = beginOperation()
         try? await service.cancelPreparedRestore()
         guard generation == operationGeneration else { return }
-        recoveryCode = ""
         isFileImporterPresented = false
         phase = .idle
     }
@@ -188,14 +166,10 @@ final class RestoreModel: ObservableObject {
         guard !activation else { return .activation }
         guard let error = error as? BackupRestoreError else { return .invalidBackup }
         switch error {
-        case .authenticationFailed:
-            return .authentication
-        case .unsupportedFormat:
-            return .unsupportedFormat
-        case .capacityInsufficient:
-            return .capacity
-        case .invalidSource, .sourceChanged:
-            return .fileAccess
+        case .notABackup: return .notABackup
+        case .unsupportedFormat: return .unsupportedFormat
+        case .capacityInsufficient: return .capacity
+        case .invalidSource, .sourceChanged: return .fileAccess
         case .graphInvalid, .stagingConflict, .receiptInvalid,
              .activationConflict, .ioFailure, .injectedFailure:
             return .invalidBackup

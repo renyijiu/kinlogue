@@ -1114,9 +1114,8 @@ DEPENDENCY_CACHE_ENABLED=false
 /usr/bin/plutil -insert storage.integrityCheck -string "sha256" "$REPORT_TEMP_FILE"
 /usr/bin/plutil -insert storage.keychainDependency -bool false "$REPORT_TEMP_FILE"
 /usr/bin/plutil -insert storage.cloudSync -bool false "$REPORT_TEMP_FILE"
-/usr/bin/plutil -insert storage.backupContainerEncryption -string "hpke-x25519-chacha20poly1305+aes-256-gcm" "$REPORT_TEMP_FILE"
-/usr/bin/plutil -insert storage.backupRecoveryPrivateKeyPersisted -bool false "$REPORT_TEMP_FILE"
-/usr/bin/plutil -insert storage.backupDeviceIdentityCanDecrypt -bool false "$REPORT_TEMP_FILE"
+/usr/bin/plutil -insert storage.backupFormat -string "zip+kinlogue-backup-v1" "$REPORT_TEMP_FILE"
+/usr/bin/plutil -insert storage.backupContainerEncryption -string "none" "$REPORT_TEMP_FILE"
 /usr/bin/plutil -insert storage.builtInBackupRestore -bool true "$REPORT_TEMP_FILE"
 
 /usr/bin/plutil -insert gates -dictionary "$REPORT_TEMP_FILE"

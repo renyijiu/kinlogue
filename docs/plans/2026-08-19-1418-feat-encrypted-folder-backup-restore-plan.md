@@ -9,10 +9,13 @@ product_contract_source: ce-plan-bootstrap
 execution: code
 planning_depth: deep
 deepened: 2026-08-19
-status: implemented-pending-release-evidence
+status: superseded
+superseded_by: 2026-10-19-1715-feat-plain-zip-backup-export-plan.md
 ---
 
 # Encrypted Folder Backup and Restore - Plan
+
+> **Superseded（2026-10-19）**：加密恢复点、恢复码、设备签名身份、repository 与 witness 的实现已从代码中删除，由 [明文 ZIP 备份计划](2026-10-19-1715-feat-plain-zip-backup-export-plan.md) 取代；当前版本不再读取 `.kinloguebackup`。本页只用于解释早期设计和威胁模型，不描述当前能力。
 
 ## Goal Capsule
 

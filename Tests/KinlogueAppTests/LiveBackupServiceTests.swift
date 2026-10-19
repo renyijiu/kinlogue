@@ -2,524 +2,174 @@ import Foundation
 import KinlogueCore
 @testable import KinloguePlatform
 import Testing
+import ZIPFoundation
 @testable import KinlogueApp
 
-@Test
-@MainActor
-func reauthorizingTheOriginalFolderPreservesWriterAndRejectsOtherDirectories() async throws {
-    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-        .appendingPathComponent("KinlogueReauthorization-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: base) }
-    let selected = base.appendingPathComponent("selected", isDirectory: true)
-    let other = base.appendingPathComponent("other", isDirectory: true)
-    let vaultURL = base.appendingPathComponent("support/Vault", isDirectory: true)
-    for url in [selected, other, vaultURL.deletingLastPathComponent()] {
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    }
-    let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
-    let store = BackupLocalConfigurationStore(rootURL: base.appendingPathComponent("support/BackupIdentity"))
-    let library = try SQLiteLibraryStore(rootURL: vaultURL)
-    defer { try? library.close() }
-    let service = LiveBackupService(
-        store: library, configurationStore: store,
-        requiresSelectedDirectoryScope: true,
-        destinationAuthority: BackupDestinationAuthority(bookmarks: bookmarks),
-        selectedDirectoryScope: bookmarks
-    )
-    let code = try await service.beginSetup(selectedParent: selected)
-    try await service.completeSetup(recoveryCodeReentry: code, independentlySaved: true)
-    let original = try #require(await store.load())
-    bookmarks.invalidBookmark = original.bookmarkData
-    bookmarks.createdBookmark = Data("reauthorized-bookmark".utf8)
-    #expect(try await service.loadStatus().lastFailure == .bookmarkNeedsReselection)
+@Suite("Live backup service", .serialized)
+struct LiveBackupServiceTests {
+    @Test
+    func choosingAFolderNeedsItsScopeAndRefusesTheLibraryItself() async throws {
+        let fixture = try await LiveBackupFixture.make()
+        defer { fixture.remove() }
+        let service = fixture.service(requiresScope: true)
 
-    await #expect(throws: BackupDestinationAuthorityError.repositoryIdentityConflict) {
-        try await service.reauthorizeDestination(selectedParent: other)
-    }
-    #expect(try await store.load() == original)
-    #expect(try FileManager.default.contentsOfDirectory(atPath: other.path).isEmpty)
-
-    let model = BackupModel(service: service)
-    await model.refresh()
-    await model.beginSetup(selectedParent: selected)
-    let updated = try #require(await store.load())
-    #expect(updated.writerIdentity == original.writerIdentity)
-    #expect(updated.scheduler == original.scheduler)
-    #expect(updated.automation == original.automation)
-    #expect(updated.verificationWitnesses == original.verificationWitnesses)
-    #expect(updated.bookmarkData == bookmarks.createdBookmark)
-    #expect(model.phase == .ready)
-    #expect(model.failure == nil)
-    #expect(model.recoveryCode == nil)
-    #expect(try await BackupLocalConfigurationStore(rootURL: store.rootURL).load() == updated)
-
-    let repository = selected.appendingPathComponent(BackupDestinationAuthority.repositoryDirectoryName)
-    try FileManager.default.moveItem(at: repository, to: selected.appendingPathComponent("parked"))
-    try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: false,
-                                          attributes: [.posixPermissions: 0o700])
-    await #expect(throws: BackupDestinationAuthorityError.repositoryIdentityConflict) {
-        try await service.reauthorizeDestination(selectedParent: selected)
-    }
-    #expect(try await store.load() == updated)
-    #expect(bookmarks.startCount == bookmarks.stopCount)
-}
-
-@Test
-func backupsKeepWorkingAfterTheVolumesOfTheProfileAndTheBackupFolderAreRenumbered() async throws {
-    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-        .appendingPathComponent("KinlogueRenumbered-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: base) }
-    let selected = base.appendingPathComponent("selected", isDirectory: true)
-    try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
-    let database = try SQLiteLibraryStore(rootURL: base.appendingPathComponent("Vault"))
-    defer { try? database.close() }
-    let repository = SQLiteReportRepository(store: database)
-    let member = try FamilyMember(displayName: "Synthetic member before the renumbering")
-    try await repository.saveMember(member, replacing: nil)
-    let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
-    let profileRoot = base.appendingPathComponent("BackupIdentity")
-    func makeService() -> LiveBackupService {
-        LiveBackupService(store: database, configurationStore: BackupLocalConfigurationStore(rootURL: profileRoot),
-            requiresSelectedDirectoryScope: true, destinationAuthority: BackupDestinationAuthority(bookmarks: bookmarks),
-            selectedDirectoryScope: bookmarks)
-    }
-    let setup = makeService()
-    let recoveryCode = try await setup.beginSetup(selectedParent: selected)
-    try await setup.completeSetup(recoveryCodeReentry: recoveryCode, independentlySaved: true)
-
-    // macOS may give a volume another device number after a restart or an update. The profile
-    // then still names its own directory, the chosen folder and the repository by the old
-    // number. Rewriting the recorded numbers before any restore point exists leaves that state.
-    let record = profileRoot.appendingPathComponent("configuration.json")
-    let text = try String(contentsOf: record, encoding: .utf8)
-    var directory = stat()
-    #expect(lstat(selected.path, &directory) == 0)
-    let live = "\"device\":\(directory.st_dev),"
-    #expect(text.components(separatedBy: live).count == 4)
-    let handle = try FileHandle(forWritingTo: record)
-    try handle.truncate(atOffset: 0)
-    try handle.write(contentsOf: Data(text.replacingOccurrences(of: live, with: "\"device\":\(Int(directory.st_dev) + 3),").utf8))
-    try handle.close()
-
-    // A new service stands for the launch after the restart.
-    let backup = makeService()
-    let profile = BackupLocalConfigurationStore(rootURL: profileRoot)
-    let recorded = try #require(await profile.load())
-    #expect(recorded.repositoryDirectoryIdentity.device == UInt64(directory.st_dev) + 3)
-    #expect(try await backup.loadStatus().lastFailure == nil)
-
-    _ = try await backup.backUpNow()
-    let later: FamilyMember = { var value = member; value.displayName = "Synthetic member after the renumbering"; return value }()
-    try await repository.saveMember(later, replacing: member)
-    _ = try await backup.backUpNow()
-
-    let destination = selected.appendingPathComponent(BackupDestinationAuthority.repositoryDirectoryName)
-    let restorePoints = try FileManager.default.contentsOfDirectory(at: destination, includingPropertiesForKeys: nil)
-        .filter { $0.pathExtension == "kinloguebackup" }
-    let current = try #require(await profile.load())
-    #expect(restorePoints.count == 2)
-    #expect(current.verificationWitnesses.count == 2)
-    #expect(current.repositoryDirectoryIdentity.device == recorded.repositoryDirectoryIdentity.device)
-    // Retention matches a restore point to its witness by this digest. It is taken from the
-    // repository as recorded, so it is the same value before and after a renumbering.
-    let digests = restorePoints.map { url -> Data in
-        var file = stat()
-        #expect(lstat(url.path, &file) == 0)
-        return current.repositoryDirectoryIdentity.leafIdentityDigest(file: .init(
-            device: UInt64(file.st_dev), inode: UInt64(file.st_ino), byteCount: UInt64(file.st_size)))
-    }
-    #expect(Set(digests) == Set(current.verificationWitnesses.map(\.repositoryIdentityDigest)))
-    let status = try await backup.loadStatus()
-    #expect(status.lastFailure == nil)
-    #expect(status.localCheckpointState == .verified)
-    #expect(bookmarks.startCount == bookmarks.stopCount)
-}
-
-@Test
-func loadingBackupStatusNeverReadsTheLibrarySource() async throws {
-    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-        .appendingPathComponent("KinlogueLiveBackupStatusCost-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: base) }
-    let selected = base.appendingPathComponent("selected", isDirectory: true)
-    let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
-    try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-    let library = try SQLiteLibraryStore(rootURL: vaultURL)
-    defer { try? library.close() }
-
-    let store = BackupLocalConfigurationStore(
-        rootURL: base.appendingPathComponent("support/Kinlogue/BackupIdentity", isDirectory: true)
-    )
-    let service = LiveBackupService(
-        store: library,
-        configurationStore: store,
-        requiresSelectedDirectoryScope: false,
-        destinationAuthority: BackupDestinationAuthority(
-            bookmarks: LiveBackupMutableBookmarks(resolvedURL: selected)
-        )
-    )
-    let code = try await service.beginSetup(selectedParent: selected)
-    try await service.completeSetup(recoveryCodeReentry: code, independentlySaved: true)
-
-    let status = try await service.loadStatus()
-
-    #expect(status.estimate == nil)
-    #expect(await service.sourceRevisionReadCountForTesting() == 0)
-    _ = try await service.setAutomaticBackupEnabled(true)
-    #expect(await service.sourceRevisionReadCountForTesting() == 1)
-    _ = try await service.setAutomaticBackupEnabled(false)
-    #expect(await service.sourceRevisionReadCountForTesting() == 1)
-    // Exercise the actual writer witness and retention clock together.
-    #expect(try await service.backUpNow() == .complete)
-}
-
-@Test
-func liveStatusPersistsAStaleBookmarkSoTheRefreshedGrantSurvivesRelaunch() async throws {
-    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-        .appendingPathComponent("KinlogueLiveBackup-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: base) }
-    let selected = base.appendingPathComponent("selected", isDirectory: true)
-    let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
-    try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-
-    let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
-    let authority = BackupDestinationAuthority(bookmarks: bookmarks)
-    let storeRoot = base.appendingPathComponent(
-        "support/Kinlogue/BackupIdentity",
-        isDirectory: true
-    )
-    let store = BackupLocalConfigurationStore(rootURL: storeRoot)
-    let library = try SQLiteLibraryStore(rootURL: vaultURL)
-    defer { try? library.close() }
-    let service = LiveBackupService(
-        store: library,
-        configurationStore: store,
-        requiresSelectedDirectoryScope: false,
-        destinationAuthority: authority
-    )
-    let code = try await service.beginSetup(selectedParent: selected)
-    try await service.completeSetup(
-        recoveryCodeReentry: code,
-        independentlySaved: true
-    )
-    #expect(try await store.load()?.bookmarkData == Data("bookmark".utf8))
-
-    bookmarks.stale = true
-    _ = try await service.loadStatus()
-
-    let relaunchedStore = BackupLocalConfigurationStore(rootURL: storeRoot)
-    #expect(try await relaunchedStore.load()?.bookmarkData == Data("refreshed-bookmark".utf8))
-    #expect(bookmarks.startCount == bookmarks.stopCount)
-}
-
-@Test
-func showingBackupRepositoryOpensTheExactHiddenRepositoryWithBalancedScope() async throws {
-    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-        .appendingPathComponent("KinlogueLiveBackupReveal-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: base) }
-    let selected = base.appendingPathComponent("selected", isDirectory: true)
-    let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
-    try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-
-    let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
-    let opener = LiveBackupRepositoryOpener()
-    let authority = BackupDestinationAuthority(bookmarks: bookmarks)
-    let store = BackupLocalConfigurationStore(
-        rootURL: base.appendingPathComponent("support/Kinlogue/BackupIdentity", isDirectory: true)
-    )
-    let library = try SQLiteLibraryStore(rootURL: vaultURL)
-    defer { try? library.close() }
-    let service = LiveBackupService(
-        store: library,
-        configurationStore: store,
-        requiresSelectedDirectoryScope: false,
-        destinationAuthority: authority,
-        repositoryOpener: opener
-    )
-    let code = try await service.beginSetup(selectedParent: selected)
-    try await service.completeSetup(recoveryCodeReentry: code, independentlySaved: true)
-    bookmarks.stale = true
-
-    try await service.showBackupRepository()
-
-    #expect(await opener.openedURLs == [
-        selected.appendingPathComponent(
-            BackupDestinationAuthority.repositoryDirectoryName,
-            isDirectory: true
-        )
-    ])
-    #expect(try await store.load()?.bookmarkData == Data("refreshed-bookmark".utf8))
-    #expect(bookmarks.startCount == bookmarks.stopCount)
-}
-
-@Test
-func failedRepositoryRevealReportsOfflineAndBalancesScope() async throws {
-    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-        .appendingPathComponent("KinlogueLiveBackupRevealFailure-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: base) }
-    let selected = base.appendingPathComponent("selected", isDirectory: true)
-    let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
-    try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-
-    let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
-    let opener = LiveBackupRepositoryOpener(result: false)
-    let authority = BackupDestinationAuthority(bookmarks: bookmarks)
-    let store = BackupLocalConfigurationStore(
-        rootURL: base.appendingPathComponent("support/Kinlogue/BackupIdentity", isDirectory: true)
-    )
-    let library = try SQLiteLibraryStore(rootURL: vaultURL)
-    defer { try? library.close() }
-    let service = LiveBackupService(
-        store: library,
-        configurationStore: store,
-        requiresSelectedDirectoryScope: false,
-        destinationAuthority: authority,
-        repositoryOpener: opener
-    )
-    let code = try await service.beginSetup(selectedParent: selected)
-    try await service.completeSetup(recoveryCodeReentry: code, independentlySaved: true)
-
-    await #expect(throws: BackupSemanticError.repositoryOffline) {
-        try await service.showBackupRepository()
+        await #expect(throws: BackupFolderError.forbiddenVaultRelationship) {
+            try await service.chooseFolder(fixture.vaultURL)
+        }
+        try await service.chooseFolder(fixture.selected)
+        let settings = try fixture.settings.load()
+        #expect(settings.folder?.bookmarkData == Data("bookmark".utf8))
+        #expect(settings.isAutomaticBackupEnabled == false)
+        #expect(try await service.loadStatus().folderName == "selected")
+        #expect(fixture.bookmarks.startCount == fixture.bookmarks.stopCount)
     }
 
-    #expect(bookmarks.startCount == bookmarks.stopCount)
-}
+    @Test
+    func statusNeverReadsTheLibraryAndOnlyEnablingDoes() async throws {
+        let fixture = try await LiveBackupFixture.make()
+        defer { fixture.remove() }
+        let service = fixture.service()
+        try await service.chooseFolder(fixture.selected)
 
-@Test
-func automaticBackupPersistsRetryWhenDestinationIsOfflineBeforeSchedulerEntry() async throws {
-    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-        .appendingPathComponent("KinlogueLiveBackupOfflineRetry-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: base) }
-    let selected = base.appendingPathComponent("selected", isDirectory: true)
-    let parked = base.appendingPathComponent("selected-offline", isDirectory: true)
-    let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
-    try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-
-    let library = try SQLiteLibraryStore(rootURL: vaultURL)
-    defer { try? library.close() }
-    let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
-    let start = Date(timeIntervalSince1970: 100_000)
-    let clock = LiveBackupTestClock(start)
-    let store = BackupLocalConfigurationStore(
-        rootURL: base.appendingPathComponent("support/Kinlogue/BackupIdentity", isDirectory: true)
-    )
-    let service = LiveBackupService(
-        store: library,
-        configurationStore: store,
-        requiresSelectedDirectoryScope: false,
-        destinationAuthority: BackupDestinationAuthority(bookmarks: bookmarks),
-        clock: { clock.now() }
-    )
-    let code = try await service.beginSetup(selectedParent: selected)
-    try await service.completeSetup(recoveryCodeReentry: code, independentlySaved: true)
-    let initialDue = start.addingTimeInterval(BackupScheduler.quietPeriod)
-    #expect(try await service.setAutomaticBackupEnabled(true) == .scheduled(initialDue))
-
-    try FileManager.default.moveItem(at: selected, to: parked)
-    let outcome = try await service.handleSchedulerEvent(.activation)
-
-    guard case .retryScheduled(let dueAt) = outcome else {
-        Issue.record("Expected an automatic offline retry, got \(outcome)")
-        return
+        _ = try await service.loadStatus()
+        #expect(await service.sourceRevisionReadCountForTesting() == 0)
+        _ = try await service.setAutomaticBackupEnabled(true)
+        #expect(await service.sourceRevisionReadCountForTesting() == 1)
+        _ = try await service.setAutomaticBackupEnabled(false)
+        #expect(await service.sourceRevisionReadCountForTesting() == 1)
     }
-    let persisted = try #require(await store.load())
-    #expect(persisted.scheduler.lastFailure == .repositoryOffline)
-    #expect(persisted.scheduler.mutationRetryAttempt == 1)
-    #expect(persisted.scheduler.retryDueAt == dueAt)
-    #expect(bookmarks.startCount == bookmarks.stopCount)
 
-    clock.set(start.addingTimeInterval(60))
-    let relaunched = LiveBackupService(
-        store: library,
-        configurationStore: BackupLocalConfigurationStore(rootURL: store.rootURL),
-        requiresSelectedDirectoryScope: false,
-        destinationAuthority: BackupDestinationAuthority(bookmarks: bookmarks),
-        clock: { clock.now() }
-    )
-    #expect(try await relaunched.handleSchedulerEvent(.startup) == .retryScheduled(initialDue))
-    #expect(try await store.load()?.scheduler.mutationRetryAttempt == 1)
+    @Test
+    func backupsLandInTheFolderAndRetentionDeletesOnlyThisMacsUnchangedOnes() async throws {
+        let fixture = try await LiveBackupFixture.make()
+        defer { fixture.remove() }
+        let service = fixture.service()
+        try await service.chooseFolder(fixture.selected)
+        try await service.setRetentionCount(2)
 
-    try FileManager.default.moveItem(at: parked, to: selected)
-    clock.set(initialDue)
-    #expect(try await relaunched.handleSchedulerEvent(.wake) == .completed)
-    let completed = try #require(await store.load())
-    #expect(completed.scheduler.lastFailure == nil)
-    #expect(completed.scheduler.mutationRetryAttempt == 0)
-    #expect(completed.scheduler.retryDueAt == nil)
-    #expect(completed.scheduler.lastCoveredRevisionPair != nil)
-}
+        let first = try await service.backUpNow()
+        fixture.clock.advance(1)
+        let second = try await service.backUpNow()
+        // The person renames the second backup; it is theirs from now on.
+        try FileManager.default.moveItem(at: fixture.selected.appendingPathComponent(second.fileName),
+                                         to: fixture.selected.appendingPathComponent("Mine.zip"))
+        try Data("unrelated".utf8).write(to: fixture.selected.appendingPathComponent("notes.txt"))
+        fixture.clock.advance(1)
+        let third = try await service.backUpNow()
+        fixture.clock.advance(1)
+        let fourth = try await service.backUpNow()
 
-@Test
-@MainActor
-func relaunchedModelResumesPersistedPendingEnrollmentWithTheOriginalRecoveryCode() async throws {
-    let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-        .appendingPathComponent("KinlogueLiveBackupPending-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: base) }
-    let selected = base.appendingPathComponent("selected", isDirectory: true)
-    let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
-    try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        #expect(!fourth.cleanupDeferred)
+        let names = try FileManager.default.contentsOfDirectory(atPath: fixture.selected.path).sorted()
+        #expect(names == [third.fileName, fourth.fileName, "Mine.zip", "notes.txt"].sorted())
+        #expect(!names.contains(first.fileName))
+        let status = try await service.loadStatus()
+        #expect(status.managedBackupCount == 2 && status.lastBackupFileName == fourth.fileName)
+        #expect(status.lastBackupAt == fourth.completedAt && status.lastFailure == nil)
+        let archive = try Archive(url: fixture.selected.appendingPathComponent(fourth.fileName), accessMode: .read)
+        #expect(archive[BackupArchiveIndex.fileName] != nil)
+        #expect(fourth.fileName.hasPrefix(BackupArchiveText.fileNameStem(fixture.clock.start.addingTimeInterval(3))))
+        #expect(fixture.bookmarks.startCount == fixture.bookmarks.stopCount)
+    }
 
-    let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
-    let authority = BackupDestinationAuthority(bookmarks: bookmarks)
-    let storeRoot = base.appendingPathComponent(
-        "support/Kinlogue/BackupIdentity",
-        isDirectory: true
-    )
-    let store = BackupLocalConfigurationStore(rootURL: storeRoot)
-    let savedRecoveryCode: String
-    let pending: BackupLocalConfiguration
-    do {
-        let failingPublisher = LiveBackupFailingEnrollmentPublisher(authority: authority)
-        let setup = BackupSetupService(
-            configurationStore: store,
-            destinationAuthority: authority,
-            enrollmentPublisher: failingPublisher
-        )
-        let session = try await setup.begin(selectedParent: selected, activeVaultURL: vaultURL)
-        savedRecoveryCode = session.recoveryCode
-        await #expect(throws: BackupDestinationAuthorityError.repositoryOffline) {
-            _ = try await setup.complete(
-                session,
-                recoveryCodeReentry: session.recoveryCode,
-                independentlySaved: true
+    @Test
+    func aStaleBookmarkIsRefreshedAndSurvivesARelaunch() async throws {
+        let fixture = try await LiveBackupFixture.make()
+        defer { fixture.remove() }
+        let service = fixture.service()
+        try await service.chooseFolder(fixture.selected)
+        fixture.bookmarks.stale = true
+        fixture.bookmarks.createdBookmark = Data("refreshed-bookmark".utf8)
+
+        _ = try await service.loadStatus()
+
+        #expect(try BackupSettingsStore(rootURL: fixture.settings.rootURL).load().folder?.bookmarkData
+            == Data("refreshed-bookmark".utf8))
+        #expect(fixture.bookmarks.startCount == fixture.bookmarks.stopCount)
+    }
+
+    @Test
+    func showingTheFolderOpensItWithBalancedScope() async throws {
+        let fixture = try await LiveBackupFixture.make()
+        defer { fixture.remove() }
+        let opener = LiveBackupFolderOpener()
+        let service = fixture.service(opener: opener)
+        try await service.chooseFolder(fixture.selected)
+
+        try await service.showFolder()
+        #expect(await opener.openedURLs == [fixture.selected])
+
+        await opener.setResult(false)
+        await #expect(throws: BackupFailure.folderUnavailable) { try await service.showFolder() }
+        #expect(fixture.bookmarks.startCount == fixture.bookmarks.stopCount)
+    }
+
+    @Test
+    func aFolderThatIsGoneBeforeTheSchedulerRunsGetsADurableRetry() async throws {
+        let fixture = try await LiveBackupFixture.make()
+        defer { fixture.remove() }
+        let service = fixture.service()
+        try await service.chooseFolder(fixture.selected)
+        let due = fixture.clock.start.addingTimeInterval(BackupScheduler.quietPeriod)
+        #expect(try await service.setAutomaticBackupEnabled(true) == .scheduled(due))
+
+        let parked = fixture.base.appendingPathComponent("parked", isDirectory: true)
+        try FileManager.default.moveItem(at: fixture.selected, to: parked)
+        let outcome = try await service.handleSchedulerEvent(.activation)
+        #expect(outcome == .retryScheduled(due))
+        let persisted = try fixture.settings.load()
+        #expect(persisted.scheduler.lastFailure == .folderUnavailable && persisted.scheduler.retryAttempt == 1)
+        #expect(try await service.loadStatus().lastFailure == .folderUnavailable)
+
+        fixture.clock.set(fixture.clock.start.addingTimeInterval(60))
+        let relaunched = fixture.service()
+        #expect(try await relaunched.handleSchedulerEvent(.startup) == .retryScheduled(due))
+
+        try FileManager.default.moveItem(at: parked, to: fixture.selected)
+        fixture.clock.set(due)
+        #expect(try await relaunched.handleSchedulerEvent(.wake) == .completed)
+        let completed = try fixture.settings.load()
+        #expect(completed.scheduler.lastFailure == nil && completed.scheduler.retryAttempt == 0)
+        #expect(completed.scheduler.lastCoveredRevision != nil && completed.ledger.count == 1)
+        #expect(fixture.bookmarks.startCount == fixture.bookmarks.stopCount)
+    }
+
+    @Test
+    func aReplacedFolderNeedsToBeChosenAgain() async throws {
+        let fixture = try await LiveBackupFixture.make()
+        defer { fixture.remove() }
+        let service = fixture.service()
+        try await service.chooseFolder(fixture.selected)
+        try FileManager.default.moveItem(at: fixture.selected, to: fixture.base.appendingPathComponent("moved"))
+        try FileManager.default.createDirectory(at: fixture.selected, withIntermediateDirectories: false)
+
+        #expect(try await service.loadStatus().lastFailure == .folderNeedsReselection)
+        await #expect(throws: BackupFailure.folderNeedsReselection) { _ = try await service.backUpNow() }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.selected.path).isEmpty)
+    }
+
+    @Test
+    func aRenumberedVolumeStillNamesTheSameFolder() async throws {
+        let fixture = try await LiveBackupFixture.make()
+        defer { fixture.remove() }
+        try await fixture.service().chooseFolder(fixture.selected)
+        // macOS may give a volume another device number after a restart or an update.
+        try fixture.settings.update { settings in
+            guard let folder = settings.folder else { throw BackupFailure.notConfigured }
+            settings.folder = try BackupFolderSelection(
+                bookmarkData: folder.bookmarkData,
+                identity: .init(device: folder.identity.device + 3, inode: folder.identity.inode)
             )
         }
-        pending = try #require(await store.load())
-    }
-    #expect(pending.phase == .pending)
-
-    let library = try SQLiteLibraryStore(rootURL: vaultURL)
-    defer { try? library.close() }
-    let relaunchedService = LiveBackupService(
-        store: library,
-        configurationStore: BackupLocalConfigurationStore(rootURL: storeRoot),
-        requiresSelectedDirectoryScope: false,
-        destinationAuthority: authority
-    )
-    let model = BackupModel(service: relaunchedService)
-    await model.refresh()
-    #expect(model.phase == .enrollmentPending)
-    #expect(model.recoveryCode == nil)
-
-    model.presentPendingEnrollmentRecovery()
-    model.pendingEnrollmentRecoveryCode = savedRecoveryCode
-    await model.resumePendingEnrollment()
-
-    let enabled = try #require(await store.load())
-    #expect(enabled.phase == .enabled)
-    #expect(enabled.descriptor == pending.descriptor)
-    #expect(enabled.authorization == pending.authorization)
-    #expect(enabled.deviceSigningSeed == pending.deviceSigningSeed)
-    #expect(enabled.enrollmentEpoch == pending.enrollmentEpoch)
-    #expect(enabled.writerEpoch == pending.writerEpoch)
-    #expect(model.phase == .ready)
-    #expect(model.pendingEnrollmentRecoveryCode.isEmpty)
-}
-
-private final class LiveBackupMutableBookmarks: BackupBookmarkAccessing,
-    BackupSelectedDirectorySecurityScope, @unchecked Sendable {
-    let resolvedURL: URL
-    var stale = false
-    var invalidBookmark: Data?
-    var createdBookmark = Data("bookmark".utf8)
-    private(set) var startCount = 0
-    private(set) var stopCount = 0
-
-    init(resolvedURL: URL) {
-        self.resolvedURL = resolvedURL
-    }
-
-    func createBookmark(for url: URL) throws -> Data {
-        _ = url
-        return createdBookmark
-    }
-
-    func resolveBookmark(_ data: Data) throws -> BackupResolvedBookmark {
-        if data == invalidBookmark { throw BackupDestinationAuthorityError.bookmarkInvalid }
-        return .init(url: resolvedURL, isStale: stale)
-    }
-
-    func refreshBookmark(for url: URL) throws -> Data {
-        _ = url
-        return Data("refreshed-bookmark".utf8)
-    }
-
-    func startAccessing(_ url: URL) -> Bool {
-        _ = url
-        startCount += 1
-        return true
-    }
-
-    func stopAccessing(_ url: URL) {
-        _ = url
-        stopCount += 1
-    }
-}
-
-private final class LiveBackupTestClock: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: Date
-
-    init(_ value: Date) {
-        self.value = value
-    }
-
-    func now() -> Date {
-        lock.withLock { value }
-    }
-
-    func set(_ value: Date) {
-        lock.withLock { self.value = value }
-    }
-}
-
-private final class LiveBackupFailingEnrollmentPublisher: BackupEnrollmentPublishing,
-    @unchecked Sendable {
-    let authority: BackupDestinationAuthority
-
-    init(authority: BackupDestinationAuthority) {
-        self.authority = authority
-    }
-
-    func publish(
-        descriptor: BackupSetDescriptor,
-        authorization: BackupDeviceAuthorization,
-        selection: BackupDestinationSelection
-    ) throws -> Data? {
-        _ = descriptor
-        _ = authorization
-        _ = selection
-        throw BackupDestinationAuthorityError.repositoryOffline
-    }
-
-    func publish(configuration: BackupLocalConfiguration) throws -> Data? {
-        try authority.publishStoredEnrollment(configuration)
-    }
-}
-
-private actor LiveBackupRepositoryOpener: BackupRepositoryOpening {
-    private(set) var openedURLs: [URL] = []
-    let result: Bool
-
-    init(result: Bool = true) {
-        self.result = result
-    }
-
-    func open(_ url: URL) async -> Bool {
-        openedURLs.append(url)
-        return result
+        let relaunched = fixture.service()
+        #expect(try await relaunched.loadStatus().lastFailure == nil)
+        _ = try await relaunched.backUpNow()
+        #expect(try fixture.settings.load().ledger.count == 1)
     }
 }
 
 @Test
-func sqliteLogicalLiveBackupAndRestoreServicesDrainBeforeClosingDatabase() async throws {
+func liveBackupAndRestoreDrainBeforeClosingTheDatabase() async throws {
     let base = FileManager.default.temporaryDirectory.appendingPathComponent("KinlogueSQLiteLiveBackup-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: base) }
     let selected = base.appendingPathComponent("selected", isDirectory: true)
@@ -533,21 +183,20 @@ func sqliteLogicalLiveBackupAndRestoreServicesDrainBeforeClosingDatabase() async
     let member = try FamilyMember(displayName: "Synthetic captured service member")
     try await repository.saveMember(member, replacing: nil)
     let bookmarks = LiveBackupMutableBookmarks(resolvedURL: selected)
-    let configuration = BackupLocalConfigurationStore(rootURL: base.appendingPathComponent("BackupIdentity"))
-    let backup = LiveBackupService(store: database, configurationStore: configuration,
-        requiresSelectedDirectoryScope: true, destinationAuthority: BackupDestinationAuthority(bookmarks: bookmarks), selectedDirectoryScope: bookmarks)
-    let recoveryCode = try await backup.beginSetup(selectedParent: selected)
-    try await backup.completeSetup(recoveryCodeReentry: recoveryCode, independentlySaved: true)
-    _ = try await backup.backUpNow()
-    let destination = selected.appendingPathComponent(BackupDestinationAuthority.repositoryDirectoryName)
-    let checkpoint = try #require(FileManager.default.contentsOfDirectory(at: destination, includingPropertiesForKeys: nil).first { $0.pathExtension == "kinloguebackup" })
+    let settings = BackupSettingsStore(rootURL: base.appendingPathComponent("Backup"))
+    let lifecycle = LibraryLifecycleCoordinator()
+    let backup = LiveBackupService(store: database, settingsStore: settings, lifecycle: lifecycle,
+        requiresSelectedDirectoryScope: true, authority: BackupFolderAuthority(bookmarks: bookmarks), selectedDirectoryScope: bookmarks)
+    try await backup.chooseFolder(selected)
+    _ = try await backup.setAutomaticBackupEnabled(true)
+    let written = try await backup.backUpNow()
+    let archiveURL = selected.appendingPathComponent(written.fileName)
     let later: FamilyMember = { var value = member; value.displayName = "Synthetic later service member"; return value }()
     try await repository.saveMember(later, replacing: member)
-    let lifecycle = LibraryLifecycleCoordinator()
     let transaction = try BackupRestoreTransaction(owner: owner)
     let restore = BackupRestoreService(verifier: try BackupRestoreVerifier(owner: owner), transaction: transaction,
-        configurationStore: configuration, operationCoordinator: await backup.operationCoordinator, lifecycle: lifecycle, database: database)
-    let prepared = try await restore.prepare(checkpointURL: checkpoint, recoveryCode: recoveryCode)
+        settingsStore: settings, operationCoordinator: await backup.operationCoordinator, lifecycle: lifecycle, database: database)
+    let prepared = try await restore.prepare(archiveURL: archiveURL)
     let (entered, enteredContinuation) = AsyncStream<Void>.makeStream()
     let (release, releaseContinuation) = AsyncStream<Void>.makeStream()
     let (revoked, revokedContinuation) = AsyncStream<Void>.makeStream()
@@ -570,11 +219,114 @@ func sqliteLogicalLiveBackupAndRestoreServicesDrainBeforeClosingDatabase() async
     try await active.value
     #expect(try await activation.value.requiresApplicationRestart)
     #expect((try? database.state()) == nil)
-    #expect(try await configuration.load() == nil)
+    // The folder and its ledger stay; automatic backup waits for the person.
+    let after = try settings.load()
+    #expect(after.folder != nil && after.ledger.count == 1 && !after.isAutomaticBackupEnabled)
     #expect(throws: SQLiteLibraryError.occupied) { _ = try SQLiteLibraryStore(rootURL: root) }
     #expect(try await transaction.reconcile() == .committed)
     let reopened = try SQLiteLibraryStore(owner: owner)
     defer { try? reopened.close() }
     #expect(try await SQLiteReportRepository(store: reopened).member(member.id) == member)
     #expect(bookmarks.startCount == bookmarks.stopCount)
+}
+
+// MARK: - Fixtures
+
+private struct LiveBackupFixture {
+    let base: URL
+    let selected: URL
+    let vaultURL: URL
+    let library: SQLiteLibraryStore
+    let settings: BackupSettingsStore
+    let bookmarks: LiveBackupMutableBookmarks
+    let clock: LiveBackupTestClock
+    let lifecycle = LibraryLifecycleCoordinator()
+
+    static func make() async throws -> Self {
+        let base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+            .appendingPathComponent("KinlogueLiveBackup-\(UUID().uuidString)", isDirectory: true)
+        let selected = base.appendingPathComponent("selected", isDirectory: true)
+        let vaultURL = base.appendingPathComponent("support/Kinlogue/Vault", isDirectory: true)
+        try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: vaultURL.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let library = try SQLiteLibraryStore(rootURL: vaultURL)
+        try await SQLiteReportRepository(store: library).saveMember(try FamilyMember(displayName: "Synthetic member"), replacing: nil)
+        return Self(
+            base: base, selected: selected, vaultURL: vaultURL, library: library,
+            settings: BackupSettingsStore(rootURL: vaultURL.deletingLastPathComponent().appendingPathComponent("Backup", isDirectory: true)),
+            bookmarks: LiveBackupMutableBookmarks(resolvedURL: selected),
+            clock: LiveBackupTestClock(Date(timeIntervalSince1970: 1_800_000_000))
+        )
+    }
+
+    func service(requiresScope: Bool = false, opener: any BackupFolderOpening = LiveBackupFolderOpener()) -> LiveBackupService {
+        let clock = self.clock
+        return LiveBackupService(
+            store: library, settingsStore: BackupSettingsStore(rootURL: settings.rootURL), lifecycle: lifecycle,
+            requiresSelectedDirectoryScope: requiresScope, authority: BackupFolderAuthority(bookmarks: bookmarks),
+            selectedDirectoryScope: bookmarks, folderOpener: opener, clock: { clock.now() }
+        )
+    }
+
+    func remove() {
+        try? library.close()
+        try? FileManager.default.removeItem(at: base)
+    }
+}
+
+final class LiveBackupMutableBookmarks: BackupBookmarkAccessing, BackupSelectedDirectorySecurityScope, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _resolvedURL: URL
+    private var _stale = false
+    private var _createdBookmark = Data("bookmark".utf8)
+    private var starts = 0
+    private var stops = 0
+
+    init(resolvedURL: URL) { _resolvedURL = resolvedURL }
+
+    var stale: Bool {
+        get { lock.withLock { _stale } }
+        set { lock.withLock { _stale = newValue } }
+    }
+    var createdBookmark: Data {
+        get { lock.withLock { _createdBookmark } }
+        set { lock.withLock { _createdBookmark = newValue } }
+    }
+    var startCount: Int { lock.withLock { starts } }
+    var stopCount: Int { lock.withLock { stops } }
+
+    func createBookmark(for url: URL) throws -> Data { createdBookmark }
+    func resolveBookmark(_ data: Data) throws -> BackupResolvedBookmark {
+        lock.withLock { .init(url: _resolvedURL, isStale: _stale) }
+    }
+    func startAccessing(_ url: URL) -> Bool { lock.withLock { starts += 1 }; return true }
+    func stopAccessing(_ url: URL) { lock.withLock { stops += 1 } }
+}
+
+final class LiveBackupTestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Date
+    let start: Date
+
+    init(_ value: Date) {
+        self.value = value
+        start = value
+    }
+
+    func now() -> Date { lock.withLock { value } }
+    func set(_ value: Date) { lock.withLock { self.value = value } }
+    func advance(_ seconds: TimeInterval) { lock.withLock { value = value.addingTimeInterval(seconds) } }
+}
+
+private actor LiveBackupFolderOpener: BackupFolderOpening {
+    private(set) var openedURLs: [URL] = []
+    private var result = true
+
+    func setResult(_ value: Bool) { result = value }
+
+    func open(_ url: URL) async -> Bool {
+        openedURLs.append(url)
+        return result
+    }
 }

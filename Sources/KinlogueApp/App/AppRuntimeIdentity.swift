@@ -21,7 +21,15 @@ struct RuntimeVaultIdentity: Equatable, Sendable {
 }
 
 struct RuntimeBackupIdentity: Equatable, Sendable {
-    let rootURL: URL
+    /// App-private backup settings and the ledger of backups this Mac wrote.
+    let settingsRootURL: URL
+    /// Where earlier builds kept their encrypted-backup keys; removed at startup.
+    let legacyIdentityRootURL: URL
+
+    init(parentURL: URL) {
+        settingsRootURL = parentURL.appendingPathComponent("Backup", isDirectory: true)
+        legacyIdentityRootURL = parentURL.appendingPathComponent("BackupIdentity", isDirectory: true)
+    }
 }
 
 struct AppRuntimeIdentity: Equatable, Sendable {
@@ -104,14 +112,12 @@ struct AppRuntimeIdentity: Equatable, Sendable {
             let rootURL = trustedApplicationSupportDirectory
                 .appendingPathComponent("Kinlogue", isDirectory: true)
                 .appendingPathComponent("Vault", isDirectory: true)
-            let backupIdentityURL = rootURL.deletingLastPathComponent()
-                .appendingPathComponent("BackupIdentity", isDirectory: true)
             return AppRuntimeIdentity(
                 mode: .production,
                 sourceVault: RuntimeVaultIdentity(
                     rootURL: rootURL
                 ),
-                backupIdentity: RuntimeBackupIdentity(rootURL: backupIdentityURL),
+                backupIdentity: RuntimeBackupIdentity(parentURL: rootURL.deletingLastPathComponent()),
                 syntheticSmokeRequested: false
             )
         }
@@ -135,10 +141,7 @@ struct AppRuntimeIdentity: Equatable, Sendable {
         return AppRuntimeIdentity(
             mode: .acceptance(runID: runID),
             sourceVault: sourceVault,
-            backupIdentity: RuntimeBackupIdentity(
-                rootURL: sourceVault.rootURL.deletingLastPathComponent()
-                    .appendingPathComponent("BackupIdentity", isDirectory: true)
-            ),
+            backupIdentity: RuntimeBackupIdentity(parentURL: sourceVault.rootURL.deletingLastPathComponent()),
             syntheticSmokeRequested: syntheticSmokeRequested
         )
     }

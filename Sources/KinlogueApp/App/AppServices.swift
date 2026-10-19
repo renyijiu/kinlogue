@@ -5,7 +5,6 @@ import UniformTypeIdentifiers
 
 struct LiveAppServiceEnvironment: Sendable {
     let dataService: LiveAppService
-    let originalExportService: any OriginalExportServicing
     let destroyService: any VaultDestroyServicing
     let lanInboxService: any LANInboxServicing
     let dicomSliceServiceFactory: @Sendable () -> any DICOMSliceViewing
@@ -27,7 +26,6 @@ struct LiveAppServiceEnvironment: Sendable {
             return Self(dataService: LiveAppService(reports: reports, studies: studies, draftStore: reports,
                 workflow: workflow, textExtractor: extractor, lifecycle: lifecycle,
                 dicomRuntime: DICOMAppRuntime(workflow: dicom, lifecycle: lifecycle, securityScope: scope)),
-                originalExportService: LiveOriginalExportService(store: store, lifecycle: lifecycle),
                 destroyService: LifecycleCoordinatedVaultDestroyService(lifecycle: lifecycle,
                     underlying: SQLiteVaultDestroyService(store: store)),
                 lanInboxService: try LiveLANInboxService(store: store, lifecycle: lifecycle),

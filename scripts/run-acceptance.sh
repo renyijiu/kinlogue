@@ -944,13 +944,10 @@ prepare_verification_candidate() {
         "$VERIFICATION_CANDIDATE")" == "false" ]] || return 1
   [[ "$(/usr/bin/plutil -extract storage.cloudSync raw -expect bool \
         "$VERIFICATION_CANDIDATE")" == "false" ]] || return 1
+  [[ "$(/usr/bin/plutil -extract storage.backupFormat raw -expect string \
+        "$VERIFICATION_CANDIDATE")" == "zip+kinlogue-backup-v1" ]] || return 1
   [[ "$(/usr/bin/plutil -extract storage.backupContainerEncryption raw \
-        -expect string "$VERIFICATION_CANDIDATE")" \
-        == "hpke-x25519-chacha20poly1305+aes-256-gcm" ]] || return 1
-  [[ "$(/usr/bin/plutil -extract storage.backupRecoveryPrivateKeyPersisted raw \
-        -expect bool "$VERIFICATION_CANDIDATE")" == "false" ]] || return 1
-  [[ "$(/usr/bin/plutil -extract storage.backupDeviceIdentityCanDecrypt raw \
-        -expect bool "$VERIFICATION_CANDIDATE")" == "false" ]] || return 1
+        -expect string "$VERIFICATION_CANDIDATE")" == "none" ]] || return 1
   [[ "$(/usr/bin/plutil -extract storage.builtInBackupRestore raw -expect bool \
         "$VERIFICATION_CANDIDATE")" == "true" ]] || return 1
   for gate in noSecurityFrameworkDependency noKeychainRuntime noLegacyCryptoRuntime; do

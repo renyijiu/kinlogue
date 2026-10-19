@@ -157,7 +157,7 @@ final class AppModel: ObservableObject {
     let comparisonModel: ComparisonModel
     let dicomImportModel: DICOMImportModel
     let dicomLibraryModel: DICOMLibraryModel
-    let originalExportModel: OriginalExportModel
+    let backupExportModel: BackupExportModel
 
     @Published private(set) var phase: AppPhase = .loading
     @Published private(set) var restartRequiredForIntegrity = false
@@ -207,7 +207,7 @@ final class AppModel: ObservableObject {
     private var ruleUpdateTask: Task<Void, Never>?
     private var ruleUpdateRecord: (id: HealthRecord.ID, revision: UInt64)?
     @Published var isVaultDeletionPresented = false
-    @Published var isOriginalExportPresented = false
+    @Published var isBackupExportPresented = false
     @Published var pendingDeleteRecordID: HealthRecord.ID?
     @Published var pendingDeleteMemberID: FamilyMember.ID?
     @Published var pendingDiscardDraftID: ImportDraft.ID?
@@ -219,7 +219,7 @@ final class AppModel: ObservableObject {
 
     init(
         service: any AppDataServicing,
-        originalExportService: any OriginalExportServicing = UnavailableOriginalExportService(),
+        backupExportService: any BackupExportServicing = UnavailableBackupExportService(),
         dicomService: any DICOMAppServicing = UnavailableAppService(),
         dicomSliceServiceFactory: @escaping @Sendable () -> any DICOMSliceViewing = {
             UnavailableDICOMSliceService()
@@ -237,7 +237,7 @@ final class AppModel: ObservableObject {
         comparisonModel = ComparisonModel(service: service)
         dicomImportModel = DICOMImportModel(service: dicomService)
         dicomLibraryModel = DICOMLibraryModel()
-        originalExportModel = OriginalExportModel(service: originalExportService)
+        backupExportModel = BackupExportModel(service: backupExportService)
         comparisonModel.onReadFailure = { [weak self] error in self?.scheduleLibraryFailure(error) }
     }
 
@@ -261,7 +261,7 @@ final class AppModel: ObservableObject {
             || editingRecord != nil
             || reviewingRuleUpdate != nil
             || viewingOriginal != nil
-            || isOriginalExportPresented
+            || isBackupExportPresented
             || isVaultDeletionPresented
             || comparisonModel.isPresented
             || pendingDeleteRecordID != nil
@@ -634,10 +634,10 @@ final class AppModel: ObservableObject {
         isVaultDeletionPresented = true
     }
 
-    func presentOriginalExport() {
+    func presentBackupExport() {
         guard phase == .ready, !hasBlockingPresentation else { return }
-        originalExportModel.begin()
-        isOriginalExportPresented = true
+        backupExportModel.begin()
+        isBackupExportPresented = true
     }
 
     func toggleComparisonSelection() {
@@ -1256,8 +1256,8 @@ final class AppModel: ObservableObject {
         editingRecord = nil
         reviewingRuleUpdate = nil
         viewingOriginal = nil
-        isOriginalExportPresented = false
-        originalExportModel.clear()
+        isBackupExportPresented = false
+        backupExportModel.clear()
         isVaultDeletionPresented = false
         pendingDeleteRecordID = nil
         pendingDeleteMemberID = nil
@@ -1653,20 +1653,12 @@ actor UnavailableAppService: AppDataServicing, DICOMAppServicing {
     }
 }
 
-actor UnavailableOriginalExportService: OriginalExportServicing {
-    func prepare(undatedToken: String) async throws {
-        throw OriginalExportServiceError.unavailable
+actor UnavailableBackupExportService: BackupExportServicing {
+    func export(to url: URL, progress: @escaping @Sendable (AppBackupProgress) -> Void) async throws -> BackupExportResult {
+        throw BackupExportError.unavailable
     }
 
-    func export(
-        to destinationURL: URL,
-        undatedToken: String,
-        progress: @escaping @Sendable (AppOriginalExportProgress) -> Void
-    ) async throws -> OriginalExportResult {
-        throw OriginalExportServiceError.unavailable
-    }
-
-    func cancel() -> Bool { false }
+    func cancelExport() -> Bool { false }
 }
 
 actor UnavailableDICOMSliceService: DICOMSliceViewing {

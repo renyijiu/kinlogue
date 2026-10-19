@@ -74,25 +74,6 @@ struct AppShellView: View {
             Task { await model.handleDICOMImporterResult(result) }
         }
         .sheet(isPresented: Binding(
-            get: {
-                backupModel.phase == .enrollmentPending
-                    && backupModel.recoveryCode != nil
-            },
-            set: { presented in
-                if !presented { backupModel.cancelSetup() }
-            }
-        )) {
-            BackupSetupView(model: backupModel)
-        }
-        .sheet(isPresented: Binding(
-            get: { backupModel.isPendingEnrollmentRecoveryPresented },
-            set: { presented in
-                if !presented { backupModel.cancelPendingEnrollmentRecovery() }
-            }
-        )) {
-            PendingBackupEnrollmentView(model: backupModel)
-        }
-        .sheet(isPresented: Binding(
             get: { restoreModel.isPresented },
             set: { presented in
                 if !presented { Task { await restoreModel.cancel() } }
@@ -186,15 +167,15 @@ struct AppShellView: View {
                 )
             }
         }
-        .sheet(isPresented: $model.isOriginalExportPresented, onDismiss: {
-            model.originalExportModel.clear()
+        .sheet(isPresented: $model.isBackupExportPresented, onDismiss: {
+            model.backupExportModel.clear()
             model.presentationDidEnd()
             isSettingsExportFocused = true
         }) {
-            OriginalExportView(
-                model: model.originalExportModel,
-                onChooseDestination: chooseOriginalExportDestination,
-                onClose: closeOriginalExport,
+            BackupExportView(
+                model: model.backupExportModel,
+                onChooseDestination: chooseBackupExportDestination,
+                onClose: closeBackupExport,
                 onShowInFinder: { destinationURL in
                     NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
                 }
@@ -376,55 +357,46 @@ struct AppShellView: View {
                 selectedLanguage: $selectedLanguage,
                 backupModel: backupModel,
                 exportButtonFocus: $isSettingsExportFocused,
-                onChooseBackupDirectory: chooseBackupDirectory,
+                onChooseBackupFolder: chooseBackupFolder,
                 onRestoreBackup: restoreModel.present,
-                onExportOriginals: model.presentOriginalExport,
+                onExportBackup: model.presentBackupExport,
                 onDeleteVault: model.presentVaultDeletion,
                 integrityCoordinator: integrityCoordinator
             )
         }
     }
 
-    private func chooseOriginalExportDestination() {
-        Task { @MainActor in
-            let undatedToken = AppLocalization.string("未注明日期")
-            guard await model.originalExportModel.prepareForDestination(
-                undatedToken: undatedToken
-            ) else { return }
-
-            let panel = NSSavePanel()
-            panel.allowedContentTypes = [.zip]
-            panel.canCreateDirectories = true
-            panel.isExtensionHidden = false
-            panel.nameFieldStringValue = AppLocalization.string("续页原始文件.zip")
-            panel.title = AppLocalization.string("导出全部原始文件")
-            panel.prompt = AppLocalization.string("导出")
-            guard panel.runModal() == .OK, let destinationURL = panel.url else {
-                model.originalExportModel.destinationSelectionCancelled()
-                return
-            }
-            await model.originalExportModel.export(
-                to: destinationURL,
-                undatedToken: undatedToken
-            )
+    private func chooseBackupExportDestination() {
+        guard model.backupExportModel.beginChoosingDestination() else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.zip]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.nameFieldStringValue = BackupArchiveText.fileNameStem(Date()) + ".zip"
+        panel.title = AppLocalization.string("导出备份")
+        panel.prompt = AppLocalization.string("导出")
+        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+            model.backupExportModel.destinationSelectionCancelled()
+            return
         }
+        Task { await model.backupExportModel.export(to: destinationURL) }
     }
 
-    private func chooseBackupDirectory() {
+    private func chooseBackupFolder() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.folder]
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.title = AppLocalization.string("选择数据备份目录")
+        panel.title = AppLocalization.string("选择备份文件夹")
         panel.prompt = AppLocalization.string("选择")
         guard panel.runModal() == .OK, let selectedURL = panel.url else { return }
-        Task { await backupModel.beginSetup(selectedParent: selectedURL) }
+        Task { await backupModel.chooseFolder(selectedURL) }
     }
 
-    private func closeOriginalExport() {
-        model.isOriginalExportPresented = false
+    private func closeBackupExport() {
+        model.isBackupExportPresented = false
     }
 
     private var recordsNavigation: some View {

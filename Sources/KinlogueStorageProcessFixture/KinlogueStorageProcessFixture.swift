@@ -95,9 +95,7 @@ private final class FixtureRuntime {
             let root = try FixtureRoot.validate(command.rootPath)
             let owner = try SQLiteLibraryOwner(rootURL: root)
             let verifier = try BackupRestoreVerifier(owner: owner)
-            let parent = root.deletingLastPathComponent()
-            let code = try String(contentsOf: parent.appendingPathComponent("logical-recovery.txt"), encoding: .utf8)
-            let prepared = try await verifier.prepare(checkpointURL: parent.appendingPathComponent("logical.kinloguebackup"), recoveryCode: code)
+            let prepared = try await verifier.prepare(archiveURL: root.deletingLastPathComponent().appendingPathComponent("logical.zip"))
             let transaction = try BackupRestoreTransaction(owner: owner, failureInjector: { point in
                 guard point == points[variant - 1] else { return false }
                 FixtureProtocol.write(.init(event: .leaseHeld, ok: true))
@@ -188,75 +186,6 @@ private final class FixtureRuntime {
             try store.publishOriginal(id, operationID: operation)
             try store.deleteOriginal(id)
             throw FixtureError.invalidCommand
-        case .barrierPublishBackup:
-            let rootURL = try FixtureRoot.validate(command.rootPath)
-            let base = rootURL.deletingLastPathComponent()
-            let configurationStore = BackupLocalConfigurationStore(
-                rootURL: base.appendingPathComponent(
-                    "BackupIdentity",
-                    isDirectory: true
-                )
-            )
-            guard let configuration = try await configurationStore.load(),
-                  configuration.phase == .enabled else {
-                throw FixtureError.invalidCommand
-            }
-            // One library has one owner, so each publishing process brings its own.
-            guard let variant = command.variant, (1...2).contains(variant) else {
-                throw FixtureError.invalidCommand
-            }
-            let store = try SQLiteLibraryStore(rootURL: base.appendingPathComponent(
-                "PublicationSource-\(variant)",
-                isDirectory: true
-            ))
-            defer { try? store.close() }
-            let source = SQLiteLogicalBackupSource(store: store)
-            let repositoryURL = base
-                .appendingPathComponent("selected", isDirectory: true)
-                .appendingPathComponent(
-                    ".kinlogue-backup-v1",
-                    isDirectory: true
-                )
-            let repository = BackupRepository(
-                repositoryURL: repositoryURL,
-                expectedIdentity: configuration.repositoryDirectoryIdentity,
-                trustedDescriptor: configuration.descriptor,
-                expectedAuthorizationID: configuration.authorization.authorizationID,
-                leaseAuthority: .init(
-                    configurationRootURL: configurationStore.rootURL,
-                    configuration: configuration
-                )
-            )
-            let writer = EncryptedCheckpointWriter(
-                source: source,
-                configurationStore: configurationStore
-            )
-            let published = try await BackupCheckpointPublisher(
-                repository: repository,
-                writer: writer,
-                configurationStore: configurationStore,
-                criticalSectionHook: {
-                    FixtureProtocol.write(.init(
-                        event: .backupPublicationCriticalSectionEntered,
-                        ok: true
-                    ))
-                    guard let releaseLine = readLine(strippingNewline: true),
-                          releaseLine.utf8.count <= FixtureProtocol.maximumLineByteCount,
-                          let releaseData = releaseLine.data(using: .utf8),
-                          let release = try? JSONDecoder().decode(
-                            FixtureCommand.self,
-                            from: releaseData
-                          ),
-                          release.operation == .release else {
-                        throw FixtureError.invalidCommand
-                    }
-                }
-            ).publishNext(configuration: configuration)
-            FixtureProtocol.write(.init(
-                event: .backupPublished,
-                ok: true,
-                generation: published.witness.sequence
-            ))
         case .release:
             throw FixtureError.invalidCommand
         case .exit:
@@ -345,7 +274,6 @@ private enum FixtureRoot {
 private enum FixtureOperation: String, Codable {
     case handshake
     case openSQLite, suspendSQLite, closeSQLite, holdSQLiteOriginal, holdSQLiteInitialization, holdSQLiteLANUpload, holdSQLiteDICOMImport, holdSQLiteLogicalRestore, holdSQLiteLogicalCapture
-    case barrierPublishBackup
     case release
     case exit
 }
@@ -360,8 +288,6 @@ private struct FixtureCommand: Codable {
 private enum FixtureEvent: String, Codable {
     case handshake
     case sqliteOpened, sqliteSuspended, sqliteClosed
-    case backupPublicationCriticalSectionEntered
-    case backupPublished
     case leaseHeld
     case operationFailed
     case rejected

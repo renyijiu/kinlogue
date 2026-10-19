@@ -133,7 +133,7 @@ func sqliteEntityMemberExactCanonicalBoundarySurvivesLogicalCapture() async thro
     #expect(try records.first { $0.kind == .member }?.decode(FamilyMember.self) == member)
     let restored = try SQLiteLibraryStore(rootURL: root.deletingLastPathComponent().appendingPathComponent("Restored"))
     defer { try? restored.close() }
-    _ = try SQLiteLogicalRestore.restore(spool: snapshot.spool, manifest: snapshot.manifest(), store: restored)
+    _ = try SQLiteLogicalRestore.restore(spool: snapshot.spool, originals: [:], revisionPair: snapshot.revisionPair, store: restored)
     #expect(try await SQLiteReportRepository(store: restored).member(member.id) == member)
 }
 

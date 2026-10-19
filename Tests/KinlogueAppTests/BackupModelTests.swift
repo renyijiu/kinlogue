@@ -7,27 +7,17 @@ import Testing
 @MainActor
 struct BackupModelTests {
     @Test
-    func setupRequiresIndependentSaveAndFullRecoveryCodeReentry() async {
+    func choosingAFolderConfiguresBackupWithoutAnyRecoveryCode() async {
         let service = BackupModelService()
         let model = BackupModel(service: service)
 
         await model.refresh()
         #expect(model.phase == .notConfigured)
 
-        await model.beginSetup(selectedParent: URL(fileURLWithPath: "/chosen"))
-        #expect(model.phase == .enrollmentPending)
-        #expect(model.recoveryCode == "KLG-RECOVERY-CODE")
-
-        model.recoveryCodeReentry = "KLG-RECOVERY-CODE"
-        model.hasConfirmedIndependentSave = true
-        await model.completeSetup()
-
+        await model.chooseFolder(URL(fileURLWithPath: "/chosen"))
         #expect(model.phase == .ready)
-        #expect(model.recoveryCode == nil)
-        #expect(model.recoveryCodeReentry.isEmpty)
-        #expect(!model.hasConfirmedIndependentSave)
-        #expect(await service.completedReentry == "KLG-RECOVERY-CODE")
-        #expect(await service.completedIndependentSave == true)
+        #expect(model.status.folderName == "Selected Folder")
+        #expect(await service.chosenFolders == [URL(fileURLWithPath: "/chosen")])
     }
 
     @Test
@@ -37,108 +27,108 @@ struct BackupModelTests {
         await model.refresh()
 
         await model.setAutomaticBackupEnabled(true)
-        await model.setRetentionCount(30)
+        await model.setRetentionCount(1)
+        await model.setRetentionCount(31)
         await model.backUpNow()
 
-        #expect(model.phase == .localCheckpointComplete)
+        #expect(model.phase == .backupCompleted)
         #expect(model.isAutomaticBackupEnabled)
-        #expect(model.retentionCount == 30)
+        #expect(model.retentionCount == 1)
         #expect(await service.automaticValues == [true])
-        #expect(await service.retentionValues == [30])
+        #expect(await service.retentionValues == [1])
         #expect(await service.manualBackupCount == 1)
-        #expect(model.cloudStatusText == AppLocalization.string("网盘同步状态未知"))
-        #expect(model.localCheckpointText == AppLocalization.string("所选目录中的恢复点已完整验证"))
     }
 
     @Test
-    func aFinishedManualBackupIsConfirmedUntilTheStatusIsReloaded() async {
+    func aFinishedManualBackupNamesItsFileUntilTheStatusIsReloaded() async {
         let service = BackupModelService(status: .readyFixture())
         let model = BackupModel(service: service)
         await model.refresh()
         #expect(model.completionText == nil)
 
         await model.backUpNow()
-        #expect(model.completionText == AppLocalization.string("新的恢复点已创建并通过验证。"))
+        #expect(model.completionText == AppLocalization.string("已创建 \("Kinlogue Backup.zip")，并完整验证。"))
+        #expect(model.cleanupDeferredText == nil)
+        #expect(
+            AppLocalization.string("已创建 \("Kinlogue Backup.zip")，并完整验证。", language: .english)
+                == "Created Kinlogue Backup.zip and verified it completely."
+        )
 
         await model.refresh()
         #expect(model.completionText == nil)
     }
 
     @Test
-    func aManualBackupThatLeavesCleanupPendingShowsOnlyThatNotice() async {
+    func aManualBackupThatLeavesCleanupPendingSaysSoBesideTheSuccess() async {
         let service = BackupModelService(status: .readyFixture())
         let model = BackupModel(service: service)
         await model.refresh()
-        await service.finishNextManualBackup(with: .success(.deferred(.retentionDeferred)))
+        await service.finishNextManualBackup(with: .success(true))
 
         await model.backUpNow()
 
-        #expect(model.phase == .localCheckpointComplete)
-        #expect(model.failure == .semantic(.retentionDeferred))
-        #expect(model.completionText == nil)
+        #expect(model.phase == .backupCompleted)
+        #expect(model.completionText != nil)
+        #expect(model.cleanupDeferredText != nil)
     }
 
     @Test
-    func aManualBackupThatFailsIsNotConfirmed() async {
+    func aManualBackupThatFailsIsNotConfirmedAndKeepsTheSemanticFailure() async {
         let service = BackupModelService(status: .readyFixture())
         let model = BackupModel(service: service)
         await model.refresh()
-        await service.finishNextManualBackup(with: .failure(.repositoryOffline))
+        await service.finishNextManualBackup(with: .failure(.folderUnavailable))
 
         await model.backUpNow()
 
-        #expect(model.phase == .failed)
-        #expect(model.failure == .semantic(.repositoryOffline))
+        #expect(model.phase == .ready)
+        #expect(model.failure == .folderUnavailable)
         #expect(model.completionText == nil)
+        #expect(model.failureText == AppLocalization.string("备份文件夹当前不可用，请连接磁盘或恢复网络文件夹后重试。"))
     }
 
     @Test
-    func showingBackupRepositoryRoutesThroughService() async {
+    func failureMessagesFollowTheCurrentLanguage() {
+        for failure in BackupFailure.allCases {
+            let english = BackupModel.localizedMessage(for: failure, language: .english)
+            let chinese = BackupModel.localizedMessage(for: failure, language: .simplifiedChinese)
+            #expect(!english.isEmpty && english != chinese, "\(failure)")
+        }
+    }
+
+    @Test
+    func showingTheFolderRoutesThroughServiceAndClearsOnlyARevealFailure() async {
         let service = BackupModelService(status: .readyFixture())
         let model = BackupModel(service: service)
         await model.refresh()
+        await service.failNextReveal()
 
-        await model.showBackupRepository()
+        await model.showFolder()
+        #expect(model.failure == .folderUnavailable)
 
-        #expect(await service.showRepositoryCount == 1)
+        await model.showFolder()
+        #expect(await service.showFolderCount == 2)
         #expect(model.failure == nil)
         #expect(model.phase == .ready)
     }
 
     @Test
-    func successfulRepositoryRevealClearsOnlyThePreviousRevealFailure() async {
+    func enablingAutomaticBackupArmsAReturnedRetryWithoutAnotherAppEvent() async {
         let service = BackupModelService(status: .readyFixture())
-        let model = BackupModel(service: service)
-        await model.refresh()
-        await service.failNextRepositoryReveal()
-
-        await model.showBackupRepository()
-        #expect(model.failure == .semantic(.repositoryOffline))
-
-        await model.showBackupRepository()
-
-        #expect(await service.showRepositoryCount == 2)
-        #expect(model.failure == nil)
-        #expect(model.phase == .ready)
-    }
-
-    @Test
-    func enablingAutomaticBackupArmsReturnedOfflineRetryWithoutAnotherAppEvent() async {
-        let service = BackupModelService(status: .readyFixture())
-        await service.returnImmediateOfflineRetryWhenEnabling()
+        await service.returnImmediateRetryWhenEnabling()
         let model = BackupModel(service: service)
         await model.refresh()
 
         await model.setAutomaticBackupEnabled(true)
-        await service.waitForSchedulerEvent()
+        await service.waitForSchedulerEventCount(1)
 
         #expect(await service.schedulerEvents == [.mutation])
     }
 
     @Test
-    func offlineRetryReturnedByAppEventAutomaticallyRunsItsDueMutation() async {
+    func aRetryReturnedByAnAppEventRunsItsDueMutation() async {
         let service = BackupModelService(status: .readyFixture())
-        await service.returnImmediateOfflineRetryThenCompletion()
+        await service.returnImmediateRetryThenCompletion()
         let model = BackupModel(service: service)
         await model.refresh()
 
@@ -152,7 +142,7 @@ struct BackupModelTests {
     @Test
     func applicationTerminationCancelsOnlyTheInMemoryTimer() async throws {
         let service = BackupModelService(status: .readyFixture())
-        await service.returnFutureOfflineRetryWhenEnabling()
+        await service.returnFutureRetryWhenEnabling()
         let model = BackupModel(service: service)
         await model.refresh()
         await model.setAutomaticBackupEnabled(true)
@@ -162,187 +152,46 @@ struct BackupModelTests {
 
         #expect(await service.schedulerEvents.isEmpty)
         #expect(try await service.loadStatus().isAutomaticBackupEnabled)
-        #expect(await service.terminationCancellationCount == 1)
     }
 
     @Test
-    func failedLateSetupCannotReplaceAStartedNewOperation() async {
-        let service = BackupModelService()
-        await service.pauseNextSetup()
-        let model = BackupModel(service: service)
-        let first = Task { await model.beginSetup(selectedParent: URL(fileURLWithPath: "/first")) }
-        await service.waitUntilPaused()
-
-        model.cancelSetup()
-        await service.resumeSetupWithFailure()
-        await first.value
-
-        #expect(model.phase == .notConfigured)
-        #expect(model.failure == nil)
-    }
-
-    @Test
-    func successfulLateSetupIsExplicitlyCancelledAndDoesNotRetainRecoveryMaterial() async {
-        let service = BackupModelService()
-        await service.pauseNextSetup()
-        let model = BackupModel(service: service)
-        let first = Task { await model.beginSetup(selectedParent: URL(fileURLWithPath: "/first")) }
-        await service.waitUntilPaused()
-
-        model.cancelSetup()
-        await service.resumeSetupSuccessfully()
-        await first.value
-
-        #expect(model.phase == .notConfigured)
-        #expect(model.recoveryCode == nil)
-        #expect(await service.hasActiveSetup == false)
-        #expect(await service.cancelCount >= 1)
-    }
-
-    @Test
-    func persistedPendingEnrollmentCanBeResumedWithoutAnInMemorySetupCode() async {
-        let service = BackupModelService(status: .pendingFixture())
-        let model = BackupModel(service: service)
-
-        await model.refresh()
-        #expect(model.phase == .enrollmentPending)
-        #expect(model.recoveryCode == nil)
-
-        model.presentPendingEnrollmentRecovery()
-        model.pendingEnrollmentRecoveryCode = "KLG-SAVED-RECOVERY-CODE"
-        await model.resumePendingEnrollment()
-
-        #expect(model.phase == .ready)
-        #expect(!model.isPendingEnrollmentRecoveryPresented)
-        #expect(model.pendingEnrollmentRecoveryCode.isEmpty)
-        #expect(await service.resumedRecoveryCodes == ["KLG-SAVED-RECOVERY-CODE"])
-    }
-
-    @Test
-    func wrongPendingRecoveryCodeReportsFailureAndDoesNotRetainInput() async {
-        let service = BackupModelService(status: .pendingFixture())
-        await service.failPendingResumeWithRecoveryCodeMismatch()
+    func aStatusRefreshDuringAManualBackupKeepsItInFlight() async {
+        let service = BackupModelService(status: .readyFixture())
+        await service.pauseNextManualBackup()
         let model = BackupModel(service: service)
         await model.refresh()
 
-        model.presentPendingEnrollmentRecovery()
-        model.pendingEnrollmentRecoveryCode = "KLG-WRONG-RECOVERY-CODE"
-        await model.resumePendingEnrollment()
-
-        #expect(model.phase == .enrollmentPending)
-        #expect(model.failure == .recoveryCodeMismatch)
-        #expect(model.isPendingEnrollmentRecoveryPresented)
-        #expect(model.pendingEnrollmentRecoveryCode.isEmpty)
-
-        model.pendingEnrollmentRecoveryCode = "KLG-SECOND-ATTEMPT"
-        model.cancelPendingEnrollmentRecovery()
-        #expect(!model.isPendingEnrollmentRecoveryPresented)
-        #expect(model.pendingEnrollmentRecoveryCode.isEmpty)
-    }
-
-    @Test
-    func statusRefreshDuringPendingResumeCannotLeaveRecoveryInputOrSheetLocked() async {
-        let service = BackupModelService(status: .pendingFixture())
-        await service.pauseNextPendingResume()
-        let model = BackupModel(service: service)
+        let backup = Task { await model.backUpNow() }
+        await service.waitUntilManualBackupPaused()
         await model.refresh()
-        model.presentPendingEnrollmentRecovery()
-        model.pendingEnrollmentRecoveryCode = "KLG-SAVED-RECOVERY-CODE"
+        await model.handleAppEvent(.activation)
+        #expect(model.phase == .backingUp && model.isManualBackupInFlight)
 
-        let resuming = Task { await model.resumePendingEnrollment() }
-        await service.waitUntilPendingResumePaused()
-        #expect(model.pendingEnrollmentRecoveryCode.isEmpty)
-        #expect(await service.resumedRecoveryCodes == ["KLG-SAVED-RECOVERY-CODE"])
-        await model.refresh()
-        await service.resumePendingResume()
-        await resuming.value
-
-        #expect(model.phase == .ready)
-        #expect(!model.isPendingEnrollmentRecoveryPresented)
-        #expect(!model.isPendingEnrollmentOperation)
-        #expect(model.pendingEnrollmentRecoveryCode.isEmpty)
-    }
-
-    @Test
-    func statusRefreshDuringFailedPendingResumeCannotLeaveRecoveryInputOrSheetLocked() async {
-        let service = BackupModelService(status: .pendingFixture())
-        await service.pauseNextPendingResume()
-        await service.failPendingResumeWithRecoveryCodeMismatch()
-        let model = BackupModel(service: service)
-        await model.refresh()
-        model.presentPendingEnrollmentRecovery()
-        model.pendingEnrollmentRecoveryCode = "KLG-SAVED-RECOVERY-CODE"
-
-        let resuming = Task { await model.resumePendingEnrollment() }
-        await service.waitUntilPendingResumePaused()
-        #expect(model.pendingEnrollmentRecoveryCode.isEmpty)
-        #expect(await service.resumedRecoveryCodes == ["KLG-SAVED-RECOVERY-CODE"])
-        await model.refresh()
-        await service.resumePendingResume()
-        await resuming.value
-
-        #expect(model.phase == .enrollmentPending)
-        #expect(model.isPendingEnrollmentRecoveryPresented)
-        #expect(!model.isPendingEnrollmentOperation)
-        #expect(model.pendingEnrollmentRecoveryCode.isEmpty)
-    }
-
-    @Test
-    func failedPendingAbandonmentRemainsVisibleAndReportsTheFailure() async {
-        let service = BackupModelService(status: .pendingFixture())
-        await service.failPendingAbandonment()
-        let model = BackupModel(service: service)
-        await model.refresh()
-        model.presentPendingEnrollmentRecovery()
-        model.pendingEnrollmentRecoveryCode = "KLG-SENSITIVE-INPUT"
-
-        await model.abandonPendingEnrollment()
-
-        #expect(model.phase == .enrollmentPending)
-        #expect(model.status.enrollment == .pending)
-        #expect(model.failure == .semantic(.verificationFailed))
-        #expect(!model.isPendingEnrollmentRecoveryPresented)
-        #expect(model.pendingEnrollmentRecoveryCode.isEmpty)
-        #expect(await service.abandonCount == 1)
+        await service.resumeManualBackup()
+        await backup.value
+        #expect(model.phase == .backupCompleted && !model.isManualBackupInFlight)
     }
 }
 
 private actor BackupModelService: BackupServicing {
-    func reauthorizeDestination(selectedParent: URL) async throws {}
     private var status: AppBackupStatus
-    private(set) var completedReentry: String?
-    private(set) var completedIndependentSave: Bool?
+    private(set) var chosenFolders: [URL] = []
     private(set) var automaticValues: [Bool] = []
     private(set) var retentionValues: [Int] = []
     private(set) var manualBackupCount = 0
-    private var nextManualBackupResult: Result<BackupCleanupOutcome, BackupSemanticError> = .success(.complete)
-    private(set) var showRepositoryCount = 0
-    private var setupContinuation: CheckedContinuation<Void, Never>?
-    private var setupPaused = false
-    private var setupEntered = false
-    private var setupWaiters: [CheckedContinuation<Void, Never>] = []
-    private var setupShouldFail = false
-    private(set) var hasActiveSetup = false
-    private(set) var cancelCount = 0
+    private var nextManualBackupResult: Result<Bool, BackupFailure> = .success(false)
+    private(set) var showFolderCount = 0
+    private var revealShouldFail = false
     private var automaticOutcome: BackupSchedulerOutcome = .disabled
     private(set) var schedulerEvents: [BackupSchedulerEvent] = []
-    private var schedulerEventWaiters: [CheckedContinuation<Void, Never>] = []
     private var schedulerOutcomes: [BackupSchedulerOutcome] = []
-    private var schedulerEventCountWaiters: [(
-        count: Int,
-        continuation: CheckedContinuation<Void, Never>
-    )] = []
-    private(set) var terminationCancellationCount = 0
-    private var terminationCancellationWaiters: [CheckedContinuation<Void, Never>] = []
-    private var repositoryRevealShouldFail = false
-    private(set) var resumedRecoveryCodes: [String] = []
-    private(set) var abandonCount = 0
-    private var pendingResumeShouldFail = false
-    private var pendingAbandonShouldFail = false
-    private var pendingResumePaused = false
-    private var pendingResumeEntered = false
-    private var pendingResumeContinuation: CheckedContinuation<Void, Never>?
-    private var pendingResumeWaiters: [CheckedContinuation<Void, Never>] = []
+    private var schedulerEventCountWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
+    private var terminationCount = 0
+    private var terminationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var manualPaused = false
+    private var manualEntered = false
+    private var manualContinuation: CheckedContinuation<Void, Never>?
+    private var manualWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(status: AppBackupStatus = .notConfigured) {
         self.status = status
@@ -350,50 +199,9 @@ private actor BackupModelService: BackupServicing {
 
     func loadStatus() async throws -> AppBackupStatus { status }
 
-    func beginSetup(selectedParent: URL) async throws -> String {
-        _ = selectedParent
-        setupEntered = true
-        setupWaiters.forEach { $0.resume() }
-        setupWaiters.removeAll()
-        if setupPaused {
-            await withCheckedContinuation { setupContinuation = $0 }
-        }
-        if setupShouldFail { throw BackupSemanticError.verificationFailed }
-        hasActiveSetup = true
-        return "KLG-RECOVERY-CODE"
-    }
-
-    func completeSetup(recoveryCodeReentry: String, independentlySaved: Bool) async throws {
-        completedReentry = recoveryCodeReentry
-        completedIndependentSave = independentlySaved
+    func chooseFolder(_ url: URL) async throws {
+        chosenFolders.append(url)
         status = .readyFixture()
-    }
-
-    func cancelSetup() async {
-        cancelCount += 1
-        hasActiveSetup = false
-    }
-
-    func resumePending(recoveryCode: String) async throws {
-        resumedRecoveryCodes.append(recoveryCode)
-        pendingResumeEntered = true
-        pendingResumeWaiters.forEach { $0.resume() }
-        pendingResumeWaiters.removeAll()
-        if pendingResumePaused {
-            await withCheckedContinuation { pendingResumeContinuation = $0 }
-        }
-        if pendingResumeShouldFail {
-            throw BackupSetupError.recoveryCodeMismatch
-        }
-        status = .readyFixture()
-    }
-
-    func abandonPending() async throws {
-        abandonCount += 1
-        if pendingAbandonShouldFail {
-            throw BackupSemanticError.verificationFailed
-        }
-        status = .notConfigured
     }
 
     func setAutomaticBackupEnabled(_ enabled: Bool) async throws -> BackupSchedulerOutcome {
@@ -407,168 +215,88 @@ private actor BackupModelService: BackupServicing {
         status = status.replacing(retention: count)
     }
 
-    func backUpNow() async throws -> BackupCleanupOutcome {
+    func backUpNow() async throws -> BackupRunResult {
         manualBackupCount += 1
+        manualEntered = true
+        manualWaiters.forEach { $0.resume() }
+        manualWaiters.removeAll()
+        if manualPaused { await withCheckedContinuation { manualContinuation = $0 } }
         let result = nextManualBackupResult
-        nextManualBackupResult = .success(.complete)
-        let cleanup = try result.get()
-        status = status.replacing(localState: .verified, verifiedAt: Date(timeIntervalSince1970: 1))
-        return cleanup
+        nextManualBackupResult = .success(false)
+        let deferred = try result.get()
+        status = status.replacing(lastBackupAt: Date(timeIntervalSince1970: 1))
+        return BackupRunResult(fileName: "Kinlogue Backup.zip", completedAt: Date(timeIntervalSince1970: 1),
+                               revision: try BackupLibraryRevision(libraryID: UUID(), generation: 1, commitID: UUID()),
+                               cleanupDeferred: deferred)
     }
 
-    func finishNextManualBackup(with result: Result<BackupCleanupOutcome, BackupSemanticError>) {
-        nextManualBackupResult = result
+    func finishNextManualBackup(with result: Result<Bool, BackupFailure>) { nextManualBackupResult = result }
+    func pauseNextManualBackup() { manualPaused = true }
+    func waitUntilManualBackupPaused() async {
+        if manualEntered { return }
+        await withCheckedContinuation { manualWaiters.append($0) }
+    }
+    func resumeManualBackup() {
+        manualPaused = false
+        manualContinuation?.resume()
+        manualContinuation = nil
     }
 
-    func showBackupRepository() async throws {
-        showRepositoryCount += 1
-        if repositoryRevealShouldFail {
-            repositoryRevealShouldFail = false
-            throw BackupSemanticError.repositoryOffline
+    func showFolder() async throws {
+        showFolderCount += 1
+        if revealShouldFail {
+            revealShouldFail = false
+            throw BackupFailure.folderUnavailable
         }
     }
 
-    func failNextRepositoryReveal() {
-        repositoryRevealShouldFail = true
-    }
-
-    func failPendingResumeWithRecoveryCodeMismatch() {
-        pendingResumeShouldFail = true
-    }
-
-    func failPendingAbandonment() {
-        pendingAbandonShouldFail = true
-    }
-
-    func pauseNextPendingResume() {
-        pendingResumePaused = true
-    }
-
-    func waitUntilPendingResumePaused() async {
-        if pendingResumeEntered { return }
-        await withCheckedContinuation { pendingResumeWaiters.append($0) }
-    }
-
-    func resumePendingResume() {
-        pendingResumeContinuation?.resume()
-        pendingResumeContinuation = nil
-    }
+    func failNextReveal() { revealShouldFail = true }
 
     func handleSchedulerEvent(_ event: BackupSchedulerEvent) async throws -> BackupSchedulerOutcome {
         schedulerEvents.append(event)
-        schedulerEventWaiters.forEach { $0.resume() }
-        schedulerEventWaiters.removeAll()
         var waiting: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
         for waiter in schedulerEventCountWaiters {
-            if schedulerEvents.count >= waiter.count {
-                waiter.continuation.resume()
-            } else {
-                waiting.append(waiter)
-            }
+            if schedulerEvents.count >= waiter.count { waiter.continuation.resume() } else { waiting.append(waiter) }
         }
         schedulerEventCountWaiters = waiting
         return schedulerOutcomes.isEmpty ? .disabled : schedulerOutcomes.removeFirst()
     }
 
     func cancelForApplicationTermination() {
-        terminationCancellationCount += 1
-        terminationCancellationWaiters.forEach { $0.resume() }
-        terminationCancellationWaiters.removeAll()
+        terminationCount += 1
+        terminationWaiters.forEach { $0.resume() }
+        terminationWaiters.removeAll()
     }
 
-    func returnImmediateOfflineRetryWhenEnabling() {
-        automaticOutcome = .retryScheduled(Date(timeIntervalSinceNow: -1))
-    }
-
-    func returnFutureOfflineRetryWhenEnabling() {
-        automaticOutcome = .retryScheduled(Date(timeIntervalSinceNow: 60 * 60))
-    }
-
-    func returnImmediateOfflineRetryThenCompletion() {
-        schedulerOutcomes = [
-            .retryScheduled(Date(timeIntervalSinceNow: -1)),
-            .completed,
-        ]
-    }
-
-    func waitForSchedulerEvent() async {
-        if !schedulerEvents.isEmpty { return }
-        await withCheckedContinuation { schedulerEventWaiters.append($0) }
+    func returnImmediateRetryWhenEnabling() { automaticOutcome = .retryScheduled(Date(timeIntervalSinceNow: -1)) }
+    func returnFutureRetryWhenEnabling() { automaticOutcome = .retryScheduled(Date(timeIntervalSinceNow: 60 * 60)) }
+    func returnImmediateRetryThenCompletion() {
+        schedulerOutcomes = [.retryScheduled(Date(timeIntervalSinceNow: -1)), .completed]
     }
 
     func waitForSchedulerEventCount(_ count: Int) async {
         if schedulerEvents.count >= count { return }
-        await withCheckedContinuation {
-            schedulerEventCountWaiters.append((count, $0))
-        }
+        await withCheckedContinuation { schedulerEventCountWaiters.append((count, $0)) }
     }
 
     func waitForTerminationCancellation() async {
-        if terminationCancellationCount > 0 { return }
-        await withCheckedContinuation { terminationCancellationWaiters.append($0) }
-    }
-
-    func pauseNextSetup() { setupPaused = true }
-    func waitUntilPaused() async {
-        if setupEntered { return }
-        await withCheckedContinuation { setupWaiters.append($0) }
-    }
-    func resumeSetupWithFailure() {
-        setupShouldFail = true
-        setupContinuation?.resume()
-        setupContinuation = nil
-    }
-    func resumeSetupSuccessfully() {
-        setupContinuation?.resume()
-        setupContinuation = nil
+        if terminationCount > 0 { return }
+        await withCheckedContinuation { terminationWaiters.append($0) }
     }
 }
 
 private extension AppBackupStatus {
     static func readyFixture() -> Self {
-        .init(
-            enrollment: .ready,
-            destinationDisplayName: "Selected Folder",
-            isAutomaticBackupEnabled: false,
-            retentionCount: 5,
-            localCheckpointState: .unavailable,
-            lastLocalVerificationAt: nil,
-            nextDueAt: nil,
-            lastFailure: nil,
-            estimate: .init(singleCheckpointBytes: 100, retainedBytes: 500, temporaryBytes: 100)
-        )
+        .init(folderName: "Selected Folder", isFolderConfigured: true, isAutomaticBackupEnabled: false,
+              retentionCount: 5, lastBackupAt: nil, lastBackupFileName: nil, managedBackupCount: 0,
+              nextDueAt: nil, lastFailure: nil)
     }
 
-    static func pendingFixture() -> Self {
-        .init(
-            enrollment: .pending,
-            destinationDisplayName: "Selected Folder",
-            isAutomaticBackupEnabled: false,
-            retentionCount: 5,
-            localCheckpointState: .unavailable,
-            lastLocalVerificationAt: nil,
-            nextDueAt: nil,
-            lastFailure: nil,
-            estimate: nil
-        )
-    }
-
-    func replacing(
-        automatic: Bool? = nil,
-        retention: Int? = nil,
-        localState: BackupLocalCheckpointState? = nil,
-        verifiedAt: Date?? = nil
-    ) -> Self {
-        .init(
-            enrollment: enrollment,
-            destinationDisplayName: destinationDisplayName,
-            isAutomaticBackupEnabled: automatic ?? isAutomaticBackupEnabled,
-            retentionCount: retention ?? retentionCount,
-            localCheckpointState: localState ?? localCheckpointState,
-            lastLocalVerificationAt: verifiedAt ?? lastLocalVerificationAt,
-            nextDueAt: nextDueAt,
-            lastFailure: lastFailure,
-            estimate: estimate
-        )
+    func replacing(automatic: Bool? = nil, retention: Int? = nil, lastBackupAt: Date? = nil) -> Self {
+        .init(folderName: folderName, isFolderConfigured: isFolderConfigured,
+              isAutomaticBackupEnabled: automatic ?? isAutomaticBackupEnabled,
+              retentionCount: retention ?? retentionCount, lastBackupAt: lastBackupAt ?? self.lastBackupAt,
+              lastBackupFileName: lastBackupFileName, managedBackupCount: managedBackupCount,
+              nextDueAt: nextDueAt, lastFailure: lastFailure)
     }
 }

@@ -26,16 +26,18 @@ struct SQLiteStartupContext: Sendable {
     let verifier: BackupRestoreVerifier
     let transaction: BackupRestoreTransaction
     let lifecycle: LibraryLifecycleCoordinator
-    let configuration: BackupLocalConfigurationStore
+    let backupSettings: BackupSettingsStore
 
     @concurrent static func make(identity: AppRuntimeIdentity) async throws -> Self {
         try await LibraryStorageExecutor.run {
             try Task.checkCancellation()
             try LibraryParentDirectoryPreparation.ensureParentDirectory(for: identity.sourceVault.rootURL)
             let owner = try SQLiteLibraryOwner(rootURL: identity.sourceVault.rootURL)
+            // Keys and witnesses of the earlier encrypted backups have no use any more.
+            try? LegacyBackupIdentityCleanup.run(rootURL: identity.backupIdentity.legacyIdentityRootURL)
             return try Self(owner: owner, verifier: BackupRestoreVerifier(owner: owner),
                 transaction: BackupRestoreTransaction(owner: owner), lifecycle: LibraryLifecycleCoordinator(),
-                configuration: BackupLocalConfigurationStore(rootURL: identity.backupIdentity.rootURL))
+                backupSettings: BackupSettingsStore(rootURL: identity.backupIdentity.settingsRootURL))
         }
     }
 
@@ -62,11 +64,11 @@ struct SQLiteStartupContext: Sendable {
 
     func seedRestore() -> LiveRestoreService {
         LiveRestoreService(service: BackupRestoreService(operations: .init(
-            prepare: { try await verifier.prepare(checkpointURL: $0, recoveryCode: $1) },
+            prepare: { try await verifier.prepare(archiveURL: $0) },
             cancel: { try verifier.cancel($0) }, destructiveFence: { try await $0() },
             revokeLifecycle: { await lifecycle.revoke() },
             activate: { try await transaction.activate(prepared: $0, resetWriter: $1) },
-            removeWriterConfiguration: { try await configuration.removeForDestructiveReset() },
+            disableAutomaticBackup: { try backupSettings.disableAutomaticBackupForRestore() },
             reconcilePreflights: {}, reconcile: { .noTransaction })))
     }
 }
