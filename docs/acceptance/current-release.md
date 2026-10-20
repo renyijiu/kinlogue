@@ -1,6 +1,6 @@
 # 当前候选证据
 
-<!-- release-facts: short=0.5.0 build=5 minimum-macos=26.0 tests=1313 suites=110 automated-gates=not-verified overall=pendingManual -->
+<!-- release-facts: short=0.5.0 build=5 minimum-macos=26.0 tests=1322 suites=110 automated-gates=not-verified overall=pendingManual -->
 
 本页是当前版本、测试清单、候选身份和发布状态的唯一权威账本。其他页面只链接本页，不复制这些易漂移数字。
 
@@ -8,14 +8,14 @@
 
 | 维度 | 当前状态 | 说明 |
 | --- | --- | --- |
-| 源码自动化 | `not-verified` | 当前主清单 1313 tests / 110 suites，其中 131 项来自成员对话计划：U1/U3 的 24 项 Core 测试（上下文包、提示词、引用与对话值类型），U2/U2b/U3 的 40 项 Platform 测试（助手 IPC、Codex 适配与用假 CLI 驱动的进程、supervisor、能力检查、SQLite 上下文包读取与 bridge provider），3 项打包边界测试、U6 的 1 项隐私门禁测试、U4 的 15 项 App 测试（设置、同意、内存对话存储、服务、对话模型与 composition 生命周期）和 U5 的 17 项界面测试（中英文案与单复数、设置模型、视图源码安全），以及 U7 的 12 项（对话存储与删除、恢复点逻辑版本 2 与冻结夹具、历史列表与重新打开）、复测修正的 2 项（问题输入框首行间距、输入法组字状态）、模型选择的 5 项（可选模型列表解析与 IPC 校验、菜单文案、选择后保存并重新确认、切换模型不重新加载面板）、schema 版本 3 的 2 项（各版本恢复点流的来源上限、旧版本资料库被拒且不改写）和分层上下文包的 10 项（各层覆盖、上限与溢出说明、同名才汇总、编号稳定、读取上限、较早提示词版本的对话不续写、确认页逐层文案）；首发前不做原地 schema 迁移，旧资料库经恢复点升级；U6 起 bridge 由 `build-app.sh` 默认嵌入，功能默认关闭，`verify-app.sh` 与分发签名脚本覆盖它，经真实 Codex 的检查与其余人工矩阵见[成员对话矩阵](member-chat-matrix.md)；签名沙盒 XPC 由单独的 `scripts/verify-assistant-xpc.sh` 验证，不在主清单内；删除 JSON 清单存储、把测试和跨进程夹具全部改到 SQLite 资料库，完成其后的评审修复并加入搜索结果的检验表格行、搜索词高亮、命中摘录及抽取规则 version 6，并完成这一改动的评审修复之后，macOS 27 上的完整 `scripts/test.sh`、规定的隔离门禁、lint、文档、本地化与当前树隐私门禁通过。覆盖数据库各领域、按需查询、逻辑备份/严格恢复、跨进程故障及 App 故障排空；具体命令与边界见[实现日志](../log.md)。尚未绑定不可变 source ref，安装、系统与人工验收另列 |
+| 源码自动化 | `not-verified` | 当前主清单 1322 tests / 110 suites，其中 131 项来自成员对话计划：U1/U3 的 24 项 Core 测试（上下文包、提示词、引用与对话值类型），U2/U2b/U3 的 40 项 Platform 测试（助手 IPC、Codex 适配与用假 CLI 驱动的进程、supervisor、能力检查、SQLite 上下文包读取与 bridge provider），3 项打包边界测试、U6 的 1 项隐私门禁测试、U4 的 15 项 App 测试（设置、同意、内存对话存储、服务、对话模型与 composition 生命周期）和 U5 的 17 项界面测试（中英文案与单复数、设置模型、视图源码安全），以及 U7 的 12 项（对话存储与删除、恢复点逻辑版本 2 与冻结夹具、历史列表与重新打开）、复测修正的 2 项（问题输入框首行间距、输入法组字状态）、模型选择的 5 项（可选模型列表解析与 IPC 校验、菜单文案、选择后保存并重新确认、切换模型不重新加载面板）、schema 版本 3 的 2 项（各版本恢复点流的来源上限、旧版本资料库被拒且不改写）和分层上下文包的 10 项（各层覆盖、上限与溢出说明、同名才汇总、编号稳定、读取上限、较早提示词版本的对话不续写、确认页逐层文案）；首发前不做原地 schema 迁移，旧资料库经恢复点升级；U6 起 bridge 由 `build-app.sh` 默认嵌入，功能默认关闭，`verify-app.sh` 与分发签名脚本覆盖它，经真实 Codex 的检查与其余人工矩阵见[成员对话矩阵](member-chat-matrix.md)；签名沙盒 XPC 由单独的 `scripts/verify-assistant-xpc.sh` 验证，不在主清单内；删除 JSON 清单存储、把测试和跨进程夹具全部改到 SQLite 资料库，完成其后的评审修复并加入搜索结果的检验表格行、搜索词高亮、命中摘录及抽取规则 version 6 并完成评审修复，再加入叙述命中按句呈现、抽取规则 version 7、识别误读提示和已确认报告按新规则整理之后，macOS 27 上的完整 `scripts/test.sh`、规定的隔离门禁、lint、文档、本地化与当前树隐私门禁通过。覆盖数据库各领域、按需查询、逻辑备份/严格恢复、跨进程故障及 App 故障排空；具体命令与边界见[实现日志](../log.md)。尚未绑定不可变 source ref，安装、系统与人工验收另列 |
 | clean-source bundle / XPC | `notExecuted` | 2026-10-12 在本机提交 `a595f8234c23a3455cfcfbdf149ce8506b1c5f3a`（干净工作树，macOS 27.0.1 / Xcode 27.0）上，`scripts/verify-app.sh --require-clean-source` 通过：Release 构建、ad-hoc 签名与完整性、含 `Assets.car` 和 GRDB privacy manifest 的精确资源清单、entitlement 白名单、最低系统 26.0、DICOM Helper 结构与主进程隔离、无 Keychain / Security 依赖。该提交只存在于本机分支，不是已发布的不可变 ref，因此本行状态不变；`verify-dicom-xpc.sh` 的真实 XPC 探针、安装验收和 synthetic smoke 没有在该提交上运行 |
 | Git 历史隐私 | `verified-baseline` | 历史已验证基线为 `f9cc99b8adcfbfeba35bddc8575a8a464d25eaa2`；历史通过不替代每次公开推送前对待发布 ref 运行 history guard，全部公开 refs 仍须单独核验 |
 | 公开托管 | `external` | CI、CodeQL、Dependabot 与治理文件已入库；GitHub 安全设置、branch rules 和 workflow 运行属于可变远端状态，必须在托管平台实时核对，不把它们固化成 commit 内的永久结论 |
 | 公共分发 | `notExecuted` | 没有 Developer ID、notarization 或正式公众下载渠道证明 |
 | 整体状态 | `pendingManual` | 自动化即使通过，也不能覆盖真实设备、真实样本、Powerbox 和可访问性人工门禁 |
 
-`automated-gates` 只描述当前 source ref 是否完成整套自动化；`overall` 描述包含人工门禁的候选整体状态。当前确定性主测试清单为 1313 tests / 110 suites，全部是 Swift Testing 测试。仅在大小写不敏感卷启用的资料库别名锁测试，以及 storage process、验收扫描、安装 LAN 生产 HTTP 探针和真实双流 LAN RSS/背压用例另按脚本要求分别串行隔离。条件式测试在不适用卷上明确跳过，不进入固定主账。源码自动化通过不替代下列安装、真机与人工门禁。
+`automated-gates` 只描述当前 source ref 是否完成整套自动化；`overall` 描述包含人工门禁的候选整体状态。当前确定性主测试清单为 1322 tests / 110 suites，全部是 Swift Testing 测试。仅在大小写不敏感卷启用的资料库别名锁测试，以及 storage process、验收扫描、安装 LAN 生产 HTTP 探针和真实双流 LAN RSS/背压用例另按脚本要求分别串行隔离。条件式测试在不适用卷上明确跳过，不进入固定主账。源码自动化通过不替代下列安装、真机与人工门禁。
 
 ## 开源 baseline 身份
 

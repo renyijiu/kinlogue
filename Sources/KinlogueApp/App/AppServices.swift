@@ -572,6 +572,55 @@ actor LiveAppService: AppDataServicing, DICOMAppServicing {
         return AppSnapshot(header: try await reports.header())
     }
 
+    func ruleUpdate(recordID: HealthRecord.ID) async throws -> RecordRuleUpdate? {
+        try await requireStartup()
+        let stored = try await reports.recordDocument(recordID)
+        return try ruleUpdateProposal(record: stored.record, document: stored.document)
+    }
+
+    func applyRuleUpdate(_ command: ApplyRuleUpdateCommand) async throws -> AppSnapshot {
+        try await requireStartup()
+        return try await withActiveReportOperation { [self] in
+            try await performApplyRuleUpdate(command)
+        }
+    }
+
+    private func performApplyRuleUpdate(_ command: ApplyRuleUpdateCommand) async throws -> AppSnapshot {
+        let stored = try await reports.recordDocument(command.recordID)
+        // The proposal is read again from the stored blocks, so what is saved is what the rules
+        // read, for the revision and rules version the user saw.
+        guard stored.record.revision == command.expectedRevision,
+              let document = stored.document,
+              let update = try ruleUpdateProposal(record: stored.record, document: document),
+              update.extractionVersion == command.extractionVersion else { throw AppServiceError.recordChanged }
+        let updated = try update.applying(command.acceptedFields, to: stored.record)
+        let refreshed = ImportDraftDocument(
+            blocks: document.blocks,
+            candidates: update.candidates,
+            candidateExtractionVersion: update.extractionVersion
+        )
+        do {
+            try await reports.updateRecord(updated, expectedRevision: command.expectedRevision, document: refreshed)
+        } catch LibraryReportError.staleRevision {
+            throw AppServiceError.recordChanged
+        }
+        return AppSnapshot(header: try await reports.header())
+    }
+
+    /// Runs the current extraction rules on the blocks retained with a confirmed record, without
+    /// recognizing anything again. Nil when the record keeps no blocks, they were last read by the
+    /// current rules, or the rules read nothing different.
+    private func ruleUpdateProposal(record: HealthRecord, document: ImportDraftDocument?) throws -> RecordRuleUpdate? {
+        guard let document, !document.blocks.isEmpty,
+              document.candidateExtractionVersion != ReportCandidateExtractor.extractionVersion else { return nil }
+        let candidates = try ReportCandidateExtractor().extract(from: document.blocks, sources: record.sources)
+        return RecordRuleUpdate.proposal(
+            for: record,
+            candidates: candidates,
+            extractionVersion: ReportCandidateExtractor.extractionVersion
+        )
+    }
+
     func deleteRecord(id: UUID) async throws -> AppSnapshot {
         try await requireStartup()
         return try await withActiveReportOperation { [self] in

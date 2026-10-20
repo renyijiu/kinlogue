@@ -255,6 +255,9 @@ func candidateExtractorJoinsTheColumnsOfALabFormToTheirCells() throws {
     #expect(candidates.reportedResults?.transcription
         == "合成项目甲 ABC\t6.85 ↑ mmol/L\t3.89-6.11\n合成项目乙 DE\t1.21 mmol/L\t<1.70")
     #expect(candidates.title == nil)
+    // The flag printed alone in its column marks the whole row, which names what was marked.
+    #expect(candidates.abnormalItems.map(\.transcription) == ["合成项目甲 ABC 6.85 ↑ mmol/L 3.89-6.11"])
+    #expect(candidates.abnormalItems.first?.references.count == 6)
 }
 
 @Test
@@ -283,6 +286,32 @@ func candidateExtractorKeepsTwoTablesPrintedSideBySideApart() throws {
     #expect(candidates.reportedResults?.transcription
         == "合成项目甲\t6.85↑\t3.89-6.11\n合成项目乙\t1.21\t<1.70\n合成项目丙\t28\t7-40")
     #expect(candidates.title == nil)
+    #expect(candidates.abnormalItems.map(\.transcription) == ["合成项目甲 6.85↑ 3.89-6.11"])
+}
+
+@Test
+func candidateExtractorKeepsMarkersOutsideTheTableAndTheReadingOrder() throws {
+    let blocks = try [
+        block("合成说明偏高一句", page: 1, x: 0.05, y: 0.9, width: 0.3),
+        block("项目", page: 1, x: 0.05, y: 0.82, width: 0.05),
+        block("结果", page: 1, x: 0.35, y: 0.82, width: 0.05),
+        block("参考值", page: 1, x: 0.6, y: 0.82, width: 0.06),
+        block("合成项目甲", page: 1, x: 0.05, y: 0.79, width: 0.15),
+        block("1.2↓", page: 1, x: 0.35, y: 0.79, width: 0.05),
+        block("3-5", page: 1, x: 0.6, y: 0.79, width: 0.05),
+        block("合成项目乙", page: 1, x: 0.05, y: 0.76, width: 0.15),
+        block("4.1", page: 1, x: 0.35, y: 0.76, width: 0.05),
+        block("3-5", page: 1, x: 0.6, y: 0.76, width: 0.05),
+        block("合成项目丙", page: 1, x: 0.05, y: 0.73, width: 0.15),
+        block("9.9", page: 1, x: 0.35, y: 0.73, width: 0.05),
+        block("H", page: 1, x: 0.45, y: 0.73, width: 0.02),
+        block("3-5", page: 1, x: 0.6, y: 0.73, width: 0.05),
+    ]
+
+    let candidates = ReportCandidateExtractor().extract(from: blocks)
+
+    #expect(candidates.abnormalItems.map(\.transcription)
+        == ["合成说明偏高一句", "合成项目甲 1.2↓ 3-5", "合成项目丙 9.9 H 3-5"])
 }
 
 @Test
@@ -352,7 +381,8 @@ func candidateExtractorKeepsReportedLabRowsAsVerbatimResults() throws {
     #expect(candidates.reportedResults?.transcription == "合成项目甲\t12.2 ↑\t3.0~10.0%\n合成项目乙\t5.9\t3.5~9.5")
     #expect(candidates.reportedResults?.references.count == 7)
     #expect(candidates.conclusion == nil)
-    #expect(candidates.abnormalItems.isEmpty)
+    // The flag printed in its own column marks its row.
+    #expect(candidates.abnormalItems.map(\.transcription) == ["合成项目甲 12.2 ↑ 3.0~10.0%"])
     #expect(candidates.dateCandidates.first?.kind == .collection)
 }
 

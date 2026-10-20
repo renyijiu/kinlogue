@@ -279,16 +279,23 @@ func searchMatchPrefersResultLinesAndSkipsFieldsTheRowShows() throws {
     #expect(LibraryReportSearchMatch(resultLines: [line], excerpt: excerpt).excerpt == nil)
     #expect(LibraryReportSearchMatch.none.isEmpty)
 
-    let fields = ["合成标题", "合成医院", "合成内分泌科", "合成结论提到内分泌", "2026-10-09T00:00:00Z"]
+    // Lines win over sentences, and sentences over an excerpt.
+    let passage = SearchPassage(field: .conclusion, excerpt: excerpt)
+    let withLines = LibraryReportSearchMatch(resultLines: [line], passages: [passage], passageCount: 1, excerpt: excerpt)
+    #expect(withLines.passages.isEmpty && withLines.passageCount == 0 && withLines.excerpt == nil)
+    let withPassages = LibraryReportSearchMatch(resultLines: [], passages: [passage], passageCount: 4, excerpt: excerpt)
+    #expect(withPassages.passages == [passage] && withPassages.passageCount == 4 && withPassages.excerpt == nil)
+
+    // The row shows a match only in a visible text that starts the field and holds the term.
     let visible = ["合成标题", "合成医院", "2026-10-09T00:00:00Z"]
-    #expect(LibraryReportSearchMatch.excerpt(term: "内分泌", fields: fields, hiding: visible)?.text == "合成内分泌科")
-    #expect(LibraryReportSearchMatch.excerpt(term: "标题", fields: fields, hiding: visible) == nil)
-    #expect(LibraryReportSearchMatch.excerpt(term: "2026", fields: fields, hiding: visible) == nil)
-    // A title the row cuts short hides only the matches the row shows.
+    #expect(LibraryReportSearchMatch.shows("标题", of: "合成标题", in: visible))
+    #expect(LibraryReportSearchMatch.shows("2026", of: "2026-10-09T00:00:00Z", in: visible))
+    #expect(!LibraryReportSearchMatch.shows("内分泌", of: "合成内分泌科", in: visible))
+    // A title the row cuts short shows only the matches before the cut.
     let title = String(repeating: "甲", count: 160) + "合成尾词"
     let shown = [String(String.UnicodeScalarView(title.unicodeScalars.prefix(160)))]
-    #expect(LibraryReportSearchMatch.excerpt(term: "甲甲", fields: [title], hiding: shown) == nil)
-    #expect(LibraryReportSearchMatch.excerpt(term: "尾词", fields: [title], hiding: shown)?.text.hasSuffix("合成尾词") == true)
+    #expect(LibraryReportSearchMatch.shows("甲甲", of: title, in: shown))
+    #expect(!LibraryReportSearchMatch.shows("尾词", of: title, in: shown))
 
     let member = try FamilyMember(displayName: "Synthetic member")
     let summary = LibraryReportSummary(record: try queryRecord(memberID: member.id, state: .confirmed, conclusion: "Synthetic"))
@@ -302,4 +309,46 @@ func searchMatchPrefersResultLinesAndSkipsFieldsTheRowShows() throws {
     #expect(listed.matchedExcerpt?.text.unicodeScalars.count == LibraryReportSummary.maximumExcerptScalars)
     #expect(listed.matchedExcerpt?.isTruncatedAtEnd == true)
     #expect(listed.matchedResultLines.isEmpty)
+
+    // At most three sentences are kept, each bounded like an excerpt; the count covers them all.
+    let sentences = Array(repeating: SearchPassage(field: .reportedResults, excerpt: long), count: 5)
+    let narrative = summary.listing(LibraryReportSearchMatch(resultLines: [], passages: sentences, passageCount: 5, excerpt: nil))
+    #expect(narrative.matchedPassages.count == LibraryReportSummary.maximumMatchedPassages)
+    #expect(narrative.matchedPassageCount == 5)
+    #expect(narrative.matchedPassages.allSatisfy {
+        $0.excerpt.text.unicodeScalars.count == LibraryReportSummary.maximumExcerptScalars && $0.excerpt.isTruncatedAtEnd
+    })
+    #expect(narrative.matchedExcerpt == nil)
+}
+
+@Test
+func searchPassagesAreTheSentencesTheTermIsFoundIn() throws {
+    // Recognition wraps lines mid-sentence; a decimal point does not end a sentence.
+    let findings = "合成肝脏形态大小正常，包膜光\n整。合成甲状腺右叶见低回声结节，大小约 5.2×4.1 mm；边界清。\n合成甲状腺左叶未见异常！胆囊壁光滑?"
+    let found = SearchPassage.sentences(matching: "甲状腺", in: findings, field: .reportedResults, limit: 3)
+    #expect(found.count == 2)
+    #expect(found.passages.map(\.excerpt.text) == ["合成甲状腺右叶见低回声结节，大小约 5.2×4.1 mm；", "合成甲状腺左叶未见异常！"])
+    #expect(found.passages.allSatisfy { $0.field == .reportedResults && !$0.excerpt.isTruncatedAtStart && !$0.excerpt.isTruncatedAtEnd })
+    // The line break inside a sentence reads as a space; a sentence matched twice counts once.
+    #expect(SearchPassage.sentences(matching: "包膜", in: findings, field: .reportedResults, limit: 3).passages.map(\.excerpt.text)
+        == ["合成肝脏形态大小正常，包膜光 整。"])
+    #expect(SearchPassage.sentences(matching: "合成", in: findings, field: .conclusion, limit: 3).count == 3)
+    // Beyond the limit, sentences are only counted.
+    let limited = SearchPassage.sentences(matching: "合成", in: findings, field: .conclusion, limit: 1)
+    #expect(limited.passages.count == 1 && limited.count == 3)
+    #expect(limited.passages.first?.field == .conclusion)
+    // A term ending in a sentence mark ends its sentence there; one spanning a mark joins both sentences.
+    #expect(SearchPassage.sentences(matching: "未见异常！", in: findings, field: .conclusion, limit: 3).passages.map(\.excerpt.text)
+        == ["合成甲状腺左叶未见异常！"])
+    #expect(SearchPassage.sentences(matching: "边界清。 合成", in: findings.replacingOccurrences(of: "\n", with: " "),
+                                    field: .conclusion, limit: 3).passages.map(\.excerpt.text)
+        == ["边界清。 合成甲状腺左叶未见异常！"])
+    // A long sentence is cut around the match.
+    let long = String(repeating: "甲", count: 200) + "合成结节" + String(repeating: "乙", count: 200) + "。"
+    let cut = try #require(SearchPassage.sentences(matching: "结节", in: long, field: .conclusion, limit: 3).passages.first)
+    #expect(cut.excerpt.isTruncatedAtStart && cut.excerpt.isTruncatedAtEnd)
+    #expect(cut.excerpt.text.count == SearchExcerpt.maximumCharacters)
+    #expect(SearchPassage.sentences(matching: "absent", in: findings, field: .conclusion, limit: 3).count == 0)
+    #expect(SearchPassage.sentences(matching: "", in: findings, field: .conclusion, limit: 3).count == 0)
+    #expect(SearchPassage.sentences(matching: "甲\u{0}", in: "甲\u{0}。", field: .conclusion, limit: 3).count == 0)
 }

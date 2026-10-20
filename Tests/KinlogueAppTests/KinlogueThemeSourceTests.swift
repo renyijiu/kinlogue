@@ -121,6 +121,7 @@ struct KinlogueThemeSourceTests {
             ("Sources/KinlogueApp/Views/OriginalDocumentView.swift", 2),
             ("Sources/KinlogueApp/Views/OriginalExportView.swift", 1),
             ("Sources/KinlogueApp/Views/RecordEditView.swift", 1),
+            ("Sources/KinlogueApp/Views/RecordRuleUpdateView.swift", 1),
         ] {
             let roots = try read(path).components(separatedBy: ".kinlogueSheetCanvas()").count - 1
             #expect(roots == expectedRoots, "sheet canvas count changed: \(path)")
@@ -132,8 +133,8 @@ struct KinlogueThemeSourceTests {
         ].map(read).joined(separator: "\n")
         let presentedSheets = presenters.components(separatedBy: ".sheet(").count - 1
         // The two member editor sheets share one view and the two original
-        // viewers each back one sheet, so 15 presentations map to 14 roots.
-        #expect(presentedSheets == 15)
+        // viewers each back one sheet, so 16 presentations map to 15 roots.
+        #expect(presentedSheets == 16)
 
         for path in [
             "Sources/KinlogueApp/Views/AppShellView.swift",

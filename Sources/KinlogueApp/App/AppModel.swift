@@ -181,7 +181,12 @@ final class AppModel: ObservableObject {
     @Published var searchText = "" { didSet { filtersDidChange() } }
     @Published private(set) var reviewQueue: [DraftSummary] = []
     @Published private(set) var backgroundDrafts: [DraftSummary] = []
-    @Published private var recordDetailState: RecordDetailState = .empty
+    @Published private var recordDetailState: RecordDetailState = .empty {
+        didSet { checkRuleUpdate() }
+    }
+    /// What the current extraction rules read differently from the open record, if anything.
+    @Published private(set) var ruleUpdate: RecordRuleUpdate?
+    @Published var reviewingRuleUpdate: RecordRuleUpdate?
     @Published private(set) var isOriginalLoading = false
     @Published var isImporterPresented = false
     @Published var isDICOMFolderPickerPresented = false
@@ -199,6 +204,8 @@ final class AppModel: ObservableObject {
     @Published var editingMember: FamilyMember?
     @Published var editingRecord: HealthRecord?
     @Published var viewingOriginal: OriginalViewerPresentation?
+    private var ruleUpdateTask: Task<Void, Never>?
+    private var ruleUpdateRecord: (id: HealthRecord.ID, revision: UInt64)?
     @Published var isVaultDeletionPresented = false
     @Published var isOriginalExportPresented = false
     @Published var pendingDeleteRecordID: HealthRecord.ID?
@@ -252,6 +259,7 @@ final class AppModel: ObservableObject {
             || isMemberEditorPresented
             || editingMember != nil
             || editingRecord != nil
+            || reviewingRuleUpdate != nil
             || viewingOriginal != nil
             || isOriginalExportPresented
             || isVaultDeletionPresented
@@ -582,6 +590,37 @@ final class AppModel: ObservableObject {
         editingRecord = selectedRecord
     }
 
+    func presentRuleUpdate() {
+        guard phase == .ready,
+              !hasBlockingPresentation,
+              let ruleUpdate,
+              selectedRecord?.id == ruleUpdate.recordID else { return }
+        reviewingRuleUpdate = ruleUpdate
+    }
+
+    /// Asks the current rules about the open record once per revision. The check is an aid: when
+    /// it fails, the record is shown as it is, without a notice.
+    private func checkRuleUpdate() {
+        let record = selectedRecord
+        guard record?.id != ruleUpdateRecord?.id || record?.revision != ruleUpdateRecord?.revision else { return }
+        ruleUpdateTask?.cancel(); ruleUpdateTask = nil
+        ruleUpdate = nil
+        ruleUpdateRecord = record.map { ($0.id, $0.revision) }
+        guard let record, !vaultLifecycleIsLocked else { return }
+        let service = self.service, reads = self.reads
+        ruleUpdateTask = Task { [weak self] in
+            let update = try? await reads.value(of: Task { try await service.ruleUpdate(recordID: record.id) })
+            guard !Task.isCancelled, let self, !self.vaultLifecycleIsLocked,
+                  self.selectedRecord?.id == record.id, self.selectedRecord?.revision == record.revision else { return }
+            self.ruleUpdate = update ?? nil
+        }
+    }
+
+    /// Returns once the check of the open record against the current rules has ended.
+    func waitForRuleUpdateCheck() async {
+        await ruleUpdateTask?.value
+    }
+
     func presentOriginalViewer() {
         guard phase == .ready,
               !hasBlockingPresentation,
@@ -877,6 +916,7 @@ final class AppModel: ObservableObject {
         isOriginalLoading = false
         recordDetailState = .empty
         editingRecord = nil
+        reviewingRuleUpdate = nil
         viewingOriginal = nil
         dicomLibraryModel.select(nil)
     }
@@ -1008,6 +1048,25 @@ final class AppModel: ObservableObject {
     }
 
     func updateRecord(_ command: UpdateRecordCommand) async -> UpdateRecordResult {
+        await saveRecordChange(recordID: command.recordID) { try await $0.updateRecord(command) }
+    }
+
+    /// Saves the open rule update with the fields the user took; none still records the decision.
+    func applyRuleUpdate(accepting fields: Set<RecordRuleUpdate.Field>) async -> UpdateRecordResult {
+        guard let update = reviewingRuleUpdate else { return .failed }
+        let command = ApplyRuleUpdateCommand(
+            recordID: update.recordID,
+            expectedRevision: update.recordRevision,
+            extractionVersion: update.extractionVersion,
+            acceptedFields: fields
+        )
+        return await saveRecordChange(recordID: update.recordID) { try await $0.applyRuleUpdate(command) }
+    }
+
+    private func saveRecordChange(
+        recordID: HealthRecord.ID,
+        _ save: (any AppDataServicing) async throws -> AppSnapshot
+    ) async -> UpdateRecordResult {
         guard phase == .ready, !vaultLifecycleIsLocked else { return .failed }
         let epoch = appliedRevision
         func isCurrentLibrary() -> Bool {
@@ -1017,12 +1076,12 @@ final class AppModel: ObservableObject {
         do {
             let existingOriginal = originalDocument
             let existingSourceID = selectedOriginalSourceID
-            let snapshot = try await service.updateRecord(command)
+            let snapshot = try await save(service)
             guard isCurrentLibrary() else { return .failed }
             await applyAfterRevokingStaleDICOMViewers(snapshot, skippingUnchanged: true)
             guard isCurrentLibrary() else { return .failed }
             let request = UUID(); detailRequestID = request
-            let selection = try await readRecords([command.recordID])
+            let selection = try await readRecords([recordID])
             guard isCurrentLibrary(), request == detailRequestID, accepts(selection.revision) else { return .failed }
             detailLibraryRevision = selection.revision
             if let updatedRecord = selection.records.first {
@@ -1039,7 +1098,7 @@ final class AppModel: ObservableObject {
                 await applyAfterRevokingStaleDICOMViewers(snapshot)
                 guard isCurrentLibrary() else { return .failed }
                 let request = UUID(); detailRequestID = request
-                let selection = try await readRecords([command.recordID])
+                let selection = try await readRecords([recordID])
                 guard isCurrentLibrary(), request == detailRequestID, accepts(selection.revision) else { return .failed }
                 return .recordChanged(latest: selection.records.first)
             } catch {
@@ -1195,6 +1254,7 @@ final class AppModel: ObservableObject {
         isMemberEditorPresented = false
         editingMember = nil
         editingRecord = nil
+        reviewingRuleUpdate = nil
         viewingOriginal = nil
         isOriginalExportPresented = false
         originalExportModel.clear()
@@ -1563,6 +1623,8 @@ actor UnavailableAppService: AppDataServicing, DICOMAppServicing {
     ) async throws -> OriginalDocumentPayload { throw AppServiceError.vaultUnavailable }
     func confirmDraft(_ command: ConfirmDraftCommand) async throws -> AppSnapshot { throw AppServiceError.vaultUnavailable }
     func updateRecord(_ command: UpdateRecordCommand) async throws -> AppSnapshot { throw AppServiceError.vaultUnavailable }
+    func ruleUpdate(recordID: HealthRecord.ID) async throws -> RecordRuleUpdate? { throw AppServiceError.vaultUnavailable }
+    func applyRuleUpdate(_ command: ApplyRuleUpdateCommand) async throws -> AppSnapshot { throw AppServiceError.vaultUnavailable }
     func deleteRecord(id: HealthRecord.ID) async throws -> AppSnapshot { throw AppServiceError.vaultUnavailable }
     func deferDraft(_ command: DeferDraftCommand) async throws {
         throw AppServiceError.vaultUnavailable

@@ -224,6 +224,7 @@ struct RecordEditView: View {
                 sourceField(AppLocalization.string("科室"), text: $editor.department, source: editor.record.department)
                 sourceField(AppLocalization.string("报告类型"), text: $editor.reportType, source: editor.record.reportType)
                 sourceTextEditor(AppLocalization.string("检查结果（逐字）"), text: $editor.reportedResults, source: editor.record.reportedResults)
+                RecognitionSuggestionsPanel(text: $editor.reportedResults)
                 sourceTextEditor(AppLocalization.string("检查结论（逐字）"), text: $editor.conclusion, source: editor.record.conclusion)
                 if !editor.abnormalItems.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {

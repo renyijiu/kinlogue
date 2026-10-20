@@ -44,6 +44,9 @@ protocol TestLibraryServing: AppDataServicing {
 
 extension TestLibraryServing {
     func beforePage(query: String?, memberID: UUID?, cursor: LibraryQueryCursor?) async throws {}
+    // Fixtures keep no OCR blocks with their records, so the current rules have nothing to add.
+    func ruleUpdate(recordID: HealthRecord.ID) async throws -> RecordRuleUpdate? { nil }
+    func applyRuleUpdate(_ command: ApplyRuleUpdateCommand) async throws -> AppSnapshot { throw AppServiceError.recordChanged }
     func timelinePage(memberID: UUID?, cursor: LibraryQueryCursor?) async throws -> LibraryTimelinePage {
         let fixture = await queryFixture()
         try await beforePage(query: nil, memberID: memberID, cursor: cursor)
@@ -127,7 +130,7 @@ final class InterceptedReportStore: LibraryReportStoring {
     enum Call: Sendable, Equatable {
         case initializeLibrary, header, member, saveMember, deleteMember, draft, record, draftDisposition
         case recordSelection, reportPage, timelinePage, draftPage, reviewContent
-        case recordOriginal, draftOriginal, updateRecord, deleteRecord
+        case recordOriginal, draftOriginal, updateRecord, deleteRecord, recordDocument, updateRecordDocument
     }
     typealias Hook = @Sendable (Call) async throws -> Void
 
@@ -192,6 +195,17 @@ final class InterceptedReportStore: LibraryReportStoring {
     }
     func deleteRecord(_ id: UUID, expectedRevision: UInt64) async throws {
         try await call(.deleteRecord) { try await base.deleteRecord(id, expectedRevision: expectedRevision) }
+    }
+    func recordDocument(_ id: UUID) async throws -> (record: HealthRecord, document: ImportDraftDocument?) {
+        try await before(.recordDocument)
+        let value = try await base.recordDocument(id)
+        try await after(.recordDocument)
+        return value
+    }
+    func updateRecord(_ record: HealthRecord, expectedRevision: UInt64, document: ImportDraftDocument) async throws {
+        try await call(.updateRecordDocument) {
+            try await base.updateRecord(record, expectedRevision: expectedRevision, document: document)
+        }
     }
 }
 

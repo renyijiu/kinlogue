@@ -12,6 +12,8 @@ struct RecordDetailView: View {
     let onOpenOriginal: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    let ruleUpdate: RecordRuleUpdate?
+    let onReviewRuleUpdate: () -> Void
 
     init(
         record: HealthRecord?,
@@ -23,7 +25,9 @@ struct RecordDetailView: View {
         onSelectOriginalSource: @escaping (ReportSource.ID) -> Void = { _ in },
         onOpenOriginal: @escaping () -> Void,
         onEdit: @escaping () -> Void,
-        onDelete: @escaping () -> Void
+        onDelete: @escaping () -> Void,
+        ruleUpdate: RecordRuleUpdate? = nil,
+        onReviewRuleUpdate: @escaping () -> Void = {}
     ) {
         self.record = record
         self.memberLabel = memberLabel
@@ -35,6 +39,8 @@ struct RecordDetailView: View {
         self.onOpenOriginal = onOpenOriginal
         self.onEdit = onEdit
         self.onDelete = onDelete
+        self.ruleUpdate = ruleUpdate
+        self.onReviewRuleUpdate = onReviewRuleUpdate
     }
 
     var body: some View {
@@ -120,6 +126,10 @@ struct RecordDetailView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .kinlogueChip()
+            }
+
+            if let ruleUpdate, ruleUpdate.recordID == record.id {
+                RecordRuleUpdateNotice(update: ruleUpdate, onReview: onReviewRuleUpdate)
             }
 
             if let reportedResults = record.reportedResults {

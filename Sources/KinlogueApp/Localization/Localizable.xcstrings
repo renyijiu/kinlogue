@@ -8132,6 +8132,304 @@
           }
         }
       }
+    },
+    "还有 %lld 处匹配": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld more match"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld more matches"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%@，%@，%@，匹配的句子：%@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$@，%2$@，%3$@，匹配的句子：%4$@"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@, %2$@, %3$@, matching sentences: %4$@"
+          }
+        }
+      }
+    },
+    "%@：%@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$@：%2$@"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@: %2$@"
+          }
+        }
+      }
+    },
+    "可能的识别错误": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Possible recognition errors"
+          }
+        }
+      }
+    },
+    "以下按常见的识别误读找出，采纳前请对照原件。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Found by common recognition misreadings. Check the original before accepting."
+          }
+        }
+      }
+    },
+    "%@ → %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$@ → %2$@"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ → %2$@"
+          }
+        }
+      }
+    },
+    "%@：%@ 改为 %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%1$@：%2$@ 改为 %3$@"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@: %2$@ changed to %3$@"
+          }
+        }
+      }
+    },
+    "采纳": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accept"
+          }
+        }
+      }
+    },
+    "忽略": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignore"
+          }
+        }
+      }
+    },
+    "把检查结果里的这一格改成建议的写法": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes this cell of the findings to the suggested reading"
+          }
+        }
+      }
+    },
+    "保留识别出的写法": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keeps the recognized reading"
+          }
+        }
+      }
+    },
+    "按新规则重新整理": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update with Current Rules"
+          }
+        }
+      }
+    },
+    "下面的字段由当前的识别规则从这份报告保存的识别结果重新整理，没有重新识别原件。勾选的字段换成新规则的结果，没有勾选的保持不变。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These fields were read again by the current recognition rules from the recognition results saved with this report; the original was not recognized again. Ticked fields take the new reading, and the rest stay as they are."
+          }
+        }
+      }
+    },
+    "保存后这份报告不再提示，之后仍可以随时编辑。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "After saving, this report no longer shows the notice. You can still edit it at any time."
+          }
+        }
+      }
+    },
+    "全部保留": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep All"
+          }
+        }
+      }
+    },
+    "这份报告已在其他窗口中发生变化，请关闭后重新打开再整理。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This report changed in another window. Close this sheet and open it again to update."
+          }
+        }
+      }
+    },
+    "使用新规则的%@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "new",
+            "value": "使用新规则的%@"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the new reading of %@"
+          }
+        }
+      }
+    },
+    "你改过这一项，使用新规则会替换你的修改。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You changed this field. Using the new reading replaces your change."
+          }
+        }
+      }
+    },
+    "当前": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current"
+          }
+        }
+      }
+    },
+    "新规则": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Reading"
+          }
+        }
+      }
+    },
+    "（无）": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(None)"
+          }
+        }
+      }
+    },
+    "识别规则已更新": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recognition Rules Updated"
+          }
+        }
+      }
+    },
+    "按新规则，这份报告的%@可以重新整理。不会重新识别原件，也不会自动修改。": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "new",
+            "value": "按新规则，这份报告的%@可以重新整理。不会重新识别原件，也不会自动修改。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "With the current rules, this report's %@ can be read again. The original is not recognized again, and nothing changes on its own."
+          }
+        }
+      }
+    },
+    "查看": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review"
+          }
+        }
+      }
+    },
+    "逐项对照当前内容和新规则的结果": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compares each field with the new reading"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

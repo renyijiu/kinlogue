@@ -1713,6 +1713,20 @@
 - **测试**：Core 新增 1 项（表头居中、两表各带序号列），并在现有测试里补上按行前进、含换行或 NUL 的词、含空白的词的摘录、超长标题的摘录；Platform 缓存测试补上结果字段位置的摘要匹配、随报告清除、20,000 条上限和 `removeAll`。三处新断言先在未修复的代码上确认失败。主清单 1182 tests / 96 suites。
 - **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，完整 `scripts/test.sh` 退出码 0，主清单 1182 tests / 96 suites，隔离门禁一并通过；传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。近上限资料库的首页计时没有重测：摘录跳过字段的判断只对卡片显示的两三段文字做前缀比较，预计不改变 [搜索呈现测量](search-presentation-measurement-2026-10-14.md) 的结果，但这是推断。真实检验单版式上的边界效果仍未核对。
 
+## [2026-10-15] search/ocr/review | 叙述命中按句呈现，异常标记带上所在行，识别误读提示，已确认报告按新规则整理
+
+- **起因**：用户让再看看同类应用有什么可参考。同一帖子新增到 113 楼（[来源笔记](sources/2026-10-15-carehealth-thread-followup.md)），出现对比多份超声报告、OCR 加手工补录太繁琐的反馈。给出三条优化方案后，用户确认“按建议都做”，取舍见 [`decisions.md`](decisions.md) 2026-10-15 一节。
+- **叙述命中**：新增 [`SearchPassage`](../Sources/KinlogueCore/Domain/SearchPassage.swift)，按“。；;！!？?”切出含搜索词的句子，每句至多一次。[`SQLiteReportSearch.match`](../Sources/KinloguePlatform/Storage/SQLiteReportSearch.swift) 在没有命中行、而搜索词落在卡片没有显示的字段里时，确定检查结果与结论的位置（缓存从“结果字段位置”改为“结果与结论两个位置”，按搜索字段开头六个字段逐一对上），列出至多 3 句并计数；不再需要的 `LibraryReportSearchMatch.excerpt(term:fields:hiding:)` 改为只判断“卡片是否已显示该处命中”的 `shows`。卡片用与表格行相同的 Container 网格，字段名只在字段开始处写一次。
+- **抽取规则 version 7**：[`ReportCandidateExtractor`](../Sources/KinlogueCore/OCR/ReportCandidateExtractor.swift) 让表格行里的高低标记取整行作为异常标记，印在单独“提示”列里的标记也算，表格外的标记不变，全部按标记的阅读顺序排列。`candidateExtractorKeepsReportedLabRowsAsVerbatimResults` 原先断言这类行不产生异常标记，按新规则改为整行。
+- **识别误读提示**：新增 [`RecognitionSuggestion`](../Sources/KinlogueCore/OCR/RecognitionSuggestion.swift) 与 [`RecognitionSuggestionsPanel`](../Sources/KinlogueApp/Views/RecognitionSuggestionsPanel.swift)，复核页和已确认记录编辑页都在检查结果下显示；只覆盖端到端核对见过的三种误读，采纳才改动一格。
+- **按新规则整理**：新增 [`RecordRuleUpdate`](../Sources/KinlogueCore/Import/RecordRuleUpdate.swift)、`LibraryReportStoring.recordDocument` 与 `updateRecord(_:expectedRevision:document:)`、`LiveAppService.ruleUpdate/applyRuleUpdate`、`AppModel` 的检查与保存（`updateRecord` 与之共用 `saveRecordChange`），以及 [`RecordRuleUpdateView`](../Sources/KinlogueApp/Views/RecordRuleUpdateView.swift) 的提示和对照页。
+- **过程问题**：中途一次构建失败没有被发现：过滤编译错误的 grep 没有先去掉 ANSI 颜色码，随后 `--skip-build` 的测试跑的是旧二进制。此后每次构建都单独打印退出码，并在干净构建上重跑了全部相关测试。
+- **规模复测**：9,990 份报告（9,791 条已确认）的未改动合成库上，初版按句呈现让 `合成` 的首页 p50 比只做摘录多约 8 ms。改为只用前缀比较判断卡片是否已显示、在原文里直接截取已找到的命中、按 Unicode 标量找句末后，`合成` 多约 4.5 ms（p50 43.3 ms），只出现在叙述字段的 `偏高` 多不到 1 ms，其余查询相差在 2 ms 以内。`偏高` 的基线本身已高于 50 ms，与本次无关。方法、数字和边界见 [搜索呈现测量](search-presentation-measurement-2026-10-14.md#叙述命中按句呈现的复测2026-10-15)；环境变量开关、临时查询词和计时改动都已撤回，合成库已删除。
+- **视觉检查**：用临时离屏渲染测试看过叙述句子卡片、误读提示面板、规则更新提示和对照页（合成数据），之后删除了临时测试。
+- **测试**：新增 9 项：Core 5 项（句子切分、表格外标记与阅读顺序、误读规则两项、按新规则整理）、App 4 项（真实资料库上的按新规则整理、AppModel 提示与保存、两个编辑页与对照页的源码检查）；另在既有测试里补上叙述命中的集成断言、字段位置缓存改名、中英文案和 sheet 计数。主清单 1191 tests / 96 suites。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，完整 `scripts/test.sh` 退出码 0，主清单 1191 tests / 96 suites，隔离门禁一并通过；传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未验证**：三种识别误读规则和按句切分在真实报告上的命中与误报；按新规则整理在真实旧版资料库上的表现（只用合成 block 验证过）；对照页和误读面板的键盘、VoiceOver 与窄窗口；macOS 26 与安装后的 App。
+
 ## [2026-10-15] plan/assistant | 提议成员对话：调用本机已登录的 Codex / Claude Code CLI
 
 - **起因**：用户希望针对每一位成员引入模型对话，先接入本机已有的 Codex CLI 或 Claude Code CLI，让使用者以聊天方式了解这位成员的资料并提问，不作为诊断。本条只做规划，没有改代码。

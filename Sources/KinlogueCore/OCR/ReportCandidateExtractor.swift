@@ -61,7 +61,7 @@ public struct ReportCandidates: Codable, Equatable, Sendable {
 }
 
 public struct ReportCandidateExtractor: Sendable {
-    public static let extractionVersion = 6
+    public static let extractionVersion = 7
 
     private static let memberNameLabels = ["受检者姓名", "患者姓名", "病人姓名", "姓名"]
     private static let organizationLabels = [
@@ -229,7 +229,11 @@ public struct ReportCandidateExtractor: Sendable {
             excluding: numericOverlayBlockIDs
         )
         result.dateCandidates = dateCandidates(in: ordered, blocksByPage: blocksByPage)
-        result.reportedResults = reportedResults(in: ordered, blocksByPage: blocksByPage)
+        let table = resultTable(in: ordered, blocksByPage: blocksByPage)
+        if let table {
+            result.abnormalItems = abnormalItems(result.abnormalItems, rows: table.rows, ordered: ordered)
+        }
+        result.reportedResults = table?.field
             ?? sectionField(
                 in: ordered,
                 headings: Self.narrativeResultHeadings,
@@ -334,14 +338,15 @@ public struct ReportCandidateExtractor: Sendable {
         candidates.append(candidate)
     }
 
-    private func reportedResults(
+    private func resultTable(
         in ordered: [OCRBlock],
         blocksByPage: [Int: [OCRBlock]]
-    ) -> SourceField? {
+    ) -> ResultTable? {
         let headers = resultTableHeaders(in: ordered, blocksByPage: blocksByPage)
         guard !headers.isEmpty else { return nil }
         var lines: [String] = []
         var referencedBlocks: [OCRBlock] = []
+        var rows: [ResultTable.Row] = []
 
         for header in headers {
             let lowerBoundary = tableLowerBoundary(
@@ -379,16 +384,40 @@ public struct ReportCandidateExtractor: Sendable {
                     $0.boundingBox.x >= secondBoundary && !isPrintedMarker($0.text)
                 })
                 guard !item.isEmpty, !result.isEmpty else { continue }
-                lines.append([item, result, reference].filter { !$0.isEmpty }.joined(separator: "\t"))
+                let cells = [item, result, reference].filter { !$0.isEmpty }
+                lines.append(cells.joined(separator: "\t"))
                 referencedBlocks.append(contentsOf: row)
+                rows.append(ResultTable.Row(text: cells.joined(separator: " "), blocks: row))
             }
         }
 
-        guard !lines.isEmpty else { return nil }
-        return sourceField(
+        guard !lines.isEmpty, let field = sourceField(
             lines.joined(separator: "\n"),
             references: referencedBlocks.compactMap(sourceReference(for:))
-        )
+        ) else { return nil }
+        return ResultTable(field: field, rows: rows)
+    }
+
+    /// A printed marker inside a table row stands for the whole row: the item, its result with the
+    /// marker and its reference, so the list names what was marked. A marker printed alone in a
+    /// flag column counts too. Markers outside the table stay as they were found; all keep the
+    /// reading order of their first marker.
+    private func abnormalItems(_ found: [SourceField], rows: [ResultTable.Row], ordered: [OCRBlock]) -> [SourceField] {
+        let position = Dictionary(ordered.enumerated().map { ($1.id, $0) }, uniquingKeysWith: min)
+        var rowOfBlock: [OCRBlock.ID: Int] = [:]
+        for (index, row) in rows.enumerated() { for block in row.blocks { rowOfBlock[block.id] = index } }
+        var items: [(order: Int, field: SourceField)] = found.compactMap { field in
+            let blockIDs = field.references.compactMap(\.blockID)
+            guard !blockIDs.contains(where: { rowOfBlock[$0] != nil }) else { return nil }
+            return (blockIDs.compactMap { position[$0] }.min() ?? Int.max, field)
+        }
+        for row in rows {
+            let markers = row.blocks.filter { isPrintedMarker($0.text) }
+            guard !markers.isEmpty,
+                  let field = sourceField(row.text, references: row.blocks.compactMap(sourceReference(for:))) else { continue }
+            items.append((markers.compactMap { position[$0.id] }.min() ?? Int.max, field))
+        }
+        return items.indices.sorted { (items[$0].order, $0) < (items[$1].order, $1) }.map { items[$0].field }
     }
 
     private func resultTableHeaders(
@@ -810,6 +839,17 @@ public struct ReportCandidateExtractor: Sendable {
 private struct DateCandidateIdentity: Hashable {
     let date: Date
     let kind: ReportDateKind
+}
+
+private struct ResultTable {
+    struct Row {
+        /// The row's cells joined by spaces, as an abnormal item reads.
+        let text: String
+        let blocks: [OCRBlock]
+    }
+
+    let field: SourceField
+    let rows: [Row]
 }
 
 private struct ResultTableHeader {

@@ -771,6 +771,88 @@ struct LiveAppServiceTests {
     }
 
     @Test
+    func ruleUpdateBringsAConfirmedReportToTheCurrentRulesOnlyForTheFieldsTheUserTakes() async throws {
+        let fixture = try SQLiteAppQueryFixture()
+        defer { fixture.destroy() }
+        func cell(_ text: String, _ x: Double, _ y: Double) throws -> OCRBlock {
+            try OCRBlock(pageNumber: 1, text: text, boundingBox: NormalizedRect(x: x, y: y, width: 0.08, height: 0.02),
+                         confidence: 0.9, method: .vision, engineVersion: "synthetic")
+        }
+        let blocks = try [
+            cell("项目", 0.05, 0.82), cell("结果", 0.35, 0.82), cell("提示", 0.48, 0.82), cell("参考值", 0.6, 0.82),
+            cell("合成葡萄糖", 0.05, 0.79), cell("6.85", 0.35, 0.79), cell("↑", 0.49, 0.79), cell("3.89-6.11", 0.6, 0.79),
+            cell("合成胰岛素", 0.05, 0.76), cell("3.0", 0.35, 0.76), cell("1.9-23", 0.6, 0.76),
+        ]
+        // Recognized under older rules: the retained candidates read no table, and the user typed
+        // a title and confirmed nothing else.
+        let older = ImportDraftDocument(
+            blocks: blocks,
+            candidates: ReportCandidates(),
+            candidateExtractionVersion: ReportCandidateExtractor.extractionVersion - 1
+        )
+        let transaction = try await LiveServiceReviewDraft.make(fixture, document: older, original: Data([1, 2, 3, 4]))
+        let service = liveService(fixture)
+        _ = try await service.confirmDraft(ConfirmDraftCommand(
+            draftID: transaction.draft.id, expectedRevision: transaction.draft.revision, memberID: transaction.member.id,
+            timelineDateSelection: .unknown, title: "合成手写标题", organization: "", department: "", reportType: "",
+            reportedResults: "", conclusion: "", abnormalItems: [], userNote: ""
+        ))
+        let id = transaction.draft.id
+        let before = try await fixture.reports.record(id)
+
+        let update = try #require(try await service.ruleUpdate(recordID: id))
+        #expect(update.changes.map(\.field) == [.title, .reportedResults, .abnormalItems])
+        #expect(update.changes.map(\.replacesUserText) == [true, false, false])
+        #expect(update.recordRevision == before.revision)
+
+        // A revision or rules version other than the one the user saw changes nothing.
+        for (revision, version) in [(before.revision + 1, update.extractionVersion), (before.revision, update.extractionVersion - 1)] {
+            await #expect(throws: AppServiceError.recordChanged) {
+                _ = try await service.applyRuleUpdate(ApplyRuleUpdateCommand(
+                    recordID: id, expectedRevision: revision, extractionVersion: version, acceptedFields: [.reportedResults]
+                ))
+            }
+        }
+        #expect(try await fixture.reports.record(id) == before)
+
+        _ = try await service.applyRuleUpdate(ApplyRuleUpdateCommand(
+            recordID: id, expectedRevision: before.revision, extractionVersion: update.extractionVersion,
+            acceptedFields: [.reportedResults, .abnormalItems]
+        ))
+        let after = try await fixture.reports.record(id)
+        #expect(after.revision == before.revision + 1)
+        #expect(after.reportedResults?.transcription == "合成葡萄糖\t6.85 ↑\t3.89-6.11\n合成胰岛素\t3.0\t1.9-23")
+        #expect(after.reportedResults?.references.compactMap(\.blockID).count == 7)
+        #expect(after.abnormalItems.map(\.transcription) == ["合成葡萄糖 6.85 ↑ 3.89-6.11"])
+        #expect(after.title == before.title && after.memberID == before.memberID)
+
+        // The retained document now carries the current rules and the same blocks, so nothing more is offered.
+        let stored = try await fixture.reports.recordDocument(id)
+        let document = try #require(stored.document)
+        #expect(document.candidateExtractionVersion == ReportCandidateExtractor.extractionVersion)
+        #expect(document.blocks.map(\.text) == blocks.map(\.text))
+        #expect(document.candidates.reportedResults == after.reportedResults)
+        #expect(try await service.ruleUpdate(recordID: id) == nil)
+        // Search lists the table line the report now holds.
+        let page = try await fixture.reports.reportPage(query: "葡萄糖", memberID: nil, limit: 10, cursor: nil)
+        #expect(page.items.first?.matchedResultLines.map(\.cells) == [["合成葡萄糖", "6.85 ↑", "3.89-6.11"]])
+
+        // The library keeps the blocks and the revision order whatever the caller sends.
+        let next = try #require(RecordRuleUpdate.proposal(for: after, candidates: ReportCandidates(), extractionVersion: 99))
+            .applying([], to: after)
+        await #expect(throws: LibraryReportError.invalidDocument) {
+            try await fixture.reports.updateRecord(next, expectedRevision: after.revision, document: ImportDraftDocument(
+                blocks: Array(document.blocks.dropLast()), candidates: document.candidates,
+                candidateExtractionVersion: document.candidateExtractionVersion
+            ))
+        }
+        await #expect(throws: LibraryReportError.staleRevision) {
+            try await fixture.reports.updateRecord(next, expectedRevision: before.revision, document: document)
+        }
+        #expect(try await fixture.reports.record(id) == after)
+    }
+
+    @Test
     func confirmDraftKeepsWhatRecognitionReadBehindARestoredVariantCharacter() async throws {
         let fixture = try SQLiteAppQueryFixture()
         defer { fixture.destroy() }

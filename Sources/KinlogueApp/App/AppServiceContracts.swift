@@ -386,6 +386,15 @@ struct UpdateRecordCommand: Equatable, Sendable {
     let userNote: String
 }
 
+/// Brings a confirmed record to the current extraction rules: the fields in `acceptedFields` take
+/// the new candidates, the rest stay. The rules version and revision are those the user saw.
+struct ApplyRuleUpdateCommand: Equatable, Sendable {
+    let recordID: HealthRecord.ID
+    let expectedRevision: UInt64
+    let extractionVersion: Int
+    let acceptedFields: Set<RecordRuleUpdate.Field>
+}
+
 struct OriginalDocumentPayload: Equatable, Sendable {
     let data: Data
     let contentTypeIdentifier: String
@@ -437,6 +446,9 @@ protocol AppDataServicing: Sendable {
     ) async throws -> OriginalDocumentPayload
     func confirmDraft(_ command: ConfirmDraftCommand) async throws -> AppSnapshot
     func updateRecord(_ command: UpdateRecordCommand) async throws -> AppSnapshot
+    /// What the current extraction rules read differently from a confirmed record, or nil.
+    func ruleUpdate(recordID: HealthRecord.ID) async throws -> RecordRuleUpdate?
+    func applyRuleUpdate(_ command: ApplyRuleUpdateCommand) async throws -> AppSnapshot
     func deleteRecord(id: HealthRecord.ID) async throws -> AppSnapshot
     func deferDraft(_ command: DeferDraftCommand) async throws
     func discardDraft(_ command: DiscardDraftCommand) async throws -> AppSnapshot
