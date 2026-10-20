@@ -2026,3 +2026,9 @@
 - **`scripts/verify-app.sh --require-clean-source`**：通过，验证报告绑定 `dc50a2b`；本机 ad-hoc 签名，Developer ID 与公证未执行。
 - **`scripts/verify-assistant-xpc.sh`**：通过，11 项全部通过，包括本机 Codex 在签名沙盒 bridge 中通过能力检查、找到登录并列出模型与默认模型（只连本机模拟服务、不耗额度、不发送资料），以及取消与强杀 bridge 后没有残留进程。
 - **未执行**：经真实 Codex 的分层上下文包延迟与 token 测量；成员对话矩阵中的人工检查（未登录、未安装、代理与断网、键盘与 VoiceOver）；macOS 26 机器。本分支尚未合入 `main`，资料库已是 schema 版本 3 时，`main` 的构建会以“格式不受支持”拒绝它。
+
+## [2026-10-20] fix/ci | PR #25 在 Xcode 26.6 上编译失败：组字状态的辅助方法缺少主线程标注
+
+- **现象**：PR #25 的 “Lint and test” 在 CI（`macos-26` runner，Xcode 26.6 / Swift 6.3.3）编译失败：[`RecordEditView`](../Sources/KinlogueApp/Views/RecordEditView.swift) 中 `InsetTextEditor.Coordinator.reportComposition(of:)` 调用了主线程隔离的 `hasMarkedText()`。本机 Xcode 27.1 能编译。
+- **原因**：Xcode 27.1 的 SDK 让遵循 `NSTextViewDelegate` 的整个 coordinator 推断为主线程隔离；Xcode 26.6 只给协议里的回调这样推断，私有辅助方法因此是非隔离的。
+- **修正**：给只从委托回调调用的 `reportComposition(of:)` 显式加 `@MainActor`。本机只有 Xcode 27.1，无法复现 26.6 的编译，以 CI 的结果为准；本机编辑器相关测试 14 项、`lint.sh` 与 `git diff --check` 通过。

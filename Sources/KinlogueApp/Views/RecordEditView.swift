@@ -419,6 +419,9 @@ struct InsetTextEditor: NSViewRepresentable {
             reportComposition(of: textView)
         }
 
+        /// Called only from the delegate callbacks. Older SDKs isolate those callbacks to the main
+        /// actor but not the rest of the coordinator, so this says so itself.
+        @MainActor
         private func reportComposition(of textView: NSTextView) {
             let composing = textView.hasMarkedText()
             guard let isComposing, isComposing.wrappedValue != composing else { return }
