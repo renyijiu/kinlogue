@@ -2032,3 +2032,11 @@
 - **现象**：PR #25 的 “Lint and test” 在 CI（`macos-26` runner，Xcode 26.6 / Swift 6.3.3）编译失败：[`RecordEditView`](../Sources/KinlogueApp/Views/RecordEditView.swift) 中 `InsetTextEditor.Coordinator.reportComposition(of:)` 调用了主线程隔离的 `hasMarkedText()`。本机 Xcode 27.1 能编译。
 - **原因**：Xcode 27.1 的 SDK 让遵循 `NSTextViewDelegate` 的整个 coordinator 推断为主线程隔离；Xcode 26.6 只给协议里的回调这样推断，私有辅助方法因此是非隔离的。
 - **修正**：给只从委托回调调用的 `reportComposition(of:)` 显式加 `@MainActor`。本机只有 Xcode 27.1，无法复现 26.6 的编译，以 CI 的结果为准；本机编辑器相关测试 14 项、`lint.sh` 与 `git diff --check` 通过。
+
+## [2026-10-20] fix/ci | PR #25 的历史隐私门禁拒绝了测试里带登录信息的代理 URL
+
+- **现象**：PR #25 的 “Lint and test” 在 “Enforce privacy disclosures and fixture policy” 一步失败：`scripts/privacy-history-guard.sh --ref HEAD` 报告可达历史中有私钥或常见凭据模式。本机在分支上复现失败，在 `origin/main` 上通过。
+- **原因**：[`AssistantSettingsModelTests`](../Tests/KinlogueAppTests/AssistantSettingsModelTests.swift) 用一个带用户名和密码的合成本机代理 URL 检查“代理不得带登录信息”，命中门禁的“URL 内嵌登录信息”规则。它自 `3b49ecd` 起存在于两个版本的测试文件中，只改当前文件无法让历史扫描通过。
+- **修正**：测试改用只带用户名的本机代理 URL，模型仍由同一条检查（用户名或密码任一存在即拒绝）判为 `proxyCredentials`；没有改动门禁。经用户同意，用 `git filter-branch --index-filter` 只替换分支上（`origin/main..HEAD`）这两个版本的测试文件，提交说明、作者与时间不变，旧分支顶端为 `41ddc20`，之后以 `--force-with-lease` 推送。
+- **验证**：重写后的分支上 `privacy-history-guard.sh --ref HEAD` 与 `privacy-guard.sh` 通过，`AssistantSettingsModelTests` 5 项通过；重写前后分支顶端的差异只有这一行。`origin/main` 没有分支外的提交，CI 合并提交的树与分支顶端一致。
+- **仍需处理**：本机分支 `claude/member-chat-imaging-layer` 与 `claude/lan-restore-date-fix` 基于重写前的提交，推送前需要变基到新的分支顶端，否则会在同一门禁失败。
