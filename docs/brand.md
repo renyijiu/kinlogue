@@ -66,7 +66,7 @@ swift scripts/render-app-icon.swift packaging
 
 ## 方向（尚未实现）
 
-以下内容是 2026-10-11 记录的产品方向，**当前版本不包含其中任何能力**。在对应决策完成并落地之前，[`project-overview.md`](project-overview.md) 的“当前明确不做”和 [`../PRIVACY.md`](../PRIVACY.md) 的承诺继续有效。
+以下内容是 2026-10-11 记录的产品方向。其中模型问答的第一步已作为默认关闭的“AI 对话（实验）”实现（见下文）；运动数据和其余助手能力**仍未实现**。在对应决策完成并落地之前，[`project-overview.md`](project-overview.md) 的“当前明确不做”和 [`../PRIVACY.md`](../PRIVACY.md) 的承诺继续有效。
 
 **方向**：从健康记录整理延伸为健康助手。计划接入运动数据，并接入模型，让使用者以某一位成员的资料为上下文了解和询问健康信息。
 
@@ -76,6 +76,8 @@ swift scripts/render-app-icon.swift packaging
 2. 模型在本机运行还是联网调用。联网会改变“不连接互联网或云服务”的当前承诺。
 3. 模型输出如何保持在非诊断边界内，以及它与用户已确认的来源转录如何区分。
 4. `README.md`、`PRIVACY.md`、[`privacy-and-security.md`](privacy-and-security.md) 和相关验收脚本如何同步改写。
+
+第一步按 [成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 实现：只做模型问答，由使用者本机已登录的 Codex CLI 提供模型（Claude Code 留待后续），在用户开启并确认后联网发送一位成员的已确认报告。它回答了上面第 2、3 项，第 4 项的改写见 [`decisions.md`](decisions.md) 2026-10-16 一节；经真实 Codex 的 bridge 段检查已于 2026-10-16 用合成资料完成，界面上的人工检查尚未执行。这项能力仍是实验，下面的候选文案继续不用。
 
 **落地时采用的品牌约束**（推断，待届时确认）：
 

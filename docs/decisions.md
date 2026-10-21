@@ -20,7 +20,8 @@
 | DICOM exact 包的进程隔离 | DICOM-Swift 1.5.0 只链接进单独签名、无网络 entitlement、无 Vault-root 权限的 XPC Helper；主 App/Core/Platform 不 import/link `DicomCore`，只通过有界 Foundation IPC contract 交换一个只读 descriptor 与最小 DTO。 | [`2026-08-06-001`](plans/2026-08-06-001-feat-dicom-mri-viewer-plan.md) KTD1–KTD2、[`release 边界探针`](sources/2026-08-07-dicom-swift-1.3.3-release-boundary.md)、[1.5.0 依赖核对](sources/dicom-swift-1.5.0-dependency-review-2026-09-16.md) |
 | DICOM 是受限辅助能力 | DICOM 只帮助保存检查原件和查看明确支持的二维灰度 MR；不扩张为诊断、测量、PACS 或通用影像工作站。 | [`dicom.md`](dicom.md)、[`project-overview.md`](project-overview.md) |
 | 已确认影像只经时间线进入 | 已确认检查与报告共用成员时间线和右栏详情，侧边栏不设“医学影像”导航项；“只看影像”由时间线类型筛选承担。数据层隔离不变：影像仍不进入 OCR、搜索或比较。 | 用户 2026-10-11 决策、[`dicom.md`](dicom.md)、[`design-system.md`](design-system.md) |
-| 首发前 current-only | 项目未公开发布，只支持当前的 SQLite schema 与 ordering policy v2；开发期的 JSON 清单存储、v1/v2 reader/migrator、policy v1 和 predecessor/rollback 路径已删除。除恢复先前由用户明确发起、且已写入有效 durable deletion receipt 的整库删除外，旧开发 Vault、未知版本、未知非空目录和损坏布局继续非破坏性 fail closed；App 不自动迁移、覆盖或删除其字节，用户可在仓库外导出后手工重置。 | 用户 2026-08-12 决策、[`storage.md`](storage.md)、[`dicom.md`](dicom.md) |
+| 成员对话是唯一的外发例外 | 默认关闭。用户开启并按对话确认后，单独签名的沙盒 XPC bridge 启动用户本机已登录的 Codex，只经 stdin 发送一位成员的已确认报告投影与问答；模型没有工具，回答不进入时间线、搜索、比较或导出；对话保存在资料库并进入恢复点。主 App 的 entitlement 不变。 | [成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) D1–D8、E1–E2，[`PRIVACY.md`](../PRIVACY.md) |
+| 首发前 current-only | 项目未公开发布，只支持当前的 SQLite schema 与 ordering policy v2；唯一例外是 schema 版本 1 到 2 的迁移，只为保存成员对话（见下文 2026-10-16）；开发期的 JSON 清单存储、v1/v2 reader/migrator、policy v1 和 predecessor/rollback 路径已删除。除恢复先前由用户明确发起、且已写入有效 durable deletion receipt 的整库删除外，旧开发 Vault、未知版本、未知非空目录和损坏布局继续非破坏性 fail closed；App 不自动迁移、覆盖或删除其字节，用户可在仓库外导出后手工重置。 | 用户 2026-08-12 决策、[`storage.md`](storage.md)、[`dicom.md`](dicom.md) |
 
 ## [2026-09-16] 最低系统调整为 macOS 26
 
@@ -139,6 +140,65 @@
 
 **验证门禁**：定向测试与完整测试见 [`log.md`](log.md)，叙述命中的规模计时见 [搜索呈现测量](search-presentation-measurement-2026-10-14.md#叙述命中按句呈现的复测2026-10-15)。三种识别误读规则只来自合成核对，真实报告上的命中与误报没有核对；按新规则整理只用合成 block 验证过；键盘、VoiceOver 与窄窗口下的对照页仍属人工矩阵。
 
+## [2026-10-16] 成员对话：经用户本机 Codex 的外发例外
+
+**问题**：用户希望按家庭成员用对话方式了解和询问其资料（2026-10-15）。这要把报告内容发给模型服务，与“不连接互联网或云服务”的承诺冲突；还要决定外部 CLI 在哪个进程运行、发送什么、何时同意，以及回答能说什么。
+
+**选择**（用户 2026-10-15 确定计划第 9 节的 D1–D8、E1–E2；2026-10-16 要求按计划继续 U6，包括默认把 bridge 放进构建）：
+
+- 外发只经用户本机已安装并登录的 Codex，续页不内置模型服务或密钥；功能默认关闭，在设置中开启。首版只做 Codex（D6）。
+- 方案 A（D1）：单独签名、启用 App Sandbox 的 XPC bridge，加 `network.client`、本机回环 listener、`~/.codex/` 读写和 `/opt/homebrew/`、`/usr/local/` 只读例外；主 App 的 entitlement 不变。
+- 模型没有工具，只发送事先组好、可逐字预览的上下文包（D2）；同意按对话计，CLI、模型或上下文包变化即失效（D3）；机构名称默认不发送（D7）。
+- 允许按时间描述性地排列同一项目的原文结果并逐条引用，不做好转、恶化或正常与否的判断（D5）。这是与“当前不做趋势分析”的边界：排列原文属于呈现，判断属于趋势分析。
+- 只支持 Codex 自己登录的 OpenAI 账号，不加载用户的 Codex 配置（E2）；代理变量在设置中填写（E1），界面首版只提供一个代理地址字段，同时写入 `HTTPS_PROXY` 与 `HTTP_PROXY`。
+- 首版不保存对话（D4）；保存对话与资料库 v1→v2 迁移在 U7 单独发布（D8）。
+
+**未选择的替代方案**：主 App 直接启动 CLI——子进程继承主 App 的沙盒，读不到登录、没有出站网络，给主 App 加例外又会扩大主进程权限；非沙盒 helper（方案 B）——行为最可预测，但 helper 不受沙盒约束；内置锁定版本的 Codex 并自做授权（方案 C）——不复用用户已有登录，体积约 247 MB；反向 MCP 桥接（方案 D）——对话不在 App 内，外部进程要读 App 容器；让模型按需调用工具读取资料——D2 否决。
+
+**影响的代码/文档**：`Sources/KinlogueAssistant*/`、`KinlogueCore/Assistant`、`KinloguePlatform/Assistant`、App 的 `AssistantService`、对话与设置模型和界面；[`packaging/KinlogueAssistantBridge.entitlements`](../packaging/KinlogueAssistantBridge.entitlements)；`build-app.sh`、`verify-app.sh`、`package-distribution.sh`、`build-acceptance-app.sh`、`privacy-guard.sh`、`verify-assistant-xpc.sh`；README、PRIVACY、[`privacy-and-security.md`](privacy-and-security.md)、[`project-overview.md`](project-overview.md)、[`architecture.md`](architecture.md)、[`design-system.md`](design-system.md)、[`localization.md`](localization.md)、[`testing-and-release.md`](testing-and-release.md)、[`brand.md`](brand.md)、`AGENTS.md` 和[成员对话验收矩阵](acceptance/member-chat-matrix.md)。
+
+**迁移/回滚要求**：首版对话只在内存，设置在 App 偏好的 `assistant.*` 键；保存对话带来的 schema 迁移见下一节。已经发送给服务方的内容不能因回滚而撤回。
+
+**验证门禁**：自动化与未执行的人工门禁见[成员对话验收矩阵](acceptance/member-chat-matrix.md)。2026-10-16 经使用者同意，用真实 Codex 经签名沙盒 bridge 跑了完整一轮和 21 个合成边界问题，回答守住第 3.2 节边界（[来源笔记](sources/2026-10-16-member-chat-real-codex-check.md)）；这次检查发现并修正了沙盒改写 supervisor `HOME` 导致始终“未登录”的问题。App 界面上的人工检查、失败场景，以及 Developer ID 与公证下 temporary exception 的表现仍未执行。
+
+## [2026-10-16] 资料库第一次 schema 迁移：v1 到 v2，只为保存成员对话
+
+> **已被 2026-10-18 的决定取代**：首发前不再保留任何原地迁移，只认当前 schema，旧资料库经恢复点升级（见下一节）。本条只解释当时为什么做了迁移；它描述的迁移代码与测试已删除。
+
+**问题**：保存成员对话（计划 U7、D8）要在资料库里加表，而“首发前 current-only”规定只支持当前 schema，未知版本一律失败关闭、不迁移。用户的真实资料库已经是 schema 版本 1。
+
+**选择**（用户 2026-10-15 同意 D8，作为 current-only 的唯一例外；2026-10-16 要求实现 U7）：
+
+- 当前版本为 2；版本 1 只作为迁移输入，其他版本照旧失败关闭、不改写。版本 1 的 DDL 原样冻结在代码里，只用于校验迁移输入。
+- 普通打开时，在单实例 owner 下、普通服务开始之前，先按版本 1 做完整校验，再在单个事务里只新增三张对话表、写 `user_version = 2`、更新 `library_state` 的 schema identity 及该行摘要；不读取、不改写其他行，也不碰原件。提交后按版本 2 重新校验。
+- 恢复点的逻辑流升到版本 2，reader 同时接受版本 1；版本 1 恢复点恢复为没有对话的版本 2 资料库。
+- 迁移只建空表，耗时与资料库大小无关，因此没有单独的“正在升级”启动页，也不自动备份；建议在升级前手动做一次恢复点。
+
+**未选择的替代方案**：单独的对话数据库文件——不需要迁移，但对话和记录不在同一事务里，默认也不进入恢复点；继续只在内存里保存——不满足 D8。
+
+**迁移/回滚要求**：迁移后更早的构建打不开这个资料库（照旧以“格式不受支持”失败关闭、不改写），也读不了版本 2 恢复点。需要回到旧构建时，只能用迁移前的恢复点在旧构建中恢复。
+
+**验证门禁**（当时；相应测试与冻结的版本 1 资料库已于 2026-10-18 随迁移删除）：`SQLiteSchemaMigrationTests` 用 2026-10-16 由迁移前代码写出并冻结的版本 1 资料库：已有行逐行不变、`library_state` 只有 identity 与摘要变化、未知版本与带漂移的版本 1 不被改写、四个中断点（含真实进程强退）之后只剩完整的版本 1 或版本 2；两个版本 1 和一个版本 2 冻结逻辑流可以恢复。真实资料库上的迁移没有在测试中执行。
+
+## [2026-10-18] 资料库 schema 版本 3，首发前不做原地迁移
+
+**问题**：[分层上下文包](plans/2026-10-18-feat-member-chat-layered-context-plan.md)让包内编号覆盖最多 300 份报告，一轮回答可能引用超过 20 份；但 schema 版本 2 的 `assistant_turn_sources` 用 `CHECK(position < 20)` 写死了每轮最多 20 个来源，超过时保存会失败、这一轮回答丢失。用户的真实资料库已经是版本 2。
+
+**选择**（用户 2026-10-18）：
+
+- 先选择“现在升 schema”，而不是保持 20 并把超出的引用显示为“未保存来源”。随后用户提出 App 还没发布、可以去掉迁移逻辑，选择简化：首发前**只认当前 schema**，不保留任何原地迁移。2026-10-16 为保存对话所做的 v1→v2 迁移一并撤销，回到原有的“首发前 current-only”。
+- 当前版本为 3，每轮来源上限 `AssistantLimits.maxTurnSources` 为 300，与目录上限一致。版本 1、2 以及未知版本的资料库一律“格式不受支持”失败关闭，不改写、不删除；启动页照旧只提供“从恢复点恢复”。
+- **恢复点是唯一的升级途径**：在旧构建里做一次恢复点，在新构建的启动页从它恢复。逻辑流升到版本 3（记录种类与版本 2 相同），reader 继续接受版本 1 至 3；版本 2 流里每轮超过 20 个来源视为无效流。首发前以后的 schema 变化同样走这条路，不再写迁移代码。
+
+**未选择的替代方案**：
+
+- 原地迁移（v1、v2 都迁到 v3）——已经实现并通过测试，但需要冻结每个旧版本的 DDL 和资料库夹具、故障注入点与真实进程强退测试；首发前每次 schema 变化都要重复一遍。只有作者自己在用，恢复点路径足够。
+- 保持 20 个来源——不动 schema，但分层上下文包正是为“列出历年结果”这类会引用多份报告的问题而做，降级会经常出现。
+
+**迁移/回滚要求**：没有原地迁移。已有的版本 1、2 资料库需要先用旧构建做恢复点，再在新构建中恢复；恢复会整根替换资料库目录。更早的构建打不开版本 3 资料库，也读不了版本 3 恢复点；需要回到旧构建时，只能用旧构建写的恢复点在旧构建中恢复。
+
+**验证门禁**：[`SQLiteLibraryStoreTests`](../Tests/KinloguePlatformTests/SQLiteLibraryStoreTests.swift) 核对版本 1、2 和更新的版本都以“格式不受支持”被拒且字节不变；冻结的版本 1、版本 2 逻辑流照常恢复到版本 3 资料库并以版本 3 重新写出同样的记录；[`AssistantConversationStoreTests`](../Tests/KinloguePlatformTests/AssistantConversationStoreTests.swift) 核对各版本流的来源上限。
+
 ## 已被 supersede 的早期决策
 
 [`2026-08-01-001-feat-kinlogue-macos-vault-plan.md`](plans/2026-08-01-001-feat-kinlogue-macos-vault-plan.md) 早期计划曾以“加密 Vault、Keychain、加密 backup/restore”为 MVP 方向；它已被明文 MVP 计划的 `supersedes` 字段覆盖。它仍然保留 threat model、早期 target 规划和未来安全升级的背景，但不能作为当前代码或隐私文案的事实来源。
@@ -160,7 +220,7 @@
 3. 锁屏、屏保、睡眠、快速用户切换、网络路径变化、退出/唤醒的安装后人工回执。
 4. 真实私有样本 OCR 抽检与键盘/VoiceOver 检查。
 5. 未来是否加入应用层加密、Keychain、可验证明文到加密迁移、备份/恢复或云同步；在决策完成前保持当前边界。
-6. 是否以及如何引入运动数据和模型问答（数据来源、本机或联网、非诊断边界、隐私承诺改写）；在决策完成前，HealthKit、互联网服务、趋势分析和诊断性输出继续属于当前明确不做。待决事项见 [`brand.md`](brand.md)。
+6. 是否以及如何引入运动数据（数据来源、本机或联网、隐私承诺改写），以及模型问答在首版之后的扩展（U7 保存对话、Claude Code、本机模型、按问题检索）。首版成员对话见上面 2026-10-16 的决策和[成员对话验收矩阵](acceptance/member-chat-matrix.md)，其中界面与失败场景的人工门禁尚未执行。在对应决策完成前，HealthKit、趋势分析和诊断性输出继续属于当前明确不做；其余待决事项见 [`brand.md`](brand.md)。
 
 ## 决策更新规则
 

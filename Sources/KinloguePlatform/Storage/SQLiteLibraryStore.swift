@@ -28,8 +28,7 @@ package struct SQLiteLibraryState: Equatable, Sendable {
 
     var contentHash: Data {
         SQLiteContentHash.hash(domain: "library_state:1", values: [
-            .blob(libraryID.sqliteBytes), .integer(generation), .blob(commitID.sqliteBytes),
-            .blob(SQLiteLibrarySchema.identity)
+            .blob(libraryID.sqliteBytes), .integer(generation), .blob(commitID.sqliteBytes), .blob(SQLiteLibrarySchema.identity)
         ])
     }
 
@@ -356,7 +355,7 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
         }
         let opened = try DatabaseQueue(path: databaseURL.path, configuration: configuration)
         do {
-            let needsSchema = try opened.read { db in
+            let needsSchema = try opened.read { db -> Bool in
                 if initializing,
                    try Int.fetchOne(db, sql: "PRAGMA application_id") == 0,
                    try Int.fetchOne(db, sql: "PRAGMA user_version") == 0 {
@@ -424,6 +423,7 @@ package final class SQLiteLibraryStore: @unchecked Sendable {
     private func failInitialization(_ point: SQLiteInitializationFaultPoint) throws {
         if initializationFault?(point) == true { throw SQLiteLibraryError.injectedFailure }
     }
+
 
     func syncDirectory(_ url: URL) throws {
         let descriptor = Darwin.open(url.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)

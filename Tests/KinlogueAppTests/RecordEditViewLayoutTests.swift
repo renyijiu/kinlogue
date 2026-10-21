@@ -195,6 +195,46 @@ struct RecordEditViewLayoutTests {
         #expect(textView.isSelectable)
     }
 
+    /// An input method's uncommitted text is not in the binding yet; an editor that shows a hint
+    /// learns from `isComposing` that the field is not empty.
+    @Test
+    func insetTextEditorReportsInputMethodComposition() throws {
+        let state = InsetTextEditorState(text: "", isEnabled: true)
+        let hostingView = NSHostingView(rootView: InsetTextEditorHarness(state: state))
+        hostingView.frame = NSRect(x: 0, y: 0, width: 320, height: 100)
+        let window = NSWindow(contentRect: hostingView.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = hostingView
+        window.alphaValue = 0
+        window.orderBack(nil)
+        settle(hostingView)
+        defer {
+            hostingView.window?.orderOut(nil)
+            hostingView.window?.contentView = nil
+        }
+
+        let textView = try #require(viewDescendants(of: hostingView).compactMap { $0 as? NSTextView }.first)
+        window.makeFirstResponder(textView)
+        #expect(!state.isComposing)
+        textView.setMarkedText("pin", selectedRange: NSRange(location: 3, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        settle(hostingView)
+        #expect(state.isComposing)
+        // The update that `isComposing` causes must not write the binding over the uncommitted text.
+        #expect(textView.hasMarkedText())
+        #expect(textView.string == "pin")
+
+        textView.insertText("拼", replacementRange: NSRange(location: NSNotFound, length: 0))
+        settle(hostingView)
+        #expect(!state.isComposing)
+        #expect(state.text == "拼")
+
+        textView.setMarkedText("yin", selectedRange: NSRange(location: 3, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        settle(hostingView)
+        #expect(state.isComposing)
+        textView.unmarkText()
+        settle(hostingView)
+        #expect(!state.isComposing)
+    }
+
     @Test
     func appShellPassesTheSelectedOriginalIntoTheRecordEditor() throws {
         let source = try String(contentsOf: appShellSourceURL, encoding: .utf8)
@@ -306,6 +346,7 @@ struct RecordEditViewLayoutTests {
 private final class InsetTextEditorState: ObservableObject {
     @Published var text: String
     @Published var isEnabled: Bool
+    @Published var isComposing = false
 
     init(text: String, isEnabled: Bool) {
         self.text = text
@@ -320,7 +361,8 @@ private struct InsetTextEditorHarness: View {
         InsetTextEditor(
             text: $state.text,
             accessibilityLabel: "Bridge label",
-            accessibilityHelp: "Bridge help"
+            accessibilityHelp: "Bridge help",
+            isComposing: $state.isComposing
         )
         .disabled(!state.isEnabled)
         .frame(width: 320, height: 100)

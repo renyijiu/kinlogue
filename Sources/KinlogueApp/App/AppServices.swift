@@ -12,6 +12,8 @@ struct LiveAppServiceEnvironment: Sendable {
     let dicomImportMetrics: DICOMImportMetricsRecorder?
     let lifecycle: LibraryLifecycleCoordinator
     var commitChanges: (@Sendable () -> AsyncStream<LibraryRevision>)? = nil
+    /// The reports member chat reads; nil leaves member chat out of the composition.
+    var assistantLibrary: (any AssistantLibraryReading & AssistantConversationStoring)? = nil
 
     @concurrent
     static func makeOpened(identity: AppRuntimeIdentity, store: SQLiteLibraryStore,
@@ -32,7 +34,7 @@ struct LiveAppServiceEnvironment: Sendable {
                     underlying: SQLiteVaultDestroyService(store: store)),
                 lanInboxService: try LiveLANInboxService(store: store, lifecycle: lifecycle),
                 dicomSliceServiceFactory: { DICOMSliceService(repository: studies) }, dicomImportMetrics: metrics,
-                lifecycle: lifecycle, commitChanges: { store.changes() })
+                lifecycle: lifecycle, commitChanges: { store.changes() }, assistantLibrary: reports)
         }
     }
 }

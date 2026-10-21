@@ -2,22 +2,30 @@ import CryptoKit
 import Foundation
 import KinlogueCore
 
-/// Fixed v1 framing. A segment boundary may bisect a record; declared lengths are checked before allocation.
+/// Fixed framing. A segment boundary may bisect a record; declared lengths are checked before allocation.
+/// The header's version decides which kinds may appear and how many counts the footer carries.
 enum SQLiteLogicalStream {
+    /// Bytes from the footer tag to the end: tag, one count per kind, length, digest.
+    static func footerByteCount(version: Int) -> Int { 1 + 4 * BackupLogicalKind.kinds(forVersion: version).count + 8 + 32 }
     static let magic = Data("KLGLOG01".utf8)
     static func integer<T: FixedWidthInteger>(_ value: T) -> Data { var value = value.bigEndian; return withUnsafeBytes(of: &value) { Data($0) } }
     static func number<T: FixedWidthInteger>(_ data: Data, _: T.Type) -> T { data.reduce(0) { ($0 << 8) | T($1) } }
     final class Writer {
         private let write: (Data) throws -> Void
         private var hash = SHA256()
-        private var counts = Array(repeating: UInt32(0), count: BackupLogicalKind.allCases.count)
+        private let kinds: [BackupLogicalKind]
+        private var counts: [UInt32]
         private var bytes: UInt64 = 0
         private var previous: (UInt8, Data)?
         private var finished = false
         init(header: BackupLogicalHeaderV1, write: @escaping (Data) throws -> Void) throws {
             self.write = write
+            kinds = BackupLogicalKind.kinds(forVersion: header.version)
+            counts = Array(repeating: 0, count: kinds.count)
             let encoded = try CanonicalVaultJSON.encode(header)
-            guard header.version == 1, encoded.count <= 1_024 else { throw SQLiteLogicalBackupError.unsupportedVersion }
+            guard BackupLogicalHeaderV1.supportedVersions.contains(header.version), encoded.count <= 1_024 else {
+                throw SQLiteLogicalBackupError.unsupportedVersion
+            }
             try appendBytes(SQLiteLogicalStream.magic + SQLiteLogicalStream.integer(UInt32(encoded.count)) + encoded)
         }
         private func appendBytes(_ data: Data) throws {
@@ -25,11 +33,11 @@ enum SQLiteLogicalStream {
             try write(data); hash.update(data: data); bytes += UInt64(data.count)
         }
         func append(_ record: SQLiteLogicalRecord) throws {
+            guard let index = kinds.firstIndex(of: record.kind) else { throw SQLiteLogicalBackupError.invalidStream }
             guard !finished, record.key.count == (record.kind == .archiveReceipt ? 32 : 16),
                   record.payload.count <= record.kind.maximumPayloadBytes else { throw SQLiteLogicalBackupError.resourceLimit }
             let tag = record.kind.rawValue
             if let previous { guard tag > previous.0 || (tag == previous.0 && previous.1.lexicographicallyPrecedes(record.key)) else { throw SQLiteLogicalBackupError.invalidStream } }
-            let index = Int(tag) - 1
             guard counts[index] < record.kind.maximumCount else { throw SQLiteLogicalBackupError.resourceLimit }
             counts[index] += 1; previous = (tag, record.key)
             try appendBytes(Data([tag, UInt8(record.key.count)]) + record.key + SQLiteLogicalStream.integer(UInt32(record.payload.count)))
@@ -45,7 +53,7 @@ enum SQLiteLogicalStream {
     }
     static func read(byteCount: Int, read: (Int, Int) throws -> Data, receiveHeader: (BackupLogicalHeaderV1) throws -> Void = { _ in },
                      consume: (SQLiteLogicalRecord) throws -> Void) throws -> BackupLogicalHeaderV1 {
-        var offset = 0, hash = SHA256(), counts = Array(repeating: UInt32(0), count: BackupLogicalKind.allCases.count)
+        var offset = 0, hash = SHA256()
         var previous: (UInt8, Data)?
         func take(_ count: Int, hashing: Bool = true) throws -> Data {
             guard count >= 0, offset <= byteCount, count <= byteCount - offset else { throw SQLiteLogicalBackupError.invalidStream }
@@ -59,7 +67,11 @@ enum SQLiteLogicalStream {
         let headerBytes = try take(headerLength)
         let header = try CanonicalVaultJSON.decode(BackupLogicalHeaderV1.self, from: headerBytes)
         guard try CanonicalVaultJSON.encode(header) == headerBytes else { throw SQLiteLogicalBackupError.invalidStream }
-        guard header.version == 1, header.generation >= 0 else { throw SQLiteLogicalBackupError.unsupportedVersion }
+        guard BackupLogicalHeaderV1.supportedVersions.contains(header.version), header.generation >= 0 else {
+            throw SQLiteLogicalBackupError.unsupportedVersion
+        }
+        let kinds = BackupLogicalKind.kinds(forVersion: header.version)
+        var counts = Array(repeating: UInt32(0), count: kinds.count)
         try receiveHeader(header)
         while true {
             try Task.checkCancellation()
@@ -74,13 +86,14 @@ enum SQLiteLogicalStream {
                 return header
             }
             hash.update(data: Data([tag]))
-            guard let kind = BackupLogicalKind(rawValue: tag) else { throw SQLiteLogicalBackupError.unsupportedVersion }
+            guard let kind = BackupLogicalKind(rawValue: tag), let index = kinds.firstIndex(of: kind) else {
+                throw SQLiteLogicalBackupError.unsupportedVersion
+            }
             let keyLength = Int(try take(1)[0])
             guard keyLength == (kind == .archiveReceipt ? 32 : 16) else { throw SQLiteLogicalBackupError.invalidStream }
             let key = try take(keyLength)
             if let previous { guard tag > previous.0 || (tag == previous.0 && previous.1.lexicographicallyPrecedes(key)) else { throw SQLiteLogicalBackupError.invalidStream } }
             let length = Int(try number(take(4), UInt32.self))
-            let index = Int(tag) - 1
             guard length <= kind.maximumPayloadBytes, counts[index] < kind.maximumCount else { throw SQLiteLogicalBackupError.resourceLimit }
             counts[index] += 1; previous = (tag, key)
             try consume(SQLiteLogicalRecord(kind: kind, key: key, payload: take(length)))

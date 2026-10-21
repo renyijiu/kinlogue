@@ -13,6 +13,9 @@ struct AppComposition {
     let processingCoordinator: AppProcessingCoordinator
     var libraryObserver: AppLibraryObservationCoordinator? = nil
     var integrityCoordinator: AppIntegrityCoordinator? = nil
+    /// Member chat; present when the services provide a library for it.
+    var assistantModel: AssistantConversationModel? = nil
+    var assistantSettings: AssistantSettingsModel? = nil
 
     /// The composition on an opened SQLite library. `LibraryLaunchCoordinator` is its only caller.
     static func makeOpened(identity: AppRuntimeIdentity, services: LiveAppServiceEnvironment,
@@ -34,6 +37,16 @@ struct AppComposition {
         database: SQLiteLibraryStore? = nil
     ) -> Self {
         let dicomViewerRegistry = DICOMViewerRegistry()
+        let assistantSettings = AssistantSettingsStore()
+        let assistantService = services.assistantLibrary.map {
+            LiveAssistantService.overXPC(library: $0, lifecycle: services.lifecycle)
+        }
+        let assistantModel = assistantService.map { service in
+            AssistantConversationModel(service: service, settings: { assistantSettings.settings })
+        }
+        let assistantSettingsModel = assistantService.map { service in
+            AssistantSettingsModel(store: assistantSettings, service: service, conversation: assistantModel)
+        }
         let appModel = AppModel(
             service: services.dataService,
             originalExportService: services.originalExportService,
@@ -67,8 +80,9 @@ struct AppComposition {
         let inspection = database.map { database in
             AppIntegrityCoordinator(store: database, lifecycle: services.lifecycle, onCompleted: { [weak appModel, weak lanInboxModel] in
                 await appModel?.refresh(); await lanInboxModel?.refresh()
-            }, onUnsafe: { [weak appModel, weak lanInboxModel] in
+            }, onUnsafe: { [weak appModel, weak lanInboxModel, weak assistantModel] in
                 lanInboxModel?.beginDestructiveVaultLifecycle()
+                assistantModel?.beginDestructiveVaultLifecycle()
                 async let revocation: Void = services.lifecycle.revoke()
                 await appModel?.beginDestructiveVaultLifecycle()
                 await revocation
@@ -84,16 +98,19 @@ struct AppComposition {
                 await appModel.refresh(skippingUnchanged: true)
                 await lanInboxModel?.refresh()
                 return appModel.currentLibraryRevision
-            }, onDurableChange: { [weak backupModel = backup.backupModel] in
+            }, onDurableChange: { [weak backupModel = backup.backupModel, weak assistantModel] in
                 await inspection?.libraryChanged()
                 await backupModel?.handleAppEvent(.mutation)
+                await assistantModel?.libraryChanged()
             })
         }
         let observationRegistrationID = UUID()
+        let assistantRegistrationID = UUID()
         let restoreModel = makeRestoreModel(
             service: backup.restoreService,
             appModel: appModel,
-            lanInboxModel: lanInboxModel, libraryObserver: observer
+            lanInboxModel: lanInboxModel, libraryObserver: observer,
+            assistantModel: assistantModel
         )
         let destroyService = BackupCoordinatedVaultDestroyService(
             operationCoordinator: backup.liveBackup.operationCoordinator,
@@ -109,6 +126,10 @@ struct AppComposition {
                 guard let appModel else { return false }
                 if let observer {
                     do { try await services.lifecycle.register(id: observationRegistrationID) { await observer.stop() } }
+                    catch { return false }
+                }
+                if let assistantService {
+                    do { try await services.lifecycle.register(id: assistantRegistrationID) { await assistantService.revoke() } }
                     catch { return false }
                 }
                 observer?.install()
@@ -137,13 +158,15 @@ struct AppComposition {
             deletionModel: deletionModel(
                 destroyService: destroyService,
                 appModel: appModel,
-                lanInboxModel: lanInboxModel, libraryObserver: observer
+                lanInboxModel: lanInboxModel, libraryObserver: observer,
+                assistantModel: assistantModel
             ),
             lanInboxModel: lanInboxModel,
             backupModel: backup.backupModel,
             restoreModel: restoreModel,
             startupCoordinator: startup,
-            processingCoordinator: processing, libraryObserver: observer, integrityCoordinator: inspection
+            processingCoordinator: processing, libraryObserver: observer, integrityCoordinator: inspection,
+            assistantModel: assistantModel, assistantSettings: assistantSettingsModel
         )
     }
 
@@ -199,13 +222,15 @@ struct AppComposition {
         destroyService: any VaultDestroyServicing,
         appModel: AppModel,
         lanInboxModel: LANInboxModel,
-        libraryObserver: AppLibraryObservationCoordinator? = nil
+        libraryObserver: AppLibraryObservationCoordinator? = nil,
+        assistantModel: AssistantConversationModel? = nil
     ) -> VaultDeletionModel {
         VaultDeletionModel(
             destroyService: destroyService,
-            onDeletionBegan: { [weak appModel, weak lanInboxModel] in
+            onDeletionBegan: { [weak appModel, weak lanInboxModel, weak assistantModel] in
                 await libraryObserver?.stop()
                 lanInboxModel?.beginDestructiveVaultLifecycle()
+                assistantModel?.beginDestructiveVaultLifecycle()
                 await appModel?.beginDestructiveVaultLifecycle()
             },
             onVaultDeleted: { [weak appModel] in appModel?.finishVaultDeletion() },
@@ -220,14 +245,16 @@ struct AppComposition {
         appModel: AppModel,
         lanInboxModel: LANInboxModel,
         securityScope: any RestoreFileSecurityScope = SystemRestoreFileSecurityScope(),
-        libraryObserver: AppLibraryObservationCoordinator? = nil
+        libraryObserver: AppLibraryObservationCoordinator? = nil,
+        assistantModel: AssistantConversationModel? = nil
     ) -> RestoreModel {
         RestoreModel(
             service: service,
             securityScope: securityScope,
-            onReplacementBegan: { [weak appModel, weak lanInboxModel] in
+            onReplacementBegan: { [weak appModel, weak lanInboxModel, weak assistantModel] in
                 await libraryObserver?.stop()
                 lanInboxModel?.beginDestructiveVaultLifecycle()
+                assistantModel?.beginDestructiveVaultLifecycle()
                 await appModel?.beginDestructiveVaultLifecycle()
             },
             onReplacementEnded: { [weak appModel] in

@@ -3,6 +3,14 @@ import Foundation
 // The payload version is independent of the SQLite schema and encrypted-container capacity version.
 package enum BackupLogicalKind: UInt8, CaseIterable, Sendable {
     case member = 1, original, reportDocument, lanDocument, report, draft, inbox, terminal, receipt, archiveReceipt, dicom
+    /// Logical version 2: one record per saved member chat, holding its turns and their sources.
+    case assistantConversation
+
+    /// The kinds a stream of `version` may contain; the footer counts exactly these.
+    package static func kinds(forVersion version: Int) -> [BackupLogicalKind] {
+        version >= 2 ? allCases : allCases.filter { $0 != .assistantConversation }
+    }
+
     package var maximumCount: Int {
         switch self {
         case .member: 256
@@ -11,6 +19,7 @@ package enum BackupLogicalKind: UInt8, CaseIterable, Sendable {
         case .report, .draft: 20_000
         case .lanDocument, .inbox, .terminal, .receipt, .archiveReceipt: 5_000
         case .dicom: 256
+        case .assistantConversation: 256 * AssistantLimits.maxConversationsPerMember
         }
     }
     package var maximumPayloadBytes: Int {
@@ -20,14 +29,26 @@ package enum BackupLogicalKind: UInt8, CaseIterable, Sendable {
     }
 }
 
+/// The stream header. Version 1 is the original format; version 2 adds saved member chats; version 3
+/// lets a saved turn keep up to `AssistantLimits.maxTurnSources` sources instead of 20, matching
+/// library schema v3. Writers produce the current version; readers accept every version, since a
+/// restore point is how an older library reaches the current schema.
 package struct BackupLogicalHeaderV1: Codable, Equatable, Sendable {
+    package static let currentVersion = 3
+    package static let supportedVersions = 1...3
+
     package let version: Int
     package let libraryID: UUID
     package let generation: Int64
     package let commitID: UUID
-    package init(libraryID: UUID, generation: Int64, commitID: UUID) throws {
-        guard generation >= 0 else { throw BackupContractError.invalidField }
-        version = 1; self.libraryID = libraryID; self.generation = generation; self.commitID = commitID
+    /// Sources one saved turn may keep in a stream of `version`: 20 before version 3.
+    package static func maximumTurnSources(forVersion version: Int) -> Int {
+        version >= 3 ? AssistantLimits.maxTurnSources : 20
+    }
+
+    package init(version: Int = currentVersion, libraryID: UUID, generation: Int64, commitID: UUID) throws {
+        guard generation >= 0, Self.supportedVersions.contains(version) else { throw BackupContractError.invalidField }
+        self.version = version; self.libraryID = libraryID; self.generation = generation; self.commitID = commitID
     }
 }
 

@@ -138,6 +138,11 @@ TARGET_DICOM_HELPER="$TARGET_APP/Contents/XPCServices/KinlogueDICOMDecoderHelper
   || fail "the copied release bundle lost its DICOM Helper"
 /usr/bin/codesign --verify --strict "$TARGET_DICOM_HELPER" \
   || fail "the copied DICOM Helper no longer has its verified signature"
+TARGET_ASSISTANT_BRIDGE="$TARGET_APP/Contents/XPCServices/KinlogueAssistantBridge.xpc"
+[[ -d "$TARGET_ASSISTANT_BRIDGE" && ! -L "$TARGET_ASSISTANT_BRIDGE" ]] \
+  || fail "the copied release bundle lost its assistant bridge"
+/usr/bin/codesign --verify --strict "$TARGET_ASSISTANT_BRIDGE" \
+  || fail "the copied assistant bridge no longer has its verified signature"
 /usr/bin/codesign --verify --strict "$TARGET_APP" \
   || fail "the copied release bundle no longer has its verified signature"
 COPIED_BUNDLE_HASH="$(bundle_hash "$TARGET_APP" "$COPIED_BUNDLE_MANIFEST")"
@@ -163,6 +168,7 @@ COPIED_EXECUTABLE_HASH="$(/usr/bin/shasum -a 256 -- "$TARGET_EXECUTABLE" | /usr/
   --entitlements "$ENTITLEMENTS_FILE" \
   "$TARGET_APP"
 /usr/bin/codesign --verify --strict "$TARGET_DICOM_HELPER"
+/usr/bin/codesign --verify --strict "$TARGET_ASSISTANT_BRIDGE"
 /usr/bin/codesign --verify --strict "$TARGET_APP"
 /usr/bin/codesign -d --verbose=4 "$TARGET_APP" \
   >/dev/null 2>"$ACCEPTANCE_SIGNATURE_METADATA"

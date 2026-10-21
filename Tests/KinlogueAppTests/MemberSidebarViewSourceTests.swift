@@ -115,7 +115,12 @@ struct MemberSidebarViewSourceTests {
         #expect(!sidebar.contains("confirmedDICOMStudyCount"))
         #expect(!shell.contains(".imaging"))
         #expect(!shell.contains("confirmedDICOMStudyCount:"))
-        #expect(shell.contains("onSelectDICOM: { id in model.selectDICOMStudy(id) }"))
+        // Choosing a study also hands the detail column back from member chat to the study.
+        #expect(shell.contains(
+            "onSelectDICOM: { id in\n"
+                + "                                isAssistantShown = false\n"
+                + "                                model.selectDICOMStudy(id)"
+        ))
         #expect(shell.contains(
             "if destination?.destination == .timeline {\n"
                 + "                        selectedSidebarSection = .records"

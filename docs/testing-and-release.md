@@ -26,8 +26,9 @@
 | `scripts/privacy-guard.sh` | 私有 fixture、隐私措辞、canary 和 forbidden values | 运行中系统权限或用户环境 |
 | `scripts/privacy-history-guard.sh [--ref <ref>]...` | public-bound reachable Git 历史中的已删除附件、`.env`/私钥路径、完整格式恢复码、常见凭据、私密库存证据和 forbidden values | PR/Issue/Actions log、release asset、fork 或托管平台缓存 |
 | `scripts/verify-package-graph.sh <dump-package.json>` | target/product/依赖 allow-list | 最终 Mach-O/link map |
-| `scripts/verify-app.sh` | release build、Info.plist、资源、entitlement、签名、依赖和隐私 | 安装后用户流程 |
+| `scripts/verify-app.sh` | release build、Info.plist、资源、entitlement、签名、依赖和隐私；两个 XPC service（DICOM Helper 与成员对话 bridge）各自的结构、签名与精确 entitlement，主 App 不含 CLI 运行代码、bridge 不链接 SQLite 存储内核，bridge 源码没有日志调用 | 安装后用户流程、真实 Codex 一轮 |
 | `scripts/verify-dicom-xpc.sh --use-verified-app` | 同一已验证 bundle 的真实 XPC、签名、恶意输入、SIGKILL、hang watchdog、socket/log canary | 更广真实 DICOM 兼容矩阵 |
+| `scripts/verify-assistant-xpc.sh` | 成员对话 bridge 作为签名沙盒 XPC：生产 entitlement 下本机 Codex 通过能力检查（只走本机模拟服务，不耗额度）并列出可选模型、例外目录之外的 CLI 被拒；多一处只读例外的验证签名下，假 CLI 的回答、npm 式包装、跨连接取消和 bridge 被杀后的整组清理。需要本机 Codex 才执行第一项 | 真实一轮问答、Developer ID/公证、macOS 26 |
 | `scripts/build-acceptance-app.sh` | 从已验证 executable 组装隔离合成验收身份 | 生产身份或真实用户资料 |
 | `scripts/run-acceptance.sh` | 安装后报告、DICOM、重启、强制终止、Viewer workload、删除和清理；各阶段经界面使用的启动链路打开 SQLite 资料库。迁移到 SQLite 之后脚本尚未重跑 | 真实样本、最低系统和可访问性 |
 | `scripts/verify-app-zip-safety.sh <zip>` | ZIP 条目、路径、类型和大小写安全 | Apple 签名或 notarization |

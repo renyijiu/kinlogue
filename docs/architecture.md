@@ -2,7 +2,7 @@
 
 ## 分层原则
 
-Kinlogue 的主 App 继续由 SwiftPM 构建，并保持 `KinlogueCore → KinloguePlatform → KinlogueApp` 的依赖方向；DICOM 解码是唯一额外的 checked-in Xcode XPC service 构建边界：
+Kinlogue 的主 App 继续由 SwiftPM 构建，并保持 `KinlogueCore → KinloguePlatform → KinlogueApp` 的依赖方向；DICOM 解码是唯一额外的 checked-in Xcode XPC service 构建边界。成员对话的 bridge 是第二个 XPC service，由 SwiftPM 构建、`assemble-assistant-bridge.sh` 打包签名，是 App 中唯一能启动外部程序、能出站联网的进程：
 
 ```mermaid
 flowchart LR
@@ -15,6 +15,10 @@ flowchart LR
   IPC["KinlogueDICOMIPC\nFoundation-only bounded DTO"]
   Helper["KinlogueDICOMDecoderHelper.xpc\nindependent App Sandbox"]
   Dicom["DicomCore 1.5.0"]
+  AIPC["KinlogueAssistantIPC\nbounded text DTO"]
+  CLI["KinlogueAssistantCLI\nCodex adapter / supervisor"]
+  Bridge["KinlogueAssistantBridge.xpc\nApp Sandbox + scheme A exceptions"]
+  Codex["user's codex CLI\n(outside the bundle)"]
   Core --> Platform
   Core --> App
   Platform --> App
@@ -24,20 +28,29 @@ flowchart LR
   IPC --> Platform
   IPC --> Helper
   Dicom --> Helper
+  AIPC --> Platform
+  AIPC --> CLI
+  CLI --> Bridge
+  Bridge -. "stdin, own process group" .-> Codex
 ```
 
 ### Target map
 
 | Target | 类型 | 责任 | 依赖 |
 | --- | --- | --- | --- |
-| `KinlogueCore` | internal library target | 领域模型、状态机、import/LAN 协议、DICOM study/index、查询契约、fingerprint、backup contract/retention 和平台无关验证 | Foundation |
-| `KinloguePlatform` | internal library target | SQLite 资料库（数据库、原件生命周期、各领域仓库）、原子文件、删除、PDF/Image OCR、LAN receiver/inbox、流式原始文件 ZIP、加密 backup container/restore transaction、内嵌手机资源 | `KinlogueCore`、GRDB `7.11.1`、`KinlogueSQLiteConfiguration`、ZIPFoundation `0.9.20`、SwiftNIO `NIOCore/NIOHTTP1/NIOPosix`、CryptoKit 与 Apple frameworks |
+| `KinlogueCore` | internal library target | 领域模型、状态机、import/LAN 协议、DICOM study/index、查询契约、fingerprint、backup contract/retention、成员对话的上下文包/提示词/引用/对话值类型（`Assistant/`，见[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md)）和平台无关验证 | Foundation |
+| `KinloguePlatform` | internal library target | SQLite 资料库（数据库、原件生命周期、各领域仓库）、原子文件、删除、PDF/Image OCR、LAN receiver/inbox、流式原始文件 ZIP、加密 backup container/restore transaction、内嵌手机资源、成员对话的上下文包读取与 `BridgeAssistantProvider`（经 XPC 客户端调用 bridge） | `KinlogueCore`、`KinlogueAssistantIPC`、GRDB `7.11.1`、`KinlogueSQLiteConfiguration`、ZIPFoundation `0.9.20`、SwiftNIO `NIOCore/NIOHTTP1/NIOPosix`、CryptoKit 与 Apple frameworks |
 | `KinlogueSQLiteConfiguration` | internal C target | SQLite connection 配置与回读的最小 varargs bridge | 系统 sqlite3 |
 | `KinlogueDICOMIPC` | library | Foundation-only、有界 request/response DTO、固定错误码和 descriptor-only NSXPC contract | Foundation |
 | `KinlogueDICOMDecoderHelper` | non-published executable / XPC service | 在独立 sandbox 中把只读 descriptor 有界复制到写入前已 unlink 的匿名临时文件，并只解码受支持的单帧 MR 对象 | `KinlogueDICOMIPC`、exact `DicomCore` 1.5.0 |
 | `KinlogueDICOMTestSupport` / `KinlogueDICOMXPCProbe` | non-published test support | 生成无身份 Explicit VR Little Endian MR fixture，并验证真实 embedded XPC round-trip | Foundation、`KinloguePlatform`（probe） |
 | `KinlogueApp` | executable | SwiftUI/AppKit UI、App service、ViewModel、运行时身份和合成验收入口 | `KinlogueCore`、`KinloguePlatform` |
 | `KinlogueStorageProcessFixture` | executable | 跨进程存储协调和安装测试 fixture；恢复测试只负责 seed/驱动/strict verify，并通过 test-only SPI 调用生产恢复事务 | `KinlogueCore`、`KinloguePlatform` |
+| `KinlogueAssistantIPC` | internal library target | 成员对话 bridge 的有界请求/状态/回答 DTO、失败码、`@Sendable` 回复的 NSXPC 协议与 App 和验证探针共用的 `KinlogueAssistantXPCClient`（取消任务即发送取消）；不传路径以外的访问权、文件句柄、记录 ID 或成员名 | Foundation、os |
+| `KinlogueAssistantCLI` | internal library target | Codex 加固参数、功能白名单、模型目录改写、`exec --json` 事件解析、本机模拟服务与请求检查、进程组运行器、`--supervise` supervisor 和 `CodexBridge`（能力检查、单轮执行、取消、私有临时目录） | `KinlogueAssistantIPC`、Darwin、os |
+| `KinlogueAssistantBridge` | non-published executable / XPC service | 成员对话的 XPC 服务入口，同一二进制兼作 supervisor；独立签名、方案 A 的沙盒例外（[entitlements](../packaging/KinlogueAssistantBridge.entitlements)）；由 `build-app.sh` 嵌入 App 的 `Contents/XPCServices`；`verify-app.sh` 核对其结构、签名、精确 entitlement 与符号隔离，`package-distribution.sh` 用 Developer ID 与 hardened runtime 重签 | `KinlogueAssistantIPC`、`KinlogueAssistantCLI` |
+| `KinlogueAssistantXPCProbe` | non-published executable | `verify-assistant-xpc.sh` 用的沙盒宿主，只发合成文本；不进入生产 product | `KinlogueAssistantIPC` |
+| `KinlogueAssistantCLIFixture` | non-published executable | 测试用的假 `codex`，按场景模拟 U0 记录的输出、失败、超时、工具调用和请求内容；不进入生产 product | `KinlogueAssistantCLI` |
 | `KinlogueExportWriterProbe` | non-published executable | 对 exact ZIP writer 做高 entry-count、RSS、取消、heartbeat 和清理 characterization；不进入生产 product | ZIPFoundation `0.9.20` |
 
 语言模式是 Swift 6，最低平台是 macOS 26；Swift package 只对外声明 `Kinlogue` executable product，Core 与 Platform 保持内部 target。SwiftNIO 固定为 `2.101.3`，ZIPFoundation 以 exact `0.9.20` 作为 root dependency 直接链接到 `KinloguePlatform`。DICOM-Swift 同时在 root manifest 和 Helper Xcode project 中固定为 exact `1.5.0` / revision `8f3605a33ed070160b4e023eacd87f32eae8e913`，两个 `Package.resolved` 都受门禁约束。Helper 是 non-published target；主 App/Core/Platform 不 import 或链接 `DicomCore`。主 App 的 ZIP 导出是独立的 Platform 能力，并把 ZIPFoundation 的 SwiftPM `PrivacyInfo.xcprivacy` resource bundle 放入主 App；这不改变 DicomCore 仍只存在于 Helper 的隔离边界，Helper 的 Xcode-generated ZIPFoundation resource bundle 处理也保持原样。
@@ -182,3 +195,5 @@ sequenceDiagram
 `AppProcessingCoordinator` 由 `AppComposition` 持有并负责启动恢复与 LAN preprocessing 的任务、失败抑制、取消和 drain。`LANInboxModel` 只负责请求和界面观察，替换 presentation 不取消正在进行的处理；失败的自动处理需要明确重试。恢复完成后逐项刷新 App snapshot。`LiveAppService` 将持久化失败绑定到具体恢复 attempt，快照提供内存中的重试资格；Sidebar 继续使用现有本地化重试入口，删除仍限于 durable failed 状态。旧失败不能覆盖新的处理任务。整库恢复/删除通过共享 lifecycle 撤销 owner，拒绝迟到结果。
 
 App 已使用 [目的型查询和提交观察](sqlite-storage.md#app-查询与提交观察)：header、分页、按 ID 详情和比较都按需读取，App 不常驻资料库的全量内容；各读取登记在模型持有的 [LibraryReadRegistry](../Sources/KinlogueApp/ViewModels/LibraryReadRegistry.swift) 中，破坏性生命周期统一取消并排空。[SQLite 启动](sqlite-storage.md#启动与空闲完整性巡检) 将一个 owner、数据库和 lifecycle 组装到报告、LAN、DICOM、备份/恢复、导出与删除，界面入口、安装验收和测试都只使用这条链路。真实 service 测试不能替代最终规模、系统和安装门禁。
+
+成员对话（实验，默认关闭，见[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md)）由 [`LiveAssistantService`](../Sources/KinlogueApp/App/AssistantService.swift) 与 [`AssistantConversationModel`](../Sources/KinlogueApp/ViewModels/AssistantConversationModel.swift) 组成：`LiveAppServiceEnvironment.assistantLibrary` 提供 SQLite 报告仓库，composition 在存储就绪时向 `LibraryLifecycleCoordinator` 登记服务的撤销钩子（取消进行中的一轮、清空内存中的对话、此后拒绝新请求），每一轮在 `withActiveOperation` 内运行，整库删除或恢复会等待它；删除、恢复与完整性故障的开始回调锁定对话模型，提交观察回调让模型重读上下文包，内容变化时清除同意并重查被引用记录。对话经 `AssistantConversationStoring` 保存在资料库（`SQLiteReportRepository` 的对话方法，schema 版本 2 的三张表），每轮与它的保存在同一个 active operation 内；撤销钩子不写资料库。设置存于 App 偏好（`assistant.*` 键），默认关闭；同意只在内存里，绑定上下文包、CLI 版本、模型和提示词版本，每轮发送前重新核对。界面由三部分组成：设置页“AI 对话（实验）”区块由 [`AssistantSettingsModel`](../Sources/KinlogueApp/ViewModels/AssistantSettingsModel.swift) 驱动，保存后通知对话模型；记录页工具栏的“对话”按钮把详情栏切换为 [`AssistantPanelView`](../Sources/KinlogueApp/Views/AssistantPanelView.swift)，同意只在 [`AssistantConsentSheet`](../Sources/KinlogueApp/Views/AssistantConsentSheet.swift) 中给出。`AssistantAvailability` 检查 App bundle 的 `Contents/XPCServices` 中是否有 bridge；没有时设置区块和工具栏按钮都不出现，所以直接从 SwiftPM 运行、不含 bridge 的构建不提供这一功能。

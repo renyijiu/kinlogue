@@ -62,6 +62,7 @@ let package = Package(
                 "KinlogueSQLiteConfiguration",
                 .product(name: "GRDB", package: "GRDB.swift"),
                 "KinlogueDICOMIPC",
+                "KinlogueAssistantIPC",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
@@ -87,6 +88,23 @@ let package = Package(
                 .process("Resources")
             ]
         ),
+        .target(name: "KinlogueAssistantIPC"),
+        .target(
+            name: "KinlogueAssistantCLI",
+            dependencies: ["KinlogueAssistantIPC"]
+        ),
+        .executableTarget(
+            name: "KinlogueAssistantBridge",
+            dependencies: ["KinlogueAssistantIPC", "KinlogueAssistantCLI"]
+        ),
+        .executableTarget(
+            name: "KinlogueAssistantCLIFixture",
+            dependencies: ["KinlogueAssistantCLI"]
+        ),
+        .executableTarget(
+            name: "KinlogueAssistantXPCProbe",
+            dependencies: ["KinlogueAssistantIPC"]
+        ),
         .testTarget(
             name: "KinlogueCoreTests",
             dependencies: ["KinlogueCore"]
@@ -97,6 +115,9 @@ let package = Package(
                 "KinloguePlatform",
                 "KinlogueDICOMIPC",
                 "KinlogueDICOMTestSupport",
+                "KinlogueAssistantIPC",
+                "KinlogueAssistantCLI",
+                "KinlogueAssistantCLIFixture",
                 .product(name: "NIOEmbedded", package: "swift-nio"),
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
             ]

@@ -22,7 +22,11 @@ enum SQLiteLogicalRows {
             ("SELECT count(*) FROM inbox_content_terminals", 8_192),
             ("SELECT count(*) FROM inbox_transport_receipts", 8_192),
             ("SELECT coalesce(sum(length(command)+length(intent)+length(outcome)+256),0) FROM inbox_archive_receipts", 2),
-            ("SELECT coalesce(sum(logical_byte_count+object_count*128+1024),0) FROM dicom_studies", 1)
+            ("SELECT coalesce(sum(logical_byte_count+object_count*128+1024),0) FROM dicom_studies", 1),
+            // Saved chats: escaped question and answer text plus fixed fields per row.
+            ("SELECT coalesce(sum(6*length(CAST(question AS BLOB))+6*length(CAST(answer AS BLOB))+512),0) FROM assistant_turns", 1),
+            ("SELECT count(*) FROM assistant_turn_sources", 256),
+            ("SELECT count(*) FROM assistant_conversations", 1_024)
         ]
         for (sql, multiplier) in queries {
             guard let value = try Int64.fetchOne(db, sql: sql), value >= 0 else { throw SQLiteLogicalBackupError.resourceLimit }
@@ -130,6 +134,14 @@ enum SQLiteLogicalRows {
             guard let id = UUID(sqliteBytes: data) else { throw SQLiteLogicalBackupError.invalidStream }
             let (header, index) = try SQLiteDICOMRows.strictStudy(id, db)
             try emit(.dicom, id, BackupLogicalDICOMV1(header: header, index: index))
+        }
+        // Logical version 2: saved member chats, after every record they could refer to.
+        let conversations = try Data.fetchCursor(db, sql: "SELECT id FROM assistant_conversations ORDER BY id")
+        while let data = try conversations.next() {
+            guard let id = UUID(sqliteBytes: data), let value = try SQLiteAssistantRows.conversation(id, db) else {
+                throw SQLiteLogicalBackupError.invalidStream
+            }
+            try emit(.assistantConversation, id, value)
         }
         if strict {
             let expected = Set(originals.keys.map { $0.uuidString.lowercased() + ".data" })

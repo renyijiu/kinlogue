@@ -44,8 +44,7 @@ struct SQLiteLibraryInitialization: Codable {
         // The device number is part of the receipt's own hash but is not compared with the
         // root's: the launch that finishes an interrupted initialization may find the volume
         // renumbered.
-        guard receipt.rootInode == rootIdentity.inode,
-              receipt.schemaIdentity == SQLiteLibrarySchema.identity,
+        guard receipt.rootInode == rootIdentity.inode, receipt.schemaIdentity == SQLiteLibrarySchema.identity,
               receipt.contentHash == hash(receipt.operationID, receipt.rootDevice, receipt.rootInode, receipt.schemaIdentity) else {
             throw SQLiteLibraryError.unsupportedFormat
         }

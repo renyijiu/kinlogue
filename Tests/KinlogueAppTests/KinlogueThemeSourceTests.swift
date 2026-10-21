@@ -109,6 +109,7 @@ struct KinlogueThemeSourceTests {
         // Tint and color scheme set inside one presentation are not
         // guaranteed to reach another, so each root opts in by itself.
         for (path, expectedRoots) in [
+            ("Sources/KinlogueApp/Views/AssistantConsentSheet.swift", 1),
             ("Sources/KinlogueApp/Views/BackupAndRestoreView.swift", 3),
             ("Sources/KinlogueApp/Views/ComparisonView.swift", 1),
             ("Sources/KinlogueApp/Views/DICOMImportSheet.swift", 1),

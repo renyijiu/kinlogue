@@ -6,8 +6,14 @@ status: navigation
 
 计划文件保留需求、权衡和实施历史，不直接证明当前代码能力。当前事实以专题页、代码、测试和 [当前候选证据](../acceptance/current-release.md) 为准。
 
+## 提议中的计划
+
+- [`2026-10-15-feat-member-cli-chat-plan.md`](2026-10-15-feat-member-cli-chat-plan.md)：针对单个成员、调用使用者本机已登录的 Codex CLI 的只读对话（Claude Code 留待后续），首版不保存对话但按可保存设计。决策已确定，U0–U7 已实现为默认关闭的“AI 对话（实验）”，对话保存在资料库并进入恢复点；人工矩阵见[成员对话验收矩阵](../acceptance/member-chat-matrix.md)。与未合入的 `codex/agentrunkit-probe` 分支的关系见计划第 2 节。
+
+
 ## 实施中的计划
 
+- [`2026-10-18-feat-member-chat-layered-context-plan.md`](2026-10-18-feat-member-chat-layered-context-plan.md)：成员对话的上下文包改为本机确定性的分层聚合（全部已确认报告的目录、结论与标记项、按项目名汇总的检验行，加预算内的最新全文），总预算约 100 KB；只保存被引用的来源。修订成员对话计划第 4.4 节；用户 2026-10-18 审阅确定，L0–L3 已实施，App 内人工检查待执行。
 - [`2026-10-10-2322-refactor-sqlite-architecture-plan.md`](2026-10-10-2322-refactor-sqlite-architecture-plan.md)：先修备份/去重与任务所有权，再完成 SQLite 查询、逻辑备份和一次生产切换。进度和证据见[日志](../log.md)，计划本身不回填执行结果。
 
 ## 已实施的决策记录

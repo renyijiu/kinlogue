@@ -12,6 +12,7 @@
 | 完整性 | SHA-256 检测意外截断、缺失和错误引用，并参与本机精确去重；数据库行摘要与原件元数据交叉校验 | 密码学认证、签名、防篡改或攻击者重写防护 |
 | 网络 | 用户主动开启的临时 LAN listener；只绑定所选本机地址并在 HTTP 前限制为其已验证 IPv4/IPv6 前缀；普通 HTTP；pairing + cookie + CSRF + session generation | TLS、公共网络安全、跨前缀远程访问或云同步 |
 | OCR | macOS Vision/PDFKit 本机处理 | 云端 OCR、医学诊断或治疗建议 |
+| 成员对话（实验） | 默认关闭；用户开启并按对话确认后，单独签名的沙盒 XPC bridge 启动用户本机已登录的 Codex，只经 stdin 传入一位成员的已确认报告投影。主 App 不出站；bridge 读不到资料库，只有 `network.client`、本机回环 listener、`~/.codex/` 读写和两个安装根只读例外。每个 CLI 与模型先对本机模拟服务做一次请求检查，请求里出现工具、额外消息或本机路径即拒绝；bridge 不写日志 | 匿名化、发送可撤回、服务方不保留或不用于训练、回答正确、由程序保证非诊断、temporary exception 在 Developer ID / notarization 下的表现已验证 |
 | 供应链 | SwiftPM exact versions + resolved commit；SwiftNIO/ZIPFoundation 锁定版本高于本次复核的公开修复线；GitHub Actions 固定完整 SHA | 未启用远端扫描时的“零漏洞”、DICOM 解码器或备份密码学已独立审计 |
 | 原始文件导出 | 用户明确选择目标后生成一个未加密 ZIP；只含已确认原始附件，发布后由用户保管 | 加密容器、备份/恢复格式、导出副本仍受 App 删除控制 |
 | 发布 | ad-hoc signed arm64 candidate；可作为带明确警告的 GitHub Pre-release 供知情测试者手动下载 | Developer ID、notarization、Apple 恶意软件检查或正式公共发布准备完成 |
@@ -22,7 +23,7 @@
 
 ### 保护对象
 
-报告原件、成员资料、OCR blocks、人工修正、搜索字段、source references、LAN inbox 的原件与预处理结果、记录之间的引用关系和可推断的存在性信息。
+报告原件、成员资料、OCR blocks、人工修正、搜索字段、source references、LAN inbox 的原件与预处理结果、记录之间的引用关系和可推断的存在性信息；成员对话开启后，还包括发送给 Codex 的上下文包，以及保存在资料库里的问题与回答。
 
 ### 当前纳入的风险
 
@@ -34,6 +35,7 @@
 - 误把 OCR/规则候选当成确认后的医学事实。
 - 通过导出名称泄漏内部 UUID/digest/path、路径穿越或名称碰撞，以及失败/取消后留下看似成功的 `.zip`。
 - 同步目录中的 symlink/hardlink/FIFO/父目录替换、恶意超限容器、截断/重排/替换、并发恢复点分叉，以及失败恢复留下私有明文 staging。
+- 成员对话把未确认内容、其他成员的资料、姓名、备注、文件名或本机 ID 带出；同意过期后仍发送；报告文字里夹带的指令让模型调用工具或越过回答边界；Codex 加载用户的 hooks、MCP、插件或项目说明；健康资料进入命令行参数、环境变量、日志或 Codex 会话历史；子进程在取消、bridge 崩溃或资料库删除后继续运行。
 
 ### 明确不承诺的风险
 
@@ -41,6 +43,7 @@
 - 其他系统服务对明文 Application Support、备份或快照的读取；
 - 普通 HTTP 在不可信 LAN 上被窃听或篡改；
 - ad-hoc 候选包的开发者身份、Apple 恶意软件检查或公共分发信任链；下载者需要自行核对 SHA-256，并在理解风险后手工覆盖 Gatekeeper。
+- 成员对话发送后的一切：服务方的保留、训练与访问控制，用户 Codex 账号或 `~/.codex` 凭据被盗，用户本机 Codex 程序本身的可信度，以及模型回答的正确性。续页只能限制发送什么、在用户确认后才发送，不能撤回已发送的内容。
 
 ## 代码中的保护边界
 
@@ -64,6 +67,11 @@
 - `DICOMSliceService`：只接受资料库产生的 opaque 会话令牌和 instance descriptor；原件在 decode 前后复核 digest、identity 和长度，raw frame 仍只经 XPC adapter。cache key 不含路径、UID 或 W/L history，错误只暴露固定 Kinlogue case。canonical/current-render 像素只在有界内存中存在；RAII lease 保证 service 释放不遗留预算，switch/close/lifecycle failure 只清对应 session token，pressure 才全局清 cache 并使旧 image handle 失效。这不承诺安全擦除调用方主动复制的 bytes、原始明文附件或系统备份。
 - `DICOMImportModel` / `DICOMStudyReviewModel` / `DICOMLibraryModel` / `DICOMStudyViewerModel`：用户界面只显示检查状态、用户确认的成员/日期、modality、尺寸、切片/Series 与 inert-object 聚合状态，不展示或记录文件名、路径、原始 UID 或 DICOM 自由文本。确认后的检查只把日期、成员和对象数量等检查级摘要投影到成员时间线；DICOM 原件、自由文本和像素仍不进入报告 OCR、搜索或比较。Viewer canvas 为当前帧保留一份有界的拥有式内存快照，不写预览/截图；App registry 在单 study 删除、外部删除刷新或 whole-Vault revoke 时先让所有目标窗口同步清空像素/失效请求，再等待 slice service close 并关闭窗口。普通关闭、Series 切换或 memory pressure 同样会使对应旧结果/handle 失效。
 
+- `AssistantContextPackBuilder` / `SQLiteReportRepository.assistantPack`：只取一位成员的已确认报告，在本机分层整理：最多 300 份的目录、结论与标记项、按完全相同的项目名汇总的表格行，以及剩余预算内最新报告的全文，合计不超过 100,000 字节，各层有子上限，每份全文不超过 12,000 字节并标注截断（见[分层上下文包计划](plans/2026-10-18-feat-member-chat-layered-context-plan.md)）；不含姓名、备注、文件名、原件或记录 ID，机构名称默认不放入；报告文字中能闭合输入标签的 `<` 会被转义。
+- `SQLiteAssistantRows`：对话、轮次与发送清单逐行带字段分隔摘要，读取时整段核对；完整性巡检把对话作为独立目标。
+- `LiveAssistantService` / `AssistantConversationModel`：同意绑定上下文包指纹、CLI 版本、模型和提示词版本，只在内存里，重新打开已保存的对话后第一次发送仍要确认；每轮发送前重查 CLI 状态并核对指纹；每轮在 `LibraryLifecycleCoordinator.withActiveOperation` 内运行，整库删除或恢复会先撤销服务、取消进行中的一轮并清空对话。
+- `KinlogueAssistantBridge.xpc` / `CodexBridge` / `CLISupervisor`：bridge 以固定参数启动 Codex（`exec --json --ephemeral --ignore-user-config --ignore-rules --strict-config --sandbox read-only`，关闭会话历史、分析、遥测、网页搜索和子代理（agents），未列入白名单的功能逐个禁用，并改写模型目录去掉工具字段）；输入只走 stdin；环境变量只有 `HOME`（真实家目录）、`USER`、`LOGNAME`、`PATH`、`LANG`、`LC_ALL`、每轮私有的 `TMPDIR` 和用户设置的代理变量，每轮的工作目录与临时目录用后删除。App Sandbox 会把沙盒 supervisor 自己的 `HOME` 与 `TMPDIR` 改成容器路径，因此这些变量以 `KINLOGUE_CLI_ENV_` 前缀交给 supervisor，由它重建 CLI 的环境。能力检查对本机回环模拟服务发一次请求，确认工具数为零、只有两条消息、模型一致、`store` 为 false 且不含本机路径，结果按可执行文件和模型缓存。供用户选择的模型列表取自同一个 `codex debug models` 输出中可见（`visibility` 为 list）的模型，只传 slug 与显示名，二者都按有界文本校验，按可执行文件缓存。子进程在独立进程组中运行，首字节 10 秒、整轮 180 秒超时，输出上限 2 MiB；`--supervise` 进程在 bridge 退出时结束整组。IPC 只传有界文本 DTO，不传文件句柄、记录 ID 或成员名。
+
 这些保护主要解决“意外损坏、错误状态、资源滥用和错误路径写入”；它们不把明文文件变成加密文件。
 
 依赖安全结论是点时证据，不是长期保证。当前版本、公开公告、GitHub 扫描能力和未完成的独立审计见 [依赖安全来源笔记](sources/dependency-security-review-2026-08-23.md)；任何自动更新都必须重新经过本仓库的 XPC、资源、隐私和 untrusted-input 门禁。
@@ -73,6 +81,7 @@
 - 普通 App error 只使用稳定 failure/event code、opaque ID、大小和状态，不输出原文、文件名、URL、完整路径、peer、cookie、CSRF、远端文件 ID 或底层错误文本。
 - HTTP log 只允许 route/reason/status class 等 allowlist 字段；`LANHTTPLogEvent` 不携带 target、header、peer、credential、filename、digest 或 underlying error。
 - 测试和脚本可以输出合成数据数量、长度和 SHA-256；不能输出合成内容所在的用户路径或复制真实资料。
+- 成员对话的 IPC、Codex 适配与 bridge 源码不含任何日志调用，`verify-app.sh` 以源码扫描阻止新增；失败只以固定失败码跨进程返回，Codex 的原始输出不越过 bridge。
 - 验收报告只记录 gate、版本、哈希、状态和不含内容的摘要；DICOM 安装门禁只增加合成对象计数、毫秒、RSS、descriptor 和字节数，不记录 tag、UID、文件名、路径或像素。完整地址、验证码、文件名和正文不落盘。
 
 ## 数据生命周期
@@ -88,6 +97,7 @@
 - 已发布的导出 ZIP 位于用户选择的位置，已经离开 Vault 生命周期；Vault destroy 不删除、跟踪或安全擦除它。用户界面必须在导出前说明这是未加密副本且不能恢复资料库。
 - 已发布的 `.kinloguebackup` 同样位于外部 repository；Vault destroy 或 restore 不删除它。retention 只处理当前 backup set 中经过认证、完整验证并满足 24 小时连续观察的恢复点，且不承诺第三方客户端远端已经上传或删除。
 - 删除失败或发生部分删除时，receipt/quarantine 让后续运行只继续处理已验证的同一目标，不能借路径替换删除另一个 Vault。
+- 成员对话保存在资料库的三张 STRICT 表里（schema 版本 3），与报告一样是明文，并进入加密恢复点。删除一段对话、删除成员（同一事务）、整库删除与恢复都在既有生命周期内完成；一轮与它的保存是同一个 active operation，整库删除或恢复会先取消它。关闭功能只停止进行中的一轮，不删除已保存的对话。已经发送给服务方的内容不受续页的任何删除影响。
 
 ## Agent 和测试禁区
 
@@ -97,6 +107,7 @@
 - `scripts/privacy-history-guard.sh` 通过 Git object database 扫描准备公开的 reachable refs，覆盖曾提交后删除的医疗/报告类附件、备份或签名容器、`.env`/私钥路径、完整格式的恢复码、常见凭据模式、精确私密资料库存证据和调用方提供的 forbidden values；`.env.example` 是唯一环境文件名例外。门禁只报告规则类别，不回显命中路径或内容；它不能替代公开托管平台上的 PR、Issue、Actions log、release asset 和 fork 审计。
 - 不要使用真实文件名来验证去重、展示名、OCR 或 LAN；使用生成 fixture 和 run-scoped canary。
 - 不要因为调试方便打开内容日志、保存 cookie/验证码、把 App Sandbox 路径写进报告或把整页 PDF 输出到终端。
+- 自动化只能用假 CLI 和合成资料驱动成员对话；`verify-assistant-xpc.sh` 对真实 Codex 只做不耗额度的本机能力检查。经真实 Codex 的一轮会消耗用户额度并把内容发给服务方，只能在用户明确同意后用合成资料进行，不得发送真实病历。
 - 不要在未确认可信网络前启动 LAN listener；不要把 `network.server` entitlement、可行性 marker 或 test-only client entitlement 扩大到不该有的 bundle。
 - 修改 `README.md`、`PRIVACY.md`、`packaging/Info.plist`、entitlements、验证脚本或网络行为时，必须一起检查本页和对应验收文档。
 

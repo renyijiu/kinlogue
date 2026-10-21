@@ -2,13 +2,17 @@ import Foundation
 import GRDB
 import KinlogueCore
 
-/// Development format; no migration from a JSON vault or another SQLite schema.
+/// The library format. Only the current version opens: before the first release there is no
+/// in-place migration, so an older library is refused like an unknown one and reaches the current
+/// version through a restore point (decisions.md, 2026-10-18). No JSON vault or other SQLite schema
+/// is migrated, rewritten or deleted.
 enum SQLiteLibrarySchema {
     static let applicationID = 0x4B4C4753 // KLGS
-    static let version = 1
+    static let version = 3
     static let maximumPayloadBytes = LibraryStorageLimits.maximumEntityJSONBytes
 
-    static let statements: [(name: String, sql: String)] = [
+    /// Every table but the member chat's.
+    static let libraryStatements: [(name: String, sql: String)] = [
         ("library_state", """
         CREATE TABLE library_state (
             singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
@@ -341,6 +345,54 @@ enum SQLiteLibrarySchema {
         """)
     ]
 
+    /// Saved member chats. A source keeps its record ID without a foreign key, so a citation of a
+    /// deleted report still reads as "deleted". A turn keeps up to `AssistantLimits.maxTurnSources`.
+    static let assistantStatements: [(name: String, sql: String)] = [
+        ("assistant_conversations", """
+        CREATE TABLE assistant_conversations (
+            id BLOB PRIMARY KEY NOT NULL CHECK(length(id) = 16),
+            member_id BLOB NOT NULL REFERENCES members(id),
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            provider_kind TEXT NOT NULL CHECK(provider_kind IN ('codex')),
+            cli_version TEXT NOT NULL CHECK(length(CAST(cli_version AS BLOB)) BETWEEN 1 AND 128),
+            model TEXT NOT NULL CHECK(length(CAST(model AS BLOB)) BETWEEN 1 AND 128),
+            prompt_version INTEGER NOT NULL CHECK(prompt_version > 0),
+            turn_count INTEGER NOT NULL CHECK(turn_count >= 0 AND turn_count <= 20),
+            first_question TEXT CHECK(first_question IS NULL OR length(CAST(first_question AS BLOB)) <= 65536),
+            content_hash BLOB NOT NULL CHECK(length(content_hash) = 32)
+        ) STRICT
+        """),
+        ("assistant_conversation_member", "CREATE INDEX assistant_conversation_member ON assistant_conversations(member_id, updated_at, id)"),
+        ("assistant_turns", """
+        CREATE TABLE assistant_turns (
+            id BLOB PRIMARY KEY NOT NULL CHECK(length(id) = 16),
+            conversation_id BLOB NOT NULL REFERENCES assistant_conversations(id),
+            ordinal INTEGER NOT NULL CHECK(ordinal >= 0 AND ordinal < 20),
+            question TEXT NOT NULL CHECK(length(CAST(question AS BLOB)) BETWEEN 1 AND 65536),
+            answer TEXT NOT NULL CHECK(length(CAST(answer AS BLOB)) BETWEEN 1 AND 32768),
+            completed_at REAL NOT NULL,
+            content_hash BLOB NOT NULL CHECK(length(content_hash) = 32),
+            UNIQUE(conversation_id, ordinal)
+        ) STRICT
+        """),
+        ("assistant_turn_sources", """
+        CREATE TABLE assistant_turn_sources (
+            turn_id BLOB NOT NULL REFERENCES assistant_turns(id),
+            position INTEGER NOT NULL CHECK(position >= 0 AND position < 300),
+            label TEXT NOT NULL CHECK(length(label) BETWEEN 2 AND 5),
+            record_id BLOB NOT NULL CHECK(length(record_id) = 16),
+            record_revision INTEGER NOT NULL CHECK(record_revision >= 0),
+            projection_digest BLOB NOT NULL CHECK(length(projection_digest) = 32),
+            content_hash BLOB NOT NULL CHECK(length(content_hash) = 32),
+            PRIMARY KEY(turn_id, position),
+            UNIQUE(turn_id, label)
+        ) STRICT
+        """)
+    ]
+
+    static let statements = libraryStatements + assistantStatements
+
     static let identity = ContentDigest.sha256(Data(statements.map(\.sql).joined(separator: "\n").utf8))
 
     static func create(in db: Database) throws {
@@ -385,6 +437,16 @@ enum SQLiteLibrarySchema {
                   SELECT original_id FROM (
                     SELECT original_id FROM report_sources UNION SELECT original_id FROM inbox_items UNION SELECT original_id FROM dicom_objects
                   ) JOIN originals ON originals.id = original_id WHERE lifecycle != 'live' LIMIT 1
-                  """) == nil else { throw SQLiteLibraryError.damaged }
+                  """) == nil,
+              try Int.fetchOne(db, sql: "SELECT count(*) FROM assistant_conversations") ?? 0 <= 256 * AssistantLimits.maxConversationsPerMember,
+              try Row.fetchOne(db, sql: "SELECT member_id FROM assistant_conversations GROUP BY member_id HAVING count(*) > ? LIMIT 1",
+                               arguments: [AssistantLimits.maxConversationsPerMember]) == nil,
+              try Row.fetchOne(db, sql: """
+                  SELECT c.id FROM assistant_conversations c LEFT JOIN assistant_turns t ON t.conversation_id = c.id
+                  GROUP BY c.id HAVING count(t.id) != c.turn_count OR (count(t.id) > 0 AND (min(t.ordinal) != 0 OR max(t.ordinal) != count(t.id) - 1))
+                  LIMIT 1
+                  """) == nil,
+              try Row.fetchOne(db, sql: "SELECT turn_id FROM assistant_turn_sources GROUP BY turn_id HAVING count(*) > ? LIMIT 1",
+                               arguments: [AssistantLimits.maxTurnSources]) == nil else { throw SQLiteLibraryError.damaged }
     }
 }
