@@ -45,6 +45,7 @@ verify_distribution_signature() {
   local signed_entitlements="$NOTARY_TEMP_DIRECTORY/$label-signed-entitlements.plist"
   local remaining_entitlements="$NOTARY_TEMP_DIRECTORY/$label-remaining-entitlements.plist"
   local helper="$app/Contents/XPCServices/KinlogueDICOMDecoderHelper.xpc"
+  local bridge="$app/Contents/XPCServices/KinlogueAssistantBridge.xpc"
 
   [[ -d "$app" && ! -L "$app" \
       && -f "$executable" && ! -L "$executable" && -x "$executable" \
@@ -52,13 +53,13 @@ verify_distribution_signature() {
     || fail "$label app structure or executable permissions are invalid"
   /usr/bin/codesign --verify --deep --strict --verbose=2 "$app" \
     || fail "$label app signature verification failed"
-  local signed_bundle identifier entitlement
+  local signed_bundle identifier entitlement signed_bridge_json expected_bridge_json
   local -a expected_entitlements
   for signed_bundle in \
       "$helper/Contents/Resources/DICOMSwift_DicomCore.bundle" \
       "$helper/Contents/Resources/J2KSwift_J2KMetal.bundle" \
       "$helper/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle" \
-      "$helper" "$app"; do
+      "$helper" "$bridge" "$app"; do
     [[ -d "$signed_bundle" && ! -L "$signed_bundle" ]] \
       || fail "$label signed bundle is missing or linked"
     /usr/bin/codesign --verify --strict --verbose=2 "$signed_bundle" \
@@ -71,9 +72,25 @@ verify_distribution_signature() {
       || fail "$label bundle Team ID drifted"
     /usr/bin/grep -Eq '^Timestamp=.+' "$signature_metadata" \
       || fail "$label bundle has no secure timestamp"
-    [[ "$signed_bundle" == "$helper" || "$signed_bundle" == "$app" ]] || continue
+    [[ "$signed_bundle" == "$helper" || "$signed_bundle" == "$bridge" \
+        || "$signed_bundle" == "$app" ]] || continue
     /usr/bin/grep -Eq '^CodeDirectory .*flags=.*\(.*runtime.*\)' "$signature_metadata" \
       || fail "$label executable does not enable hardened runtime"
+    if [[ "$signed_bundle" == "$bridge" ]]; then
+      /usr/bin/grep -Fqx "Identifier=com.kinlogue.mac.assistant-bridge" "$signature_metadata" \
+        || fail "$label assistant bridge identifier drifted"
+      signed_bridge_json="$(/usr/bin/codesign -d --entitlements :- "$signed_bundle" 2>/dev/null \
+        | /usr/bin/plutil -convert json -o - - \
+        | /usr/bin/ruby -rjson -e 'puts JSON.generate(JSON.parse(STDIN.read).sort.to_h)')" \
+        || fail "$label assistant bridge entitlements could not be inspected"
+      expected_bridge_json="$(/usr/bin/plutil -convert json -o - \
+        "$REPO_DIR/packaging/KinlogueAssistantBridge.entitlements" \
+        | /usr/bin/ruby -rjson -e 'puts JSON.generate(JSON.parse(STDIN.read).sort.to_h)')" \
+        || fail "$label assistant bridge source entitlements could not be read"
+      [[ "$signed_bridge_json" == "$expected_bridge_json" ]] \
+        || fail "$label assistant bridge entitlements differ from packaging/KinlogueAssistantBridge.entitlements"
+      continue
+    fi
     expected_entitlements=(com.apple.security.app-sandbox)
     identifier=com.kinlogue.mac.dicom-decoder
     if [[ "$signed_bundle" == "$app" ]]; then
@@ -234,6 +251,13 @@ done
   --timestamp \
   --entitlements "$REPO_DIR/packaging/KinlogueDICOMDecoderHelper.entitlements" \
   "$DICOM_HELPER_BUNDLE"
+ASSISTANT_BRIDGE_BUNDLE="$APP_BUNDLE/Contents/XPCServices/KinlogueAssistantBridge.xpc"
+/usr/bin/codesign --force --sign "$KINLOGUE_CODESIGN_IDENTITY" \
+  --keychain "$KINLOGUE_SIGNING_KEYCHAIN_PATH" \
+  --options runtime \
+  --timestamp \
+  --entitlements "$REPO_DIR/packaging/KinlogueAssistantBridge.entitlements" \
+  "$ASSISTANT_BRIDGE_BUNDLE"
 /usr/bin/codesign --force --sign "$KINLOGUE_CODESIGN_IDENTITY" \
   --keychain "$KINLOGUE_SIGNING_KEYCHAIN_PATH" \
   --options runtime \

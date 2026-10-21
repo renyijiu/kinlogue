@@ -57,6 +57,8 @@ package actor SQLiteReportRepository: ImportDraftStore {
                 }
                 let studies = try Int.fetchOne(db, sql: "SELECT count(*) FROM dicom_studies WHERE member_id = ?", arguments: [id.sqliteBytes])!
                 guard studies == 0 else { throw CatalogDeletionError.memberStillReferencedByDICOMStudy(studyCount: studies) }
+                // Saved chats belong to the member and go with it, in this transaction.
+                try SQLiteAssistantRows.deleteAll(memberID: id, db)
                 try db.execute(sql: "DELETE FROM members WHERE id = ?", arguments: [id.sqliteBytes])
                 try SQLiteLibraryState.advance(in: db)
             }

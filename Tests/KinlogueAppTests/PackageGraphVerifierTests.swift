@@ -340,6 +340,7 @@ private struct PackageGraphFixture {
                         byName("KinlogueSQLiteConfiguration"),
                         product("GRDB", package: "GRDB.swift"),
                         byName("KinlogueDICOMIPC"),
+                        byName("KinlogueAssistantIPC"),
                         product("NIOCore", package: "swift-nio"),
                         product("NIOHTTP1", package: "swift-nio"),
                         product("NIOPosix", package: "swift-nio"),
@@ -350,6 +351,27 @@ private struct PackageGraphFixture {
                     name: "KinlogueApp",
                     type: "executable",
                     dependencies: [byName("KinlogueCore"), byName("KinloguePlatform")]
+                ),
+                target(name: "KinlogueAssistantIPC", type: "regular"),
+                target(
+                    name: "KinlogueAssistantCLI",
+                    type: "regular",
+                    dependencies: [byName("KinlogueAssistantIPC")]
+                ),
+                target(
+                    name: "KinlogueAssistantBridge",
+                    type: "executable",
+                    dependencies: [byName("KinlogueAssistantIPC"), byName("KinlogueAssistantCLI")]
+                ),
+                target(
+                    name: "KinlogueAssistantCLIFixture",
+                    type: "executable",
+                    dependencies: [byName("KinlogueAssistantCLI")]
+                ),
+                target(
+                    name: "KinlogueAssistantXPCProbe",
+                    type: "executable",
+                    dependencies: [byName("KinlogueAssistantIPC")]
                 ),
                 target(
                     name: "KinlogueCoreTests",
@@ -363,6 +385,9 @@ private struct PackageGraphFixture {
                         byName("KinloguePlatform"),
                         byName("KinlogueDICOMIPC"),
                         byName("KinlogueDICOMTestSupport"),
+                        byName("KinlogueAssistantIPC"),
+                        byName("KinlogueAssistantCLI"),
+                        byName("KinlogueAssistantCLIFixture"),
                         product("NIOEmbedded", package: "swift-nio"),
                         product("ZIPFoundation", package: "ZIPFoundation"),
                     ]

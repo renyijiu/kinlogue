@@ -246,7 +246,7 @@ extension BackupArchiveWriter {
                 catalog.studies.append(.init(id: value.index.studyID, state: value.state, memberID: value.memberID,
                                              date: value.date, attachmentIDs: ids))
                 studies += 1
-            case .reportDocument, .lanDocument, .terminal, .receipt, .archiveReceipt:
+            case .reportDocument, .lanDocument, .terminal, .receipt, .archiveReceipt, .assistantConversation:
                 break
             }
         }

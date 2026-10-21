@@ -12,6 +12,7 @@ struct SettingsView: View {
     let onExportBackup: () -> Void
     let onDeleteVault: () -> Void
     var integrityCoordinator: AppIntegrityCoordinator? = nil
+    var assistantSettings: AssistantSettingsModel? = nil
 
     var body: some View {
         ScrollView {
@@ -108,6 +109,10 @@ struct SettingsView: View {
                                 .accessibilityIdentifier("backup-restore")
                         }
                     }
+                }
+
+                if let assistantSettings {
+                    AssistantSettingsSection(settings: assistantSettings, controlColumnWidth: Self.controlColumnWidth)
                 }
 
                 VStack(alignment: .leading, spacing: 12) {

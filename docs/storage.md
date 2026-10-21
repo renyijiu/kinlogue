@@ -36,7 +36,7 @@ DICOM 导入开始前先在 `dicom-import-journals/` 原子写入归属收据，
 
 ## 其他格式的目录
 
-[SQLiteLibraryStore](../Sources/KinloguePlatform/Storage/SQLiteLibraryStore.swift) 在打开已有文件前只读核对 SQLite header、`application_id`、`user_version` 和日志模式。根目录里出现它不认识的内容时返回“格式不受支持”，不迁移、不改写、不删除：早先版本留下的 `library.json` 资料库、未知 schema 和其他非空目录都按此处理，[回归](../Tests/KinloguePlatformTests/SQLiteLibraryStoreTests.swift) 核对目录内容和字节保持不变。启动页说明格式不受支持，只提供从备份恢复的入口。在这样的目录上确认恢复，会用备份包的内容整根替换它，下一次启动打开恢复后的资料库；被替换的旧目录先移到资料库旁，由下一次启动收敛时删除，之后不再保留（[回归](../Tests/KinlogueAppTests/SQLiteAppStartupTests.swift)）。把已有 JSON 资料迁入需要另行验证的离线转换，本分支没有提供；这部分代码已经删除，需要它的人只能从 Git 历史取回，转换结果只能以备份包的形式经上述恢复入口装入。早先版本写出的文件树格式和加密格式恢复点同样不能读取，见 [`backup-and-restore.md`](backup-and-restore.md)。
+[SQLiteLibraryStore](../Sources/KinloguePlatform/Storage/SQLiteLibraryStore.swift) 在打开已有文件前只读核对 SQLite header、`application_id`、`user_version` 和日志模式。首发前只认当前 schema（版本 3），不做原地迁移：早先的 schema 版本 1、2 同样返回“格式不受支持”，经新构建从备份恢复来升级（见 [`backup-and-restore.md`](backup-and-restore.md) 的升级途径与 [`decisions.md`](decisions.md) 2026-10-18）。根目录里出现它不认识的内容时返回“格式不受支持”，不迁移、不改写、不删除：早先版本留下的 `library.json` 资料库、未知 schema 和其他非空目录都按此处理，[回归](../Tests/KinloguePlatformTests/SQLiteLibraryStoreTests.swift) 核对目录内容和字节保持不变。启动页说明格式不受支持，只提供从备份恢复的入口。在这样的目录上确认恢复，会用备份包的内容整根替换它，下一次启动打开恢复后的资料库；被替换的旧目录先移到资料库旁，由下一次启动收敛时删除，之后不再保留（[回归](../Tests/KinlogueAppTests/SQLiteAppStartupTests.swift)）。把已有 JSON 资料迁入需要另行验证的离线转换，本分支没有提供；这部分代码已经删除，需要它的人只能从 Git 历史取回，转换结果只能以备份包的形式经上述恢复入口装入。早先版本写出的文件树格式和加密格式恢复点同样不能读取，见 [`backup-and-restore.md`](backup-and-restore.md)。
 
 ## 文件系统安全与删除
 

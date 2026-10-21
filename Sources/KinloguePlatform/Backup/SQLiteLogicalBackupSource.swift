@@ -300,7 +300,9 @@ package struct SQLiteLogicalBackupSource: Sendable {
     }
 
     static func revision(_ header: BackupLogicalHeaderV1) throws -> BackupRevisionPair {
-        guard header.version == 1, header.generation >= 0 else { throw SQLiteLogicalBackupError.unsupportedVersion }
+        guard BackupLogicalHeaderV1.supportedVersions.contains(header.version), header.generation >= 0 else {
+            throw SQLiteLogicalBackupError.unsupportedVersion
+        }
         let digest = SQLiteContentHash.hash(domain: "logical-revision:1", values: [.blob(header.libraryID.sqliteBytes), .integer(header.generation), .blob(header.commitID.sqliteBytes)])
         let revision = try BackupRevision(generation: UInt64(header.generation) + 1, commitID: header.commitID, manifestDigest: digest)
         return try BackupRevisionPair(vault: revision, lanInbox: revision)
@@ -314,8 +316,13 @@ package struct SQLiteLogicalBackupSource: Sendable {
             } onCancel: { cancellation.cancel() }
         }
     }
-    package func validateStrict(check: () throws -> Void = { try Task.checkCancellation() }) throws -> SQLiteLogicalValidation {
-        let snapshot = try captureStrict(check: check)
+    /// Re-encodes the library in logical `version`. A library restored from a version-1 stream is
+    /// checked against that stream in version 1; it cannot hold conversations.
+    package func validateStrict(
+        version: Int = BackupLogicalHeaderV1.currentVersion,
+        check: () throws -> Void = { try Task.checkCancellation() }
+    ) throws -> SQLiteLogicalValidation {
+        let snapshot = try captureStrict(version: version, check: check)
         defer { snapshot.release() }
         for original in snapshot.pins.originals.values {
             let reader = try snapshot.pins.open(original.id); defer { reader.close() }
@@ -327,9 +334,11 @@ package struct SQLiteLogicalBackupSource: Sendable {
             }
         }
         try snapshot.validate()
-        let footer = try snapshot.spool.read(offset: snapshot.spool.byteCount - 85, count: 85)
+        let footerBytes = SQLiteLogicalStream.footerByteCount(version: version)
+        let footer = try snapshot.spool.read(offset: snapshot.spool.byteCount - footerBytes, count: footerBytes)
+        let kinds = BackupLogicalKind.kinds(forVersion: version)
         func count(_ kind: BackupLogicalKind) -> Int {
-            let start = 1 + (Int(kind.rawValue) - 1) * 4
+            let start = 1 + (kinds.firstIndex(of: kind) ?? 0) * 4
             return Int(SQLiteLogicalStream.number(footer.subdata(in: start..<(start + 4)), UInt32.self))
         }
         let counts = (count(.member), count(.report), count(.inbox))
@@ -419,7 +428,7 @@ package struct SQLiteLogicalBackupSource: Sendable {
         } catch { spool?.release(); pins?.release(); throw error }
     }
 
-    private func captureStrict(check: () throws -> Void) throws -> SQLiteLogicalBackupSnapshot {
+    private func captureStrict(version: Int, check: () throws -> Void) throws -> SQLiteLogicalBackupSnapshot {
         var spool: SQLiteLogicalSpool?
         var pins: SQLiteLogicalOriginalPins?
         do {
@@ -441,7 +450,7 @@ package struct SQLiteLogicalBackupSource: Sendable {
                 let capturedSpool = try SQLiteLogicalSpool(parent: store.rootURL.deletingLastPathComponent(), maximumByteCount: Int(estimate))
                 spool = capturedSpool
                 let state = try SQLiteLibraryState.read(from: db)
-                let header = try BackupLogicalHeaderV1(libraryID: state.libraryID, generation: state.generation, commitID: state.commitID)
+                let header = try BackupLogicalHeaderV1(version: version, libraryID: state.libraryID, generation: state.generation, commitID: state.commitID)
                 let writer = try SQLiteLogicalStream.Writer(header: header, write: capturedSpool.append)
                 let originals = try SQLiteLogicalRows.visit(db, store: store, strict: true) { record in
                     try check()

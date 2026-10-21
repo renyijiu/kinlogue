@@ -34,6 +34,7 @@ SwiftPM 命令行构建不会在当前工具链中自动把 `.xcstrings` 转成�
 - OCR heading/keyword、原报告文字、家庭成员姓名、文件名和用户备注是内容数据，不翻译。LAN display name 只经过安全清洗；无法保留有效名称时使用语言无关的 `_`，不能把本地化后的占位名写回领域模型或持久化数据。
 - 整库销毁的输入确认 token 跟随当前 App 显示语言：中文为“彻底删除”，英文为“Permanently Delete”。删除弹窗必须展示当前 token，并只接受与该展示值完全一致的输入；切换语言后不得继续接受另一语言的 token。
 - 翻译不能新增诊断、趋势或建议，也不能弱化明文存储和普通 HTTP 的用户提示。
+- AI 对话（实验）的回答和用户的提问是内容数据，不翻译；模型按提问的语言作答，界面语言只决定包裹它们的标签、确认页和错误文案。回答旁的“模型生成 · 可能有误 · 不是诊断”、确认页里“不是匿名化”“发送后无法撤回”的提示必须在两种语言中同等明确。这些文案集中在 [`AssistantPresentation.swift`](../Sources/KinlogueApp/Views/AssistantPresentation.swift)，函数接收 `AppLanguage` 以便两种语言都有运行时测试（[`AssistantPresentationTests`](../Tests/KinlogueAppTests/AssistantPresentationTests.swift)）。
 
 ### 重构与合并门禁
 

@@ -25,6 +25,10 @@ DICOM_HELPER_NOTICE="$DICOM_HELPER_RESOURCES/THIRD_PARTY_NOTICES.md"
 DICOM_HELPER_ENTITLEMENTS_SOURCE="$REPO_DIR/packaging/KinlogueDICOMDecoderHelper.entitlements"
 DICOM_HELPER_PROJECT="$REPO_DIR/packaging/KinlogueDICOMDecoderHelper.xcodeproj/project.pbxproj"
 DICOM_HELPER_PROJECT_RESOLUTION="$REPO_DIR/packaging/KinlogueDICOMDecoderHelper.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+ASSISTANT_BRIDGE_BUNDLE="$APP_BUNDLE/Contents/XPCServices/KinlogueAssistantBridge.xpc"
+ASSISTANT_BRIDGE_EXECUTABLE="$ASSISTANT_BRIDGE_BUNDLE/Contents/MacOS/KinlogueAssistantBridge"
+ASSISTANT_BRIDGE_INFO_PLIST="$ASSISTANT_BRIDGE_BUNDLE/Contents/Info.plist"
+ASSISTANT_BRIDGE_ENTITLEMENTS_SOURCE="$REPO_DIR/packaging/KinlogueAssistantBridge.entitlements"
 
 EXPECTED_BUNDLE_IDENTIFIER="com.kinlogue.mac"
 EXPECTED_SHORT_VERSION="0.5.0"
@@ -50,6 +54,11 @@ EXPECTED_ARGUMENT_PARSER_VERSION="1.8.2"
 EXPECTED_ZIPFOUNDATION_REVISION="22787ffb59de99e5dc1fbfe80b19c97a904ad48d"
 EXPECTED_ZIPFOUNDATION_VERSION="0.9.20"
 EXPECTED_DICOM_HELPER_IDENTIFIER="com.kinlogue.mac.dicom-decoder"
+EXPECTED_ASSISTANT_BRIDGE_IDENTIFIER="com.kinlogue.mac.assistant-bridge"
+# Scheme A of the member-chat plan, in canonical JSON: the bridge's own sandbox, outgoing network
+# for Codex, a loopback listener for the pre-send check, Codex's state folder, and the two
+# supported installation roots read-only.
+EXPECTED_ASSISTANT_BRIDGE_ENTITLEMENTS='{"com.apple.security.app-sandbox":true,"com.apple.security.network.client":true,"com.apple.security.network.server":true,"com.apple.security.temporary-exception.files.absolute-path.read-only":["/opt/homebrew/","/usr/local/"],"com.apple.security.temporary-exception.files.home-relative-path.read-write":["/.codex/"]}'
 
 XCODE_DEVELOPER_DIR_INPUT="/Applications/Xcode.app/Contents/Developer"
 [[ -d "$XCODE_DEVELOPER_DIR_INPUT" && ! -L "$XCODE_DEVELOPER_DIR_INPUT" ]] || {
@@ -135,6 +144,30 @@ require_plist_key_absent() {
     *"No value at that key path or invalid key path: $escaped_key_path") ;;
     *) fail "$label could not be inspected safely for $key" ;;
   esac
+}
+
+canonical_entitlements_json() {
+  /usr/bin/plutil -convert json -o - - \
+    | /usr/bin/ruby -rjson -e 'puts JSON.generate(JSON.parse(STDIN.read).sort.to_h)'
+}
+
+verify_assistant_bridge_prerequisites() {
+  local root="$1"
+  local bridge_entitlements="$root/packaging/KinlogueAssistantBridge.entitlements"
+  local bridge_info="$root/packaging/KinlogueAssistantBridge-Info.plist"
+  local bridge_assembler="$root/scripts/assemble-assistant-bridge.sh"
+
+  for file in "$bridge_entitlements" "$bridge_info" "$bridge_assembler"; do
+    [[ -f "$file" && ! -L "$file" && -s "$file" ]] \
+      || fail "an assistant bridge prerequisite file is missing, linked, or empty: $file"
+  done
+  [[ "$(canonical_entitlements_json <"$bridge_entitlements")" \
+      == "$EXPECTED_ASSISTANT_BRIDGE_ENTITLEMENTS" ]] \
+    || fail "the assistant bridge source entitlements differ from the reviewed scheme A set"
+  [[ "$(/usr/bin/plutil -extract CFBundlePackageType raw -expect string "$bridge_info")" == "XPC!" \
+      && "$(/usr/bin/plutil -extract CFBundleIdentifier raw -expect string "$bridge_info")" \
+        == "$EXPECTED_ASSISTANT_BRIDGE_IDENTIFIER" ]] \
+    || fail "the assistant bridge Info.plist is not the reviewed XPC service identity"
 }
 
 require_exact_boolean_entitlements() {
@@ -393,6 +426,7 @@ verify_release_prerequisites() {
 
   verify_grdb_prerequisites "$manifest_json" "$resolution" "$graph_json"
   verify_dicom_helper_prerequisites "$root" "$manifest_json"
+  verify_assistant_bridge_prerequisites "$root"
 
   if [[ "$resolved_only" == true ]]; then
     verify_swiftnio_checkout "$scratch_root"
@@ -619,6 +653,17 @@ else
   [[ "$LAN_LOG_SCAN_EXIT" -eq 1 ]] \
     || fail "the LAN receiver logging audit could not be completed"
 fi
+if LC_ALL=C /usr/bin/grep -r -n -E -- \
+    '(^|[^[:alnum:]_])(print|NSLog|os_log)[[:space:]]*\(|Logger[[:space:]]*[.(]' \
+    "$REPO_DIR/Sources/KinlogueAssistantIPC" \
+    "$REPO_DIR/Sources/KinlogueAssistantCLI" \
+    "$REPO_DIR/Sources/KinlogueAssistantBridge" >/dev/null 2>&1; then
+  fail "the assistant bridge contains a logging path that could carry health content"
+else
+  ASSISTANT_LOG_SCAN_EXIT=$?
+  [[ "$ASSISTANT_LOG_SCAN_EXIT" -eq 1 ]] \
+    || fail "the assistant bridge logging audit could not be completed"
+fi
 LAN_COMPOSITION_SCAN_STATUS="passed"
 [[ "$LAN_COMPOSITION_SCAN_STATUS" == passed ]] \
   || fail "the LAN composition audit was not executed"
@@ -663,17 +708,22 @@ if LC_ALL=C /usr/bin/grep -r -a -F -q \
     'KinlogueDICOMAcceptanceFixtureGenerator' "$APP_BUNDLE"; then
   fail "the non-product DICOM acceptance generator leaked into the release bundle"
 fi
+for non_product in KinlogueAssistantCLIFixture KinlogueAssistantXPCProbe; do
+  if LC_ALL=C /usr/bin/grep -r -a -F -q "$non_product" "$APP_BUNDLE"; then
+    fail "the non-product $non_product leaked into the release bundle"
+  fi
+done
 XPC_SERVICE_COUNT="$(/usr/bin/find "$APP_BUNDLE/Contents/XPCServices" \
   -mindepth 1 -maxdepth 1 -type d -name '*.xpc' -print \
   | /usr/bin/wc -l | /usr/bin/awk '{print $1}')"
-[[ "$XPC_SERVICE_COUNT" -eq 1 \
+[[ "$XPC_SERVICE_COUNT" -eq 2 \
     && -d "$DICOM_HELPER_BUNDLE" && ! -L "$DICOM_HELPER_BUNDLE" \
     && -f "$DICOM_HELPER_INFO_PLIST" && ! -L "$DICOM_HELPER_INFO_PLIST" \
     && -f "$DICOM_HELPER_EXECUTABLE" && -x "$DICOM_HELPER_EXECUTABLE" \
     && ! -e "$DICOM_HELPER_BUNDLE/DICOMSwift_DicomCore.bundle" \
     && ! -e "$DICOM_HELPER_BUNDLE/J2KSwift_J2KMetal.bundle" \
     && ! -e "$DICOM_HELPER_BUNDLE/ZIPFoundation_ZIPFoundation.bundle" ]] \
-  || fail "the app must contain exactly one standard-layout DICOM XPC service"
+  || fail "the app must contain a standard-layout DICOM XPC service and the assistant bridge only"
 DICOM_HELPER_RESOURCE_ENTRIES="$(
   cd "$DICOM_HELPER_RESOURCES"
   /usr/bin/find . -mindepth 1 -maxdepth 1 -print | LC_ALL=C /usr/bin/sort
@@ -713,6 +763,37 @@ DICOM_HELPER_ENTITLEMENTS_JSON="$(/usr/bin/codesign -d --entitlements :- \
 [[ "$DICOM_HELPER_ENTITLEMENTS_JSON" \
     == '{"com.apple.security.app-sandbox":true}' ]] \
   || fail "the signed DICOM Helper entitlements exceed the exact sandbox allow-list"
+[[ -d "$ASSISTANT_BRIDGE_BUNDLE" && ! -L "$ASSISTANT_BRIDGE_BUNDLE" \
+    && -f "$ASSISTANT_BRIDGE_INFO_PLIST" && ! -L "$ASSISTANT_BRIDGE_INFO_PLIST" \
+    && -f "$ASSISTANT_BRIDGE_EXECUTABLE" && -x "$ASSISTANT_BRIDGE_EXECUTABLE" ]] \
+  || fail "the app must contain the standard-layout assistant bridge XPC service"
+ASSISTANT_BRIDGE_ENTRIES="$(
+  cd "$ASSISTANT_BRIDGE_BUNDLE/Contents"
+  /usr/bin/find . -mindepth 1 -print | LC_ALL=C /usr/bin/sort
+)"
+EXPECTED_ASSISTANT_BRIDGE_ENTRIES="./Info.plist
+./MacOS
+./MacOS/KinlogueAssistantBridge
+./_CodeSignature
+./_CodeSignature/CodeResources"
+[[ "$ASSISTANT_BRIDGE_ENTRIES" == "$EXPECTED_ASSISTANT_BRIDGE_ENTRIES" ]] \
+  || fail "the assistant bridge bundle contents do not match exactly"
+[[ "$(/usr/bin/plutil -extract CFBundlePackageType raw -expect string \
+      "$ASSISTANT_BRIDGE_INFO_PLIST")" == "XPC!" \
+    && "$(/usr/bin/plutil -extract CFBundleIdentifier raw -expect string \
+      "$ASSISTANT_BRIDGE_INFO_PLIST")" == "$EXPECTED_ASSISTANT_BRIDGE_IDENTIFIER" \
+    && "$(/usr/bin/plutil -extract CFBundleExecutable raw -expect string \
+      "$ASSISTANT_BRIDGE_INFO_PLIST")" == "KinlogueAssistantBridge" ]] \
+  || fail "the assistant bridge metadata is unexpected"
+/usr/bin/codesign --verify --strict "$ASSISTANT_BRIDGE_BUNDLE" \
+  || fail "the assistant bridge signature is invalid"
+ASSISTANT_BRIDGE_ENTITLEMENTS_JSON="$(/usr/bin/codesign -d --entitlements - --xml \
+  "$ASSISTANT_BRIDGE_BUNDLE" 2>/dev/null | canonical_entitlements_json)" \
+  || fail "the assistant bridge signed entitlements could not be inspected"
+[[ "$ASSISTANT_BRIDGE_ENTITLEMENTS_JSON" == "$EXPECTED_ASSISTANT_BRIDGE_ENTITLEMENTS" \
+    && "$ASSISTANT_BRIDGE_ENTITLEMENTS_JSON" \
+      == "$(canonical_entitlements_json <"$ASSISTANT_BRIDGE_ENTITLEMENTS_SOURCE")" ]] \
+  || fail "the signed assistant bridge entitlements differ from packaging/KinlogueAssistantBridge.entitlements"
 RESOURCE_FILES="$(
   cd "$APP_BUNDLE/Contents/Resources"
   /usr/bin/find . -type f -print | LC_ALL=C /usr/bin/sort
@@ -860,6 +941,9 @@ ARCHITECTURES="$(/usr/bin/lipo -archs "$EXECUTABLE")"
 DICOM_HELPER_ARCHITECTURES="$(/usr/bin/lipo -archs "$DICOM_HELPER_EXECUTABLE")"
 [[ "$DICOM_HELPER_ARCHITECTURES" == "arm64" ]] \
   || fail "the DICOM Helper executable must contain only arm64"
+ASSISTANT_BRIDGE_ARCHITECTURES="$(/usr/bin/lipo -archs "$ASSISTANT_BRIDGE_EXECUTABLE")"
+[[ "$ASSISTANT_BRIDGE_ARCHITECTURES" == "arm64" ]] \
+  || fail "the assistant bridge executable must contain only arm64"
 BINARY_PLATFORM="$(
   /usr/bin/vtool -show-build "$EXECUTABLE" \
     | /usr/bin/awk '$1 == "platform" { print $2; exit }'
@@ -897,6 +981,27 @@ case "$HELPER_EXECUTABLE_SYMBOLS" in
 esac
 if /usr/bin/otool -L "$DICOM_HELPER_EXECUTABLE" | /usr/bin/grep -Fq 'libsqlite3'; then
   fail "the DICOM Helper must not directly link SQLite"
+fi
+# The App never starts the CLI itself; only the bridge does, and the bridge never reaches the library.
+case "$MAIN_EXECUTABLE_SYMBOLS" in
+  *CodexBridge*|*CLISupervisor*|*LoopbackResponsesServer*)
+    fail "the main executable contains the assistant CLI runner"
+    ;;
+esac
+ASSISTANT_BRIDGE_SYMBOLS="$(/usr/bin/nm "$ASSISTANT_BRIDGE_EXECUTABLE" 2>/dev/null)" \
+  || fail "the assistant bridge symbols could not be inspected"
+[[ "$ASSISTANT_BRIDGE_SYMBOLS" == *CodexBridge* ]] \
+  || fail "the assistant bridge executable does not contain the Codex adapter"
+case "$ASSISTANT_BRIDGE_SYMBOLS" in
+  *GRDB*|*_sqlite3_*|*SQLiteLibraryStore*|*SQLiteReportRepository*)
+    fail "the assistant bridge must not link the SQLite storage kernel"
+    ;;
+  *DCMDecoder*|*DicomCore*)
+    fail "the assistant bridge must not contain the DICOM decoder"
+    ;;
+esac
+if /usr/bin/otool -L "$ASSISTANT_BRIDGE_EXECUTABLE" | /usr/bin/grep -Fq 'libsqlite3'; then
+  fail "the assistant bridge must not directly link SQLite"
 fi
 LEGACY_RUNTIME_PATTERN='(^|[^[:alnum:]_])(EncryptedVault|VaultCipher)([^[:alnum:]_]|$)'
 if LC_ALL=C /usr/bin/grep -r -n -E -- \
@@ -1023,6 +1128,10 @@ RESOURCE_MANIFEST_HASH="$(/usr/bin/shasum -a 256 -- "$RESOURCE_MANIFEST_FILE" | 
 EXECUTABLE_HASH="$(/usr/bin/shasum -a 256 -- "$EXECUTABLE" | /usr/bin/awk '{print $1}')"
 DICOM_HELPER_EXECUTABLE_HASH="$(/usr/bin/shasum -a 256 -- \
   "$DICOM_HELPER_EXECUTABLE" | /usr/bin/awk '{print $1}')"
+ASSISTANT_BRIDGE_EXECUTABLE_HASH="$(/usr/bin/shasum -a 256 -- \
+  "$ASSISTANT_BRIDGE_EXECUTABLE" | /usr/bin/awk '{print $1}')"
+ASSISTANT_BRIDGE_ENTITLEMENTS_HASH="$(/usr/bin/printf '%s' "$ASSISTANT_BRIDGE_ENTITLEMENTS_JSON" \
+  | /usr/bin/shasum -a 256 | /usr/bin/awk '{print $1}')"
 ICON_HASH="$(/usr/bin/shasum -a 256 -- "$ICON_FILE" | /usr/bin/awk '{print $1}')"
 ENTITLEMENTS_HASH="$(/usr/bin/shasum -a 256 -- "$ENTITLEMENTS_FILE" | /usr/bin/awk '{print $1}')"
 PACKAGE_RESOLVED_HASH="$(/usr/bin/shasum -a 256 -- "$REPO_DIR/Package.resolved" | /usr/bin/awk '{print $1}')"
@@ -1087,6 +1196,12 @@ DEPENDENCY_CACHE_ENABLED=false
   "$EXPECTED_DICOM_HELPER_IDENTIFIER" "$REPORT_TEMP_FILE"
 /usr/bin/plutil -insert artifact.dicomHelperExecutableSHA256 -string \
   "$DICOM_HELPER_EXECUTABLE_HASH" "$REPORT_TEMP_FILE"
+/usr/bin/plutil -insert artifact.assistantBridgeBundleIdentifier -string \
+  "$EXPECTED_ASSISTANT_BRIDGE_IDENTIFIER" "$REPORT_TEMP_FILE"
+/usr/bin/plutil -insert artifact.assistantBridgeExecutableSHA256 -string \
+  "$ASSISTANT_BRIDGE_EXECUTABLE_HASH" "$REPORT_TEMP_FILE"
+/usr/bin/plutil -insert artifact.assistantBridgeEntitlementsSHA256 -string \
+  "$ASSISTANT_BRIDGE_ENTITLEMENTS_HASH" "$REPORT_TEMP_FILE"
 /usr/bin/plutil -insert artifact.iconFile -string "$EXPECTED_ICON_FILE" "$REPORT_TEMP_FILE"
 /usr/bin/plutil -insert artifact.iconSHA256 -string "$ICON_HASH" "$REPORT_TEMP_FILE"
 /usr/bin/plutil -insert artifact.iconRepresentations -integer "$ICON_REPRESENTATION_COUNT" "$REPORT_TEMP_FILE"

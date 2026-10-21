@@ -25,7 +25,8 @@ func sqliteKernelCreatesStrictSchemaAndVerifiesActualEngineConfiguration() throw
     }
     #expect(strictTables == ["library_state", "members", "originals", "ocr_documents", "reports", "report_details", "report_search",
         "import_drafts", "report_sources", "inbox_items", "inbox_content_terminals", "inbox_transport_receipts", "inbox_uploads", "inbox_archive_receipts",
-        "dicom_studies", "dicom_objects", "dicom_series", "dicom_instances"])
+        "dicom_studies", "dicom_objects", "dicom_series", "dicom_instances",
+        "assistant_conversations", "assistant_turns", "assistant_turn_sources"])
     try store.close()
     let reopened = try SQLiteLibraryStore(rootURL: root)
     #expect(try reopened.state() == first)
@@ -44,6 +45,23 @@ func sqliteKernelRejectsSecondOwnerBeforeOpeningDatabaseAndReleasesAfterClose() 
     try first.close()
     let next = try SQLiteLibraryStore(rootURL: root)
     try next.close()
+}
+
+/// Before the first release only the current schema opens: an older library is refused like an
+/// unknown one, and it reaches the current version through a restore point (decisions.md, 2026-10-18).
+@Test(arguments: [1, 2, SQLiteLibrarySchema.version + 1])
+func sqliteKernelOlderAndNewerSchemaVersionsAreRefusedUntouched(version: Int) throws {
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    try SQLiteLibraryStore(rootURL: root).close()
+    let databaseURL = root.appendingPathComponent(SQLiteLibraryStore.databaseFilename)
+    var bytes = try Data(contentsOf: databaseURL)
+    bytes.replaceSubrange(60..<64, with: [0, 0, 0, UInt8(version)])
+    try bytes.write(to: databaseURL)
+
+    #expect(throws: SQLiteLibraryError.unsupportedFormat) { _ = try SQLiteLibraryStore(rootURL: root) }
+    #expect(try Data(contentsOf: databaseURL) == bytes)
+    #expect(!FileManager.default.fileExists(atPath: databaseURL.path + "-journal"))
 }
 
 @Test

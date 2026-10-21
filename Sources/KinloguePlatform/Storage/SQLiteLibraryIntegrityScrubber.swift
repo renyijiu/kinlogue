@@ -4,7 +4,7 @@ import KinlogueCore
 
 package struct SQLiteIntegrityTarget: Hashable, Sendable {
     package enum Kind: String, CaseIterable, Sendable {
-        case member, report, draft, document, original, inbox, terminal, receipt, archiveReceipt, study, upload
+        case member, report, draft, document, original, inbox, terminal, receipt, archiveReceipt, study, upload, conversation
         var table: String {
             switch self {
             case .member: "members"
@@ -18,6 +18,7 @@ package struct SQLiteIntegrityTarget: Hashable, Sendable {
             case .archiveReceipt: "inbox_archive_receipts"
             case .study: "dicom_studies"
             case .upload: "inbox_uploads"
+            case .conversation: "assistant_conversations"
             }
         }
         var key: String {
@@ -259,6 +260,7 @@ package struct SQLiteLibraryIntegrityScrubber: Sendable {
             _ = try SQLiteLANRows.receipt(row, item: { try SQLiteLANRows.item($0, db) }, terminal: { try SQLiteLANRows.terminal(session: $0, content: $1, db) })
         case .study: _ = try SQLiteDICOMRows.strictStudy(id, db)
         case .upload: _ = try SQLiteLANUpload.read(id, db)
+        case .conversation: guard try SQLiteAssistantRows.conversation(id, db) != nil else { throw SQLiteLibraryError.damaged }
         case .archiveReceipt: break
         }
     }

@@ -67,6 +67,13 @@ func sqliteLogicalArchiveRestoreReopensAndEditsActualRepositories() async throws
     _ = try await inbox.savePreprocessedDocument(itemID: item.id, expectedRevision: item.revision, document: lanDocument)
     let before = try await inbox.loadSnapshot()
     let (record, reportDocument) = try await sqliteLogicalConfirmedReport(store, member: member)
+    // A saved member chat travels in the data stream, not under files/.
+    let pack = try await SQLiteReportRepository(store: store).assistantPack(memberID: member.id).pack
+    let provider = try AssistantProviderDescriptor(kind: .codex, cliVersion: "0.162.0", model: "gpt-synthetic")
+    let chat = try AssistantConversation(memberID: member.id, createdAt: Date(timeIntervalSince1970: 1786000000), provider: provider, promptVersion: 1)
+        .appending(AssistantTurn(ordinal: 0, question: "Synthetic archived question", answer: "Synthetic answer [R1]",
+                                 completedAt: Date(timeIntervalSince1970: 1786000001), sources: pack.manifest))
+    try await SQLiteReportRepository(store: store).saveAssistantConversation(chat)
     let dicomDirectory = base.appendingPathComponent("synthetic-dicom")
     try FileManager.default.createDirectory(at: dicomDirectory, withIntermediateDirectories: false)
     try GeneratedDICOMFixture.explicitVRLittleEndianMR().write(to: dicomDirectory.appendingPathComponent("mr.dcm"))
@@ -110,6 +117,7 @@ func sqliteLogicalArchiveRestoreReopensAndEditsActualRepositories() async throws
     let restoredItem = try #require(after.items.first)
     #expect(try await SQLiteLANInboxStore(store: restored).loadPreprocessedDocument(itemID: restoredItem.id, expectedRevision: restoredItem.revision) == lanDocument)
     #expect(try await repository.record(record.id) == record)
+    #expect(try await repository.assistantConversation(chat.id) == chat)
     let restoredDocument = try restored.read { db in try SQLiteReportRows.document(record.ocrDocumentObjectID!, sources: record.sources,
         expectedHash: Data.fetchOne(db, sql: "SELECT document_hash FROM reports WHERE record_id=?", arguments: [record.id.sqliteBytes]), db) }
     #expect(restoredDocument == reportDocument)
@@ -195,7 +203,9 @@ func sqliteLogicalFrozenV1RestoresIntoAppSchemaAndRemainsByteExact() async throw
     #expect(result.memberCount == 1 && result.recordCount == 1 && result.inboxItemCount == 1)
     let after = try await SQLiteLogicalBackupSource(store: store).prepare()
     defer { after.release() }
-    #expect(try after.spool.read(offset: 0, count: after.spool.byteCount) == fixture.stream)
+    // The writer now produces the current logical version: the same records under its header, with
+    // no conversations. Restore itself checked the library against the version-1 bytes.
+    try expectSameRecordsInCurrentVersion(after, as: fixture.stream)
     let records = try after.logicalRecordsForTesting()
     let reportDocument = try #require(records.first { $0.kind == .reportDocument }).decode(BackupLogicalReportDocumentV1.self)
     #expect(reportDocument.document.reviewState?.userNote == "Synthetic review note")
@@ -204,6 +214,26 @@ func sqliteLogicalFrozenV1RestoresIntoAppSchemaAndRemainsByteExact() async throw
     #expect(BackupLogicalKind.reportDocument.maximumCount == 40_000)
     // Every legal original fits in one archive beside the index, read-me and data stream.
     #expect(BackupLogicalKind.original.maximumCount <= BackupArchiveLimits.maximumOriginalCount)
+}
+
+@Test
+func sqliteLogicalFrozenV2RestoresSavedChatsAndRemainsByteExact() async throws {
+    let fixture = try JSONDecoder().decode(SQLiteLogicalFrozenFixture.self, from: Data(sqliteLogicalV2FrozenJSON.utf8))
+    let root = try sqliteTestRoot()
+    defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+    let store = try SQLiteLibraryStore(rootURL: root)
+    defer { try? store.close() }
+    let result = try sqliteRestoreFrozen(fixture, store: store)
+    #expect(result.memberCount == 1 && result.recordCount == 1)
+
+    let id = try #require(UUID(uuidString: "5C1A2B3D-4E5F-4061-8273-9A8B7C6D5E4F"))
+    let conversation = try #require(try await SQLiteReportRepository(store: store).assistantConversation(id))
+    #expect(conversation.turns.map(\.question) == ["Synthetic frozen question"])
+    #expect(conversation.turns[0].sources.map(\.label) == ["R1"])
+    let after = try await SQLiteLogicalBackupSource(store: store).prepare()
+    defer { after.release() }
+    // Restore checked the library against the version-2 bytes; the writer now uses version 3.
+    try expectSameRecordsInCurrentVersion(after, as: fixture.stream)
 }
 
 private func sqliteRestoreFrozen(_ fixture: SQLiteLogicalFrozenFixture, store: SQLiteLibraryStore) throws -> SQLiteLogicalValidation {
@@ -424,7 +454,7 @@ func sqliteLogicalFrozenRecoveryStatesAndReplayHistoryRemainPortable() async thr
     _ = try sqliteRestoreFrozen(fixture, store: store)
     let snapshot = try await SQLiteLogicalBackupSource(store: store).prepare()
     defer { snapshot.release() }
-    #expect(try snapshot.spool.read(offset: 0, count: snapshot.spool.byteCount) == fixture.stream)
+    try expectSameRecordsInCurrentVersion(snapshot, as: fixture.stream)
     let records = try snapshot.logicalRecordsForTesting()
     let document = try #require(records.first { $0.kind == .reportDocument }).decode(BackupLogicalReportDocumentV1.self)
     #expect(document.document.blocks.count == 1)
@@ -509,4 +539,24 @@ func sqliteLogicalBackupDigestFailureQuarantinesWithoutReadingOriginalTwice(stri
     }
     #expect(store.originalReadMetrics.verifiedReadByteCount - before == UInt64(original.byteCount))
     await #expect(throws: SQLiteLibraryError.damaged) { try await repository.record(record.id) }
+}
+
+/// A version-2 capture of a library restored from a version-1 stream: the same header fields and the
+/// same records, byte for byte, with no conversations.
+private func expectSameRecordsInCurrentVersion(_ snapshot: SQLiteLogicalBackupSnapshot, as older: Data,
+                                           sourceLocation: SourceLocation = #_sourceLocation) throws {
+    func parse(_ bytes: Data) throws -> (BackupLogicalHeaderV1, [SQLiteLogicalRecord]) {
+        var records: [SQLiteLogicalRecord] = []
+        let header = try SQLiteLogicalStream.read(byteCount: bytes.count, read: { bytes.subdata(in: $0..<($0 + $1)) }) { records.append($0) }
+        return (header, records)
+    }
+    let (oldHeader, oldRecords) = try parse(older)
+    let (newHeader, newRecords) = try parse(try snapshot.spool.read(offset: 0, count: snapshot.spool.byteCount))
+    #expect(oldHeader.version < BackupLogicalHeaderV1.currentVersion, sourceLocation: sourceLocation)
+    #expect(newHeader.version == BackupLogicalHeaderV1.currentVersion, sourceLocation: sourceLocation)
+    #expect(oldHeader.libraryID == newHeader.libraryID && oldHeader.generation == newHeader.generation
+        && oldHeader.commitID == newHeader.commitID, sourceLocation: sourceLocation)
+    #expect(newRecords.map(\.kind) == oldRecords.map(\.kind), sourceLocation: sourceLocation)
+    #expect(newRecords.map(\.key) == oldRecords.map(\.key), sourceLocation: sourceLocation)
+    #expect(newRecords.map(\.payload) == oldRecords.map(\.payload), sourceLocation: sourceLocation)
 }

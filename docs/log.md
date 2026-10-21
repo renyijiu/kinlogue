@@ -1727,6 +1727,320 @@
 - **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，完整 `scripts/test.sh` 退出码 0，主清单 1191 tests / 96 suites，隔离门禁一并通过；传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
 - **未验证**：三种识别误读规则和按句切分在真实报告上的命中与误报；按新规则整理在真实旧版资料库上的表现（只用合成 block 验证过）；对照页和误读面板的键盘、VoiceOver 与窄窗口；macOS 26 与安装后的 App。
 
+## [2026-10-15] plan/assistant | 提议成员对话：调用本机已登录的 Codex / Claude Code CLI
+
+- **起因**：用户希望针对每一位成员引入模型对话，先接入本机已有的 Codex CLI 或 Claude Code CLI，让使用者以聊天方式了解这位成员的资料并提问，不作为诊断。本条只做规划，没有改代码。
+- **依据**：读了 [`project-overview.md`](project-overview.md)、[`../PRIVACY.md`](../PRIVACY.md)、[`decisions.md`](decisions.md) 2026-10-11 一节和开放门禁第 6 项、[`brand.md`](brand.md) 的方向一节、[`architecture.md`](architecture.md)，以及主 App 的 [entitlements](../packaging/Kinlogue.entitlements)。另读了未合入的 `codex/agentrunkit-probe` 分支（基于 SQLite 切换前的主线）的助手、Codex 接入和调研文档：它内置锁定版本的 Codex 并由续页自己做 ChatGPT 授权，刻意不读取用户的 CLI 配置和凭据，Claude 暂缓。本机两个 CLI 只看了帮助文本，记录在[来源笔记](sources/2026-10-15-local-cli-noninteractive-flags.md)。
+- **产出**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md)（status: proposed）。要点：每段对话绑定一位成员，只发送预先组好、可逐字预览的已确认报告投影，模型没有任何工具；启动 CLI 放在拿不到资料库的单独 XPC helper 中，主 App 权限不扩大；健康资料只经 stdin；按能力检查 CLI 而不锁版本；对话只在内存中。helper 是否启用沙盒、是否纳入 Claude Code、同意粒度、是否允许描述性排列历次结果等 7 项留给用户决定。导航同步到 [`index.md`](index.md)、[`plans/README.md`](plans/README.md)、[`sources/README.md`](sources/README.md)、[`decisions.md`](decisions.md) 开放门禁第 6 项和 [`brand.md`](brand.md)。
+- **未执行**：没有发起任何模型请求，没有在 App Sandbox 或 XPC 中运行 CLI；计划中凭据可读性、流式事件格式、工具是否真正关闭、是否写入会话或遥测文件等都标为待 U0 实测。`PRIVACY.md`、`README.md` 和产品契约没有改动。
+
+## [2026-10-15] plan/assistant | 成员对话计划修订：首版只接 Codex，对话保存做兼容设计
+
+- **起因**：用户确定 D6 为首版只做 Codex，并要求“如果想保留对话，设计上最好可以兼容”。暂不执行 U0。
+- **依据**：[`sqlite-storage.md`](sqlite-storage.md) 的格式一节（打开时精确校验 `user_version=1` 与 schema，未知版本拒绝、不自动迁移）和逻辑恢复点一节（logical-v1 与 schema 解耦、有冻结夹具）；[`decisions.md`](decisions.md) 的“首发前 current-only”；`SQLiteReportRepository.deleteMember` 在成员仍有报告、草稿或 DICOM 时拒绝删除。
+- **计划改动**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 的范围、方案比较、适配表、界面、U0 和人工矩阵改为只针对 Codex，适配层保留 `CLIAdapter` 接口给后续的 Claude Code。新增第 4.9 节：首版对话仍只在内存，但对话、轮次和每轮发送清单是可编码的 Core 值类型，引用落在记录 ID 与 revision 上，每轮无状态重发、不依赖 Codex 会话文件，App 只经 `AssistantConversationStoring` 读写；打开保存时推荐在主资料库加三张表并进入恢复点，代价是第一次 schema 迁移（v1→v2）和 logical payload v2，需要用户同意 current-only 的例外；备选是单独的对话数据库文件。新增可选单元 U7 和待定决策 D8；第 9 节把 D6 移到“已定”。导航中的描述同步到 [`index.md`](index.md)、[`plans/README.md`](plans/README.md)、[`decisions.md`](decisions.md) 和 [`brand.md`](brand.md)。
+- **未执行**：仍未发起模型请求，没有改代码；迁移、恢复点 v2 和对话表都只是设计，没有原型或测试。
+
+## [2026-10-15] plan/assistant | 成员对话计划：确定对话保存进主资料库与恢复点，设计 v1→v2 迁移
+
+- **起因**：用户确定 D8：保存的对话放进主资料库并进入恢复点，同意为此做资料库第一次 schema 迁移（v1→v2）。
+- **依据**：[`SQLiteLibrarySchema`](../Sources/KinloguePlatform/Storage/SQLiteLibrarySchema.swift) 打开时要求 `user_version` 等于当前版本、每张表的 DDL 逐字相同，并在 `library_state` 保存全部 DDL 的 SHA-256；[`sqlite-storage.md`](sqlite-storage.md) 的逻辑恢复点一节（logical-v1 与 schema 解耦、两个 v1 冻结夹具）。
+- **计划改动**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 第 4.9 节写明迁移做法：只接受 v1 作为迁移输入、其他未知版本照旧失败关闭；在单实例 owner 下、普通服务打开前，用单个事务校验 v1、按 v2 的 DDL 常量建表、写 `user_version = 2`、更新 `library_state` 的 schema identity 与内容摘要，再按 v2 校验；只新增表，不改已有行、不读原件；建议但不强制迁移前手动备份；回退只能用迁移前的恢复点。恢复点 payload 升到 v2，reader 同时接受 v1 与 v2。U7 的退出条件补上 v1 冻结资料库夹具的分阶段强退测试；D8 移入“已定”，D4 改为问 U7 放进首版还是首版之后单独发布（建议后者）。[`decisions.md`](decisions.md) 开放门禁第 6 项记下这个例外已获同意、实施前 current-only 规则不变。
+- **未执行**：没有改代码、没有原型或测试；迁移和恢复点 v2 都还只是设计。
+
+## [2026-10-15] plan/assistant | 成员对话计划：确定保存对话在首版之后单独发布
+
+- **起因**：用户确定 D4 按建议执行：U7（保存对话）在首版之后单独发布。
+- **计划改动**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 把 D4 移入“已定”，修订说明、第 4.6 节和 U7 一行同步。首版对话只在内存里，但仍按第 4.9 节做可保存的兼容设计。待定的还有 D1（由 U0 实测决定）、D2、D3、D5、D7，以及代理变量和 Codex 服务商配置两个默认值。
+- **未执行**：没有改代码，U0 未开始。
+
+## [2026-10-15] plan/assistant | 成员对话计划：D2、D3、D5、D7 按建议确定
+
+- **起因**：用户确定 D2、D3、D5、D7 都按计划中的建议执行。
+- **计划改动**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 第 9 节把四项移入“已定”：首版模型没有任何工具，只发送可逐字预览的上下文包（D2）；同意按对话计，CLI、模型或上下文包变化即失效（D3）；允许按时间描述性排列同一项目的历次原文结果并逐条引用，不做好转或恶化判断（D5，实现时需在 [`decisions.md`](decisions.md) 记录它与“当前不做趋势分析”的边界）；默认不发送机构名称，确认页提供单独开关（D7）。第 3.2 节、第 4.4 节和确认页描述同步。待定的只剩 D1（由 U0 实测决定），以及代理变量和 Codex 服务商配置两个默认值。
+- **未执行**：没有改代码，U0 未开始。
+- **补充**：同日在第 9 节为剩下的两个默认值写出建议，编号 E1、E2：允许在设置里填写四个代理变量，只传给 Codex 子进程（E1）；首版不加载 Codex 的用户配置，因此不支持第三方中转，后续改为在续页设置里填写服务商地址并经 `-c` 传入（E2）。第 7 节人工矩阵补上对应检查。两项待用户确认。
+
+## [2026-10-15] plan/assistant | 成员对话计划：E1、E2 按建议确定
+
+- **起因**：用户确定 E1、E2 都按建议执行。
+- **计划改动**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 第 9 节把 E1（设置里可填四个代理变量，只传给 Codex 子进程）和 E2（首版不加载 Codex 用户配置、不支持第三方中转，后续改为在续页设置里填写服务商地址）移入“已定”；第 4.3 节、设置页描述和第 11 节后续工作同步。除 D1 由 U0 实测决定外，计划中的决策已全部确定。
+- **未执行**：没有改代码，U0 未开始；U0 会消耗用户的 Codex 额度，需要用户同意后执行。
+
+## [2026-10-15] probe/assistant | 成员对话计划 U0：本机 Codex 在加固参数与两种 XPC helper 下的实测
+
+- **起因**：用户同意开始 U0，并允许使用其本机 Codex 的额度；只用合成资料。
+- **做法**：探针代码放在会话临时目录，没有进入仓库。先用只监听 127.0.0.1 的模拟 Responses 服务记录 Codex 0.162.0 实际发出的请求，再用真实账号在终端跑 3 轮；然后构建 ad-hoc 签名的沙盒宿主，内嵌沙盒加例外（A）与非沙盒（B）两个 XPC helper，各自用真实账号跑通。结果与方法见 [U0 证据笔记](sources/2026-10-15-codex-u0-probe-evidence.md)。
+- **关键发现**：只关闭功能不够——当前所有模型的目录项都是 `code_mode_only`，请求里仍有代码模式和子 agent 协作共 9 个工具；加 `agents.enabled=false` 并用 `model_catalog_json` 传入改过的目录后，工具数为 0。`-c instructions=...` 整段替换内置提示词，加固后的请求只有两条消息，没有本机路径。`--strict-config` 拒绝不认识的配置键。`exec --json` 没有逐字增量。真实账号 3 份记录 6.2 秒、20 份（约 92 KB）17.1 秒；注入记录被当成资料，canary 未外泄。整个 `~/.codex` 中找不到合成标记串。A 下 helper 读不到真实家目录和 `~/Library/Containers`，Codex 仍能读登录文件并完成回答。
+- **计划改动**：[成员对话计划](plans/2026-10-15-feat-member-cli-chat-plan.md) 按约定规则确定 D1 为方案 A（B 不再作为备选），写明 helper 的 entitlement 集合；第 4.3 节换成实测过的参数表，能力检查增加“发送前对本机模拟服务跑一轮、确认请求中没有工具”；超时改为启动 10 秒、整轮 180 秒；对话面板增加等待提示；U2 补上模型目录改写、模拟请求检查和其他安装位置的验证；风险一节换成 temporary exception 与模型目录改写两项。计划中的决策已全部确定。
+- **未执行**：A 下的令牌刷新写回（这几轮没有发生刷新）、Homebrew 以外的安装位置、真实发送的网络去向（没有抓包）、取消与进程组回收、Developer ID 与公证、macOS 26。探针留下两个由系统保护的空沙盒容器（`~/Library/Containers/com.kinlogue.u0probe.*`），`rm` 无法删除，需要用户在 Finder 中移除。
+
+## [2026-10-15] feat/assistant | 成员对话计划 U1：Core 的上下文包、提示词、引用与对话值类型
+
+- **起因**：用户要求开始 U1，先写测试。范围只在 `KinlogueCore`，不接入 Platform 或 App，界面和隐私承诺没有变化。
+- **测试先行**：新增 [`AssistantContextPackTests`](../Tests/KinlogueCoreTests/AssistantContextPackTests.swift)（15 项）和 [`AssistantConversationTests`](../Tests/KinlogueCoreTests/AssistantConversationTests.swift)（8 项），全部使用合成数据。实现之前的 `swift build --build-tests` 只在这两个文件里因类型不存在而失败，其余目标编译通过。
+- **Core**（[`Sources/KinlogueCore/Assistant/`](../Sources/KinlogueCore/Assistant/AssistantContextPack.swift)，只依赖 Foundation）：`AssistantContextPackBuilder` 只取该成员的已确认报告，默认从最新开始放入，最多 20 份、正文合计 60,000 字节，遇到放不下的一份即停止，不跳到更旧的报告；显式选择时不可用、重复、为空或超限都直接报错。报告从旧到新编为 R1…Rn，正文只含标题（缺省用报告类型）、检查结果、结论和异常项的确认转录，机构只在打开开关时加入；成员名、消歧标签、科室、备注、文件名和任何 UUID 都不进入正文。单份超过 12,000 字节时截断并标 `[truncated]`。日期按存储日历（UTC 正午）写成 `yyyy-MM-dd`。正文和用户文本中能打开或关闭输入标签的 `<` 改写为 `&lt;`，`<5.2` 这类比较保持原样。摘要由调用方注入（Core 没有 SHA-256 实现，生产时由 Platform 提供）：投影摘要覆盖时间线日期、日期类型和始终发送的字段，不受备注或 revision 影响；同意指纹覆盖提示词版本、CLI、版本、模型、机构开关和每份报告的发送内容与 revision。`AssistantPrompt` 给出版本 1 的角色说明和每轮输入（记录、要重发的历史、问题）。`AssistantCitationParser` 只把整个方括号或【】里全是 `R` 加数字的内容当引用，按本轮发送清单解析，未知编号标为无效；引用状态按 revision 或投影摘要判断“仍一致/已更改/已删除”。`AssistantTurn`、`AssistantConversation`、`AssistantTurnSource`、`AssistantProviderDescriptor` 可编码，解码时重新校验；对话最多 20 轮、问题 2,000 字、回答 32 KiB，重发窗口保留最新、不超过 40,000 字节的轮次。`AssistantProvider` 协议只声明一轮请求与语义失败码，还没有实现。
+- **测试清单**：主清单从 1182 增至 1205 tests / 96 suites，[`acceptance/current-release.md`](acceptance/current-release.md) 的 release-facts 标记和两处数字同步；[`architecture.md`](architecture.md) 的 Core 一行补上这些类型。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，Core 全部 155 项（含新增 23 项）通过；会断言文本的套件（`Safety|GitHubActions|Documentation|Packaging|PrivacyGuard|Localization|Presentation|Layout|AcceptanceScan`）通过；完整 `scripts/test.sh` 退出码 0，各分片的期望数与实测数一致，隔离运行的门禁一并通过。此后只改了文档。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：Platform 的 SHA-256 注入、SQLite 窄查询、XPC helper 和 App 接入（U2–U5）都还没有开始；提示词的实际回答质量只在 U0 用合成资料看过几轮。
+
+## [2026-10-15] feat/assistant | 成员对话计划 U2：助手 IPC、Codex 适配与 bridge（未打包进 App）
+
+- **起因**：用户要求提交 U1 后开始 U2：IPC、helper、Codex 适配器、模型目录改写、发送前的模拟请求检查和假 CLI 测试。打包进 App、helper entitlement、签名 XPC 验证、其他安装位置和经 helper 的真实一轮拆为 U2b，见[计划](plans/2026-10-15-feat-member-cli-chat-plan.md)第 6 节。
+- **新 target**（[`Package.swift`](../Package.swift)，均不对外发布）：`KinlogueAssistantIPC`（Foundation-only 的有界 DTO、失败码、`@Sendable` 回复的 NSXPC 协议；模型名只能是字母数字开头的短 token，代理变量只认四个名字，路径须为绝对路径且无控制字符）；`KinlogueAssistantCLI`（`CodexInvocation`、`CodexFeatureList`、`CodexModelCatalog`、`CodexEventAccumulator`、`CodexFailureClassifier`、`CodexRequestInspection`、`LoopbackResponsesServer`、`CLIProcess`、`CLISupervisor`、`CLIExecutable`、`CodexBridge`）；`KinlogueAssistantBridge`（XPC 入口，兼作 supervisor）；`KinlogueAssistantCLIFixture`（测试用假 `codex`）。[`verify-package-graph.sh`](../scripts/verify-package-graph.sh) 与 [`PackageGraphVerifierTests`](../Tests/KinlogueAppTests/PackageGraphVerifierTests.swift) 的精确清单同步。Platform、App 和主 App 的 entitlement 都没有变化。
+- **做法要点**：每轮用 `posix_spawn` 让 supervisor 领导新进程组；supervisor 只把 runner 点名的环境变量交给 CLI（Foundation 会给自身进程加上 `__CF_USER_TEXT_ENCODING`），父进程消失时杀掉整组；超时、取消、输出超限或发现工具调用时先 SIGTERM 再 SIGKILL 整组。输入只走 stdin。能力检查按（可执行文件、模型）缓存：读版本、核对 `exec --help`、由 `features list` 算出要关的功能，再用这一轮的模型对 127.0.0.1 上的模拟服务跑一轮，要求请求里没有工具、只有我们的两条消息、模型一致、`store` 为 false、不含家目录、用户名和临时目录路径。回答取最后一个 `agent_message`；消息、推理和 `error` 之外的事件项一律视为工具调用并终止。每轮用私有临时目录，结束即删，启动时清理残留。
+- **测试先行**：先写 [`AssistantIPCTests`](../Tests/KinloguePlatformTests/AssistantIPCTests.swift) 与 [`AssistantCodexAdapterTests`](../Tests/KinloguePlatformTests/AssistantCodexAdapterTests.swift)，在只有占位源文件时构建，失败只出现在这两个文件；再写 [`AssistantBridgeProcessTests`](../Tests/KinloguePlatformTests/AssistantBridgeProcessTests.swift)，用假 CLI 覆盖 stdin 投递与参数/环境中无输入、启动超时、整组（含孙进程）终止、取消、输出洪泛与超长行、工具调用中止、宿主被 SIGKILL 后 supervisor 清组、可执行文件校验、能力检查的各类失败、整轮成功与失败码、忙碌拒绝与按 ID 取消、启动清理。共 26 项，连续三次运行稳定，无残留进程。
+- **对真实 Codex 的复核**：用临时测试（已删除）让 `CodexBridge` 对本机 Codex 0.162.0 跑能力检查，只走本机模拟服务。先后暴露两处问题并修正：功能名可含 `.`；`features list` 在关闭后仍显示 `unified_exec` 开启，而实际请求没有任何工具，因此不再复查功能表。修正后 `gpt-6.1-sol` 与 `gpt-6-astra` 均通过。详见 [U0 证据笔记](sources/2026-10-15-codex-u0-probe-evidence.md) 的追加一节；计划第 4.3 节的成功判据与能力检查描述同步修订。
+- **测试清单**：主清单增至 1231 tests / 99 suites，[`acceptance/current-release.md`](acceptance/current-release.md) 同步；[`architecture.md`](architecture.md) target 表与 [`../AGENTS.md`](../AGENTS.md) 代码边界表补上新 target。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，会断言文本的套件（含 `PackageGraph`）通过；完整 `scripts/test.sh` 退出码 0，各分片期望数与实测数一致，隔离门禁一并通过，结束后没有残留的假 CLI 进程；传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：没有经 bridge 跑真实的一轮问答（U2 没有动用用户额度）；bridge 尚未构建成 XPC bundle、没有签名或 entitlement，App 中没有任何入口；npm 等其他安装位置、失败消息分类对真实错误输出的符合程度都未验证。
+
+## [2026-10-15] feat/assistant | 成员对话计划 U2b：bridge 打包为签名沙盒 XPC（方案 A）并验证
+
+- **起因**：用户要求提交 U2 后开始 U2b：把 bridge 打包成 XPC 服务嵌进 App、写方案 A 的 helper entitlement、做签名 XPC 验证，并核对其他安装位置。
+- **安装位置核对**（只读，未安装任何东西）：本机 Codex 只有 Homebrew cask 一种；Node 也来自 Homebrew，npm 全局前缀是 `/opt/homebrew`。`npm view @openai/codex@0.162.0` 显示 npm 版的 `codex` 是 `bin/codex.js` Node 脚本，再由它启动平台对应的原生二进制。据此 entitlements 只读例外取 `/opt/homebrew/` 与 `/usr/local/`（后者是官方 Node 安装包的 npm 前缀，只验证了同一机制），家目录下的 nvm、volta、bun 等不加入；npm 脚本的 `#!/usr/bin/env node` 需要在请求路径所在目录找到 `node`，`CodexBridge` 的 PATH 因此先放请求路径所在目录。
+- **打包**：新增 [`KinlogueAssistantBridge-Info.plist`](../packaging/KinlogueAssistantBridge-Info.plist)（`com.kinlogue.mac.assistant-bridge`，XPC!）、[`KinlogueAssistantBridge.entitlements`](../packaging/KinlogueAssistantBridge.entitlements)（sandbox、network.client、network.server、`~/.codex/` 读写、两个安装根只读）和 [`assemble-assistant-bridge.sh`](../scripts/assemble-assistant-bridge.sh)。[`build-app.sh`](../scripts/build-app.sh) 只在 `--with-assistant-bridge` 时构建并嵌入 bridge：在 U6 一并改写隐私说明和发布门禁之前，默认构建、`verify-app.sh` 与发布包都保持只有 DICOM 一个 XPC 服务。实际跑了一次带开关的构建：两个 XPC 服务、`codesign --verify --strict --deep` 通过、bridge 的 entitlements 恰为上述集合、主 App 的 entitlements 不变、无符号链接。
+- **行为修正**（测试先行，两项新测试先确认失败）：启动不了的 CLI（沙盒拒绝执行，测试中用有执行位但格式不可执行的文件模拟；supervisor 以 127 退出或 spawn 失败）报 `unsupportedLocation`；`CLIExecutable.inspect` 区分缺失、不合格和“看得见但不能执行”（沙盒允许读元数据，只拒 `access(X_OK)`）；能力检查读模型目录时也识别启动失败。bridge 只在发起这一轮的连接断开时取消它，不再因任何连接关闭而取消。
+- **签名 XPC 验证**：新增 [`verify-assistant-xpc.sh`](../scripts/verify-assistant-xpc.sh) 与沙盒探针宿主 `KinlogueAssistantXPCProbe`（[`Package.swift`](../Package.swift)、package graph 门禁与其测试同步）。生产 entitlements 下：本机 Codex 0.162.0 在沙盒 bridge 中通过能力检查（不耗额度），例外目录之外的 CLI 报“不支持的安装位置”；多一处只读目录的验证签名（独立 bundle 标识）下：假 CLI 的回答经 supervisor 返回、仿 npm 包装可运行、第二条连接的取消停止这一轮及孙进程、SIGKILL bridge 后整组退出且无 supervisor 残留。连续两次全部通过，无残留进程和临时目录。详见 [U0 证据笔记](sources/2026-10-15-codex-u0-probe-evidence.md) 追加一节；计划第 4.2 节、[`architecture.md`](architecture.md) 与 [`testing-and-release.md`](testing-and-release.md) 同步。
+- **测试**：新增 [`AssistantPackagingBoundaryTests`](../Tests/KinlogueAppTests/AssistantPackagingBoundaryTests.swift)（3 项：entitlements 精确集合、Info.plist 身份与版本、默认构建不嵌入且验证脚本覆盖各项检查）和 2 项进程测试；主清单 1236 tests / 100 suites，[`acceptance/current-release.md`](acceptance/current-release.md) 同步。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，`verify-assistant-xpc.sh` 连续两次通过；会断言文本的套件（含 `PackageGraph` 与新的打包边界测试）通过；完整 `scripts/test.sh` 退出码 0，各分片期望数与实测数一致，隔离门禁一并通过，无残留假 CLI 进程；传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。没有运行 `verify-app.sh`（它要求干净源码，且默认构建本次没有变化）。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：经 bridge 的真实一轮问答；`/usr/local/` 下的真实 Codex 安装；Developer ID 签名与公证下 temporary exception 的表现；macOS 26；`package-distribution.sh` 对第二个 XPC 服务的重签（默认发布包不含 bridge，届时在 U6 处理）。系统为探针创建的三个沙盒容器只含元数据，保留在 `~/Library/Containers/`。
+
+## [2026-10-15] feat/assistant | 成员对话计划 U3：SQLite 上下文包读取与 bridge provider
+
+- **起因**：用户要求提交 U2b 后开始 U3：Platform 的 SQLite 窄查询和 XPC 客户端。
+- **窄查询**：[`AssistantLibrary.swift`](../Sources/KinloguePlatform/Assistant/AssistantLibrary.swift) 给 `SQLiteReportRepository` 加 `assistantPack(memberID:selection:includeOrganization:)`：一次读取取得成员、该成员已确认报告的总数和按 `timeline_date DESC, record_id` 的最新 20 份（显式选择则按 ID 读取，超过 20 份直接拒绝），交给 Core 构建器，摘要用 `ContentDigest.sha256`；自动选择时读不出的报告列入 `damagedRecordIDs` 并略去。Core 构建器为此增加 `confirmedRecordCount`，只载入最新几份时仍能算出略去了几份。`assistantRecordStates` 按 ID 读回 revision 与投影摘要。没有新增持久化字段。
+- **XPC 客户端**：[`KinlogueAssistantXPCClient`](../Sources/KinlogueAssistantIPC/AssistantXPCClient.swift) 放在 `KinlogueAssistantIPC`，实现 `KinlogueAssistantBridgeClient` 协议：保留一条连接、失效后重建，回复与错误处理只有一个能恢复等待，取消调用方的任务时在同一条连接上发送取消。验证探针改用它，所以 [`verify-assistant-xpc.sh`](../scripts/verify-assistant-xpc.sh) 测到的就是 App 将用的客户端；取消检查改为“取消任务即停止这一轮”。
+- **Provider**：[`BridgeAssistantProvider`](../Sources/KinloguePlatform/Assistant/BridgeAssistantProvider.swift) 实现 Core 的 `AssistantProvider`，把 IPC 失败码映射为 Core 的 `AssistantFailure`（新增 `unsupportedLocation`、`toolUseDetected`、`busy`、`bridgeUnavailable`），bridge 不可达或回复无法解码时报 `bridgeUnavailable`；`AssistantCLISettings` 在构造时就拒绝 bridge 会拒绝的路径和代理变量；`status(model:)` 给设置页用。Platform 新增对 `KinlogueAssistantIPC` 的依赖，[`verify-package-graph.sh`](../scripts/verify-package-graph.sh) 与其测试同步。
+- **测试先行**：新增 [`AssistantLibraryTests`](../Tests/KinloguePlatformTests/AssistantLibraryTests.swift)（5 项，经真实导入路径在 SQLite 资料库里建报告：最新 20 份与成员隔离、损坏报告略去并列出、显式选择、归档/缺失/无报告成员、编辑/备注/删除后的引用状态）、[`AssistantProviderTests`](../Tests/KinloguePlatformTests/AssistantProviderTests.swift)（6 项，用进程内客户端直接驱动 `CodexBridge` 与假 CLI：回答、失败映射、取消任务、状态、bridge 不可用、设置校验）和 1 项 Core 测试。主清单 1248 tests / 102 suites，[`acceptance/current-release.md`](acceptance/current-release.md) 同步；[`architecture.md`](architecture.md)、[`sqlite-storage.md`](sqlite-storage.md) 同步。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，助手相关测试全部通过；`verify-assistant-xpc.sh` 改用共享客户端后 9 项检查通过；会断言文本的套件通过；完整 `scripts/test.sh` 退出码 0，各分片期望数与实测数一致，隔离门禁一并通过，无残留假 CLI 进程；传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：App 侧还没有任何调用（U4/U5）；近上限资料库上读取上下文包的耗时没有测；损坏报告在引用状态里与“已删除”无法区分，界面上需要在 U5 决定措辞。
+
+## [2026-10-15] feat/assistant | 成员对话计划 U4：App 服务、同意、内存对话存储与生命周期
+
+- **起因**：用户要求提交 U3 后开始 U4：App 服务——设置、同意、内存版对话存储、生命周期和提交观察。界面与文案留给 U5。
+- **App**（[`AssistantService.swift`](../Sources/KinlogueApp/App/AssistantService.swift)）：`AssistantSettings` 与 `AssistantSettingsStore` 存在 App 偏好（`assistant.enabled/executablePath/model/proxy`），默认关闭，bridge 会拒绝的路径、模型和代理变量读出时视为未设置。`AssistantConversationStoring` 协议与 `InMemoryAssistantConversationStore`（每位成员最多 200 段）。`AssistantConsent` 绑定成员、接收方（CLI 版本与模型）和上下文包指纹，只在内存里。`LiveAssistantService`：读取上下文包；按 bridge 状态生成同意；每轮发送前核对同意仍对应当前包、CLI 版本和模型，否则要求重新确认；在 `LibraryLifecycleCoordinator.withActiveOperation` 里运行这一轮并可被撤销取消；只保存完整完成的轮次；`revoke()` 取消进行中的一轮、清空对话并拒绝此后的请求。错误都是语义值（`AssistantServiceError`）。
+- **模型**（[`AssistantConversationModel.swift`](../Sources/KinlogueApp/ViewModels/AssistantConversationModel.swift)）：每位成员一段当前对话，打开时载入上下文包和 CLI 状态并要求确认；代数栅栏丢弃已切换成员或已关闭时迟到的结果；停止只取消当前一轮；提交观察后重读上下文包，指纹变化才清除同意，并重查被引用记录的状态；切换“包含机构名称”会重建上下文包并要求重新确认；关闭功能时取消并清空；整库删除、恢复或完整性故障开始后永久锁定，直到重启。问题保存为 `AssistantIssue` 语义值，没有已解析的文案。
+- **组装**：`LiveAppServiceEnvironment.assistantLibrary` 传入 SQLite 报告仓库；[`AppComposition`](../Sources/KinlogueApp/App/AppComposition.swift) 构造服务与模型，在存储就绪时登记撤销钩子，删除、恢复与完整性故障的开始回调锁定模型，提交观察回调通知模型。bridge 状态回复新增“检查所用模型”，作为一轮的默认模型。资料库打不开时的组装不含助手。
+- **测试先行**：新增 [`AssistantServiceTests`](../Tests/KinlogueAppTests/AssistantServiceTests.swift)（7 项）与 [`AssistantConversationModelTests`](../Tests/KinlogueAppTests/AssistantConversationModelTests.swift)（7 项模型测试与 1 项 composition 测试：真实 SQLite 资料库与启动链路，删除资料库后模型锁定），bridge 由可控的假后端替代；构建先确认这些测试因类型不存在而失败。主清单 1263 tests / 105 suites，[`acceptance/current-release.md`](acceptance/current-release.md) 与 [`architecture.md`](architecture.md) 同步。
+- **验证**：macOS 27.0.1 / Xcode 27.0 / Swift 6.4 上，助手相关测试及受影响的恢复、删除、完整性与启动测试通过；会断言文本的套件（含本地化硬编码门禁）通过；完整 `scripts/test.sh` 退出码 0，各分片期望数与实测数一致，隔离门禁一并通过；传入实际清单摘要的 `scripts/lint.sh` 与 `scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：没有界面入口（U5），因此没有任何用户能触发对话；默认构建不含 bridge，开启功能后状态会是“对话服务不可用”，直到 U6 默认嵌入。经真实 bridge 的完整一轮仍未运行。
+
+## [2026-10-15] feat/assistant | 成员对话计划 U5：对话面板、确认页、设置页与中英文案
+
+- **起因**：用户要求提交 U4 后开始 U5：对话面板、确认页、设置页和中英文案；之后要求按计划完成、自测后再交给其审核。
+- **可见范围**：[`AssistantAvailability`](../Sources/KinlogueApp/App/AssistantService.swift) 检查 App bundle 的 `Contents/XPCServices` 里有没有 bridge，没有时设置区块和工具栏按钮都不出现。在 U6 改写隐私说明之前，只有 `build-app.sh --with-assistant-bridge` 的开发构建能看到这一功能，默认构建和发布的界面不变。
+- **设置**：新增 [`AssistantSettingsModel`](../Sources/KinlogueApp/ViewModels/AssistantSettingsModel.swift) 与 [`AssistantSettingsSection`](../Sources/KinlogueApp/Views/AssistantSettingsSection.swift)（设置页“AI 对话（实验）”）。开关保存后立即检查 CLI，显示位置、版本、登录、模型和检查结果。Codex 路径、模型、代理三个字段先校验再保存：路径须为绝对路径；模型须为 bridge 接受的记号；代理只接受 http/https/socks5 地址，一个字段同时写入 `HTTPS_PROXY` 与 `HTTP_PROXY`，不接受用户名或密码，因为设置以明文保存。`ALL_PROXY`、`NO_PROXY` 首版不提供。保存后通知对话模型；接收方改变时需要重新确认。
+- **面板与确认页**：[`AssistantPanelView`](../Sources/KinlogueApp/Views/AssistantPanelView.swift) 由工具栏“对话”按钮切换到详情栏，只对选中的成员可用。点选时间线卡片、影像卡片或来源 Chip 切回详情，同一成员的对话与同意保留。[`AssistantConsentSheet`](../Sources/KinlogueApp/Views/AssistantConsentSheet.swift) 列出接收方、会发送和不会发送的内容、“不是匿名化，发送后无法撤回”的警示、默认关闭的“包含检查机构名称”和可折叠的全文，是唯一给出同意的地方。回答以中性 Card 显示“模型生成 · 可能有误 · 不是诊断”，只保留行内强调，去掉链接；来源 Chip 区分当前、已更新、已删除和未发送。提问框 Return 换行，Command-Return 发送，输入法组字时不发送；等待时显示已等待秒数，可以停止，没有得到回答的问题放回输入框。对话模型新增 `pendingQuestion`、`sendingStartedAt` 与 `recheck()`。文字与派生值集中在 [`AssistantPresentation.swift`](../Sources/KinlogueApp/Views/AssistantPresentation.swift)，函数都带语言参数以便测试。
+- **文案**：String Catalog 新增 109 条中英文案，其中 5 条带英文单复数；已运行 `compile-localizations.sh --write`。
+- **测试先行**：新增 [`AssistantPresentationTests`](../Tests/KinlogueAppTests/AssistantPresentationTests.swift)（8 项：全部问题的中英文案、语气、单复数与年月范围、去链接、来源状态）、[`AssistantSettingsModelTests`](../Tests/KinlogueAppTests/AssistantSettingsModelTests.swift)（4 项：开关与检查、字段校验、通知对话模型、bundle 中的 bridge）和 [`AssistantViewSafetyTests`](../Tests/KinlogueAppTests/AssistantViewSafetyTests.swift)（5 项源码检查：视图不创建服务、不读偏好；回答保持中性且没有链接；Command-Return 与输入法保护；同意只在确认页给出；入口受 bridge 与开关约束）。对话模型测试补充发送中状态。主题门禁的 sheet 画布清单加入确认页。`MemberSidebarViewSourceTests` 对 `onSelectDICOM` 闭包的断言改为新的多行写法：选中影像仍调用 `model.selectDICOMStudy`，同时把详情栏从对话切回影像。主清单 1280 tests / 108 suites，[`acceptance/current-release.md`](acceptance/current-release.md) 同步；[`design-system.md`](design-system.md) 第 27 条、[`architecture.md`](architecture.md)、[`index.md`](index.md) 和 `AGENTS.md` 的范围说明同步。
+- **离屏核对**：用临时测试在离屏窗口里以合成数据渲染中英文的面板（需要确认、空、已回答、发送中、已停止、不可用）、确认页、设置区块和 340pt 窄宽度。据此修正四处：发送范围拆成两行，不再截断；提问框固定高度；确认页开关移到行尾；设置状态与字段改用 Grid 对齐。临时测试已删除，PNG 只留在会话临时目录，没有进入仓库。
+
+## [2026-10-16] feat/assistant | 成员对话计划 U6：默认嵌入 bridge、发布门禁与隐私承诺改写
+
+- **起因**：用户确认 U5 后要求继续 U6：按计划第 8 节同步改写承诺与脚本、加入验收矩阵，并按此前说明把 bridge 默认放进构建。
+- **构建与发布门禁**：[`build-app.sh`](../scripts/build-app.sh) 删除 `--with-assistant-bridge`，总是构建并嵌入 bridge，开始前检查其 entitlements、Info.plist 与打包脚本。[`verify-app.sh`](../scripts/verify-app.sh) 新增以下检查：
+  - bridge 源 entitlements 与审查过的方案 A 集合逐字一致（规范化 JSON）；
+  - 正式包恰好两个 XPC service；
+  - bridge 包内容只有 Info.plist、可执行文件和签名，标识与类型正确，签名有效，签名后的 entitlements 与源文件一致，只含 arm64；
+  - 主 App 不含 `CodexBridge` 等 CLI 运行代码；bridge 含 Codex 适配、不链接 SQLite 存储内核与 DICOM 解码器；
+  - 假 CLI 与 XPC 探针没有进入正式包；
+  - 成员对话的 IPC、CLI 与 bridge 源码没有任何日志调用；
+  - 报告新增 bridge 的标识、可执行文件摘要与 entitlements 摘要。
+
+  [`package-distribution.sh`](../scripts/package-distribution.sh) 用 Developer ID、hardened runtime、时间戳和 bridge 自己的 entitlements 重签 bridge，并逐项核对 Authority、Team ID、时间戳、runtime、标识与 entitlements。[`build-acceptance-app.sh`](../scripts/build-acceptance-app.sh) 复制和重签后都核对 bridge 签名。[`privacy-guard.sh`](../scripts/privacy-guard.sh) 要求 PRIVACY 写明“AI 对话（实验）”“不是匿名化”“发送后无法撤回”，README 写明前两项，并把“不连接互联网或云服务”列为过时的离线声明。
+- **承诺改写**：
+  - [`PRIVACY.md`](../PRIVACY.md) 首段改为“默认不访问互联网”，指明唯一的外发例外，新增“AI 对话（实验）”一节，说明接收方、发送与不发送的内容、不是匿名化、不可撤回、额度、无工具、只在内存和明文设置。OCR 一条保留原句并注明例外。
+  - [`README.md`](../README.md) 新增核心体验条目、边界表一行、使用说明一节，并更新 `verify-app.sh` 说明和目录表。
+  - 以下页面同步更新：[`privacy-and-security.md`](privacy-and-security.md)（姿态、威胁模型、代码边界、日志、生命周期、Agent 禁区）、[`project-overview.md`](project-overview.md)、[`architecture.md`](architecture.md)（target 图与 bridge 行）、[`decisions.md`](decisions.md)（新增 2026-10-16 决策与开放门禁）、[`brand.md`](brand.md)、[`localization.md`](localization.md)、[`testing-and-release.md`](testing-and-release.md)、`AGENTS.md` 第 3、4 节、[`index.md`](index.md) 和计划状态。
+  - 新增[成员对话验收矩阵](acceptance/member-chat-matrix.md)，[当前候选证据](acceptance/current-release.md)的人工门禁加入成员对话。
+- **测试先行**：`AssistantPackagingBoundaryTests` 改为断言默认嵌入，以及四个发布脚本都覆盖 bridge。`ReleaseScriptSafetyTests` 的分发签名夹具加入 bridge，并对它的无效签名、ad-hoc、Team ID、时间戳、runtime、标识与 entitlements 七种错误逐一要求失败。新增隐私门禁测试：删掉任一披露短语或加回离线声明即失败。主清单 1281 tests / 108 suites。
+- **验证**（macOS 27.0.1 / Xcode 27.0 / Swift 6.4）：
+  - `verify-app.sh` 拒绝未提交的工作树，所以把已跟踪文件和新文件复制到会话临时目录中的一次性 git 仓库并提交，在其上运行 `verify-app.sh --require-clean-source`，退出码 0。正式包含两个 XPC service，报告记录 bridge 标识 `com.kinlogue.mac.assistant-bridge`。在同一副本里给 bridge entitlements 多加一项后，验证器在构建前就以“source entitlements differ”失败。副本随后删除，没有在本仓库提交。
+  - 会断言文本的套件通过。完整 `scripts/test.sh` 退出码 0，没有失败，各分片期望数与实测数一致，隔离门禁一并通过，无残留假 CLI 进程。传入实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check` 和 `git diff --check` 通过。工作树未提交，这些结果没有绑定不可变 source ref。
+  - PRIVACY 与 README 中“不下诊断、不给用药建议”改写为对模型的要求、不能保证，因为这由提示词约束而不是程序保证。
+- **未执行**：
+  - 经真实 Codex 的一轮问答与人工矩阵（会消耗额度，需要用户同意）；
+  - Developer ID 签名、hardened runtime 下 temporary exception 的表现与 notarization（分发脚本只经假 `codesign` 测试）；
+  - macOS 26；
+  - `/usr/local` 的真实安装；
+  - 安装后合成验收不覆盖成员对话。
+
+## [2026-10-16] feat/assistant | 成员对话：经真实 Codex 的检查，修正沙盒内始终“未登录”
+
+- **起因**：用户提交 U6 后选择先做真实 Codex 检查，并明确同意用合成资料经签名沙盒 bridge 跑完整一轮和约 20 个边界问题；内容会发给 OpenAI 并消耗其额度。
+- **工具**：[`KinlogueAssistantXPCProbe`](../Sources/KinlogueAssistantXPCProbe/main.swift) 新增 `ask` 模式，从 stdin 读取说明与输入，并把回答作为 JSON 字符串输出；状态行附上检查所用的模型。上下文包与提示词由一个用完即删的临时测试，经真实导入路径和 App 的 `assistantPack`、`AssistantPrompt` 生成。没有启动 App，也没有打开真实资料库。
+- **发现与修正**：第一次状态检查报“未登录”。原因是 App Sandbox 把沙盒 supervisor 自己的 `HOME`、`TMPDIR` 改成了容器路径，supervisor 再把它们传给 Codex，Codex 便在容器里找登录。U2 加入 supervisor 后就有这个问题，U2b 的签名检查允许“未登录”而漏掉了它。修正：[`CLIProcess`](../Sources/KinlogueAssistantCLI/CLIProcess.swift) 以 `KINLOGUE_CLI_ENV_` 前缀把变量交给 supervisor，[`CLISupervisor`](../Sources/KinlogueAssistantCLI/CLISupervisor.swift) 只从带前缀的变量重建 CLI 环境。新测试 `theSupervisorGivesTheCLITheBridgesVariablesNotItsOwn` 在改动前失败、改动后通过。[`verify-assistant-xpc.sh`](../scripts/verify-assistant-xpc.sh) 现在要求：终端里已登录时，沙盒内也报告已登录。
+- **结果**：经签名沙盒 bridge、Codex 0.162.0、模型 `gpt-6.1-sol`，21 轮（20 个单轮问题加 1 个带历史的追问）全部得到回答，用时 7.3–14.5 秒，中位数 9.4 秒。回答都守住计划第 3.2 节边界：不下诊断、不给用药建议、不判断好坏、不预测、急症提示立即就医、记录外的信息说明没有、报告里夹带的指令未执行，引用都指向发送过的 R1–R6。三处说明：急症回答附了一般急救要点；被问到和妈妈对比时邀请用户贴出另一人的资料；英文的肝功能总结漏了总胆固醇。运行后 `~/.codex` 与 bridge 容器里没有任何文件含合成内容，没有写入当天会话记录，没有残留进程。逐题记录见[来源笔记](sources/2026-10-16-member-chat-real-codex-check.md)，[验收矩阵](acceptance/member-chat-matrix.md)、[决策](decisions.md)、[品牌](brand.md)、[索引](index.md)、[隐私工程说明](privacy-and-security.md)与[当前候选证据](acceptance/current-release.md)同步。主清单 1282 tests / 108 suites。
+- **未执行**：App 界面上的真实对话、未登录与登录过期、未安装、Codex 中途更新、代理与断网、第三方中转、中途停止、一轮进行中删除或恢复资料库、键盘与 VoiceOver、其他模型、npm 或 `/usr/local` 安装、Developer ID 与公证、macOS 26。修正前的检查在 `~/Library/Containers/com.kinlogue.mac.assistant-bridge/Data/.codex` 留下了 Codex 自己的状态库（不含资料内容），可由用户在 Finder 中删除。
+
+## [2026-10-16] feat/assistant | 成员对话计划 U7：保存对话、schema v1→v2 迁移与恢复点逻辑版本 2
+
+- **起因**：用户在真实 Codex 检查之后要求实现 U7。依据计划第 4.9 节、D4、D8，以及用户 2026-10-15 对第一次 schema 迁移的同意。
+- **冻结输入**：改 schema 之前，先用迁移前的代码写出一个合成的版本 1 资料库（两位成员、一份已确认报告及其原件、OCR 文档与备注、一份待确认草稿），以 zlib + base64 冻结在 `SQLiteLibraryV1Fixture.swift`（2026-10-18 已删除）。
+- **schema 与迁移**：[`SQLiteLibrarySchema`](../Sources/KinloguePlatform/Storage/SQLiteLibrarySchema.swift) 版本 2 在冻结的版本 1 DDL 之后新增 `assistant_conversations`、`assistant_turns`、`assistant_turn_sources`，并为对话数、每成员 200 段、轮次连续与每轮来源数加了结构校验。[`SQLiteLibraryStore`](../Sources/KinloguePlatform/Storage/SQLiteLibraryStore.swift) 的 header 接受版本 1 和 2。普通打开时，版本 1 先按版本 1 完整校验，再在单个事务里建表、写 `user_version = 2`、更新 `library_state` 的 identity 与摘要，提交后按版本 2 校验。`strictExisting` 不迁移。为测试设了四个中断点。初始化回执接受版本 1 的 identity。
+- **存储**：新增 [`SQLiteAssistantRows`](../Sources/KinloguePlatform/Storage/SQLiteAssistantRows.swift)，逐行摘要、整段核对、只读摘要列表，提供逐段、按成员和全部删除；报告仓库新增对应方法。删除成员时在同一事务里删除其对话。完整性巡检新增“对话”目标。
+- **恢复点**：`BackupLogicalKind` 新增 `assistantConversation`。头部支持版本 1 和 2，writer 写版本 2，可出现的类型与 footer 计数随版本而定。恢复后的严格校验按输入的版本重新编码，因此版本 1 恢复点仍逐字节核对。新增版本 2 冻结流 [`SQLiteLogicalV2Fixture.swift`](../Tests/KinloguePlatformTests/SQLiteLogicalV2Fixture.swift)。两个版本 1 冻结测试改为核对：重新捕获得到相同的记录，只是换成版本 2 头部。
+- **App**：
+  - `AssistantConversationStoring` 改为可抛错，由 `SQLiteReportRepository` 实现；内存版删除。
+  - 服务把一轮和它的保存放在同一个 active operation 里，返回保存后重读的对话。新增读取、删除与“对话数已达上限”。关闭功能只停止进行中的一轮，撤销钩子不写资料库。
+  - 对话模型新增历史列表、重新打开与删除。重新打开后仍需确认。显示的对话来自另一个 CLI 或模型时，继续提问开始新对话。
+  - 面板新增“历史对话”菜单与删除确认；设置新增“已保存的对话”与“删除全部对话…”；删除成员的确认文案说明对话一并删除。
+  - 新增 19 条中英文案，删除 3 条旧文案。
+- **测试先行**：
+  - 迁移测试 6 项，在隔离的跨进程 storage 目标里：已有行逐行不变、`library_state` 只有 identity 与摘要变化、迁移后可读、再次打开不写入、未知版本与带漂移的版本 1 不改写、四个中断点之后只剩完整版本。真实进程测试中的 4 个强退案例先在 fixture 里阻塞，再被 SIGKILL。
+  - [`AssistantConversationStoreTests`](../Tests/KinloguePlatformTests/AssistantConversationStoreTests.swift) 7 项，版本 2 冻结流 1 项，App 4 项。
+  - 主清单 1294 tests / 109 suites。
+- **验证**（macOS 27.0.1 / Xcode 27.0 / Swift 6.4）：
+  - 会断言文本的套件通过。第一次完整 `scripts/test.sh` 发现 `SQLiteLibraryStoreTests` 精确列出 STRICT 表，补上三张新表后，完整 `scripts/test.sh` 退出码 0、没有失败，隔离门禁（含跨进程迁移测试）一并通过，无残留假 CLI 进程。
+  - 传入实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check` 与 `git diff --check` 通过。
+  - 没有重跑 `verify-app.sh`：这次没有改动打包与 entitlement。
+  - 工作树未提交，这些结果没有绑定不可变 source ref。
+- **未执行**：真实资料库上的迁移（用户的资料库是版本 1，第一次运行包含 U7 的构建时会自动迁移，之后更早的构建无法打开它）；App 界面上保存、重新打开与删除对话的人工检查；带对话的恢复点经加密容器的端到端恢复（对话只在逻辑流层面测试；已有的加密恢复测试现在写版本 2，但其中没有对话）。
+- **说明**：
+  - 迁移后的冻结库做完整性巡检时，两个原件被标为损坏，因为冻结行记录的是生成机器上的 inode。测试只接受这一种情况，其余行都要通过巡检。
+  - 迁移只建空表，没有单独的“正在升级”启动页，也不自动备份。这一点和决策记录写在 [`decisions.md`](decisions.md) 2026-10-16 一节。
+- **文档**：PRIVACY 与 README 说明对话以明文保存在资料库并进入恢复点、可删除、随成员删除、关闭功能不删除；[`privacy-and-security.md`](privacy-and-security.md)、[`project-overview.md`](project-overview.md)、[`architecture.md`](architecture.md)、[`sqlite-storage.md`](sqlite-storage.md)、[`storage.md`](storage.md)、[`backup-and-restore.md`](backup-and-restore.md)、[`domain-and-data-model.md`](domain-and-data-model.md)、[`design-system.md`](design-system.md)、[`decisions.md`](decisions.md)、[`index.md`](index.md)、`AGENTS.md`、计划状态、[成员对话矩阵](acceptance/member-chat-matrix.md)和[当前候选证据](acceptance/current-release.md)同步。
+
+## [2026-10-16] fix/assistant | 成员对话面板在分栏详情列中溢出、输入法组字被提示文字盖住、全文展开文字点击无效
+
+- **现象**：
+  - 在 App 里打开对话后，面板整体上移，标题区和输入框（或确认卡片）在窗口之外，无法输入。
+  - 修正上一条后复测：用拼音输入时，灰色提示“就已确认的报告提问”留在组字文本之上。
+  - 确认页“查看将发送的报告全文”只有左侧小箭头可点，点文字无效。
+- **原因**：
+  - 详情列没有宽度约束，分栏视图计算它的最小尺寸时按接近零的宽度测量。[`AssistantPanelView`](../Sources/KinlogueApp/Views/AssistantPanelView.swift) 在对话记录之外有几段固定高度的换行文本（发送范围、确认说明、问题提示），在这个宽度下逐字换行，使窗口的最小高度升到约 1160–1960pt。
+  - 输入法未提交的组字文本不进入 `draft`，提示文字只在 `draft` 为空时显示，于是组字期间仍然显示。
+  - macOS 的 `DisclosureGroup` 标签本身不响应点击，只有展开箭头响应。
+- **修正**：
+  - 面板根视图设最小宽度 360pt 并填满详情列；标题区的成员名优先占用剩余宽度，“新对话”按钮保持自身尺寸，不再被压成竖排。
+  - 提示文字只在输入框为空且没有焦点时显示；[`AssistantViewSafetyTests`](../Tests/KinlogueAppTests/AssistantViewSafetyTests.swift) 增加对应的源码检查，先失败后通过。
+  - [`AssistantConsentSheet`](../Sources/KinlogueApp/Views/AssistantConsentSheet.swift) 的展开标签改为切换同一展开状态的按钮（`kinlogueGhost` 样式，28pt 高），保留系统展开箭头；同一测试增加源码检查，先失败后通过。
+- **验证**：
+  - 临时离屏测试按 App 的列宽在 1000×745 与 920×620 的带标题栏窗口中放入面板，需确认与可输入两种状态的窗口高度都保持不变；最小高度 672pt，与只放普通详情内容时相同。截图确认标题区、示例问题和输入框都在窗口内。另一个临时离屏测试在输入框上设置组字文本（`setMarkedText`），截图确认组字时不再有提示文字，失焦且为空时提示恢复。第三个临时测试向确认页发送真实鼠标事件点击文字，截图确认全文展开。三个临时测试均已删除。
+  - 对话、主题与本地化相关套件 157 tests 通过；`lint.sh` 与 `git diff --check` 通过；`build-app.sh` 重新构建并签名。
+  - 用户用 16:05 的构建在 App 中复测：面板完整显示，点击输入框后拼音组字不再被提示盖住，点击“查看将发送的报告全文”能展开全文。
+- **未执行**：完整 `scripts/test.sh`；`verify-app.sh`（打包与 entitlement 未改动）。
+
+## [2026-10-16] fix/assistant | 问题输入框改用带内边距的原生编辑器，输入法组字不再被遮住或清空
+
+- **现象**：上一条修正提交后复测，问题输入框里的中文仍像被遮住。
+- **原因**：
+  - 输入框仍是 SwiftUI `TextEditor`，首行紧贴可见区域上沿，输入中文时字形上部被遮住。记录编辑页 2026-08-10 修过同一问题，改用 [`InsetTextEditor`](../Sources/KinlogueApp/Views/RecordEditView.swift)。
+  - 改用 `InsetTextEditor` 后又发现：它在每次界面更新时，只要原生文本与 binding 不同就用 binding 覆盖原生文本，而输入法未提交的组字文本只在原生文本里，于是组字中任何一次界面更新都会清空组字。记录编辑页同样受影响。
+- **修正**：
+  - [`AssistantPanelView`](../Sources/KinlogueApp/Views/AssistantPanelView.swift) 的问题输入框改用 `InsetTextEditor`（8pt 内边距，外框高 88pt，文字位置不变），无障碍标签与提示改由原生文本视图提供。
+  - `InsetTextEditor` 增加可选的 `isComposing`，由原生文本视图的 `hasMarkedText()` 在文本或选区变化时更新；组字期间不再用 binding 覆盖原生文本。提示文字只在 `draft` 为空且不在组字时显示，取代上一条按焦点隐藏的做法：获得焦点但为空时仍显示提示。
+- **测试先行**：
+  - 新增 [`AssistantPanelLayoutTests`](../Tests/KinlogueAppTests/AssistantPanelLayoutTests.swift) 1 项：真实 `NSHostingView` 中输入框首个字形距可见区域上沿至少 8pt；旧实现按预期失败。
+  - [`RecordEditViewLayoutTests`](../Tests/KinlogueAppTests/RecordEditViewLayoutTests.swift) 新增 1 项：组字开始、提交、再组字、放弃时 `isComposing` 的变化，以及组字引起的界面更新不清空组字文本；先因缺少参数无法编译，加参数后因组字被清空而失败，修正后通过。
+  - [`AssistantViewSafetyTests`](../Tests/KinlogueAppTests/AssistantViewSafetyTests.swift) 的源码检查改为要求 `InsetTextEditor` 与组字条件。
+  - 主清单 1296 tests / 110 suites（`primary-test-shards.rb --inventory-summary` 核对）。
+- **验证**：临时离屏测试在面板输入框中设置组字文本，截图确认组字完整显示、提示隐藏，已提交文字后再组字正常，获得焦点且为空时提示仍在；临时测试已删除。会断言源码与文本的套件、对话与布局套件共 324 tests 通过；带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`git diff --check` 通过；`build-app.sh` 重新构建并签名。
+  - 用户 2026-10-17 用 17:40 的构建在 App 中复测问题输入框的拼音输入，结果正常。
+- **未执行**：完整 `scripts/test.sh`；`verify-app.sh`；记录编辑页的人工输入法检查（未单独确认）。
+
+## [2026-10-17] verify/assistant | 成员对话分支在 `501e56f` 上完整跑一遍自动化门禁
+
+- **环境**：macOS 27.0.1、Xcode 27.1（27A9275，当天凌晨自动更新，前几天的记录为 27.0）、Swift 6.4。
+- **先遇到的问题**：更新后第一次完整 `scripts/test.sh` 在构建阶段就停止，没有执行任何测试：DICOM-Swift 的 `WindowingShaders.metal` 需要 Metal Toolchain，`xcrun metal` 报告缺少工具链，在沙盒外运行结果相同，`xcodebuild -showComponent` 却显示已安装。经用户同意运行 `xcodebuild -downloadComponent MetalToolchain` 重新下载（27A266a）后恢复。这是本机工具链状态，与仓库代码无关。
+- **结果**（工作树干净，HEAD `501e56f`）：
+  - 完整 `scripts/test.sh` 退出码 0，用时约 10 分钟，没有失败；72 次分片与隔离门禁运行共执行 1336 项测试，主清单 1296 tests / 110 suites（`primary-test-shards.rb --inventory-summary` 核对）。
+  - `scripts/verify-app.sh --require-clean-source` 通过，验证报告绑定 `501e56f`；本机 ad-hoc 签名，Developer ID 与公证未执行。
+  - `scripts/verify-assistant-xpc.sh` 通过：能力检查对本机回环替身运行，不消耗额度；假 CLI 回答、取消与强杀 bridge 后没有残留进程。
+  - 带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过。
+- **未执行**：Developer ID 签名与公证；macOS 26 机器；键盘、VoiceOver 与错误情形的人工检查；记录编辑页的人工输入法检查。这条日志本身未提交时，上述结果对应的是 `501e56f`，不是包含本条日志的提交。
+
+## [2026-10-17] feat/assistant | 成员对话可以从本机 Codex 的模型列表中选择模型
+
+- **需求**：用户反馈“无法选择模型”。此前设置页只有自由填写的模型文本框，面板只显示当前模型。用户选择在设置页和对话面板都提供选择，二者改的是同一个设置。
+- **依据**：bridge 的状态检查本来就运行 `codex debug models` 取默认模型。本机 Codex 的模型缓存显示每个模型有 `slug`、`display_name`、`visibility`（list / hide）与 `priority`；只读查看了字段名和公开的模型名，没有读取账号信息。
+- **实现**：
+  - [`CodexModelCatalog.choices`](../Sources/KinlogueAssistantCLI/CodexInvocation.swift) 从同一份输出取出 `visibility` 为 list（或未给出）的模型，按 `priority`、再按目录顺序排列，最多 32 个；slug 必须是 token，显示名不安全时退回 slug。
+  - [`KinlogueAssistantStatus`](../Sources/KinlogueAssistantIPC/AssistantIPC.swift) 新增 `defaultModel` 与 `models`（slug 与显示名），编码前校验数量、唯一性、token 与有界显示名。[`CodexBridge`](../Sources/KinlogueAssistantCLI/CodexBridge.swift) 每次状态检查都附上列表，成功的列表按可执行文件缓存，发送前的状态检查不再多跑一次进程；默认模型仍是目录中第一个 token slug，与之前一致。
+  - [`AssistantSettingsSection`](../Sources/KinlogueApp/Views/AssistantSettingsSection.swift) 有列表时用下拉菜单（“Codex 默认（名称）”、Codex 列出的模型、已保存但不在列表中的模型），没有列表时回退为文本框；状态行显示模型的显示名。
+  - [`AssistantPanelView`](../Sources/KinlogueApp/Views/AssistantPanelView.swift) 头部的接收方一行成为同样的菜单，经 [`AssistantSettingsModel.selectModel`](../Sources/KinlogueApp/ViewModels/AssistantSettingsModel.swift) 立即保存模型，保留设置页其他未保存的草稿；打开的对话随之重新检查并要求重新确认，发送中菜单不可用。
+  - 新增 4 条中英文案；README、项目概览、隐私与安全、设计系统第 27 条（同时把过时的 `TextEditor` 改为 `InsetTextEditor`）和成员对话矩阵同步。
+- **测试**：Platform 新增 2 项（列表解析：隐藏、排序、去重、不安全 slug 与显示名、上限；状态 IPC 拒绝不安全的列表），假 CLI 目录加入一个可见、一个隐藏模型，provider 测试核对两种检查下都带同一列表与默认模型；App 新增 2 项（菜单项与中英文案；从面板选择后保存、保留其他草稿、对话要求重新确认、拒绝不合法名称），视图源码检查增加菜单经设置模型保存且发送中不可用。主清单 1300 tests / 110 suites。App 两项先因缺少 `selectModel` 无法编译；Platform 测试与实现在同一步写成，没有单独记录失败的运行。
+- **真实环境门禁**：[`verify-assistant-xpc.sh`](../scripts/verify-assistant-xpc.sh) 的探针输出增加列表数量与默认模型；终端里已登录时，要求沙盒内的本机 Codex 列出至少一个模型并给出默认模型，假 CLI 一侧要求恰好列出 2 个（隐藏的不列出）。[`AssistantPackagingBoundaryTests`](../Tests/KinlogueAppTests/AssistantPackagingBoundaryTests.swift) 先要求脚本包含这项检查并按预期失败，补上后通过。
+- **验证**（macOS 27.0.1 / Xcode 27.1 / Swift 6.4，工作树未提交）：
+  - 临时离屏测试渲染设置页下拉菜单和面板菜单，以及从面板选择后设置页显示新模型、面板回到“发送前请确认”；临时测试已删除。
+  - 完整 `scripts/test.sh` 退出码 0，没有失败（72 次运行共 1340 项测试）；此后只改了探针输出、验证脚本和对应的源码文本检查，相关套件重跑通过。
+  - `verify-assistant-xpc.sh` 通过，包括本机真实 Codex 在签名沙盒 bridge 中列出模型（只运行 `codex debug models` 与本机模拟服务，不耗额度，不发送资料）。
+  - 带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过；`build-app.sh` 重新构建并签名。
+- **未执行**：VoiceOver 读菜单。在 App 中用真实 Codex 选择模型的复测见下一条。
+
+## [2026-10-17] fix/assistant | 切换模型不再重新加载对话面板
+
+- **现象**：用户复测模型选择时反馈，切换模型会把会话重新刷新加载。
+- **原因**：设置保存后 [`AssistantConversationModel.settingsChanged`](../Sources/KinlogueApp/ViewModels/AssistantConversationModel.swift) 总是重新走一遍 `open`：清空状态、显示“正在准备对话…”，再重读上下文包、历史和最新一段对话，屏幕上正在看的旧对话或刚开始的新对话被替换；即使接收方没变，同意也被丢掉。
+- **修正**：对话界面正在显示（已就绪或待确认）且上下文包已读取时，设置变化只重新检查接收方：上下文包、历史、显示中的对话和输入框都保留；新接收方与已同意的相同（同一 CLI 版本、模型与上下文包）时保留同意，否则提示 `consentRequired` 并要求重新确认；检查失败时显示对应问题。检查期间 `isCheckingCLI` 为真，确认、发送和模型菜单都不可用，接收方一行旁显示小进度指示，避免把同意给到旧接收方；较早的检查结果被丢弃。关闭功能、不可用状态和发送中的设置变化仍按原流程处理。
+- **测试先行**：[`AssistantConversationModelTests`](../Tests/KinlogueAppTests/AssistantConversationModelTests.swift) 新增 1 项：显示历史中的旧对话时切换模型，对话、历史与上下文包不变，要求重新确认，确认后下一问开始新对话；显式选择与默认相同的模型时同意保留。旧实现按预期失败 3 处。视图源码检查改为要求确认页与面板在检查期间不可用。主清单 1301 tests / 110 suites。
+- **验证**：临时离屏测试渲染发送一轮后切换模型的面板，对话保留、头部显示新模型、Warning 与确认 Card 出现；临时测试已删除。对话与会断言源码与文本的套件共 329 tests 通过；带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过；`build-app.sh` 重新构建并签名。
+  - 用户用 22:50 的构建在 App 中用真实 Codex 复测：在设置页与面板选择模型、切换后面板不重新加载，结果正常。
+- **未执行**：本次改动只在 App 层，没有重跑完整 `scripts/test.sh` 与 `verify-assistant-xpc.sh`（上一条记录的两项在本次改动前通过）。
+
+## [2026-10-18] plan/assistant | 提议：成员对话的分层上下文包
+
+- **起因**：用户问发送内容能否加入影像信息。核实后，影像检查在库里只有确认日期、序列与对象数量，检查类型只能是 MR（或仅保留文档），部位没有保存。用户随后提出先把成员全部检查文字整理聚合成初始上下文，认为“最新 20 份”过于绝对。
+- **依据**：20 份 / 60,000 字节来自 U0 探针的规模（20 份约 92 KB、约 2.5 万输入 token、17 秒），原计划承诺的“预览里增删报告”没有界面；已确认结果的表格行按制表符分格，可由 [`ReportedResultLine`](../Sources/KinlogueCore/Domain/ReportedResultLine.swift) 原样拆分；每轮来源上限与 20 份绑定（[`AssistantConversation.swift`](../Sources/KinlogueCore/Assistant/AssistantConversation.swift)）；继续已保存对话时只比较接收方，不比较提示词版本。
+- **产出**：[分层上下文包计划](plans/2026-10-18-feat-member-chat-layered-context-plan.md)（`status: proposed`）：本机确定性聚合，不用模型写总结；目录、结论与标记项、只合并同名项目的检验汇总、预算内的最新全文，总预算约 100 KB 并给出各层子上限；提示词 v2 全文；指纹 v2；确认页逐层列出；只保存被引用的来源；提示词版本不同的对话继续提问时开始新对话。原计划第 4.4 节和计划目录已链接。
+- **未执行**：没有改代码；等待用户审阅第 10 节的问题后再实施。
+
+## [2026-10-18] feat/storage | 资料库 schema 版本 3、首发前不做原地迁移（分层上下文包 L0）
+
+- **起因**：用户审阅[分层上下文包计划](plans/2026-10-18-feat-member-chat-layered-context-plan.md)后确定其余四项（预算按第 4 节、目录 300 份、改任意报告都要重新确认、结论层覆盖全部报告、保留与全文的重复）。开始 L1 前核对发现，schema 版本 2 的 `assistant_turn_sources` 写死 `CHECK(position < 20)`，校验也按 20 计；计划第 8 节“schema 不变”的说法是错的。用户选择现在升到版本 3。
+- **过程**：先实现了原地迁移：版本 1 直接迁到 3，版本 2 只重建来源表。为此用迁移前的代码冻结了一个版本 2 资料库，写了 11 项迁移测试（含真实进程强退），完整 `scripts/test.sh` 通过（1347 项执行，无失败）。随后用户提出 App 还没发布、可以去掉迁移逻辑，选择只认当前版本、经恢复点升级。原地迁移连同 2026-10-16 的 v1→v2 迁移一并删除（决策见 [`decisions.md`](decisions.md) 2026-10-18，2026-10-16 条已标为被取代）。
+- **最终实现**：
+  - [`AssistantLimits.maxTurnSources`](../Sources/KinlogueCore/Assistant/AssistantLimits.swift) 为 300，`AssistantTurn` 按它校验；`maxPackRecords` 仍是 20，留给 L1。
+  - [`SQLiteLibrarySchema`](../Sources/KinloguePlatform/Storage/SQLiteLibrarySchema.swift) 只有当前版本 3（来源表每轮 300），去掉冻结的旧 DDL、按版本的校验、迁移函数与迁移故障点；[`SQLiteLibraryStore`](../Sources/KinloguePlatform/Storage/SQLiteLibraryStore.swift) 的文件头预检与打开流程回到只认当前版本，`SQLiteLibraryState` 去掉按 identity 的辅助方法；初始化收据只接受当前 identity；存储跨进程夹具去掉迁移挂起操作。
+  - 恢复点逻辑流升到版本 3，reader 接受版本 1 至 3；[`SQLiteLogicalRestore`](../Sources/KinloguePlatform/Backup/SQLiteLogicalRestore.swift) 按 [`BackupLogicalHeaderV1.maximumTurnSources(forVersion:)`](../Sources/KinlogueCore/Backup/BackupLogicalV1.swift) 拒绝版本 2 流里超过 20 个来源的轮次。
+  - 删除 U7 的版本 1 资料库夹具与迁移测试，以及本次的版本 2 资料库夹具与迁移测试。
+- **测试先行**：
+  - [`SQLiteLibraryStoreTests`](../Tests/KinloguePlatformTests/SQLiteLibraryStoreTests.swift) 新增：版本 1、2 和更新的版本都以“格式不受支持”被拒且字节不变；在仍带迁移的代码上，版本 1、2 按预期失败（进入迁移校验后报“损坏”）。
+  - [`AssistantConversationStoreTests`](../Tests/KinloguePlatformTests/AssistantConversationStoreTests.swift) 新增各版本流的来源上限（版本 2 的 21 个被拒，20 个与版本 3 的 21、300 个可以恢复）；冻结的版本 1、版本 2 流照常恢复并以版本 3 重新写出同样的记录；Core 来源上限测试改为 300。
+  - 主清单 1303 tests / 110 suites；隔离的 storage 目标 17 tests / 1 suite。
+- **验证**（macOS 27.0.1 / Xcode 27.1 / Swift 6.4，工作树未提交）：去掉迁移后完整 `scripts/test.sh` 退出码 0，没有失败（72 次运行共 1337 项测试）；带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过。旧日志里指向已删除夹具的一处链接改为代码名并注明已删除，措辞未改。
+- **未执行**：`verify-app.sh`（工作树未提交）；用户真实资料库（版本 2）需要先用当前构建做恢复点，再在新构建中恢复，之后更早的构建无法打开它。
+
+## [2026-10-18] feat/assistant | 分层上下文包 L1–L4：本机聚合全部已确认报告、提示词 v2、只保存被引用的来源
+
+- **依据**：[分层上下文包计划](plans/2026-10-18-feat-member-chat-layered-context-plan.md)（用户 2026-10-18 审阅确定）与已提交的 L0（schema 版本 3）。
+- **L1 Core**：
+  - [`AssistantContextPackBuilder`](../Sources/KinlogueCore/Assistant/AssistantContextPack.swift) 按四层构建：目录（最多 300 份、16 KB）、结论与标记项（24 KB，每份 600 字节）、按完全相同的项目名汇总的表格行（30 KB，先保证每个项目的最新一行，再按新到旧补充）、剩余预算内最新报告的标题与完整结果（每份 12 KB），合计不超过 100,000 字节。每层有溢出说明；编号按时间从旧到新，新增报告不改变已有编号。
+  - [`AssistantLimits`](../Sources/KinlogueCore/Assistant/AssistantLimits.swift) 新增各层子上限，`maxPackRecords` 由 20 改为 300、`maxPackBytes` 由 60,000 改为 100,000。
+  - 同意指纹升为 `consent.v2`，绑定包结构版本、每份目录内报告的编号与 revision 和完整渲染文本；投影摘要不变，旧回答的引用状态照旧判断。
+  - [`AssistantPrompt`](../Sources/KinlogueCore/Assistant/AssistantPrompt.swift) 升到版本 2，说明四个部分只是原文的重排、同名才合并、没有全文时如何说明；转义加入四个新标签。
+  - `AssistantConversation.continues(with:promptVersion:)`：提示词版本不同的已保存对话继续提问时开始新对话，面板说明“这段对话来自较早版本的续页”。
+- **L2 Platform**：[`assistantPack`](../Sources/KinloguePlatform/Assistant/AssistantLibrary.swift) 按新的上限读取最新的最多 300 份并统计总数。
+- **L3 App**：确认页“会发送”逐层列出数量并说明未列入的部分，折叠区改名“查看将发送的全部内容”；面板发送范围显示全文份数；[`LiveAssistantService`](../Sources/KinlogueApp/App/AssistantService.swift) 每轮只保存回答引用的来源。新增 12 条中英文案（含单复数），删除 2 条不再使用的文案。
+- **测试先行**：Core 包测试改写并新增 6 项（目录与上限、编号稳定、结论层覆盖与溢出、同名汇总、每项最新行、全文预算不跳过），Core 续写规则 1 项，Platform 读取上限 1 项，App 2 项（较早提示词版本不续写、逐层文案）；服务测试改为只保存被引用的来源。先因缺少新字段无法编译，实现后通过。主清单 1313 tests / 110 suites。
+- **L4 测量**（合成数据，见计划第 4 节）：200 份报告、原文约 204 KB，包 99,696 字节、构建 58 ms；目录 10.2 KB，结论 127 份全部列入 22.4 KB，检验汇总 40 项、2,896 行中最新 641 行 28.7 KB，全文最新 38 份 35.9 KB。检验单多时汇总层是瓶颈。
+- **离屏核对**：临时测试渲染 9 份合成报告的确认页与面板：逐层列出、无结论时不显示该行、面板显示“9 份报告 · 全文 9 份”；临时测试已删除。
+- **验证**（macOS 27.0.1 / Xcode 27.1 / Swift 6.4，工作树未提交）：完整 `scripts/test.sh` 退出码 0，没有失败；带实际清单摘要的 `lint.sh` 与 `verify-docs.sh`、`privacy-guard.sh`、`compile-localizations.sh --check`、`git diff --check` 通过。
+- **未执行**：经真实 Codex 的延迟与 token 测量（需要用户另行同意、消耗额度）；`verify-app.sh`（工作树未提交）；App 内人工检查（用户的真实资料库需先经恢复点升到 schema 版本 3）。
+
+## [2026-10-19] verify/assistant | 在 `dc50a2b` 上跑打包与签名 bridge 门禁
+
+- **范围**：分层上下文包 L1–L4 提交后，工作树干净，HEAD `dc50a2b`；macOS 27.0.1 / Xcode 27.1 / Swift 6.4。完整 `scripts/test.sh` 与 lint、文档、隐私、本地化门禁已在同一份代码上通过（见 2026-10-18 的 L1–L4 条）。
+- **`scripts/verify-app.sh --require-clean-source`**：通过，验证报告绑定 `dc50a2b`；本机 ad-hoc 签名，Developer ID 与公证未执行。
+- **`scripts/verify-assistant-xpc.sh`**：通过，11 项全部通过，包括本机 Codex 在签名沙盒 bridge 中通过能力检查、找到登录并列出模型与默认模型（只连本机模拟服务、不耗额度、不发送资料），以及取消与强杀 bridge 后没有残留进程。
+- **未执行**：经真实 Codex 的分层上下文包延迟与 token 测量；成员对话矩阵中的人工检查（未登录、未安装、代理与断网、键盘与 VoiceOver）；macOS 26 机器。本分支尚未合入 `main`，资料库已是 schema 版本 3 时，`main` 的构建会以“格式不受支持”拒绝它。
+
+## [2026-10-20] fix/ci | PR #25 在 Xcode 26.6 上编译失败：组字状态的辅助方法缺少主线程标注
+
+- **现象**：PR #25 的 “Lint and test” 在 CI（`macos-26` runner，Xcode 26.6 / Swift 6.3.3）编译失败：[`RecordEditView`](../Sources/KinlogueApp/Views/RecordEditView.swift) 中 `InsetTextEditor.Coordinator.reportComposition(of:)` 调用了主线程隔离的 `hasMarkedText()`。本机 Xcode 27.1 能编译。
+- **原因**：Xcode 27.1 的 SDK 让遵循 `NSTextViewDelegate` 的整个 coordinator 推断为主线程隔离；Xcode 26.6 只给协议里的回调这样推断，私有辅助方法因此是非隔离的。
+- **修正**：给只从委托回调调用的 `reportComposition(of:)` 显式加 `@MainActor`。本机只有 Xcode 27.1，无法复现 26.6 的编译，以 CI 的结果为准；本机编辑器相关测试 14 项、`lint.sh` 与 `git diff --check` 通过。
+
+## [2026-10-20] fix/ci | PR #25 的历史隐私门禁拒绝了测试里带登录信息的代理 URL
+
+- **现象**：PR #25 的 “Lint and test” 在 “Enforce privacy disclosures and fixture policy” 一步失败：`scripts/privacy-history-guard.sh --ref HEAD` 报告可达历史中有私钥或常见凭据模式。本机在分支上复现失败，在 `origin/main` 上通过。
+- **原因**：[`AssistantSettingsModelTests`](../Tests/KinlogueAppTests/AssistantSettingsModelTests.swift) 用一个带用户名和密码的合成本机代理 URL 检查“代理不得带登录信息”，命中门禁的“URL 内嵌登录信息”规则。它自 `3b49ecd` 起存在于两个版本的测试文件中，只改当前文件无法让历史扫描通过。
+- **修正**：测试改用只带用户名的本机代理 URL，模型仍由同一条检查（用户名或密码任一存在即拒绝）判为 `proxyCredentials`；没有改动门禁。经用户同意，用 `git filter-branch --index-filter` 只替换分支上（`origin/main..HEAD`）这两个版本的测试文件，提交说明、作者与时间不变，旧分支顶端为 `41ddc20`，之后以 `--force-with-lease` 推送。
+- **验证**：重写后的分支上 `privacy-history-guard.sh --ref HEAD` 与 `privacy-guard.sh` 通过，`AssistantSettingsModelTests` 5 项通过；重写前后分支顶端的差异只有这一行。`origin/main` 没有分支外的提交，CI 合并提交的树与分支顶端一致。
+- **仍需处理**：本机分支 `claude/member-chat-imaging-layer` 与 `claude/lan-restore-date-fix` 基于重写前的提交，推送前需要变基到新的分支顶端，否则会在同一门禁失败。
+
 ## [2026-10-19] plan | 提议把加密备份与原件导出合并为明文 ZIP 备份包
 
 - **起因**：用户提出把加密备份/恢复与数据导出合并，暂时去掉加密，备份导出为压缩包、把数据管理权交还给用户，用户设定保留份数，恢复时直接选压缩包；索引文件和目录结构由 Agent 设计。
@@ -1747,3 +2061,14 @@
 - **与计划的差异**：设置页没有显示“文件夹中另有 X 份备份不由本机管理”的计数。
 - **验证**：macOS 27.0.1 / Xcode 27.1 / Swift 6.4 上，完整 `scripts/test.sh` 退出码 0，主清单 1120 tests / 103 suites（与验收账本一致，由 `verify-docs.sh` 在测试内核对），隔离门禁一并通过；`scripts/lint.sh`（warnings-as-errors 构建与包图）、`scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。完整运行前，备份相关与断言源码文字的测试套件已分别过滤运行并通过。
 - **未验证**：安装后的 App 上选择文件夹、立即备份、轮换与恢复；接近上限的 ZIP64 规模（改为 ZIP 后未重跑规模探针）；阿里云盘、百度网盘客户端对文件夹的处理；外置盘与 NAS；Windows 与访达对包内中文路径的解压；macOS 26、键盘与 VoiceOver。用户现有资料库若依赖加密恢复点，新版本不能读取，升级前应先用旧版本确认资料库可正常打开。
+
+## [2026-10-21] merge | 明文 ZIP 备份分支合入 main 的成员对话（#25）
+
+- **起因**：PR #24 与 main 冲突。main 在分支之后合入了成员对话（#25）：资料库 schema 版本 3、逻辑流写版本 3（读 1 至 3）并携带保存的对话，以及“首发前不做原地迁移、旧资料库经恢复点升级”的决策。
+- **冲突处理**：15 个文件。`SQLiteLogicalRestore` 同时保留按索引原件表恢复（本分支）与按流版本严格校验（main）；`SettingsView` 保留 AI 对话设置分区、去掉已删除的待定备份确认状态；`en.lproj` 由合并后的目录重新生成；文档两边的事实都保留，main 中描述“加密恢复点”的现行文字改为备份 ZIP。
+- **合并带来的代码改动**：`BackupArchiveWriter` 的记录种类分支加入 `.assistantConversation`（对话只在数据流里，不进入 `files/`）；main 测试里经 `BackupManifest` 恢复的两个辅助函数改用 `restore(spool:originals:revisionPair:store:)`；三条 AI 对话界面文案从“恢复点”改为“备份”，并说明备份不加密；`SQLiteLibrarySchema`、`BackupLogicalHeaderV1` 与 `AssistantService` 的注释同步。索引的 `encoding` 仍写 `logical-v1`，指流格式家族，具体版本以流头部为准。
+- **升级途径的变化**：2026-10-18 规定旧 schema 资料库经加密恢复点升级，本分支不再读取加密恢复点。合并后的写法是：版本 1、2 的资料库先用合入本分支之前、能读加密恢复点的 schema 3 构建恢复一次，之后当前构建直接打开；以后的 schema 变化经备份 ZIP 升级。见 [`backup-and-restore.md`](backup-and-restore.md) 与 [`decisions.md`](decisions.md)。
+- **文档事实修正**：main 的 `sqlite-storage.md` 写“writer 写逻辑版本 2”，代码是 3，已按代码改正；`project-overview.md` 的“不做”列表与 `decisions.md` 开放门禁第 6 项仍列着已经实现的“保存对话”，已删去；决策表里“首发前 current-only”一行仍写着已被 2026-10-18 撤销的 v1→v2 迁移例外，已改为当前规则。
+- **测试**：`sqliteLogicalArchiveRestoreReopensAndEditsActualRepositories` 在资料库里加入一段保存的对话，经 ZIP 写出、整根恢复后逐字段相等。合并后主清单 1251 tests / 118 suites（由 `swift test list` 与 `primary-test-shards.rb` 计算）。
+- **验证**：macOS 27.0.1 / Xcode 27.1 / Swift 6.4 上，合并后的完整 `scripts/test.sh` 退出码 0，主清单 1251 tests / 118 suites（由测试内的 `verify-docs.sh` 核对），隔离门禁一并通过；`scripts/lint.sh`、`scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。完整运行前，合并涉及的备份、对话与断言源码文字的测试套件已过滤运行并通过。签名沙盒 XPC 的 `scripts/verify-assistant-xpc.sh` 没有在合并后重跑。
+- **未验证**：与上一条相同；另外，用户现有资料库若仍是 schema 版本 1、2，升级要经过上述两步，这条路径没有在真实资料库上走过。

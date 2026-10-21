@@ -10,7 +10,7 @@
 续页备份 2026-10-19 153012.zip
 ├── kinlogue-backup.json        # 索引（第一个条目，deflate）
 ├── 说明.txt                     # 给人看的说明，按写出时的界面语言；恢复时忽略
-├── data/library.klog           # logical-v1 数据流（deflate）
+├── data/library.klog           # 逻辑数据流，头部带版本（deflate）
 └── files/                      # 每个原件恰好一份（stored）
     ├── <成员>/<日期> - Report 0001 - Source 0001 - <来源名>.<扩展名>
     ├── <成员>/<日期> - DICOM 0001/0001.dcm
@@ -21,7 +21,8 @@
 ```
 
 - **索引** [`BackupArchiveIndex`](../Sources/KinlogueCore/Backup/BackupArchiveIndex.swift)：`format`、`formatVersion`、`minimumReaderVersion`、`encryption: "none"`、`backupID`、整秒的 `createdAt`、写出它的版本、资料库的 `libraryID / generation / commitID`、各类计数、数据流的路径/长度/SHA-256，以及每个原件的 id、路径、长度、SHA-256 和内容类型。UUID 为小写，摘要为小写十六进制，JSON 按键排序并缩进。新版本写出的未知字段被忽略；`minimumReaderVersion` 高于当前 reader 或 `encryption` 不是 `none` 时以“格式不受支持”拒绝。
-- **数据流** 沿用 [logical-v1](sqlite-storage.md#逻辑数据流与备份)：成员、报告与 OCR 复核、草稿、LAN 队列与回执、规范化 DICOM 图；不含 SQLite 文件。冻结夹具继续验证当前 reader 能读既有 wire bytes。
+- **数据流** 是 [逻辑数据流](sqlite-storage.md#逻辑数据流与备份)：成员、报告与 OCR 复核、草稿、LAN 队列与回执、规范化 DICOM 图和保存的成员对话；不含 SQLite 文件。流头部带自己的版本：当前写版本 3，读版本 1 至 3。版本 1 恢复为没有对话的资料库；版本 2 每轮对话最多 20 个来源，超过的视为无效流，版本 3 最多 300 个。索引里 `encoding: "logical-v1"` 指这一流格式家族，具体版本以流头部为准。冻结的版本 1、版本 2 夹具继续验证当前 reader 能读既有 wire bytes。
+- **升级途径**：首发前资料库 schema 不做原地迁移（[`decisions.md`](decisions.md) 2026-10-18），旧 schema 的资料库靠新构建从备份恢复来升级，以后的 schema 变化同样走这条路。版本 1、2 的资料库只有当时构建写的加密恢复点，而本构建不再读取加密恢复点：需要先用合入 ZIP 备份之前、能读加密恢复点的 schema 3 构建恢复一次，之后本构建可以直接打开这份资料库。
 - **路径规划** [`BackupArchivePlan`](../Sources/KinlogueCore/Backup/BackupArchivePlan.swift) 从同一次捕获的数据流读出成员、报告来源、草稿、DICOM 与 LAN 记录，给每个原件分配唯一路径：已确认报告和已确认影像按成员（含已归档成员）与日期排列，沿用早先导出的命名；未确认报告、草稿和待确认影像放进 `_待确认`，手机上传放进 `_手机待整理`，任何没有被这些记录命名的原件放进 `_其他`，不会被漏掉。同一原件被多处引用时只写一次，放在规划顺序中第一次出现的位置。名称经过 Unicode 规范化、控制字符与 `<>:"/\|?*` 替换、Windows 保留名加前缀，单段不超过 120 字节、整条不超过 512 字节，在大小写不敏感的文件系统上也不重名；内部 UUID 不进入 `files/` 下的路径。`_` 开头的文件夹名按写出时的界面语言本地化，恢复不依赖它们。
 - **上限**：原件不超过 25,000 个，索引不超过 16 MiB，数据流与原件合计不超过 4 TiB；超过 4 GiB 或 65,535 个条目时使用 ZIP64（锁定的 ZIPFoundation `0.9.20` 包含该实现，大包未实测）。
 
