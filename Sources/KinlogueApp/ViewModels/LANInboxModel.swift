@@ -667,7 +667,7 @@ final class LANInboxModel: ObservableObject {
         return true
     }
 
-    private func apply(_ screen: LANInboxScreenSnapshot, retaining: [LANInboxItem], appending: Bool = false) {
+    private func apply(_ screen: LANInboxQueueScreen, retaining: [LANInboxItem], appending: Bool = false) {
         guard !vaultLifecycleIsLocked else { return }
         let incoming = screen.page
         if let page {

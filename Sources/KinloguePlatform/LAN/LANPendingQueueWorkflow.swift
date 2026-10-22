@@ -32,7 +32,7 @@ public actor LANPendingQueueWorkflow {
         memberID: FamilyMember.ID,
         canonicalReportDate: Date,
         activeSessionID: UUID? = nil
-    ) async throws -> LANReportArchiveResult {
+    ) async throws -> LANArchiveOutcome {
         try await archiveCoordinator.archive(
             itemIDs: itemIDs,
             expectedRevisions: expectedRevisions,

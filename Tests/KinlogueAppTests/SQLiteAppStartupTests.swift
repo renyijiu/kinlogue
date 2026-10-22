@@ -227,7 +227,7 @@ struct SQLiteAppStartupTests {
     enum OldLibraryCircumstance: Sendable {
         case nothingElse
         /// The backup settings can no longer be read. The restore has to clear them instead of
-        /// stopping on them; an earlier build's encrypted-backup profile is removed at launch.
+        /// stopping on them.
         case anUnreadableBackupSettings
         /// An earlier restore over the same library stopped right after recording its intent.
         /// The launch has to undo it and leave the old library in place for another attempt.
@@ -257,14 +257,11 @@ struct SQLiteAppStartupTests {
         try Data("synthetic old object".utf8).write(to: root.appendingPathComponent("objects/synthetic.bin"))
         let settingsRoot = fixture.identity.backupIdentity.settingsRootURL
         let profileRecord = settingsRoot.appendingPathComponent("settings.json")
-        let legacy = fixture.identity.backupIdentity.legacyIdentityRootURL
         if circumstance == .anUnreadableBackupSettings {
             try FileManager.default.createDirectory(at: settingsRoot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             try Data("{\"magic\":\"truncated".utf8).write(to: profileRecord)
             #expect(chmod(profileRecord.path, 0o600) == 0)
             #expect(throws: BackupSettingsStoreError.invalidRecord) { _ = try BackupSettingsStore(rootURL: settingsRoot).load() }
-            try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            try Data("synthetic old profile".utf8).write(to: legacy.appendingPathComponent("configuration.json"))
         }
         func restoreLeftovers() throws -> [String] {
             try FileManager.default.contentsOfDirectory(atPath: root.deletingLastPathComponent().path)
@@ -286,7 +283,6 @@ struct SQLiteAppStartupTests {
         await #expect(throws: SQLiteLibraryError.unsupportedFormat) { try await startup.openEnvironment() }
         #expect(try Data(contentsOf: root.appendingPathComponent("library.json")) == oldManifest)
         #expect(try restoreLeftovers().isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: legacy.path))
         do {
             // Scoped: the service keeps the library's owner, which the next launch has to take.
             let restore = try #require(startup.seedRestoreService)

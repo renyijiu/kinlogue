@@ -2,8 +2,6 @@ import Foundation
 import KinlogueCore
 import KinloguePlatform
 
-typealias LANInboxScreenSnapshot = LANInboxQueueScreen
-
 struct LANReceiverDetails: Equatable, Sendable {
     let url: URL
     let pairingCode: String
@@ -11,9 +9,9 @@ struct LANReceiverDetails: Equatable, Sendable {
 }
 
 protocol LANInboxServicing: Sendable {
-    func initialize() async throws -> LANInboxScreenSnapshot
-    func refresh() async throws -> LANInboxScreenSnapshot
-    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxScreenSnapshot
+    func initialize() async throws -> LANInboxQueueScreen
+    func refresh() async throws -> LANInboxQueueScreen
+    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxQueueScreen
     func processingPage(cursor: LANInboxPageCursor?) async throws -> LANInboxPage
     func loadItems(ids: [UUID]) async throws -> [LANInboxItem]
     func resolveAddresses() async throws -> LANNetworkInterfaceResolution
@@ -28,14 +26,14 @@ protocol LANInboxServicing: Sendable {
         expectedRevisions: [UInt64]?,
         memberID: FamilyMember.ID,
         canonicalReportDate: Date
-    ) async throws -> LANReportArchiveResult
+    ) async throws -> LANArchiveOutcome
     func loadPreview(itemID: LANInboxItem.ID) async throws -> LANInboxPreviewPayload
 }
 
 extension LANInboxServicing {
     func preprocess(itemID: LANInboxItem.ID) async throws { try await preprocess(itemID: itemID, expectedRevision: nil) }
     func changeGeneration() async -> UInt64 { 0 }
-    func archive(itemIDs: [UUID], memberID: UUID, canonicalReportDate: Date) async throws -> LANReportArchiveResult {
+    func archive(itemIDs: [UUID], memberID: UUID, canonicalReportDate: Date) async throws -> LANArchiveOutcome {
         try await archive(itemIDs: itemIDs, expectedRevisions: nil, memberID: memberID, canonicalReportDate: canonicalReportDate)
     }
 }
@@ -86,13 +84,13 @@ actor LiveLANInboxService: LANInboxServicing {
         receiver = dependencies.receiver ?? LANReceiver(store: inbox)
     }
 
-    func initialize() async throws -> LANInboxScreenSnapshot {
+    func initialize() async throws -> LANInboxQueueScreen {
         try await withActiveRuntimeOperation { runtime in
             return try await Self.screenSnapshot(runtime: runtime)
         }
     }
 
-    func refresh() async throws -> LANInboxScreenSnapshot {
+    func refresh() async throws -> LANInboxQueueScreen {
         try await withActiveRuntimeOperation { runtime in
             try await Self.screenSnapshot(runtime: runtime)
         }
@@ -161,7 +159,7 @@ actor LiveLANInboxService: LANInboxServicing {
         expectedRevisions: [UInt64]?,
         memberID: FamilyMember.ID,
         canonicalReportDate: Date
-    ) async throws -> LANReportArchiveResult {
+    ) async throws -> LANArchiveOutcome {
         try await withActiveRuntimeOperation { [receiver] runtime in
             try await runtime.workflow.archive(
                 itemIDs: itemIDs,
@@ -234,11 +232,11 @@ actor LiveLANInboxService: LANInboxServicing {
         }
     }
 
-    private static func screenSnapshot(runtime: Runtime) async throws -> LANInboxScreenSnapshot {
+    private static func screenSnapshot(runtime: Runtime) async throws -> LANInboxQueueScreen {
         try await runtime.inbox.queueScreen(cursor: nil)
     }
 
-    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxScreenSnapshot {
+    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxQueueScreen {
         try await withActiveRuntimeOperation { try await $0.inbox.queueScreen(cursor: cursor) }
     }
     func processingPage(cursor: LANInboxPageCursor?) async throws -> LANInboxPage {
@@ -250,13 +248,13 @@ actor LiveLANInboxService: LANInboxServicing {
 }
 
 actor UnavailableLANInboxService: LANInboxServicing {
-    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxScreenSnapshot { throw AppServiceError.runtimeUnavailable }
+    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxQueueScreen { throw AppServiceError.runtimeUnavailable }
     func processingPage(cursor: LANInboxPageCursor?) async throws -> LANInboxPage { throw AppServiceError.runtimeUnavailable }
     func loadItems(ids: [UUID]) async throws -> [LANInboxItem] { throw AppServiceError.runtimeUnavailable }
-    func initialize() async throws -> LANInboxScreenSnapshot {
+    func initialize() async throws -> LANInboxQueueScreen {
         throw AppServiceError.runtimeUnavailable
     }
-    func refresh() async throws -> LANInboxScreenSnapshot {
+    func refresh() async throws -> LANInboxQueueScreen {
         throw AppServiceError.runtimeUnavailable
     }
     func resolveAddresses() async throws -> LANNetworkInterfaceResolution {
@@ -278,7 +276,7 @@ actor UnavailableLANInboxService: LANInboxServicing {
         expectedRevisions: [UInt64]?,
         memberID: FamilyMember.ID,
         canonicalReportDate: Date
-    ) async throws -> LANReportArchiveResult {
+    ) async throws -> LANArchiveOutcome {
         throw AppServiceError.runtimeUnavailable
     }
     func loadPreview(itemID: LANInboxItem.ID) async throws -> LANInboxPreviewPayload {

@@ -1,8 +1,6 @@
 import Foundation
 import KinlogueCore
 
-public typealias LANReportArchiveResult = LANArchiveOutcome
-
 /// Turns one ordered Mac selection into at most one review draft. The inbox moves the
 /// selection's originals and recognised text into the draft in one transaction, so an
 /// interrupted archive leaves either the queue items or the draft, never part of each.
@@ -21,7 +19,7 @@ public actor LANReportArchiveCoordinator {
         memberID: FamilyMember.ID,
         canonicalReportDate: Date,
         activeSessionID: UUID? = nil
-    ) async throws -> LANReportArchiveResult {
+    ) async throws -> LANArchiveOutcome {
         if let result = try await inbox.completedArchive(itemIDs: itemIDs, memberID: memberID, canonicalReportDate: canonicalReportDate) {
             return result
         }

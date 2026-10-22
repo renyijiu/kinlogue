@@ -809,7 +809,7 @@ private struct ArchiveRequest: Equatable, Sendable {
 private actor LANPendingQueueServiceSpy: LANInboxServicing {
     private let queryEpoch = UUID()
     private var durableSnapshot: LANInboxSnapshot
-    private(set) var screenSnapshot: LANInboxScreenSnapshot
+    private(set) var screenSnapshot: LANInboxQueueScreen
     private(set) var preprocessedItemIDs: [LANInboxItem.ID] = []
     private(set) var lastArchiveRequest: ArchiveRequest?
     private var archiveError: (any Error)?
@@ -855,7 +855,7 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
             blobs: resolvedBlobs
         )
         durableSnapshot = snapshot
-        screenSnapshot = LANInboxScreenSnapshot(
+        screenSnapshot = LANInboxQueueScreen(
             snapshot: snapshot,
             storage: try LANInboxStorageSummary(
                 itemCount: items.count,
@@ -875,7 +875,7 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
     func replace(items: [LANInboxItem], blobs: [LANInboxBlob]) throws {
         durableSnapshot = try durableSnapshot.replacing(generation: durableSnapshot.generation + 1, commitID: UUID(),
             lastWriterRuntimeGeneration: durableSnapshot.lastWriterRuntimeGeneration, items: items, blobs: blobs)
-        screenSnapshot = LANInboxScreenSnapshot(snapshot: durableSnapshot, storage: try durableSnapshot.storageSummary(), openEpoch: queryEpoch)
+        screenSnapshot = LANInboxQueueScreen(snapshot: durableSnapshot, storage: try durableSnapshot.storageSummary(), openEpoch: queryEpoch)
     }
     func loadItems(ids: [UUID]) async throws -> [LANInboxItem] {
         try ids.map { id in
@@ -886,9 +886,9 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
     func setPageGate(_ gate: AsyncOperationGate) { pageGate = gate }
     func setPageError(_ failed: Bool) { pageError = failed }
     func setRefreshError(_ failed: Bool) { refreshError = failed }
-    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxScreenSnapshot {
+    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxQueueScreen {
         if pageError { throw LANInboxError.storageFailure }
-        let response = LANInboxScreenSnapshot(page: try stubInboxPage(durableSnapshot, cursor: cursor, processing: false, openEpoch: queryEpoch), storage: screenSnapshot.storage)
+        let response = LANInboxQueueScreen(page: try stubInboxPage(durableSnapshot, cursor: cursor, processing: false, openEpoch: queryEpoch), storage: screenSnapshot.storage)
         if let gate = pageGate { pageGate = nil; await gate.wait() }
         return response
     }
@@ -935,7 +935,7 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
         self.replacementOnStop = replacementOnStop
     }
 
-    func initialize() async throws -> LANInboxScreenSnapshot {
+    func initialize() async throws -> LANInboxQueueScreen {
         initializeCallCount += 1
         let response = screenSnapshot
         if let gate = initializeGate {
@@ -944,7 +944,7 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
         }
         return response
     }
-    func refresh() async throws -> LANInboxScreenSnapshot {
+    func refresh() async throws -> LANInboxQueueScreen {
         refreshCallCount += 1
         if refreshError { throw LANInboxError.storageFailure }
         let response = screenSnapshot
@@ -1016,7 +1016,7 @@ private actor LANPendingQueueServiceSpy: LANInboxServicing {
         expectedRevisions: [UInt64]?,
         memberID: FamilyMember.ID,
         canonicalReportDate: Date
-    ) async throws -> LANReportArchiveResult {
+    ) async throws -> LANArchiveOutcome {
         lastArchiveRequest = ArchiveRequest(
             itemIDs: itemIDs,
             memberID: memberID,

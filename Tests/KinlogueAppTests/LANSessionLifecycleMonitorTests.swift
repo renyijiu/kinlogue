@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import KinlogueApp
+import KinloguePlatform
 
 struct LANSessionLifecycleMonitorTests {
     @Test(arguments: LANSessionLifecycleEvent.stoppingEvents)

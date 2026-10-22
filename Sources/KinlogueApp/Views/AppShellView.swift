@@ -641,7 +641,7 @@ struct AppShellView: View {
         ContentUnavailableView {
             Label(AppLocalization.string("无法读取本机资料库"), systemImage: "externaldrive.badge.exclamationmark")
         } description: {
-            Text(AppLocalization.string("续页不会覆盖无法识别的内容。若这里是旧版加密资料库，当前简化版不会自动迁移；请保留原目录，等待后续迁移工具。"))
+            Text(AppLocalization.string("续页不会覆盖无法识别的内容。请保留原目录，或从数据备份恢复。"))
         } actions: {
             Button(AppLocalization.string("从数据备份恢复…")) {
                 restoreModel.present()
