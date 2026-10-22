@@ -20,10 +20,10 @@ struct AppComposition {
     /// The composition on an opened SQLite library. `LibraryLaunchCoordinator` is its only caller.
     static func makeOpened(identity: AppRuntimeIdentity, services: LiveAppServiceEnvironment,
                            context: SQLiteStartupContext, database: SQLiteLibraryStore) -> Self {
-        let live = LiveBackupService(store: database, configurationStore: context.configuration,
+        let live = LiveBackupService(store: database, settingsStore: context.backupSettings, lifecycle: context.lifecycle,
             requiresSelectedDirectoryScope: identity.mode == .production)
         let restore = BackupRestoreService(verifier: context.verifier, transaction: context.transaction,
-            configurationStore: context.configuration, operationCoordinator: live.operationCoordinator,
+            settingsStore: context.backupSettings, operationCoordinator: live.operationCoordinator,
             lifecycle: context.lifecycle, database: database)
         return makeComposition(services: services, backup: BackupRuntime(liveBackup: live,
             backupModel: BackupModel(service: live), restoreService: LiveRestoreService(service: restore)), restoreReconciled: true, database: database)
@@ -49,7 +49,7 @@ struct AppComposition {
         }
         let appModel = AppModel(
             service: services.dataService,
-            originalExportService: services.originalExportService,
+            backupExportService: backup.liveBackup,
             dicomService: services.dataService,
             dicomSliceServiceFactory: services.dicomSliceServiceFactory,
             dicomViewerRegistry: dicomViewerRegistry,
@@ -114,7 +114,7 @@ struct AppComposition {
         )
         let destroyService = BackupCoordinatedVaultDestroyService(
             operationCoordinator: backup.liveBackup.operationCoordinator,
-            configurationStore: backup.liveBackup.configurationStore,
+            settingsStore: backup.liveBackup.settingsStore,
             underlying: services.destroyService
         )
         let startup = AppStartupCoordinator(
@@ -177,7 +177,7 @@ struct AppComposition {
         let dicomViewerRegistry = DICOMViewerRegistry()
         let appModel = AppModel(
             service: unavailableAppService,
-            originalExportService: UnavailableOriginalExportService(),
+            backupExportService: UnavailableBackupExportService(),
             dicomService: unavailableAppService,
             dicomSliceServiceFactory: { UnavailableDICOMSliceService() },
             dicomViewerRegistry: dicomViewerRegistry
@@ -277,54 +277,18 @@ private actor UnavailableVaultDestroyService: VaultDestroyServicing {
 }
 
 private actor UnavailableBackupService: BackupServicing {
-    func reauthorizeDestination(selectedParent: URL) async throws {
-        throw BackupSemanticError.notConfigured
-    }
     func loadStatus() async throws -> AppBackupStatus { .notConfigured }
-    func beginSetup(selectedParent: URL) async throws -> String {
-        _ = selectedParent
-        throw BackupSemanticError.verificationFailed
-    }
-    func completeSetup(recoveryCodeReentry: String, independentlySaved: Bool) async throws {
-        _ = recoveryCodeReentry
-        _ = independentlySaved
-        throw BackupSemanticError.verificationFailed
-    }
-    func cancelSetup() async {}
-    func resumePending(recoveryCode: String) async throws {
-        _ = recoveryCode
-        throw BackupSemanticError.notConfigured
-    }
-    func abandonPending() async throws {
-        throw BackupSemanticError.notConfigured
-    }
-    func setAutomaticBackupEnabled(_ enabled: Bool) async throws -> BackupSchedulerOutcome {
-        _ = enabled
-        throw BackupSemanticError.notConfigured
-    }
-    func setRetentionCount(_ count: Int) async throws {
-        _ = count
-        throw BackupSemanticError.notConfigured
-    }
-    func backUpNow() async throws -> BackupCleanupOutcome {
-        throw BackupSemanticError.notConfigured
-    }
-    func showBackupRepository() async throws {
-        throw BackupSemanticError.notConfigured
-    }
-    func handleSchedulerEvent(_ event: BackupSchedulerEvent) async throws -> BackupSchedulerOutcome {
-        _ = event
-        return .disabled
-    }
+    func chooseFolder(_ url: URL) async throws { throw BackupFailure.notConfigured }
+    func setAutomaticBackupEnabled(_ enabled: Bool) async throws -> BackupSchedulerOutcome { throw BackupFailure.notConfigured }
+    func setRetentionCount(_ count: Int) async throws { throw BackupFailure.notConfigured }
+    func backUpNow() async throws -> BackupRunResult { throw BackupFailure.notConfigured }
+    func showFolder() async throws { throw BackupFailure.notConfigured }
+    func handleSchedulerEvent(_ event: BackupSchedulerEvent) async throws -> BackupSchedulerOutcome { .disabled }
 }
 
 private actor UnavailableRestoreService: BackupRestoreServicing {
     func reconcileBeforeStartingServices() async throws {}
-    func prepare(checkpointURL: URL, recoveryCode: String) async throws -> BackupRestoreSummary {
-        _ = checkpointURL
-        _ = recoveryCode
-        throw BackupRestoreError.stagingConflict
-    }
+    func prepare(archiveURL: URL) async throws -> BackupRestoreSummary { throw BackupRestoreError.stagingConflict }
     func cancelPreparedRestore() async throws {}
     func activatePreparedRestore() async throws -> BackupRestoreActivationResult {
         throw BackupRestoreError.activationConflict
@@ -333,24 +297,26 @@ private actor UnavailableRestoreService: BackupRestoreServicing {
 
 private actor BackupCoordinatedVaultDestroyService: VaultDestroyServicing {
     private let operationCoordinator: BackupOperationCoordinator
-    private let configurationStore: BackupLocalConfigurationStore
+    private let settingsStore: BackupSettingsStore
     private let underlying: any VaultDestroyServicing
 
     init(
         operationCoordinator: BackupOperationCoordinator,
-        configurationStore: BackupLocalConfigurationStore,
+        settingsStore: BackupSettingsStore,
         underlying: any VaultDestroyServicing
     ) {
         self.operationCoordinator = operationCoordinator
-        self.configurationStore = configurationStore
+        self.settingsStore = settingsStore
         self.underlying = underlying
     }
 
+    /// Deleting the library also forgets the backup folder and its ledger on this Mac. The
+    /// backups in the folder stay; they are the person's files.
     func destroyCurrentVault() async throws {
-        let configurationStore = self.configurationStore
+        let settingsStore = self.settingsStore
         let underlying = self.underlying
         try await operationCoordinator.withDestructiveFence {
-            try await configurationStore.removeForDestructiveReset()
+            try settingsStore.remove()
             try await underlying.destroyCurrentVault()
         }
     }

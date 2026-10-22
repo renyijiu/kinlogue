@@ -43,18 +43,16 @@ struct ExportWriterProbeSourceSafetyTests {
     }
 
     @Test
-    func productionExportKeepsOneArchiveOpenAndReadsOnlyItsPinnedOriginals() throws {
-        let exporter = try contents(
-            "Sources/KinloguePlatform/Export/OriginalArchiveExporter.swift"
-        )
+    func productionBackupKeepsOneArchiveOpenAndReadsOnlyItsPinnedOriginals() throws {
+        let writer = try contents("Sources/KinloguePlatform/Backup/BackupArchiveWriter.swift")
 
-        #expect(exporter.contains("func writeArchive("))
-        #expect(exporter.contains("to archive: Archive"))
-        #expect(!exporter.contains("accessMode: .update"))
-        // Entries come from the originals pinned when the export was prepared, and the pins
-        // are checked once more before the archive is committed.
-        #expect(exporter.contains("try snapshot.pins.open(entry.attachmentID)"))
-        #expect(exporter.contains("try snapshot.pins.validate()"))
+        #expect(writer.contains("nonisolated func writeArchive("))
+        #expect(writer.contains("accessMode: .create"))
+        #expect(!writer.contains("accessMode: .update"))
+        // Entries come from the originals pinned when the library was captured, and the pins
+        // are checked once more before the archive is published.
+        #expect(writer.contains("try snapshot.pins.open(id)"))
+        #expect(writer.contains("try snapshot.validate()"))
     }
 
     private func contents(_ path: String) throws -> String {

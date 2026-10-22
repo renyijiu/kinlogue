@@ -10,7 +10,7 @@ Only the current `main` branch is supported before the first stable release. His
 
 Use GitHub **private vulnerability reporting** from the repository Security tab. Do not open a public issue or pull request for an unpatched vulnerability.
 
-Never attach real medical records, screenshots of user data, private filesystem paths, content-bearing logs, credentials, recovery codes, signing material, or `.kinloguebackup` files. Build the smallest reproduction from synthetic data and redact environment-specific identifiers. If synthetic data cannot demonstrate the issue, describe the missing precondition without sending the private source material.
+Never attach real medical records, screenshots of user data, private filesystem paths, content-bearing logs, credentials, recovery codes, signing material, backup archives (`kinlogue-backup.json` ZIP files, which hold a whole library unencrypted), or `.kinloguebackup` files. Build the smallest reproduction from synthetic data and redact environment-specific identifiers. If synthetic data cannot demonstrate the issue, describe the missing precondition without sending the private source material.
 
 Include the affected revision, macOS version, expected security boundary, reproduction steps, and observed impact. The maintainer will acknowledge reports on a best-effort basis, validate them privately, and coordinate disclosure after a fix is available. Please do not test against systems or data you do not own or have explicit permission to use.
 

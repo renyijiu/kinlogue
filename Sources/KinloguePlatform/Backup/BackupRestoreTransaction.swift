@@ -196,7 +196,7 @@ public final class BackupRestoreTransaction: @unchecked Sendable {
             scenario: currentIdentity == nil ? .absentRoot : .existingRoot,
             phase: .intent,
             activeRootNameDigest: ContentDigest.sha256(Data(activeRootName.utf8)),
-            checkpointID: prepared.summary.checkpointID.bytes,
+            checkpointID: prepared.summary.backupID.sqliteBytes,
             preflightReceiptName: prepared.preflightReceiptURL.lastPathComponent,
             stagingName: prepared.stagingURL.lastPathComponent,
             rollbackName: rollbackName,
@@ -516,7 +516,7 @@ public final class BackupRestoreTransaction: @unchecked Sendable {
               receipt.version == 1,
               receipt.operationID == prepared.operationID,
               receipt.activeRootNameDigest == ContentDigest.sha256(Data(activeRootName.utf8)),
-              receipt.checkpointID == prepared.summary.checkpointID.bytes,
+              receipt.checkpointID == prepared.summary.backupID.sqliteBytes,
               receipt.stagingName == prepared.stagingURL.lastPathComponent,
               receipt.stagingIdentity == prepared.stagingIdentity,
               try BackupRestoreFilesystem.directoryIdentity(

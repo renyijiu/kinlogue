@@ -168,7 +168,7 @@ struct DeleteVaultViewSafetyTests {
     }
 
     @Test
-    func dataExportAndWholeLibraryDeletionAreSeparateSettingsActions() throws {
+    func backupExportRestoreAndWholeLibraryDeletionAreSeparateSettingsActions() throws {
         let appShell = try String(contentsOf: appShellURL, encoding: .utf8)
         let settings = try String(contentsOf: settingsURL, encoding: .utf8)
 
@@ -176,59 +176,31 @@ struct DeleteVaultViewSafetyTests {
         #expect(!appShell.contains("删除本机数据…"))
         #expect(appShell.components(separatedBy: "model.presentVaultDeletion").count == 2)
         #expect(appShell.contains("onDeleteVault: model.presentVaultDeletion"))
-        #expect(appShell.contains("onExportOriginals: model.presentOriginalExport"))
+        #expect(appShell.contains("onExportBackup: model.presentBackupExport"))
         #expect(appShell.contains("NSSavePanel()"))
         #expect(appShell.contains("panel.allowedContentTypes = [.zip]"))
         #expect(settings.contains("Button(AppLocalization.string(\"删除本机数据…\"), role: .destructive)"))
-        #expect(settings.contains("Button(AppLocalization.string(\"导出原始文件…\"))"))
-        #expect(settings.contains("onExportOriginals()"))
+        #expect(settings.contains("Button(AppLocalization.string(\"导出备份到…\"))"))
+        #expect(settings.contains("onExportBackup()"))
         #expect(settings.contains("onDeleteVault()"))
-        let backupButtonStart = try #require(settings.range(
-            of: "Button(AppLocalization.string(\"选择备份目录…\"), action: onChooseBackupDirectory)"
-        ))
-        let backupButtonEnd = try #require(settings.range(
-            of: ".accessibilityIdentifier(\"backup-choose-directory\")",
-            range: backupButtonStart.lowerBound..<settings.endIndex
-        ))
-        let backupButton = settings[backupButtonStart.lowerBound..<backupButtonEnd.upperBound]
-        #expect(backupButton.contains(".fixedSize()"))
-        #expect(backupButton.contains(
-            ".frame(width: Self.controlColumnWidth, alignment: .trailing)"
-        ))
-        #expect(settings.components(
-            separatedBy: ".frame(width: Self.controlColumnWidth, alignment: .trailing)"
-        ).count == 5)
-        let manualActionsStart = try #require(settings.range(of: "HStack(spacing: 12)"))
-        let manualActionsEnd = try #require(settings.range(
-            of: ".disabled(backupModel.phase == .backingUp)",
-            range: manualActionsStart.lowerBound..<settings.endIndex
-        ))
-        let manualActions = settings[
-            manualActionsStart.lowerBound..<manualActionsEnd.upperBound
-        ]
-        #expect(manualActions.contains(
-            ".frame(maxWidth: .infinity, alignment: .trailing)"
-        ))
-        let restoreButtonStart = try #require(settings.range(
-            of: "Button(AppLocalization.string(\"从恢复点恢复…\"), action: onRestoreBackup)"
-        ))
-        let restoreButtonEnd = try #require(settings.range(
-            of: ".accessibilityIdentifier(\"backup-restore\")",
-            range: restoreButtonStart.lowerBound..<settings.endIndex
-        ))
-        let restoreButton = settings[
-            restoreButtonStart.lowerBound..<restoreButtonEnd.upperBound
-        ]
-        #expect(restoreButton.contains(
-            ".frame(maxWidth: .infinity, alignment: .trailing)"
-        ))
-        #expect(settings.components(separatedBy: ".buttonStyle(.kinlogueDestructive)").count - 1 == 2)
+        for (start, end) in [
+            ("Button(AppLocalization.string(\"选择备份文件夹…\"), action: onChooseBackupFolder)", ".accessibilityIdentifier(\"backup-choose-folder\")"),
+            ("Button(AppLocalization.string(\"从备份恢复…\"), action: onRestoreBackup)", ".accessibilityIdentifier(\"backup-restore\")"),
+        ] {
+            let buttonStart = try #require(settings.range(of: start))
+            let buttonEnd = try #require(settings.range(of: end, range: buttonStart.lowerBound..<settings.endIndex))
+            let button = settings[buttonStart.lowerBound..<buttonEnd.upperBound]
+            #expect(button.contains(".fixedSize()"))
+            #expect(button.contains(".frame(width: Self.controlColumnWidth, alignment: .trailing)"))
+        }
+        #expect(settings.components(separatedBy: ".frame(width: Self.controlColumnWidth, alignment: .trailing)").count == 6)
+        #expect(settings.components(separatedBy: ".buttonStyle(.kinlogueDestructive)").count - 1 == 1)
         #expect(!settings.contains(".tint(.red)"))
-        #expect(settings.contains("\"settings-export-originals\""))
+        #expect(settings.contains("\"settings-export-backup\""))
         #expect(settings.contains(".focused(exportButtonFocus)"))
         #expect(settings.contains("\"settings-delete-local-data\""))
         #expect(settings.contains("\"backup-show-in-finder\""))
-        #expect(settings.contains("AppLocalization.string(\"正在准备加密备份…\")"))
+        #expect(settings.contains("AppLocalization.string(\"正在创建备份…\")"))
         #expect(settings.contains("\"backup-status-complete\""))
         // A relative date keeps counting up beside the button and reads as a backup still running.
         #expect(!settings.contains("style: .relative"))
@@ -257,20 +229,19 @@ struct DeleteVaultViewSafetyTests {
     }
 }
 
-struct OriginalExportViewSafetyTests {
+struct BackupExportViewSafetyTests {
     @Test
     func warningPrecedesSelectionAndActiveExportCannotBeDismissed() throws {
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
         #expect(source.contains("case .warning:"))
-        #expect(source.contains("导出的压缩包包含未加密的健康资料"))
-        #expect(source.contains("不是资料库备份"))
-        #expect(source.contains("删除续页资料库不会删除已导出的副本"))
+        #expect(source.contains("备份文件不加密，包含全部健康资料"))
+        #expect(source.contains("不要直接交给医生"))
+        #expect(source.contains("续页不会再管理或删除它"))
         #expect(source.contains(".interactiveDismissDisabled(isDismissDisabled)"))
-        #expect(source.contains("case .checking, .choosing, .exporting, .cancelling: true"))
-        #expect(source.contains("case .checking:\n                cancelButton"))
-        #expect(source.contains("\"original-export-cancel\""))
-        #expect(source.contains("\"original-export-show-in-finder\""))
+        #expect(source.contains("case .choosing, .exporting, .cancelling: true"))
+        #expect(source.contains("\"backup-export-cancel\""))
+        #expect(source.contains("\"backup-export-show-in-finder\""))
 
         let shell = try String(contentsOf: appShellSourceURL, encoding: .utf8)
         #expect(shell.contains("@FocusState private var isSettingsExportFocused"))
@@ -279,7 +250,7 @@ struct OriginalExportViewSafetyTests {
 
     private var sourceURL: URL {
         repositoryURL
-            .appendingPathComponent("Sources/KinlogueApp/Views/OriginalExportView.swift")
+            .appendingPathComponent("Sources/KinlogueApp/Views/BackupExportView.swift")
     }
 
     private var appShellSourceURL: URL {
@@ -346,27 +317,24 @@ struct AppShellPresentationSafetyTests {
         let restoreView = backupAndRestore[restoreViewStart.lowerBound...]
         let setupView = backupAndRestore[..<restoreViewStart.lowerBound]
         #expect(restoreView.contains("isPresented: $model.isFileImporterPresented"))
-        #expect(restoreView.contains("UTType(filenameExtension: \"kinloguebackup\")"))
-        #expect(restoreView.contains("Task { await model.prepare(checkpointURL) }"))
+        #expect(restoreView.contains("allowedContentTypes: [.zip]"))
+        #expect(restoreView.contains("Task { await model.prepare(archiveURL) }"))
         #expect(!setupView.contains("isPresented: $model.isFileImporterPresented"))
     }
 
     @Test
-    func pendingBackupEnrollmentOffersResumeAndConfirmedAbandonment() throws {
+    func backupSettingsHaveNoRecoveryCodeAndWarnThatBackupsArePlaintext() throws {
         let appShell = try String(contentsOf: appShellURL, encoding: .utf8)
         let settings = try String(contentsOf: settingsURL, encoding: .utf8)
         let backupAndRestore = try String(contentsOf: backupAndRestoreURL, encoding: .utf8)
 
-        #expect(appShell.contains("PendingBackupEnrollmentView(model: backupModel)"))
-        #expect(settings.contains("backup-resume-pending-enrollment"))
-        #expect(settings.contains("backup-abandon-pending-enrollment"))
-        #expect(settings.contains("Button(AppLocalization.string(\"放弃并重新配置\"), role: .destructive)"))
-        #expect(settings.contains("await backupModel.abandonPendingEnrollment()"))
+        #expect(!appShell.contains("BackupSetupView") && !appShell.contains("PendingBackupEnrollmentView"))
+        #expect(!backupAndRestore.contains("SecureField(") && !settings.contains("SecureField("))
+        #expect(settings.contains("备份文件不加密，包含全部健康资料。放在网盘同步文件夹里，网盘服务商和能登录该账号的人都能读取。"))
+        #expect(settings.contains("backup-choose-folder") && settings.contains("settings-export-backup"))
+        #expect(settings.contains("backup-retention-picker") && settings.contains("backup-restore"))
         #expect(!settings.contains("try? await"))
-        #expect(backupAndRestore.contains("SecureField("))
-        #expect(backupAndRestore.contains("backup-pending-recovery-code"))
-        #expect(backupAndRestore.contains("backup-pending-resume"))
-        #expect(backupAndRestore.contains("model.cancelPendingEnrollmentRecovery()"))
+        #expect(appShell.contains("panel.allowedContentTypes = [.zip]"))
     }
 
     @Test

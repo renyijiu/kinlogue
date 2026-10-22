@@ -286,7 +286,6 @@ private extension BackupCapabilityProbe {
         let current: URL
         let source: URL
         let checkpoint: URL
-        let recoveryCode: URL
 
         init(configuration: Configuration, createParent: Bool = false) throws {
             let base = try configuration.baseDirectory()
@@ -296,14 +295,7 @@ private extension BackupCapabilityProbe {
             )
             current = parent.appendingPathComponent("Vault", isDirectory: true)
             source = parent.appendingPathComponent("RestoreSource", isDirectory: true)
-            checkpoint = parent.appendingPathComponent(
-                "prepared.kinloguebackup",
-                isDirectory: false
-            )
-            recoveryCode = parent.appendingPathComponent(
-                "recovery-code.txt",
-                isDirectory: false
-            )
+            checkpoint = parent.appendingPathComponent("prepared.zip", isDirectory: false)
             if createParent {
                 guard !FileManager.default.fileExists(atPath: parent.path) else {
                     throw ProbeError.activationInvalid
@@ -319,29 +311,6 @@ private extension BackupCapabilityProbe {
         }
     }
 
-    // SAFETY: `lock` serializes all access to `storage`; `data` and `source()`
-    // return immutable snapshots that do not retain the mutable buffer.
-    final class ActivationCheckpointBytes: @unchecked Sendable {
-        private let lock = NSLock()
-        private var storage = Data()
-
-        func append(_ bytes: Data) {
-            lock.withLock { storage.append(bytes) }
-        }
-
-        var data: Data { lock.withLock { storage } }
-
-        func source() -> BackupContainerByteSource {
-            let snapshot = data
-            return BackupContainerByteSource(byteCount: UInt64(snapshot.count)) {
-                offset,
-                maximumByteCount in
-                let start = Int(offset)
-                return Data(snapshot[start..<min(snapshot.count, start + maximumByteCount)])
-            }
-        }
-    }
-
     static func activationSeed(configuration: Configuration) async throws {
         guard let scenario = configuration.scenario else {
             throw ProbeError.invalidArguments
@@ -353,27 +322,16 @@ private extension BackupCapabilityProbe {
         _ = try await createCommittedRoot(at: workspace.source, state: .new)
         let store = try SQLiteLibraryStore(rootURL: workspace.source)
         defer { try? store.close() }
-        let snapshot = try await SQLiteLogicalBackupSource(store: store).prepare()
-        defer { snapshot.release() }
-        let enrollment = try BackupKeyHierarchy.makeEnrollment()
-        let signer = try BackupDeviceSigner(
-            descriptor: enrollment.descriptor,
-            authorization: enrollment.authorization,
-            deviceSigningSeed: enrollment.deviceSigningSeed
-        )
-        let bytes = ActivationCheckpointBytes()
-        _ = try await EncryptedBackupContainerWriter().write(
-            entries: snapshot.sources(),
-            revisionPair: snapshot.revisionPair,
-            sequence: 1,
-            signer: signer,
-            sink: BackupContainerWriteSink(
-                write: bytes.append,
-                readBackSource: bytes.source
+        guard !pathExists(workspace.checkpoint) else { throw ProbeError.activationInvalid }
+        _ = try await BackupArchiveWriter(store: store).write(
+            to: .file(workspace.checkpoint),
+            content: BackupArchiveContent(
+                labels: BackupArchiveLabels(undated: "Undated", pendingFolder: "Pending", phoneFolder: "Phone", otherFolder: "Other"),
+                creator: try BackupArchiveIndex.Creator(app: "Kinlogue", version: "probe", build: "probe"),
+                readmeFileName: "README.txt",
+                readmeText: "Synthetic activation probe backup"
             )
         )
-        try writeExclusivePrivateFile(bytes.data, to: workspace.checkpoint)
-        try writeExclusivePrivateFile(Data(enrollment.recoveryCode.utf8), to: workspace.recoveryCode)
         try syncParentDirectory(workspace.parent)
     }
 
@@ -387,17 +345,10 @@ private extension BackupCapabilityProbe {
                 || (scenario == .absent && !pathExists(workspace.current)) else {
             throw ProbeError.activationInvalid
         }
-        let recoveryCode = String(decoding: try readPrivateFile(
-            workspace.recoveryCode,
-            maximumByteCount: 256
-        ), as: UTF8.self)
         do {
             let owner = try SQLiteLibraryOwner(rootURL: workspace.current)
             let verifier = try BackupRestoreVerifier(owner: owner)
-            let prepared = try await verifier.prepare(
-                checkpointURL: workspace.checkpoint,
-                recoveryCode: recoveryCode
-            )
+            let prepared = try await verifier.prepare(archiveURL: workspace.checkpoint)
             let productionFault = fault.productionFault
             let transaction = try BackupRestoreTransaction(
                 owner: owner,
@@ -786,75 +737,6 @@ private extension BackupCapabilityProbe {
             }
         }
         try syncDescriptor(parentDescriptor)
-    }
-
-    static func writeExclusivePrivateFile(_ data: Data, to destination: URL) throws {
-        let parent = destination.deletingLastPathComponent()
-        try ensureOwnedDirectory(parent)
-        let parentDescriptor = try openOwnedDirectory(parent)
-        defer { Darwin.close(parentDescriptor) }
-        let descriptor = openat(
-            parentDescriptor,
-            destination.lastPathComponent,
-            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-            mode_t(0o600)
-        )
-        guard descriptor >= 0 else { throw ProbeError.ioFailure(errno) }
-        var closeNeeded = true
-        defer {
-            if closeNeeded { Darwin.close(descriptor) }
-        }
-        try data.withUnsafeBytes { buffer in
-            guard let base = buffer.baseAddress else { return }
-            var offset = 0
-            while offset < buffer.count {
-                let count = Darwin.write(
-                    descriptor,
-                    base.advanced(by: offset),
-                    buffer.count - offset
-                )
-                if count < 0 {
-                    if errno == EINTR { continue }
-                    throw ProbeError.ioFailure(errno)
-                }
-                offset += count
-            }
-        }
-        if fcntl(descriptor, F_FULLFSYNC) != 0, fsync(descriptor) != 0 {
-            throw ProbeError.ioFailure(errno)
-        }
-        guard Darwin.close(descriptor) == 0 else { throw ProbeError.ioFailure(errno) }
-        closeNeeded = false
-        try syncDescriptor(parentDescriptor)
-    }
-
-    static func readPrivateFile(_ url: URL, maximumByteCount: Int) throws -> Data {
-        let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
-        guard descriptor >= 0 else { throw ProbeError.ioFailure(errno) }
-        defer { Darwin.close(descriptor) }
-        var metadata = stat()
-        guard fstat(descriptor, &metadata) == 0,
-              metadata.st_mode & S_IFMT == S_IFREG,
-              metadata.st_uid == geteuid(),
-              metadata.st_nlink == 1,
-              metadata.st_mode & mode_t(0o777) == mode_t(0o600),
-              metadata.st_size >= 0,
-              metadata.st_size <= maximumByteCount else {
-            throw ProbeError.receiptInvalid
-        }
-        var result = Data()
-        var buffer = [UInt8](repeating: 0, count: 4 * 1_024)
-        while true {
-            let count = Darwin.read(descriptor, &buffer, buffer.count)
-            if count < 0 {
-                if errno == EINTR { continue }
-                throw ProbeError.ioFailure(errno)
-            }
-            if count == 0 { break }
-            result.append(contentsOf: buffer.prefix(count))
-            guard result.count <= maximumByteCount else { throw ProbeError.resourceLimit }
-        }
-        return result
     }
 
     static func syncParentDirectory(_ directory: URL) throws {

@@ -32,7 +32,7 @@ package enum BackupLogicalKind: UInt8, CaseIterable, Sendable {
 /// The stream header. Version 1 is the original format; version 2 adds saved member chats; version 3
 /// lets a saved turn keep up to `AssistantLimits.maxTurnSources` sources instead of 20, matching
 /// library schema v3. Writers produce the current version; readers accept every version, since a
-/// restore point is how an older library reaches the current schema.
+/// backup is how an older library reaches the current schema.
 package struct BackupLogicalHeaderV1: Codable, Equatable, Sendable {
     package static let currentVersion = 3
     package static let supportedVersions = 1...3

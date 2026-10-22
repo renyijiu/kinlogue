@@ -4,7 +4,7 @@ This audit covers production declarations under `Sources/`. It records why the
 remaining compiler escape hatches are safe, what invariant must remain true,
 and how repository automation detects unreviewed additions.
 
-<!-- concurrency-inventory: unchecked=66 files=36 dicom=10 core=0 unsafe=2 -->
+<!-- concurrency-inventory: unchecked=55 files=30 dicom=10 core=0 unsafe=2 -->
 
 ## Current inventory
 
@@ -13,12 +13,12 @@ and how repository automation detects unreviewed additions.
 | `KinlogueCore` | 0 unchecked declarations | Domain values and state machines remain checked `Sendable`. |
 | `KinloguePlatform/DICOM` | 10 `@unchecked Sendable` declarations | Lock-protected pixel/reply/budget state, actor-backed runtime services, and one scanner-owned descriptor lease with structured concurrent read-only use. |
 | LAN and storage platform code | 28 `@unchecked Sendable` declarations | Private locks/serial queues, actor confinement, SwiftNIO event-loop confinement, or immutable task-local error transport. |
-| Original export orchestration and capability probes | 9 `@unchecked Sendable` declarations | Lock-protected cancellation/progress and probe metrics; one exporter-owned descriptor whose close lifetime is structured and idempotent. |
-| Encrypted backup and restore | 18 `@unchecked Sendable` declarations | Immutable service authority, actor/cross-process serialization, lock-protected configuration/history/metrics and publication leases, and structured descriptor lifetimes. |
-| App backup destination authority | 1 `@unchecked Sendable` declaration | Immutable authority context with synchronized access. |
+| Backup capture, restore and settings platform code | 9 `@unchecked Sendable` declarations | Lock-protected logical spool, original pins, per-reader descriptors and cancellation; immutable restore verifier and transaction authority; staging output and restored-file writers with one structured owner; a settings store whose file transactions are serialized by a process lock plus `flock`. |
+| App backup, export and folder authority | 3 `@unchecked Sendable` declarations | Immutable folder authority collaborators, and lock-protected export cancellation and progress coalescing. |
+| Writer and storage-scale probes | 5 `@unchecked Sendable` declarations | Probe metrics and phase records behind private locks, returned as copied snapshots. |
 | DICOM XPC Helper | 2 `nonisolated(unsafe)` properties | One private lock protects both process-lifecycle collections. |
 
-The inventory is 67 unchecked conformances across 36 files, plus two unsafe
+The inventory is 55 unchecked conformances across 30 files, plus two unsafe
 static properties in the Helper. The audit found no demonstrated data race.
 Three immutable/stateless wrappers (`LANManualReadHandler`,
 `LANInboundBytesHandler`, and `LANUploadSink.PendingReservations`) use checked
@@ -79,28 +79,25 @@ idle task and cancellation/drain identity stay on MainActor.
 - **Immutable error transport.** `LANUploadSink.PendingAdmissionFailure` is an
   immutable wrapper created, thrown and consumed inside one sink task chain;
   its existential error is not exposed as independently shared mutable state.
-- **Original export orchestration.** `OriginalExportCancellationGate` and
-  `OriginalExportProgressRelay` keep their cancellation phase and coalesced
-  progress state behind private locks; accepted progress is delivered on the
-  main actor. `OriginalArchiveSource` has immutable descriptor
-  metadata, an idempotent lock-protected `close`, and a structured exporter
-  lifetime in which actor-confined reads finish before the source is closed.
+- **Backup and export orchestration.** `BackupExportCancellationGate` and
+  `BackupProgressRelay` keep their cancellation phase and coalesced progress
+  state behind private locks; accepted progress is delivered on the main
+  actor. `BackupFolderAuthority` stores only immutable Sendable collaborators,
+  and each folder use owns its security scope for the duration of the call.
 - **Writer probe metrics.** `WorkerState`, `IntegerMaximum`, and
   `WorkerStateTimestamp` expose only lock-protected mutations and copied
   snapshots. Their mutable result, maximum, and timestamp storage never
   escapes the wrapper.
-- **Encrypted backup and restore.** Configuration and repository history use
-  private locks plus process-wide/cross-process serialization. Publication
-  flocks the owner-only, no-follow app-private configuration-root directory
-  inode bound to the expected writer/repository authority, then preserves the
-  `repository → configuration` lock order through authoritative scan and
-  durable witness. Retention keeps that lease while its lock-protected scan
-  generation advances only after exact target and planned-keep validation.
-  Work, source, output and restored-file descriptors have one structured
-  owner; mutable counters and close/publication transitions are lock-protected,
-  and every read closure finishes before its owner closes the descriptor.
-  Restore root activation runs under a per-root in-process gate while the
-  library owner's lock keeps other processes out.
+- **Backup archives and restore.** `BackupArchiveWriter` is an actor; the
+  ZIP provider runs in one nonisolated synchronous call and reads only from
+  the snapshot's lock-protected spool and pin readers, which finish before the
+  snapshot is released. `BackupSettingsStore` holds no mutable state of its
+  own: every read-modify-write runs under a process-wide lock and an
+  owner-only `flock`. Restore staging output, restored-file writers and the
+  verifier have one structured owner per preparation; mutable byte counts and
+  close transitions are lock-protected. Restore root activation runs under a
+  per-root in-process gate while the library owner's lock keeps other
+  processes out.
 - **Helper process lifecycle.** `DICOMDecoderProcessLifecycle.lock` protects
   both unsafe static collections for every request/watchdog read and mutation.
   A timeout may terminate the Helper; successful requests leave ordinary XPC

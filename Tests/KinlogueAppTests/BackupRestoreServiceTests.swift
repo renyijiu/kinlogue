@@ -16,17 +16,14 @@ struct BackupRestoreServiceTests {
             prepared: prepared
         ))
 
-        let returned = try await service.prepare(
-            checkpointURL: URL(fileURLWithPath: "/synthetic.kinloguebackup"),
-            recoveryCode: "synthetic"
-        )
+        let returned = try await service.prepare(archiveURL: URL(fileURLWithPath: "/synthetic.zip"))
 
         #expect(returned.summary == prepared.summary)
         #expect(await events.values == ["prepare"])
     }
 
     @Test
-    func confirmationFencesBackupsThenRevokesLifecycleBeforeActivationAndWriterReset() async throws {
+    func confirmationFencesBackupsThenRevokesLifecycleBeforeActivationAndTurnsAutomaticBackupOff() async throws {
         let events = RestoreServiceEvents()
         let prepared = try makePreparedRestore()
         let service = BackupRestoreService(operations: makeOperations(
@@ -41,7 +38,7 @@ struct BackupRestoreServiceTests {
             "fence-begin",
             "revoke",
             "activate-begin",
-            "remove-writer",
+            "disable-automatic-backup",
             "activate-end",
             "fence-end",
         ])
@@ -67,18 +64,12 @@ struct BackupRestoreServiceTests {
         let service = LiveRestoreService(service: backend)
 
         let first = Task {
-            try await service.prepare(
-                checkpointURL: URL(fileURLWithPath: "/first.kinloguebackup"),
-                recoveryCode: "first"
-            )
+            try await service.prepare(archiveURL: URL(fileURLWithPath: "/first.zip"))
         }
         await controller.waitUntilFirstPreparationEntered()
 
         let second = Task {
-            try await service.prepare(
-                checkpointURL: URL(fileURLWithPath: "/second.kinloguebackup"),
-                recoveryCode: "second"
-            )
+            try await service.prepare(archiveURL: URL(fileURLWithPath: "/second.zip"))
         }
         await controller.waitUntilFirstPreparationCancelled()
         #expect(await controller.secondEntered == false)
@@ -90,8 +81,8 @@ struct BackupRestoreServiceTests {
         }
         let activation = try await service.activatePreparedRestore()
 
-        #expect(secondSummary.sequence == 2)
-        #expect(activation.summary.sequence == 2)
+        #expect(secondSummary.memberCount == 2)
+        #expect(activation.summary.memberCount == 2)
         #expect(controller.cancelledSequences == [1])
         #expect(controller.activatedSequences == [2])
     }
@@ -101,10 +92,7 @@ struct BackupRestoreServiceTests {
         let controller = RestorePreparationController()
         let service = LiveRestoreService(service: BackupRestoreService(operations: controller.operations))
         let preparation = Task {
-            try await service.prepare(
-                checkpointURL: URL(fileURLWithPath: "/first.kinloguebackup"),
-                recoveryCode: "first"
-            )
+            try await service.prepare(archiveURL: URL(fileURLWithPath: "/first.zip"))
         }
         await controller.waitUntilFirstPreparationEntered()
         let cancellation = Task { try await service.cancelPreparedRestore() }
@@ -138,20 +126,20 @@ private actor RestorePreparationController {
 
     nonisolated var operations: BackupRestoreService.Operations {
         BackupRestoreService.Operations(
-            prepare: { [self] _, recoveryCode in
-                try await prepare(recoveryCode: recoveryCode)
+            prepare: { [self] url in
+                try await prepare(name: url.lastPathComponent)
             },
             cancel: { [self] prepared in
-                sequenceRecorder.recordCancellation(prepared.summary.sequence)
+                sequenceRecorder.recordCancellation(UInt64(prepared.summary.memberCount))
             },
             destructiveFence: { operation in try await operation() },
             revokeLifecycle: {},
             activate: { [self] prepared, resetWriter in
                 try await resetWriter()
-                sequenceRecorder.recordActivation(prepared.summary.sequence)
+                sequenceRecorder.recordActivation(UInt64(prepared.summary.memberCount))
                 return BackupRestoreActivationResult(summary: prepared.summary)
             },
-            removeWriterConfiguration: {},
+            disableAutomaticBackup: {},
             reconcilePreflights: {},
             reconcile: { .noTransaction }
         )
@@ -178,8 +166,8 @@ private actor RestorePreparationController {
         cancellationWaiters.removeAll()
     }
 
-    private func prepare(recoveryCode: String) async throws -> BackupPreparedRestore {
-        if recoveryCode == "first" {
+    private func prepare(name: String) async throws -> BackupPreparedRestore {
+        if name == "first.zip" {
             firstEntered = true
             firstWaiters.forEach { $0.resume() }
             firstWaiters.removeAll()
@@ -238,7 +226,7 @@ private func makeOperations(
     prepared: BackupPreparedRestore
 ) -> BackupRestoreService.Operations {
     BackupRestoreService.Operations(
-        prepare: { _, _ in
+        prepare: { _ in
             await events.append("prepare")
             return prepared
         },
@@ -258,8 +246,8 @@ private func makeOperations(
             await events.append("activate-end")
             return BackupRestoreActivationResult(summary: prepared.summary)
         },
-        removeWriterConfiguration: {
-            await events.append("remove-writer")
+        disableAutomaticBackup: {
+            await events.append("disable-automatic-backup")
         },
         reconcilePreflights: {
             await events.append("reconcile-preflights")
@@ -271,26 +259,19 @@ private func makeOperations(
     )
 }
 
+/// `sequence` doubles as the member count so tests can tell preparations apart.
 private func makePreparedRestore(sequence: UInt64 = 1) throws -> BackupPreparedRestore {
-    let vault = try BackupRevision(
-        generation: 1,
-        commitID: UUID(),
-        manifestDigest: Data(repeating: 0x11, count: 32)
-    )
-    let inbox = try BackupRevision(
-        generation: 1,
-        commitID: UUID(),
-        manifestDigest: Data(repeating: 0x22, count: 32)
-    )
+    let revision = try BackupRevision(generation: 1, commitID: UUID(), manifestDigest: Data(repeating: 0x11, count: 32))
     let summary = BackupRestoreSummary(
-        checkpointID: try BackupCheckpointID(bytes: Data(repeating: 0x33, count: 16)),
-        revisionPair: try BackupRevisionPair(vault: vault, lanInbox: inbox),
-        sequence: sequence,
-        memberCount: 0,
+        backupID: UUID(),
+        revisionPair: try BackupRevisionPair(vault: revision, lanInbox: revision),
+        createdAt: Date(timeIntervalSince1970: 1),
+        creatorVersion: "1.0",
+        memberCount: Int(sequence),
         recordCount: 0,
         inboxItemCount: 0,
+        originalCount: 0,
         plaintextByteCount: 1,
-        formatVersion: .current,
         logicalDigest: Data(repeating: 0x5A, count: 32)
     )
     let base = URL(fileURLWithPath: "/synthetic-parent", isDirectory: true)

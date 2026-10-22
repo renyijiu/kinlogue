@@ -185,7 +185,7 @@ U8 使用相同机器上的独立 Release 探针；新 schema 资料为 9,990 �
 
 真实 capture callback 记录 **20,001 个原件**；逻辑流至少占一个额外容器条目，所以外部条目数推导下界为 **20,002**，已超过旧 20,000 上限。这里没有读取并声称实际 manifest entryCount，明确保留为推导下界，也没有把旧 JSON 的 reports-20000 对象标签当成 SQL 条目数量。
 
-本档实际原件共 **20,481,024 bytes**；从严格恢复总明文扣除原件，逻辑流为 **8,341,675 bytes**，小于代码中的 1 GiB segment。按当前固定内部路径和 canonical 编码推导，单 segment 的 manifest 为 **2,480,366 bytes**，payload frame 共 **20,033**（每个小原件一帧，加逻辑流逐 256 KiB 向上取整）。这与 [格式约束](../Sources/KinlogueCore/Backup/BackupCheckpoint.swift) 的 30,002 entries、32 MiB manifest、2²⁴ frames 和名义 4 TiB 明文预算分别核对；这些推导不扩大资料库/LAN 限制，也不以所有维度理论最大值相乘来替代真实闭环。
+本档实际原件共 **20,481,024 bytes**；从严格恢复总明文扣除原件，逻辑流为 **8,341,675 bytes**，小于代码中的 1 GiB segment。按当前固定内部路径和 canonical 编码推导，单 segment 的 manifest 为 **2,480,366 bytes**，payload frame 共 **20,033**（每个小原件一帧，加逻辑流逐 256 KiB 向上取整）。这与 `格式约束` 的 30,002 entries、32 MiB manifest、2²⁴ frames 和名义 4 TiB 明文预算分别核对；这些推导不扩大资料库/LAN 限制，也不以所有维度理论最大值相乘来替代真实闭环。
 
 ### 证据与未执行范围
 

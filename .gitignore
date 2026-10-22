@@ -18,9 +18,12 @@ DerivedData/
 *.cer
 *.mobileprovision
 
-# User-created encrypted checkpoints are private even though their payload is
-# authenticated and encrypted.
+# Backups hold a whole library in plaintext. Earlier builds wrote encrypted
+# checkpoints; current builds write ZIP archives under these names.
 *.kinloguebackup
+续页备份*.zip
+Kinlogue Backup*.zip
+kinlogue-backup.json
 
 PrivateFixtures/
 private-medical-records/

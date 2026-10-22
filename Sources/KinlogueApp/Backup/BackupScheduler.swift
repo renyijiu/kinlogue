@@ -15,294 +15,164 @@ enum BackupSchedulerOutcome: Equatable, Sendable {
     case scheduled(Date)
     case retryScheduled(Date)
     case completed
-    case failed(BackupSemanticError)
+    case failed(BackupFailure)
 }
 
-/// App-lifetime scheduler. Its clocks and retry decisions live in the strict
-/// app-private configuration record, so relaunch never grants a fresh quiet
-/// period and never turns an actionable identity error into a busy loop.
+/// One automatic backup that finished and was recorded in the settings.
+struct BackupRunResult: Equatable, Sendable {
+    let fileName: String
+    let completedAt: Date
+    let revision: BackupLibraryRevision
+    /// The backup was written, but older ones could not all be checked or removed.
+    let cleanupDeferred: Bool
+}
+
+protocol BackupAutomaticRunning: Sendable {
+    func runAutomaticBackup(expected: BackupLibraryRevision, at: Date) async throws -> BackupRunResult
+}
+
+/// Decides when automatic backups run. Its timing lives in the app-private settings, so a
+/// relaunch never grants a fresh quiet period and a failure that needs the person never turns
+/// into a busy loop.
 actor BackupScheduler {
     static let quietPeriod: TimeInterval = 5 * 60
-    static let minimumVerificationInterval: TimeInterval = 24 * 60 * 60
-    static let mutationRetryDelays: [TimeInterval] = [60, 5 * 60, 15 * 60]
+    static let minimumInterval: TimeInterval = 24 * 60 * 60
+    static let retryDelays: [TimeInterval] = [60, 5 * 60, 15 * 60]
 
-    private let configurationStore: BackupLocalConfigurationStore
-    private let automaticRunner: any BackupAutomaticRunning
-    private let clock: @Sendable () -> Date
+    private let store: BackupSettingsStore
+    private let runner: any BackupAutomaticRunning
 
-    init(
-        configurationStore: BackupLocalConfigurationStore,
-        automaticRunner: any BackupAutomaticRunning,
-        clock: @escaping @Sendable () -> Date = { Date() }
-    ) {
-        self.configurationStore = configurationStore
-        self.automaticRunner = automaticRunner
-        self.clock = clock
+    init(store: BackupSettingsStore, runner: any BackupAutomaticRunning) {
+        self.store = store
+        self.runner = runner
     }
 
-    func setAutomaticBackupEnabled(
-        _ enabled: Bool,
-        currentPair: BackupRevisionPair,
-        at now: Date = Date()
-    ) async throws -> BackupSchedulerOutcome {
-        guard enabled else { return try await disableAutomaticBackup() }
-        let current = try await requireConfiguration()
-        _ = try await configurationStore.updateAutomation(
-            isAutomaticBackupEnabled: true,
-            expectedRevision: current.revision
-        )
-        return try await observe(currentPair, at: now)
+    func enableAutomaticBackup(current: BackupLibraryRevision, at now: Date) throws -> BackupSchedulerOutcome {
+        try store.update { settings in
+            guard settings.folder != nil else { throw BackupFailure.notConfigured }
+            settings.isAutomaticBackupEnabled = true
+        }
+        return try observe(current, at: now)
     }
 
-    func disableAutomaticBackup() async throws -> BackupSchedulerOutcome {
-        let current = try await requireConfiguration()
-        _ = try await configurationStore.updateAutomation(
-            isAutomaticBackupEnabled: false,
-            expectedRevision: current.revision
-        )
+    /// Turning automatic backups off only changes the settings; it never reads the library.
+    func disableAutomaticBackup() throws -> BackupSchedulerOutcome {
+        try store.update { settings in
+            settings.isAutomaticBackupEnabled = false
+            settings.scheduler.firstObservedRevision = nil
+            settings.scheduler.firstObservedAt = nil
+            settings.scheduler.dueAt = nil
+            settings.scheduler.retryDueAt = nil
+            settings.scheduler.retryAttempt = 0
+        }
         return .disabled
     }
 
-    func setRetentionCount(_ count: BackupRetentionCount) async throws {
-        let current = try await requireConfiguration()
-        _ = try await configurationStore.updateAutomation(
-            retentionCount: count,
-            expectedRevision: current.revision
-        )
-    }
-
-    func disableForDestructiveReset() async throws {
-        guard let current = try await configurationStore.load(), current.phase == .enabled else {
-            return
-        }
-        _ = try await configurationStore.disableForDestructiveReset(
-            expectedRevision: current.revision
-        )
-    }
-
+    /// Records that the library reached `revision`; the backup is due after the quiet period,
+    /// and never sooner than a day after the last one.
     @discardableResult
-    func observe(
-        _ pair: BackupRevisionPair,
-        at now: Date = Date()
-    ) async throws -> BackupSchedulerOutcome {
-        let current = try await requireConfiguration()
-        guard current.automation.isAutomaticBackupEnabled else { return .disabled }
-        if current.scheduler.lastCoveredRevisionPair == pair {
-            return .alreadyCovered
+    func observe(_ revision: BackupLibraryRevision, at now: Date) throws -> BackupSchedulerOutcome {
+        try store.update { settings in
+            guard settings.folder != nil, settings.isAutomaticBackupEnabled else { return .disabled }
+            var scheduler = settings.scheduler
+            if scheduler.lastCoveredRevision == revision { return .alreadyCovered }
+            if scheduler.firstObservedRevision == revision, let dueAt = scheduler.dueAt {
+                return .scheduled(scheduler.retryDueAt ?? dueAt)
+            }
+            let quietDue = now.addingTimeInterval(Self.quietPeriod)
+            // A clock set back must not push the next backup a day past what it would be.
+            let minimumDue = scheduler.lastBackupAt.map { min($0, now).addingTimeInterval(Self.minimumInterval) }
+            let dueAt = max(quietDue, minimumDue ?? quietDue)
+            scheduler.firstObservedRevision = revision
+            scheduler.firstObservedAt = now
+            scheduler.dueAt = dueAt
+            scheduler.lastFailure = nil
+            scheduler.retryAttempt = 0
+            scheduler.retryDueAt = nil
+            settings.scheduler = scheduler
+            return .scheduled(dueAt)
         }
-        if current.scheduler.firstObservedRevisionPair == pair,
-           let dueAt = current.scheduler.dueAt {
-            return .scheduled(current.scheduler.retryDueAt ?? dueAt)
-        }
-        guard clockIsContinuous(configuration: current) else {
-            _ = try await configurationStore.markBackupFailure(
-                .verificationFailed,
-                retryAttempt: 0,
-                retryDueAt: nil,
-                expectedRevision: current.revision
-            )
-            return .failed(.verificationFailed)
-        }
-        let quietDue = now.addingTimeInterval(Self.quietPeriod)
-        let minimumDue = current.scheduler.lastLocalVerificationAt?
-            .addingTimeInterval(Self.minimumVerificationInterval)
-        let dueAt = max(quietDue, minimumDue ?? quietDue)
-        _ = try await configurationStore.observeRevisionPair(
-            pair,
-            observedAt: now,
-            dueAt: dueAt,
-            expectedRevision: current.revision
-        )
-        return .scheduled(dueAt)
     }
 
     func handle(
-        _ event: BackupSchedulerEvent,
-        currentPair: BackupRevisionPair,
-        at now: Date = Date()
+        _ event: BackupSchedulerEvent, current: BackupLibraryRevision, at now: Date
     ) async throws -> BackupSchedulerOutcome {
         _ = event
-        var current = try await requireConfiguration()
-        guard current.automation.isAutomaticBackupEnabled else { return .disabled }
-        if current.scheduler.lastCoveredRevisionPair == currentPair {
-            if let failure = current.scheduler.lastFailure,
-               Self.isRecoverable(failure) {
-                _ = try await configurationStore.observeRevisionPair(
-                    currentPair,
-                    observedAt: now,
-                    dueAt: now,
-                    expectedRevision: current.revision
-                )
+        var settings = try store.load()
+        guard settings.folder != nil, settings.isAutomaticBackupEnabled else { return .disabled }
+        if settings.scheduler.lastCoveredRevision == current {
+            if let failure = settings.scheduler.lastFailure, failure.isRecoverable {
+                try store.update { settings in
+                    settings.scheduler.lastFailure = nil
+                    settings.scheduler.retryAttempt = 0
+                    settings.scheduler.retryDueAt = nil
+                }
             }
             return .alreadyCovered
         }
-        if current.scheduler.firstObservedRevisionPair != currentPair {
-            _ = try await observe(currentPair, at: now)
-            current = try await requireConfiguration()
+        if settings.scheduler.firstObservedRevision != current {
+            let outcome = try observe(current, at: now)
+            guard case .scheduled = outcome else { return outcome }
+            settings = try store.load()
         }
-        guard clockIsContinuous(configuration: current) else {
-            current = try await configurationStore.markBackupFailure(
-                .verificationFailed,
-                retryAttempt: 0,
-                retryDueAt: nil,
-                expectedRevision: current.revision
-            )
-            return .failed(current.scheduler.lastFailure ?? .verificationFailed)
-        }
-        if let terminal = Self.terminalFailure(for: current) { return terminal }
-        guard let baseDue = current.scheduler.dueAt else {
-            return try await observe(currentPair, at: now)
-        }
-        let dueAt = current.scheduler.retryDueAt ?? baseDue
+        if let terminal = Self.terminalFailure(settings.scheduler) { return terminal }
+        guard let baseDue = settings.scheduler.dueAt else { return try observe(current, at: now) }
+        let dueAt = settings.scheduler.retryDueAt ?? baseDue
         guard now >= dueAt else {
-            return current.scheduler.retryDueAt == nil
-                ? .scheduled(dueAt)
-                : .retryScheduled(dueAt)
+            return settings.scheduler.retryDueAt == nil ? .scheduled(dueAt) : .retryScheduled(dueAt)
         }
-
         do {
-            let result = try await automaticRunner.runAutomaticBackup(
-                expectedPair: currentPair,
-                at: now
-            )
-            guard result.revisionPair == currentPair else {
-                return try await recordRecoverableFailure(
-                    .sourceChanged,
-                    current: current,
-                    now: now
-                )
-            }
-            let latest = try await requireConfiguration()
-            _ = try await configurationStore.markBackupSuccess(
-                result.revisionPair,
-                verifiedAt: result.verifiedAt,
-                expectedRevision: latest.revision
-            )
+            let result = try await runner.runAutomaticBackup(expected: current, at: now)
+            guard result.revision == current else { return try recordRecoverable(.sourceChanged, at: now) }
             return .completed
         } catch is CancellationError {
             throw CancellationError()
-        } catch let error as BackupOperationCoordinatorError {
-            switch error {
-            case .semantic(let semantic) where Self.isRecoverable(semantic):
-                let latest = try await requireConfiguration()
-                return try await recordRecoverableFailure(
-                    semantic,
-                    current: latest,
-                    now: now
-                )
-            case .semantic(let semantic):
-                let latest = try await requireConfiguration()
-                _ = try await configurationStore.markBackupFailure(
-                    semantic,
-                    retryAttempt: 0,
-                    retryDueAt: nil,
-                    expectedRevision: latest.revision
-                )
-                return .failed(semantic)
-            case .operationInProgress:
-                return .failed(.operationInProgress)
-            case .destructiveOperationInProgress:
-                return .failed(.operationInProgress)
+        } catch BackupOperationCoordinatorError.operationInProgress {
+            return .failed(.operationInProgress)
+        } catch BackupOperationCoordinatorError.destructiveOperationInProgress {
+            return .failed(.operationInProgress)
+        } catch let failure as BackupFailure where failure.isRecoverable {
+            return try recordRecoverable(failure, at: now)
+        } catch {
+            let failure = error as? BackupFailure ?? .verificationFailed
+            try store.update { settings in
+                settings.scheduler.lastFailure = failure
+                settings.scheduler.retryAttempt = 0
+                settings.scheduler.retryDueAt = nil
             }
+            return .failed(failure)
         }
     }
 
-    /// Persists an offline failure that happened while resolving the selected
-    /// directory, before a source snapshot or automatic runner could be
-    /// admitted. Existing source observation and quiet-period metadata remain
-    /// authoritative; this method never invents a revision pair.
-    func recordDestinationOffline(
-        at now: Date = Date()
-    ) async throws -> BackupSchedulerOutcome {
-        let current = try await requireConfiguration()
-        guard current.automation.isAutomaticBackupEnabled else { return .disabled }
-        guard clockIsContinuous(configuration: current) else {
-            _ = try await configurationStore.markBackupFailure(
-                .verificationFailed,
-                retryAttempt: 0,
-                retryDueAt: nil,
-                expectedRevision: current.revision
-            )
-            return .failed(.verificationFailed)
-        }
-        if let terminal = Self.terminalFailure(for: current) { return terminal }
-        if let retryDueAt = current.scheduler.retryDueAt, now < retryDueAt {
+    /// The folder could not be reached before a backup could even start. Existing timing is
+    /// kept; this only schedules a bounded retry.
+    func recordFolderUnavailable(at now: Date) throws -> BackupSchedulerOutcome {
+        let settings = try store.load()
+        guard settings.folder != nil, settings.isAutomaticBackupEnabled else { return .disabled }
+        if let terminal = Self.terminalFailure(settings.scheduler) { return terminal }
+        if let retryDueAt = settings.scheduler.retryDueAt, now < retryDueAt { return .retryScheduled(retryDueAt) }
+        return try recordRecoverable(.folderUnavailable, at: now)
+    }
+
+    private func recordRecoverable(_ failure: BackupFailure, at now: Date) throws -> BackupSchedulerOutcome {
+        try store.update { settings in
+            let attempts = settings.scheduler.retryAttempt
+            settings.scheduler.lastFailure = failure
+            guard attempts < Self.retryDelays.count else {
+                settings.scheduler.retryDueAt = nil
+                return .failed(failure)
+            }
+            let delayed = now.addingTimeInterval(Self.retryDelays[attempts])
+            let retryDueAt = max(delayed, settings.scheduler.dueAt ?? delayed)
+            settings.scheduler.retryAttempt = attempts + 1
+            settings.scheduler.retryDueAt = retryDueAt
             return .retryScheduled(retryDueAt)
         }
-        return try await recordRecoverableFailure(
-            .repositoryOffline,
-            current: current,
-            now: now
-        )
     }
 
-    private func recordRecoverableFailure(
-        _ failure: BackupSemanticError,
-        current: BackupLocalConfiguration,
-        now: Date
-    ) async throws -> BackupSchedulerOutcome {
-        precondition(Self.isRecoverable(failure))
-        let completedRetries = current.scheduler.mutationRetryAttempt
-        guard completedRetries < Self.mutationRetryDelays.count else {
-            _ = try await configurationStore.markBackupFailure(
-                failure,
-                retryAttempt: completedRetries,
-                retryDueAt: nil,
-                expectedRevision: current.revision
-            )
-            return .failed(failure)
-        }
-        let retryAttempt = completedRetries + 1
-        let delayedDueAt = now.addingTimeInterval(
-            Self.mutationRetryDelays[completedRetries]
-        )
-        let retryDueAt = max(delayedDueAt, current.scheduler.dueAt ?? delayedDueAt)
-        _ = try await configurationStore.markBackupFailure(
-            failure,
-            retryAttempt: retryAttempt,
-            retryDueAt: retryDueAt,
-            expectedRevision: current.revision
-        )
-        return .retryScheduled(retryDueAt)
-    }
-
-    private static func terminalFailure(
-        for configuration: BackupLocalConfiguration
-    ) -> BackupSchedulerOutcome? {
-        guard let failure = configuration.scheduler.lastFailure,
-              configuration.scheduler.retryDueAt == nil else { return nil }
-        if !isRecoverable(failure)
-            || configuration.scheduler.mutationRetryAttempt >= mutationRetryDelays.count {
-            return .failed(failure)
-        }
+    private static func terminalFailure(_ scheduler: BackupSchedulerState) -> BackupSchedulerOutcome? {
+        guard let failure = scheduler.lastFailure, scheduler.retryDueAt == nil else { return nil }
+        if !failure.isRecoverable || scheduler.retryAttempt >= retryDelays.count { return .failed(failure) }
         return nil
-    }
-
-    private nonisolated static func isRecoverable(
-        _ failure: BackupSemanticError
-    ) -> Bool {
-        failure == .sourceChanged || failure == .repositoryOffline
-    }
-
-    private func requireConfiguration() async throws -> BackupLocalConfiguration {
-        guard let configuration = try await configurationStore.load(),
-              configuration.phase == .enabled else {
-            throw BackupOperationCoordinatorError.semantic(.notConfigured)
-        }
-        return configuration
-    }
-
-    private func clockIsContinuous(
-        configuration: BackupLocalConfiguration
-    ) -> Bool {
-        // Configuration reads can suspend while another backup completes.
-        // Compare that durable state with the current clock, not event arrival.
-        let now = Date(
-            timeIntervalSince1970: (clock().timeIntervalSince1970 * 1_000).rounded() / 1_000
-        )
-        guard now.timeIntervalSinceReferenceDate.isFinite else { return false }
-        let scheduler = configuration.scheduler
-        return scheduler.firstObservedAt.map { $0 <= now } ?? true
-            && scheduler.lastLocalVerificationAt.map { $0 <= now } ?? true
     }
 }

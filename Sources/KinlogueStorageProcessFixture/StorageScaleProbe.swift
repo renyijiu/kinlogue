@@ -461,7 +461,7 @@ enum StorageScaleProbe {
             report.set("admission_capture_ms", snapshot.captureDuration * 1_000)
             report.set("logical_bytes", snapshot.logicalByteCount)
             report.set("plaintext_bytes", snapshot.totalPlaintextByteCount)
-            report.set("entry_count", snapshot.entryCount)
+            report.set("original_count", snapshot.originalCount)
             report.set("fd_with_snapshot", try descriptors())
             report.set("footprint_with_snapshot_bytes", Memory.current().footprint)
             report.set("capture_outcome", "capturedAndValidated")
@@ -585,63 +585,25 @@ enum StorageScaleProbe {
 
     // MARK: - Backup
 
-    /// Runs the production publisher end to end: repository scan, source
-    /// plan, encrypted streaming write, full read-back and durable witness.
-    /// The command deadline bounds actual execution; timings include full verification.
+    /// Runs the production archive writer end to end into a folder: capture, ZIP write, full
+    /// read-back and publication, then a strict restore of that archive. The command deadline
+    /// bounds actual execution; timings include full verification.
     private static func backup(
         _ configuration: Configuration,
         into report: inout ProbeReport
     ) async throws {
         let selected = configuration.workDirectory.appendingPathComponent("selected", isDirectory: true)
-        for name in ["selected", "BackupIdentity", "restored"] {
+        for name in ["selected", "restored"] {
             guard !FileManager.default.fileExists(atPath: configuration.workDirectory.appendingPathComponent(name).path) else {
                 throw ProbeError.invalidWorkDirectory
             }
         }
-        let repositoryURL = selected.appendingPathComponent(".kinlogue-backup-v1", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: repositoryURL,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        guard chmod(selected.path, 0o700) == 0, chmod(repositoryURL.path, 0o700) == 0 else {
-            throw ProbeError.unexpectedState
-        }
-        let material = try BackupKeyHierarchy.makeEnrollment()
-        let repositoryIdentity = try directoryIdentity(repositoryURL)
-        try BackupEnrollmentRepository().publish(
-            descriptor: material.descriptor,
-            authorization: material.authorization,
-            repositoryURL: repositoryURL,
-            expectedIdentity: repositoryIdentity
-        )
-        let configurationStore = BackupLocalConfigurationStore(
-            rootURL: configuration.workDirectory.appendingPathComponent(
-                "BackupIdentity",
-                isDirectory: true
-            )
-        )
-        let created = try await configurationStore.createPending(try BackupPendingEnrollment(
-            bookmarkData: Data("synthetic-scale-probe-bookmark".utf8),
-            selectedDirectoryIdentity: try directoryIdentity(selected),
-            repositoryDirectoryIdentity: repositoryIdentity,
-            descriptor: material.descriptor,
-            authorization: material.authorization,
-            deviceSigningSeed: material.deviceSigningSeed,
-            writerEpoch: material.writerEpoch
-        ))
-        let enabled = try await configurationStore.promotePending(
-            enrollmentEpoch: created.enrollmentEpoch,
-            expectedRevision: created.revision
-        )
-
-        try await logicalBackup(configuration, repositoryURL: repositoryURL, configurationStore: configurationStore,
-            enabled: enabled, recoveryCode: material.recoveryCode, into: &report)
+        try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        try await logicalBackup(configuration, folder: selected, into: &report)
     }
 
     private static func logicalBackup(
-        _ configuration: Configuration, repositoryURL: URL, configurationStore: BackupLocalConfigurationStore,
-        enabled: BackupLocalConfiguration, recoveryCode: String, into report: inout ProbeReport
+        _ configuration: Configuration, folder: URL, into report: inout ProbeReport
     ) async throws {
         let store = try SQLiteLibraryStore(rootURL: configuration.rootURL)
         defer { try? store.close() }
@@ -663,8 +625,9 @@ enum StorageScaleProbe {
             sampleLAN = try await inbox.loadPreprocessedDocument(itemID: item.id, expectedRevision: item.revision)
         }
         let phases = LogicalCapturePhases()
-        let source = SQLiteLogicalBackupSource(store: store, captureObservation: phases.record)
+        let source = SQLiteLogicalBackupSource(store: store)
         let expectedPair = try source.currentRevision()
+        let expectedLibrary = try source.currentLibraryRevision()
         let before = Memory.current()
         let peaks = LogicalCaptureFDPeak()
         peaks.sample()
@@ -673,23 +636,22 @@ enum StorageScaleProbe {
         }
         var started = now()
         do {
-            let result = try await BackupCheckpointPublisher(
-                repository: BackupRepository(repositoryURL: repositoryURL,
-                    expectedIdentity: enabled.repositoryDirectoryIdentity, trustedDescriptor: enabled.descriptor,
-                    expectedAuthorizationID: enabled.authorization.authorizationID,
-                    leaseAuthority: .init(configurationRootURL: configurationStore.rootURL, configuration: enabled)),
-                writer: EncryptedCheckpointWriter(source: source, configurationStore: configurationStore),
-                configurationStore: configurationStore
-            ).publishNext(configuration: enabled)
-            report.set("publish_restore_point_ms", milliseconds(since: started))
-            report.set("publish_outcome", "published")
-            report.set("restore_point_bytes", result.fileIdentity.byteCount)
-            report.set("publish_footprint_peak_bytes", Memory.current().peakFootprint)
-            report.set("publish_footprint_peak_sampled_bytes", peaks.footprint)
-            report.set("publish_footprint_increment_sampled_bytes", peaks.footprint > before.footprint ? peaks.footprint - before.footprint : 0)
-            report.set("writer_maximum_buffered_bytes", result.maximumBufferedPlaintextByteCount)
-            report.set("writer_maximum_source_files", result.maximumSimultaneousSourceFileCount)
-            guard result.revisionPair == expectedPair, try source.currentRevision() == expectedPair,
+            let result = try await BackupArchiveWriter(store: store, captureObservation: phases.record).write(
+                to: .folder(folder, fileNameStem: "Kinlogue Backup"),
+                content: BackupArchiveContent(
+                    labels: BackupArchiveLabels(undated: "Undated", pendingFolder: "Pending", phoneFolder: "Phone", otherFolder: "Other"),
+                    creator: try BackupArchiveIndex.Creator(app: "Kinlogue", version: "probe", build: "probe"),
+                    readmeFileName: "README.txt",
+                    readmeText: "Synthetic storage probe backup"
+                )
+            )
+            report.set("write_backup_ms", milliseconds(since: started))
+            report.set("backup_outcome", "published")
+            report.set("backup_archive_bytes", result.byteCount)
+            report.set("backup_footprint_peak_bytes", Memory.current().peakFootprint)
+            report.set("backup_footprint_peak_sampled_bytes", peaks.footprint)
+            report.set("backup_footprint_increment_sampled_bytes", peaks.footprint > before.footprint ? peaks.footprint - before.footprint : 0)
+            guard result.library == expectedLibrary, try source.currentRevision() == expectedPair,
                   phases.values.filter({ $0.0 == 0 }).count == 1 else { throw ProbeError.unexpectedState }
             let counts = Dictionary(uniqueKeysWithValues: phases.values.map { ($0.0, $0.1) })
             guard counts[BackupLogicalKind.original.rawValue] == sourceCounts.0 + sourceCounts.1 + sourceInbox.items.count,
@@ -698,7 +660,7 @@ enum StorageScaleProbe {
                   (counts[BackupLogicalKind.inbox.rawValue] ?? 0) == sourceInbox.items.count else { throw ProbeError.unexpectedState }
             let originalCount = counts[242] ?? 0
             report.set("captured_original_count", originalCount)
-            report.set("container_entry_count_inferred_minimum", originalCount + 1)
+            report.set("archive_entry_count", result.counts.originals + 3)
             if configuration.command == .logicalCapacity {
                 guard originalCount == configuration.reportCount + 1, sourceCounts.1 == configuration.reportCount,
                       sampleLAN != nil else { throw ProbeError.unexpectedState }
@@ -709,7 +671,7 @@ enum StorageScaleProbe {
             let owner = try SQLiteLibraryOwner(rootURL: restoredRoot)
             let verifier = try BackupRestoreVerifier(owner: owner)
             started = now()
-            let prepared = try await verifier.prepare(checkpointURL: repositoryURL.appendingPathComponent(result.finalLeafName), recoveryCode: recoveryCode)
+            let prepared = try await verifier.prepare(archiveURL: result.url)
             report.set("restore_prepare_ms", milliseconds(since: started))
             guard prepared.summary.revisionPair == expectedPair, prepared.summary.logicalDigest.count == 32,
                   prepared.summary.memberCount == members.count, prepared.summary.recordCount == sourceCounts.0,
@@ -807,14 +769,6 @@ enum StorageScaleProbe {
             throw ProbeError.unexpectedState
         }
         return Int(metadata.st_size)
-    }
-
-    private static func directoryIdentity(_ url: URL) throws -> BackupFilesystemIdentity {
-        var metadata = stat()
-        guard lstat(url.path, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFDIR else {
-            throw ProbeError.unexpectedState
-        }
-        return .init(device: UInt64(metadata.st_dev), inode: UInt64(metadata.st_ino))
     }
 
     private static let vocabulary = [

@@ -78,7 +78,7 @@ struct AssistantPanelView: View {
             }
             Button(AppLocalization.string("保留"), role: .cancel) {}
         } message: {
-            Text(AppLocalization.string("对话会从本机资料库中删除；已写入的恢复点仍包含它，已发送给 Codex 服务的内容也不受影响。"))
+            Text(AppLocalization.string("对话会从本机资料库中删除；已写入的备份仍包含它，已发送给 Codex 服务的内容也不受影响。"))
         }
         .accessibilityIdentifier("assistant-panel")
     }

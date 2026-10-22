@@ -32,7 +32,7 @@ enum SQLiteLogicalRows {
             guard let value = try Int64.fetchOne(db, sql: sql), value >= 0 else { throw SQLiteLogicalBackupError.resourceLimit }
             let addition = UInt64(value).multipliedReportingOverflow(by: multiplier)
             let next = total.addingReportingOverflow(addition.partialValue)
-            guard !addition.overflow, !next.overflow, next.partialValue <= BackupFormatLimits.maximumPlaintextByteCount else { throw SQLiteLogicalBackupError.resourceLimit }
+            guard !addition.overflow, !next.overflow, next.partialValue <= BackupArchiveLimits.maximumPlaintextByteCount else { throw SQLiteLogicalBackupError.resourceLimit }
             total = next.partialValue
         }
         return total

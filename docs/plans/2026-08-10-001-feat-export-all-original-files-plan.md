@@ -8,10 +8,13 @@ artifact_readiness: implementation-ready
 product_contract_source: ce-brainstorm
 execution: code
 planning_depth: deep
-status: implemented
+status: superseded
+superseded_by: 2026-10-19-1715-feat-plain-zip-backup-export-plan.md
 ---
 
 # Export All Original Files - Plan
+
+> **Superseded（2026-10-19）**：“只含已确认原件、不可恢复”的单独导出已删除。现在“导出备份到…”写出与文件夹备份相同、可以恢复的明文 ZIP，按成员排列的原件仍在其中，见 [明文 ZIP 备份计划](2026-10-19-1715-feat-plain-zip-backup-export-plan.md)。本页只用于解释决策来源。
 
 ## Goal Capsule
 

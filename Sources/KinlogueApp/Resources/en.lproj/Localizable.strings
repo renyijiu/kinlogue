@@ -110,10 +110,8 @@
 	<string>These fields were read again by the current recognition rules from the recognition results saved with this report; the original was not recognized again. Ticked fields take the new reading, and the rest stay as they are.</string>
 	<key>不会发送：成员姓名、备注、原件文件和图片、文件名，以及其他成员的资料。</key>
 	<string>Not sent: the member's name, notes, original files and images, file names, and other members' records.</string>
-	<key>不包含 OCR、转录、备注、目录或草稿。</key>
-	<string>Does not include OCR, transcriptions, notes, catalog data, or drafts.</string>
-	<key>不包含健康内容的恢复点概要</key>
-	<string>Restore point summary without health content</string>
+	<key>不包含健康内容的备份概要</key>
+	<string>Backup summary without health content</string>
 	<key>不支持预览或归档</key>
 	<string>Preview and filing are unsupported</string>
 	<key>不支持预览，原件仍保留</key>
@@ -122,8 +120,6 @@
 	<string>Without a date, the record appears in the Unknown Date group</string>
 	<key>两份原件已载入内存</key>
 	<string>Both originals are loaded in memory</string>
-	<key>临时空间估算</key>
-	<string>Estimated temporary space</string>
 	<key>二维医学影像查看器</key>
 	<string>2D Medical Image Viewer</string>
 	<key>二维码不可用</key>
@@ -132,8 +128,10 @@
 	<string>For viewing local original images only. No diagnosis, measurements, or medical interpretation are provided.</string>
 	<key>仅展示确认过的原文，不生成趋势、判断或建议。</key>
 	<string>Only confirmed source text is shown. No trends, judgments, or advice are generated.</string>
-	<key>从恢复点恢复…</key>
-	<string>Restore from Restore Point…</string>
+	<key>从备份恢复</key>
+	<string>Restore from Backup</string>
+	<key>从备份恢复…</key>
+	<string>Restore from Backup…</string>
 	<key>从手机接收</key>
 	<string>Receive from Phone</string>
 	<key>从手机接收资料</key>
@@ -178,18 +176,14 @@
 	<string>Save</string>
 	<key>保存后这份报告不再提示，之后仍可以随时编辑。</key>
 	<string>After saving, this report no longer shows the notice. You can still edit it at any time.</string>
-	<key>保存数据备份恢复码</key>
-	<string>Save the Backup Recovery Code</string>
 	<key>保留</key>
 	<string>Keep</string>
 	<key>保留 %lld 个对象</key>
 	<string>%lld retained objects</string>
 	<key>保留但暂不可查看的对象</key>
 	<string>Retained Objects Not Currently Viewable</string>
-	<key>保留的恢复点数量</key>
-	<string>Restore points to keep</string>
-	<key>保留空间估算</key>
-	<string>Estimated retained space</string>
+	<key>保留最近的备份份数</key>
+	<string>Backups to keep</string>
 	<key>保留识别出的写法</key>
 	<string>Keeps the recognized reading</string>
 	<key>停止</key>
@@ -218,8 +212,12 @@
 	<string>Close</string>
 	<key>关闭归档结果</key>
 	<string>Dismiss filing result</string>
+	<key>其他</key>
+	<string>Other</string>
 	<key>其他日期</key>
 	<string>Other Date</string>
+	<key>写入它的续页版本</key>
+	<string>Written by Kinlogue</string>
 	<key>准备处理</key>
 	<string>Preparing</string>
 	<key>出院日期</key>
@@ -268,8 +266,6 @@
 	<string>Delete This Imaging Study…</string>
 	<key>加入等待确认</key>
 	<string>Add to Review Queue</string>
-	<key>加密目录备份</key>
-	<string>Encrypted Folder Backup</string>
 	<key>加载更多待确认项</key>
 	<string>Load more pending items</string>
 	<key>包含检查机构名称</key>
@@ -282,12 +278,12 @@
 	<string>Imaging Study</string>
 	<key>医院</key>
 	<string>Hospital</string>
-	<key>单个恢复点估算</key>
-	<string>Estimated per restore point</string>
 	<key>历史对话</key>
 	<string>History</string>
 	<key>压缩包位于续页资料库之外，请妥善保管。</key>
 	<string>The ZIP is outside the Kinlogue library. Keep it secure.</string>
+	<key>压缩包包含资料库的全部内容：家庭成员、报告、识别文字、草稿、手机上传和原始文件，可以用“从备份恢复…”整库恢复。</key>
+	<string>The ZIP holds the whole library: family members, reports, recognized text, drafts, phone uploads and original files. “Restore from Backup…” can restore the whole library from it.</string>
 	<key>压缩包验证失败，未发布不完整的导出。</key>
 	<string>ZIP verification failed. No incomplete export was published.</string>
 	<key>原件</key>
@@ -316,8 +312,10 @@
 	<string>Original Image</string>
 	<key>原始报告图片</key>
 	<string>Original report image</string>
-	<key>原始文件已导出</key>
-	<string>Originals Exported</string>
+	<key>原始文件</key>
+	<string>Original files</string>
+	<key>原始文件按家庭成员和日期排列，解压后可以直接打开或打印。</key>
+	<string>Original files are arranged by family member and date and open or print directly once unzipped.</string>
 	<key>原报告未提供或未识别；可对照原件手动填写</key>
 	<string>Not provided or recognized; enter it manually while checking the original</string>
 	<key>原报告未提供或未识别；可对照原件手动填写，保存后会标记为人工录入</key>
@@ -346,10 +344,10 @@
 	<string>Cancel Comparison</string>
 	<key>另一项资料库操作正在进行。</key>
 	<string>Another library operation is in progress.</string>
+	<key>另一项资料库操作正在进行，请稍后重试。</key>
+	<string>Another library operation is in progress. Try again later.</string>
 	<key>另保留 %lld 个暂不可查看对象</key>
 	<string>%lld additional objects retained but not currently viewable</string>
-	<key>只会导出已确认报告和医学影像的原始文件，并按家庭成员和日期排列。</key>
-	<string>Only originals from confirmed reports and medical images will be exported, organized by family member and date.</string>
 	<key>只保留原报告印出的高低或箭头标记，不会按数值推断。</key>
 	<string>Keep only high, low, or arrow markings printed in the original report. Values are never interpreted.</string>
 	<key>只删除待确认队列中的所选原件；已经归档到报告的原件不受影响。</key>
@@ -428,16 +426,32 @@
 	<string>Add a private note that is kept separate from the original report</string>
 	<key>处理失败，可重试</key>
 	<string>Processing failed; retry available</string>
-	<key>备份期间资料库发生变化，续页会稍后重试。</key>
-	<string>The library changed during backup. Kinlogue will try again later.</string>
-	<key>备份目录当前不可用，请连接存储或恢复网盘目录后重试。</key>
-	<string>The backup folder is unavailable. Reconnect the storage or cloud-drive folder, then try again.</string>
-	<key>备份目录身份发生变化，已暂停写入。</key>
-	<string>The backup folder identity changed, so writing is paused.</string>
-	<key>备份设置尚未完成。若你仍保存原恢复码，可以继续完成；续页不会生成新的恢复码。</key>
-	<string>Backup setup is incomplete. If you still have the original recovery code, you can continue; Kinlogue will not generate a new one.</string>
-	<key>备份验证未完成，请检查目录后重试。</key>
-	<string>Backup verification did not finish. Check the folder and try again.</string>
+	<key>备份不完整或已损坏，当前资料库没有变化。</key>
+	<string>The backup is incomplete or damaged. The current library was not changed.</string>
+	<key>备份到文件夹</key>
+	<string>Back Up to a Folder</string>
+	<key>备份可能已经写入，但无法确认磁盘同步状态。请检查备份文件夹。</key>
+	<string>The backup may have been written, but whether it reached the disk could not be confirmed. Check the backup folder.</string>
+	<key>备份在网盘里时，请先确认它已完整下载到这台 Mac。</key>
+	<string>If the backup is in a cloud drive, make sure it has fully downloaded to this Mac first.</string>
+	<key>备份已导出</key>
+	<string>Backup Exported</string>
+	<key>备份文件不加密，包含全部健康资料</key>
+	<string>Backup files are not encrypted and contain all health information</string>
+	<key>备份文件不加密，包含全部健康资料。放在网盘同步文件夹里，网盘服务商和能登录该账号的人都能读取。</key>
+	<string>Backup files are not encrypted and contain all health information. In a cloud-drive sync folder, the cloud provider and anyone who can sign in to that account can read them.</string>
+	<key>备份文件夹</key>
+	<string>Backup folder</string>
+	<key>备份文件夹当前不可用，请连接磁盘或恢复网络文件夹后重试。</key>
+	<string>The backup folder is not available. Connect the disk or reconnect the network folder, then try again.</string>
+	<key>备份文件夹所在磁盘没有足够空间。</key>
+	<string>The disk with the backup folder does not have enough space.</string>
+	<key>备份文件验证未通过，没有保存不完整的备份。</key>
+	<string>The backup file did not pass verification. No incomplete backup was saved.</string>
+	<key>备份时间</key>
+	<string>Backed up</string>
+	<key>备份期间资料库发生了变化，续页会稍后重试。</key>
+	<string>The library changed during the backup. Kinlogue will try again shortly.</string>
 	<key>备注不会进入搜索比较中的原文结论。</key>
 	<string>Notes are excluded from the source conclusions used in search and comparison.</string>
 	<key>备注与原文转录分开保存，不进入比较。</key>
@@ -454,8 +468,6 @@
 	<string>Done</string>
 	<key>完成时间</key>
 	<string>Completed at</string>
-	<key>完整回输恢复码</key>
-	<string>Re-enter the complete recovery code</string>
 	<key>完整性校验失败</key>
 	<string>Integrity check failed</string>
 	<key>完整性校验失败，可重试</key>
@@ -480,12 +492,12 @@
 	<string>Family Timeline</string>
 	<key>对话</key>
 	<string>Chat</string>
-	<key>对话会从本机资料库中删除；已写入的恢复点仍包含它，已发送给 Codex 服务的内容也不受影响。</key>
-	<string>The chat is deleted from the library on this Mac. Restore points already written still contain it, and what was sent to the Codex service is not affected.</string>
+	<key>对话会从本机资料库中删除；已写入的备份仍包含它，已发送给 Codex 服务的内容也不受影响。</key>
+	<string>The chat is deleted from the library on this Mac. Backups already written still contain it, and what was sent to the Codex service is not affected.</string>
 	<key>对话保存在本机资料库中，可在“历史对话”里删除。</key>
 	<string>Chats are saved in the library on this Mac and can be deleted under History.</string>
-	<key>对话和报告一样以明文保存在本机资料库中，并随加密恢复点备份；删除成员时一并删除。关闭 AI 对话不会删除它们。</key>
-	<string>Like reports, chats are saved unencrypted in the library on this Mac and included in encrypted restore points. They are deleted with their member. Turning off AI chat does not delete them.</string>
+	<key>对话和报告一样以明文保存在本机资料库中，也包含在不加密的备份压缩包里；删除成员时一并删除。关闭 AI 对话不会删除它们。</key>
+	<string>Like reports, chats are saved unencrypted in the library on this Mac and included in the unencrypted backup archives. They are deleted with their member. Turning off AI chat does not delete them.</string>
 	<key>对话组件不可用，请重新启动续页后再试。</key>
 	<string>The chat component is unavailable. Restart Kinlogue and try again.</string>
 	<key>导入 DICOM 文件夹并确认家庭成员与检查日期后，会显示在这里。</key>
@@ -508,24 +520,22 @@
 	<string>Import Your First Report…</string>
 	<key>导出</key>
 	<string>Export</string>
-	<key>导出全部原始文件</key>
-	<string>Export All Original Files</string>
-	<key>导出内容为未加密副本，不包含 OCR、备注或草稿。</key>
-	<string>The export is an unencrypted copy and does not include OCR, notes, or drafts.</string>
-	<key>导出原始文件…</key>
-	<string>Export Originals…</string>
-	<key>导出后文件由您保管；删除续页资料库不会删除已导出的副本。</key>
-	<string>You are responsible for the exported files. Deleting the Kinlogue library will not delete exported copies.</string>
+	<key>导出后的文件由你保管，续页不会再管理或删除它。</key>
+	<string>The exported file is yours to keep. Kinlogue will not manage or delete it.</string>
+	<key>导出备份</key>
+	<string>Export Backup</string>
+	<key>导出备份到…</key>
+	<string>Export Backup To…</string>
 	<key>导出已取消</key>
 	<string>Export Cancelled</string>
 	<key>导出文件可能已经写入，但无法确认磁盘同步状态。请检查所选位置后再决定是否重试。</key>
 	<string>The export may have been written, but its disk sync status could not be confirmed. Check the selected location before retrying.</string>
+	<key>导出期间资料库发生了变化或有原件未通过校验，导出未完成。</key>
+	<string>The library changed during the export, or an original failed its check. The export did not finish.</string>
 	<key>导出未完成</key>
 	<string>Export Incomplete</string>
 	<key>导出未完成，可以稍后重试。</key>
 	<string>The export did not finish. You can try again later.</string>
-	<key>导出的压缩包包含未加密的健康资料</key>
-	<string>The exported ZIP contains unencrypted health information</string>
 	<key>导出进度</key>
 	<string>Export Progress</string>
 	<key>将 %@ 向前移动</key>
@@ -534,10 +544,6 @@
 	<string>Move %@ backward</string>
 	<key>将删除续页当前资料库中的家庭成员、健康记录和本地原件。</key>
 	<string>This deletes family members, health records, and local originals from the current Kinlogue library.</string>
-	<key>将已确认报告和医学影像的原始文件按家庭成员与日期整理为一个 ZIP 压缩包。</key>
-	<string>Organize originals from confirmed reports and medical images into one ZIP by family member and date.</string>
-	<key>尚无已验证的本地恢复点</key>
-	<string>No locally verified restore point yet</string>
 	<key>尚无问题</key>
 	<string>No question yet</string>
 	<key>尚未巡检</key>
@@ -546,8 +552,8 @@
 	<string>Not inspected; waiting for idle time</string>
 	<key>尚未确认家庭成员与检查日期</key>
 	<string>Family member and study date not yet confirmed</string>
-	<key>尚未配置数据备份。</key>
-	<string>Data backup is not configured.</string>
+	<key>尚未选择备份文件夹。</key>
+	<string>No backup folder is selected.</string>
 	<key>就已确认的报告提问</key>
 	<string>Ask about the confirmed reports</string>
 	<key>就这位成员已确认的报告提问</key>
@@ -568,6 +574,8 @@
 	<string>This answer was stopped.</string>
 	<key>已关闭比较并释放原件</key>
 	<string>Comparison closed and originals released</string>
+	<key>已创建 %@，并完整验证。</key>
+	<string>Created %@ and verified it completely.</string>
 	<key>已加入 %lld 份，重复跳过 %lld 份，待重试 %lld 份。</key>
 	<string>Added: %1$lld; duplicates skipped: %2$lld; retry needed: %3$lld.</string>
 	<key>已加入比较</key>
@@ -578,8 +586,6 @@
 	<string>Selection removed; current selection: %@</string>
 	<key>已处理</key>
 	<string>Processed</string>
-	<key>已处理 %lld / %@</key>
-	<string>%1$lld of %2$@ processed</string>
 	<key>已完成 %lld%%</key>
 	<string>%lld%% complete</string>
 	<key>已显示第 %lld 张，共 %lld 张</key>
@@ -600,8 +606,8 @@
 	<string>Selected record %1$lld; current selection: %2$@</string>
 	<key>已隔离的损坏项目</key>
 	<string>Damaged items isolated</string>
-	<key>已验证的恢复点概要</key>
-	<string>Verified Restore Point Summary</string>
+	<key>已验证的备份概要</key>
+	<string>Verified Backup Summary</string>
 	<key>并排查看历史原件</key>
 	<string>Compare Historical Originals Side by Side</string>
 	<key>序列 %lld</key>
@@ -628,8 +634,8 @@
 	<string>The current image slice could not be loaded. You can retry.</string>
 	<key>当前版本暂不提供影像切片查看；可以管理已确认检查，且不会主动渲染不支持的对象。</key>
 	<string>The current version does not provide slice viewing. You can manage confirmed studies, and unsupported objects are not rendered automatically.</string>
-	<key>当前资料库不会因验证失败而被替换。你可以取消后重新选择恢复点。</key>
-	<string>A verification failure will not replace the current library. Cancel and choose a restore point again.</string>
+	<key>当前资料库不会因验证失败而被替换。你可以取消后重新选择备份。</key>
+	<string>A failed verification never replaces the current library. You can cancel and choose another backup.</string>
 	<key>影像</key>
 	<string>Imaging</string>
 	<key>影像导入已取消</key>
@@ -678,46 +684,26 @@
 	<string>Restore is complete. Quit and reopen Kinlogue.</string>
 	<key>恢复未完成。</key>
 	<string>Restore did not finish.</string>
-	<key>恢复点不完整或已损坏，当前资料库没有变化。</key>
-	<string>The restore point is incomplete or damaged. The current library was not changed.</string>
-	<key>恢复点可能已写入，但无法确认本地同步状态。</key>
-	<string>The restore point may have been written, but local sync status could not be confirmed.</string>
-	<key>恢复码</key>
-	<string>Recovery code</string>
-	<key>恢复码不完整或与本次设置不一致。</key>
-	<string>The recovery code is incomplete or does not match this setup.</string>
-	<key>恢复码是读取加密恢复点所必需的。请把它完整保存在密码管理器或其他独立位置；续页无法替你找回。</key>
-	<string>The recovery code is required to read encrypted restore points. Save it in full in a password manager or another independent location; Kinlogue cannot recover it for you.</string>
-	<key>恢复码显示在屏幕上。为避免旁人通过辅助功能听到，续页不会朗读这段敏感内容。</key>
-	<string>The recovery code is visible on screen. Kinlogue will not read this sensitive content aloud through accessibility features.</string>
-	<key>恢复码错误，或恢复点未通过身份验证。</key>
-	<string>The recovery code is incorrect, or the restore point failed authentication.</string>
 	<key>我了解，继续</key>
 	<string>I Understand, Continue</string>
-	<key>我已将恢复码完整保存在独立位置</key>
-	<string>I saved the complete recovery code in an independent location</string>
 	<key>我的备注</key>
 	<string>My Notes</string>
 	<key>我的备注（可选）</key>
 	<string>My Notes (Optional)</string>
 	<key>我确认当前是可信任的私人局域网</key>
 	<string>I confirm this is a trusted private local network</string>
-	<key>所有成员保存的对话都会从本机资料库中删除；已写入的恢复点仍包含它们，已发送给 Codex 服务的内容也不受影响。</key>
-	<string>Every member's saved chats are deleted from the library on this Mac. Restore points already written still contain them, and what was sent to the Codex service is not affected.</string>
-	<key>所选位置没有足够空间完成备份。</key>
-	<string>The selected location does not have enough space to finish the backup.</string>
+	<key>所有成员保存的对话都会从本机资料库中删除；已写入的备份仍包含它们，已发送给 Codex 服务的内容也不受影响。</key>
+	<string>Every member's saved chats are deleted from the library on this Mac. Backups already written still contain them, and what was sent to the Codex service is not affected.</string>
 	<key>所选位置没有足够空间完成导出。</key>
 	<string>The selected location does not have enough space to finish the export.</string>
 	<key>所选原件暂时无法打开</key>
 	<string>The selected original is temporarily unavailable</string>
 	<key>所选报告无法全部发送，请重新打开对话。</key>
 	<string>The chosen reports cannot all be sent. Open the chat again.</string>
+	<key>所选文件不是续页备份。</key>
+	<string>The selected file is not a Kinlogue backup.</string>
 	<key>所选文件夹中没有可导入的 DICOM 影像</key>
 	<string>No importable DICOM images were found in the selected folder</string>
-	<key>所选目录</key>
-	<string>Selected folder</string>
-	<key>所选目录中的恢复点已完整验证</key>
-	<string>A restore point in the selected folder was fully verified</string>
 	<key>所选记录无法比较</key>
 	<string>The selected records cannot be compared</string>
 	<key>所选资料未能加入待确认，资料仍保留在队列中。</key>
@@ -736,6 +722,8 @@
 	<string>Phone Uploads (Receiving)</string>
 	<key>手机与这台 Mac 之间使用普通局域网 HTTP 连接，不能保证传输加密。请勿在公共、访客或不信任的网络中开启。</key>
 	<string>Your phone and this Mac communicate over plain local-network HTTP without guaranteed transport encryption. Do not enable this on public, guest, or untrusted networks.</string>
+	<key>手机待整理</key>
+	<string>From Phone</string>
 	<key>手机接收中</key>
 	<string>Receiving from Phone</string>
 	<key>打开原件并确认识别字段</key>
@@ -746,6 +734,8 @@
 	<string>Open Settings</string>
 	<key>扩大窗宽</key>
 	<string>Widen Window Width</string>
+	<key>把同样的备份压缩包保存到任意位置。它不计入保留数量，续页之后也不会管理它。</key>
+	<string>Save the same backup ZIP anywhere. It does not count toward the backups to keep, and Kinlogue will not manage it afterwards.</string>
 	<key>把检查结果里的这一格改成建议的写法</key>
 	<string>Changes this cell of the findings to the suggested reading</string>
 	<key>报告</key>
@@ -810,40 +800,34 @@
 	<string>Discard Import…</string>
 	<key>放弃并删除本机草稿</key>
 	<string>Discard and Delete Local Draft</string>
-	<key>放弃并重新配置</key>
-	<string>Abandon and Set Up Again</string>
-	<key>放弃未完成的备份设置？</key>
-	<string>Abandon Incomplete Backup Setup?</string>
-	<key>放弃未完成的设置…</key>
-	<string>Abandon Incomplete Setup…</string>
 	<key>放弃这份失败的导入</key>
 	<string>Discard this failed import</string>
 	<key>放弃这份失败的导入？</key>
 	<string>Discard This Failed Import?</string>
 	<key>放弃这份导入？</key>
 	<string>Discard This Import?</string>
-	<key>数据备份</key>
-	<string>Data Backup</string>
+	<key>数据备份与导出</key>
+	<string>Backup &amp; Export</string>
 	<key>数据管理</key>
 	<string>Data Management</string>
+	<key>整份备份含有全家所有人的资料，不要直接交给医生；可以只发送某位成员的文件夹。</key>
+	<string>A backup holds every family member’s information. Do not give the whole backup to a doctor; send only that member’s folder.</string>
 	<key>文件夹中包含无法读取或暂不支持的 DICOM 文件</key>
 	<string>The folder contains DICOM files that cannot be read or are not currently supported</string>
+	<key>文件夹当前不可用</key>
+	<string>Folder not available</string>
 	<key>文件无法读取</key>
 	<string>Unable to Read File</string>
 	<key>文件超出首版支持范围</key>
 	<string>File exceeds supported limits</string>
 	<key>文件顺序</key>
 	<string>File Order</string>
+	<key>新备份已保存，但有较早的备份暂时没能检查或删除，续页会在下次备份时再试。</key>
+	<string>The new backup was saved, but some older backups could not be checked or deleted yet. Kinlogue will try again at the next backup.</string>
 	<key>新对话</key>
 	<string>New Chat</string>
-	<key>新恢复点已保留，但旧恢复点暂未清理。</key>
-	<string>The new restore point was kept, but old restore points have not been cleaned up yet.</string>
-	<key>新的恢复点已创建并通过验证。</key>
-	<string>A new restore point was created and verified.</string>
 	<key>新规则</key>
 	<string>New Reading</string>
-	<key>无法使用所选备份目录，请重新选择。</key>
-	<string>The selected backup folder cannot be used. Choose it again.</string>
 	<key>无法使用所选导出位置，请选择其他位置。</key>
 	<string>The selected export location cannot be used. Choose another location.</string>
 	<key>无法保存家庭成员，请稍后再试。</key>
@@ -870,14 +854,12 @@
 	<string>The current image slice cannot be displayed</string>
 	<key>无法添加家庭成员，请稍后再试。</key>
 	<string>Unable to add the family member. Try again later.</string>
-	<key>无法证明哪个恢复点最新，已暂停写入和清理。</key>
-	<string>Kinlogue cannot prove which restore point is newest, so writing and cleanup are paused.</string>
 	<key>无法读取家庭成员</key>
 	<string>Couldn’t load the family member</string>
-	<key>无法读取所选恢复点，请确认文件已下载到本机后重试。</key>
-	<string>The selected restore point cannot be read. Make sure it is downloaded to this Mac and try again.</string>
 	<key>无法读取所选文件夹</key>
 	<string>The selected folder could not be read</string>
+	<key>无法读取所选文件，请确认它已完整下载到这台 Mac 后重试。</key>
+	<string>The selected file could not be read. Make sure it has fully downloaded to this Mac, then try again.</string>
 	<key>无法读取本机资料库</key>
 	<string>Unable to Read Local Library</string>
 	<key>无法读取本机资料库中的报告，请稍后重试。</key>
@@ -902,10 +884,12 @@
 	<string>Pause Playback</string>
 	<key>暂时无法打开资料库。请稍后重试，或退出后检查本机存储。</key>
 	<string>The library cannot be opened right now. Try again later, or quit and check local storage.</string>
+	<key>更改文件夹…</key>
+	<string>Change Folder…</string>
 	<key>最多只能选择两条记录</key>
 	<string>You can select at most two records</string>
-	<key>最近本地验证</key>
-	<string>Last local verification</string>
+	<key>最近一次备份</key>
+	<string>Last backup</string>
 	<key>有资料未能完成本机识别，可单独重试。</key>
 	<string>One or more items couldn't be processed on this Mac. Retry each failed item individually.</string>
 	<key>未分配家庭成员</key>
@@ -922,12 +906,8 @@
 	<string>The local library could not be deleted. Restart Kinlogue and check again; the original data may remain on disk.</string>
 	<key>未识别到文字</key>
 	<string>No text recognized</string>
-	<key>本地恢复点</key>
-	<string>Local restore point</string>
-	<key>本地恢复点已过期或需要处理</key>
-	<string>The local restore point is overdue or needs attention</string>
-	<key>本机备份身份不可用，需要重新设置新的备份。</key>
-	<string>This Mac's backup identity is unavailable. Set up a new backup.</string>
+	<key>本机写入并管理的备份</key>
+	<string>Backups managed by this Mac</string>
 	<key>本机文字识别</key>
 	<string>On-device text recognition</string>
 	<key>本机没有足够空间安全恢复这份资料库。</key>
@@ -1014,8 +994,8 @@
 	<string>Uploading</string>
 	<key>正在保存压缩包，请勿关闭续页…</key>
 	<string>Saving ZIP. Do not close Kinlogue…</string>
-	<key>正在准备加密备份…</key>
-	<string>Preparing Encrypted Backup…</string>
+	<key>正在写入备份…</key>
+	<string>Writing Backup…</string>
 	<key>正在准备原件…</key>
 	<string>Preparing Original…</string>
 	<key>正在准备对话…</key>
@@ -1024,6 +1004,8 @@
 	<string>Preparing Export…</string>
 	<key>正在准备比较…</key>
 	<string>Preparing Comparison…</string>
+	<key>正在创建备份…</key>
+	<string>Creating backup…</string>
 	<key>正在删除本机资料库…</key>
 	<string>Deleting Local Library…</string>
 	<key>正在加载影像切片</key>
@@ -1036,8 +1018,6 @@
 	<string>Cancelling and cleaning up staging…</string>
 	<key>正在取消并清理未完成的导出…</key>
 	<string>Cancelling and cleaning up the unfinished export…</string>
-	<key>正在复制原始文件…</key>
-	<string>Copying Originals…</string>
 	<key>正在巡检</key>
 	<string>Inspection in progress</string>
 	<key>正在归档</key>
@@ -1058,8 +1038,6 @@
 	<string>Recognizing On Device</string>
 	<key>正在检查 Codex…</key>
 	<string>Checking Codex…</string>
-	<key>正在检查可导出的原始文件…</key>
-	<string>Checking for originals to export…</string>
 	<key>正在等待选择保存位置…</key>
 	<string>Waiting for a save location…</string>
 	<key>正在识别</key>
@@ -1086,14 +1064,10 @@
 	<string>Re-recognizing</string>
 	<key>正在验证压缩包…</key>
 	<string>Verifying ZIP…</string>
-	<key>正在验证恢复点…</key>
-	<string>Verifying Restore Point…</string>
-	<key>正在验证恢复码…</key>
-	<string>Verifying Recovery Code…</string>
+	<key>正在验证备份…</key>
+	<string>Verifying backup…</string>
 	<key>此序列缺少完整空间几何，当前使用持久化的回退顺序。</key>
 	<string>This series is missing complete spatial geometry. Its persisted fallback order is being used.</string>
-	<key>此恢复点需要更新版本的续页。</key>
-	<string>This restore point requires a newer version of Kinlogue.</string>
 	<key>此操作不可撤销</key>
 	<string>This Action Cannot Be Undone</string>
 	<key>此日期由你手动选择，会明确标记为人工录入。</key>
@@ -1120,8 +1094,6 @@
 	<string>Permanently Delete Local Library</string>
 	<key>没有匹配记录</key>
 	<string>No Matching Records</string>
-	<key>没有可导出的原始文件</key>
-	<string>No Originals to Export</string>
 	<key>没有可查看序列</key>
 	<string>No Viewable Series</string>
 	<key>没有可用的局域网地址。请连接 Wi-Fi 或有线网络后重试。</key>
@@ -1162,12 +1134,8 @@
 	<string>Sign-in</string>
 	<key>目前只支持 Codex 自己登录的 OpenAI 账号，不支持第三方中转服务。</key>
 	<string>Only the OpenAI account Codex signs in to is supported for now; third-party relay services are not.</string>
-	<key>目录当前不可用</key>
-	<string>Folder currently unavailable</string>
 	<key>确认医学影像检查</key>
 	<string>Confirm Imaging Study</string>
-	<key>确认后的报告和医学影像原件会出现在这里。</key>
-	<string>Originals from confirmed reports and medical images will appear here.</string>
 	<key>确认后，续页会把这位成员 %@的转录文本和你的问题发送给 Codex。确认前可以查看将要发送的全部内容。</key>
 	<string>Once you confirm, Kinlogue sends the transcriptions of this member's %@ and your questions to Codex. You can review everything that will be sent first.</string>
 	<key>确认家庭成员与检查日期</key>
@@ -1198,8 +1166,6 @@
 	<string>Window and level not loaded</string>
 	<key>立即使地址和验证码失效，已完成上传的待确认项会保留</key>
 	<string>Invalidate the address and code immediately; completed pending uploads are retained</string>
-	<key>立即创建加密恢复点</key>
-	<string>Create an encrypted restore point now</string>
 	<key>立即备份</key>
 	<string>Back Up Now</string>
 	<key>第 %lld 个文件，%@，%@</key>
@@ -1230,35 +1196,45 @@
 	<string>Continue</string>
 	<key>继续并选择位置…</key>
 	<string>Continue and Choose Location…</string>
-	<key>继续未完成的备份设置</key>
-	<string>Continue Incomplete Backup Setup</string>
-	<key>继续未完成的备份设置…</key>
-	<string>Continue Incomplete Backup Setup…</string>
 	<key>继续确认</key>
 	<string>Continue Reviewing</string>
 	<key>续页</key>
 	<string>Kinlogue</string>
 	<key>续页不会覆盖无法识别的内容。若这里是旧版加密资料库，当前简化版不会自动迁移；请保留原目录，等待后续迁移工具。</key>
 	<string>Kinlogue will not overwrite unrecognized content. If this is an older encrypted library, this version will not migrate it automatically. Keep the original folder for a future migration tool.</string>
-	<key>续页会把加密恢复点写入你选择的具体目录。该目录可以由阿里云盘、百度网盘或其他桌面客户端同步。</key>
-	<string>Kinlogue writes encrypted restore points to the specific folder you choose. Aliyun Drive, Baidu Netdisk, or another desktop client can sync that folder.</string>
-	<key>续页原始文件.zip</key>
-	<string>Kinlogue Originals.zip</string>
 	<key>续页只在这台 Mac 上处理和保存资料，不会发送到云端或外部服务。只有在你主动开启“手机上传”时，才会临时接收同一局域网内浏览器发送的资料。当前版本不提供应用层加密：报告和医学影像原件、成员资料及 OCR 结果以可读取的本地文件保存。能够访问此 Mac 用户资料的人员或软件，以及包含资料库的 Time Machine 备份、APFS 快照或其他副本，可能读取这些内容。</key>
 	<string>Kinlogue processes and stores data only on this Mac and does not send it to cloud or external services. It temporarily accepts browser uploads on the same local network only when you explicitly start Phone Uploads. This version does not provide application-level encryption: report and medical imaging originals, family member data, and OCR results are stored as readable local files. People or software with access to this Mac user's data, as well as Time Machine backups, APFS snapshots, or other copies containing the library, may be able to read them.</string>
-	<key>续页只在这台 Mac 上处理资料。默认保存在本机；只有在你明确启用数据备份后，续页才会将加密恢复点写入你选择的目录。该目录是否被网盘客户端上传由对应客户端决定。只有在你主动开启“手机上传”时，才会临时接收同一局域网内浏览器发送的资料。活动资料库不提供应用层加密：报告和医学影像原件、成员资料及 OCR 结果以可读取的本地文件保存。能够访问此 Mac 用户资料的人员或软件，以及包含资料库的 Time Machine 备份、APFS 快照或其他副本，可能读取这些内容。</key>
-	<string>Kinlogue processes data only on this Mac. It stays local by default; only after you explicitly enable data backup does Kinlogue write encrypted restore points to the folder you choose. Whether a cloud-drive client uploads that folder is controlled by that client. Only when you start Phone Upload does Kinlogue temporarily receive files from a browser on the same local network. The active library has no application-level encryption: report and medical-image originals, member information, and OCR results are stored as readable local files. People or software that can access this Mac user’s files, and Time Machine backups, APFS snapshots, or other copies containing the library, may read this content.</string>
-	<key>续页只能验证所选目录里的本地恢复点，无法证明网盘客户端已经上传。</key>
-	<string>Kinlogue can verify only the local restore point in the selected folder. It cannot prove that a cloud-drive client uploaded it.</string>
+	<key>续页只在这台 Mac 上处理资料。默认保存在本机；只有在你选择备份文件夹或导出备份时，续页才会把未加密的备份压缩包写到你选择的位置，该位置是否被网盘客户端上传由对应客户端决定。只有在你主动开启“手机上传”时，才会临时接收同一局域网内浏览器发送的资料。资料库和备份都不提供应用层加密：报告和医学影像原件、成员资料及 OCR 结果以可读取的文件保存。能够访问此 Mac 用户资料或备份文件的人员或软件，以及包含资料库的 Time Machine 备份、APFS 快照或其他副本，可能读取这些内容。</key>
+	<string>Kinlogue processes data only on this Mac. It stays local by default; only when you choose a backup folder or export a backup does Kinlogue write an unencrypted backup ZIP to the place you choose, and whether a cloud-drive client uploads that place is controlled by that client. Only when you start Phone Upload does Kinlogue temporarily receive files from a browser on the same local network. Neither the library nor its backups have application-level encryption: report and medical-image originals, member information, and OCR results are stored as readable files. People or software that can access this Mac user’s files or the backup files, and Time Machine backups, APFS snapshots, or other copies containing the library, may read this content.</string>
+	<key>续页备份
+
+这个压缩包是续页资料库的完整备份，没有加密。任何拿到它的人都能看到其中全部家庭成员、报告、识别文字和原始文件。
+
+files 文件夹按家庭成员和日期存放原始文件，可以直接打开、打印，或把某位成员的文件夹发给医生。名称以“_%@”“_%@”“_%@”开头的文件夹里是尚未整理的原件。
+
+kinlogue-backup.json 和 data 文件夹用于恢复，请不要修改。恢复时在续页的“设置 → 数据备份与导出”中选择“从备份恢复…”，再选中这个压缩包；恢复会替换当前资料库。</key>
+	<string>Kinlogue Backup
+
+This ZIP file is a complete backup of a Kinlogue library and is not encrypted. Anyone who has it can see every family member, report, recognized text and original file in it.
+
+The files folder holds the original files by family member and date. You can open or print them directly, or send one member’s folder to a doctor. Folders whose names start with “_%1$@”, “_%2$@” or “_%3$@” hold originals that are not organized yet.
+
+kinlogue-backup.json and the data folder are used for restoring; do not change them. To restore, choose “Restore from Backup…” in Kinlogue under Settings → Backup &amp; Export and select this ZIP file. Restoring replaces the current library.</string>
+	<key>续页备份 %@</key>
+	<string>Kinlogue Backup %@</string>
 	<key>续页尚未验证这个 Codex 版本；每次发送前仍会重新检查。</key>
 	<string>Kinlogue has not verified this Codex version; it is checked again before every send.</string>
+	<key>续页把完整资料库写成 ZIP 压缩包，保存在你选择的文件夹里。文件夹可以在外置盘、NAS 上，也可以由阿里云盘、百度网盘等客户端同步。</key>
+	<string>Kinlogue writes the whole library as a ZIP file into the folder you choose. The folder can be on an external disk or a NAS, or synced by a client such as Aliyun Drive or Baidu Netdisk.</string>
 	<key>续页无法访问这个位置的 Codex。目前只支持安装在 /opt/homebrew 或 /usr/local 下的 Codex。</key>
 	<string>Kinlogue cannot reach Codex in this location. Only Codex installed under /opt/homebrew or /usr/local is supported for now.</string>
 	<key>续页没有权限写入所选位置，请重新选择。</key>
 	<string>Kinlogue does not have permission to write to the selected location. Choose it again.</string>
 	<key>续页的固定说明：只依据这些报告回答、标注来源、不做诊断或治疗建议</key>
 	<string>Kinlogue's fixed instructions: answer only from these reports, cite them, and give no diagnosis or treatment advice</string>
-	<key>续页需要你重新选择备份目录。</key>
+	<key>续页运行时，资料变化后自动备份，每天最多一次。</key>
+	<string>While Kinlogue is open, it backs up after the library changes, at most once a day.</string>
+	<key>续页需要你重新选择备份文件夹。</key>
 	<string>Kinlogue needs you to choose the backup folder again.</string>
 	<key>编辑</key>
 	<string>Edit</string>
@@ -1276,20 +1252,14 @@
 	<string>Narrow Window Width</string>
 	<key>缩放 %lld%%</key>
 	<string>Zoom %lld%%</string>
-	<key>网盘同步状态未知</key>
-	<string>Cloud-drive sync status unknown</string>
-	<key>网盘状态</key>
-	<string>Cloud-drive status</string>
 	<key>自动备份</key>
 	<string>Automatic backup</string>
-	<key>自动备份默认关闭。设置时会生成一份必须独立保存的恢复码。</key>
-	<string>Automatic backup is off by default. Setup generates a recovery code that must be saved independently.</string>
+	<key>自动备份默认关闭。选择文件夹后可以立即备份，或打开自动备份。</key>
+	<string>Automatic backup is off by default. After choosing a folder, you can back up now or turn on automatic backup.</string>
 	<key>若手机无法打开，请确认两台设备没有使用访客网络隔离，并检查 macOS 防火墙是否允许续页接收入站连接。</key>
 	<string>If your phone cannot open the address, confirm neither device uses an isolated guest network and check that the macOS firewall allows incoming connections to Kinlogue.</string>
 	<key>要发送的内容或接收方已变化，请重新确认后再提问。</key>
 	<string>What would be sent, or who receives it, has changed. Confirm again before asking.</string>
-	<key>解密后大小</key>
-	<string>Decrypted size</string>
 	<key>解释一下报告里出现的专业术语</key>
 	<string>Explain the medical terms used in these reports</string>
 	<key>记录</key>
@@ -1314,10 +1284,10 @@
 	<string>This family member is still linked to %lld imaging studies. Reassign or delete those studies, then try again.</string>
 	<key>语言</key>
 	<string>Language</string>
+	<key>说明.txt</key>
+	<string>README.txt</string>
 	<key>请先确认仅在可信任的私人局域网中使用。</key>
 	<string>Confirm that you are using a trusted private local network first.</string>
-	<key>请先确认恢复码已保存在独立位置。</key>
-	<string>Confirm that the recovery code is saved in an independent location first.</string>
 	<key>请先选择家庭成员</key>
 	<string>Select a family member first</string>
 	<key>请先选择家庭成员和报告日期</key>
@@ -1352,6 +1322,8 @@
 	<string>Select a family member</string>
 	<key>请选择报告或影像资料中可核实的检查日期</key>
 	<string>Choose a study date you can verify from the report or imaging material</string>
+	<key>资料大小</key>
+	<string>Data size</string>
 	<key>资料已发生变化，请刷新后重试。</key>
 	<string>The documents changed. Refresh and try again.</string>
 	<key>资料库</key>
@@ -1374,6 +1346,14 @@
 	<string>The library is changing, so the chat has stopped.</string>
 	<key>资料库正由另一个续页进程使用。请关闭该进程后重试。</key>
 	<string>Another Kinlogue process is using this library. Close that process and try again.</string>
+	<key>资料库的部分内容无法读取，备份未完成。</key>
+	<string>Part of the library could not be read. The backup did not finish.</string>
+	<key>资料库的部分内容无法读取，导出未完成。</key>
+	<string>Part of the library could not be read. The export did not finish.</string>
+	<key>资料库超出了单个备份能容纳的大小。</key>
+	<string>The library is larger than one backup can hold.</string>
+	<key>超出份数时，续页只删除自己写入、之后没有被改名、移动或修改的备份；文件夹里的其他文件不会被删除。</key>
+	<string>Beyond that number, Kinlogue deletes only backups it wrote that have not been renamed, moved or changed since. Nothing else in the folder is deleted.</string>
 	<key>跟随系统</key>
 	<string>System Default</string>
 	<key>载入下一页记录</key>
@@ -1382,8 +1362,6 @@
 	<string>Load more %@</string>
 	<key>载入更多记录</key>
 	<string>Load more records</string>
-	<key>输入你在首次设置时独立保存的完整恢复码。续页会继续使用原有备份身份，不会生成新的恢复码。</key>
-	<string>Enter the complete recovery code you saved independently during initial setup. Kinlogue will continue using the existing backup identity and will not generate a new recovery code.</string>
 	<key>返回报告详情</key>
 	<string>Back to report details</string>
 	<key>还原</key>
@@ -1402,12 +1380,12 @@
 	<string>The names of the organizations that issued these reports</string>
 	<key>这些报告里提到过哪些复查建议？</key>
 	<string>Which follow-up recommendations do these reports mention?</string>
+	<key>这份备份需要更新版本的续页。</key>
+	<string>This backup needs a newer version of Kinlogue.</string>
 	<key>这份报告已在其他窗口中发生变化，请关闭后重新打开再整理。</key>
 	<string>This report changed in another window. Close this sheet and open it again to update.</string>
-	<key>这会替换而不是合并当前资料库，并移除本机备份设置。外部恢复点会保留。</key>
-	<string>This replaces rather than merges the current library and removes local backup settings. External restore points are kept.</string>
-	<key>这会移除本机保存的未完成备份身份。已有外部文件不会被删除；之后可以选择目录并生成新的恢复码。</key>
-	<string>This removes the incomplete backup identity saved on this Mac. Existing external files are not deleted; afterward, you can choose a folder and generate a new recovery code.</string>
+	<key>这会替换而不是合并当前资料库。备份文件夹设置会保留，但自动备份会关闭，需要时请重新打开。</key>
+	<string>This replaces the current library instead of merging into it. The backup folder is kept, but automatic backup is turned off; turn it on again when you want it.</string>
 	<key>这位成员保存的对话已达上限，请先在“历史对话”中删除一些。</key>
 	<string>This member already keeps the most saved chats allowed. Delete some under History first.</string>
 	<key>这位成员已归档，不能开始对话。</key>
@@ -1416,8 +1394,6 @@
 	<string>This member has no confirmed reports yet, so there is nothing to ask about.</string>
 	<key>这台 Mac 的地址</key>
 	<string>This Mac's Address</string>
-	<key>这是提供给医生查看的副本，不是资料库备份，不能用于恢复续页。</key>
-	<string>This is a copy for sharing with a doctor, not a library backup, and cannot restore Kinlogue.</string>
 	<key>这条记录已在其他窗口中发生变化，当前修改无法保存。请关闭编辑页。</key>
 	<string>This record changed in another window, so these edits cannot be saved. Close the editor.</string>
 	<key>这条记录已在其他窗口中更新。重新载入最新版本会替换此页未保存的修改。</key>
@@ -1454,8 +1430,10 @@
 	<string>Choose</string>
 	<key>选择 Codex 使用的模型；更换后需要重新确认发送内容</key>
 	<string>Choose the model Codex uses; after a change, confirm what is sent again</string>
-	<key>选择一个已下载到本机的 .kinloguebackup 恢复点。恢复会先完整验证，不会在确认前修改当前资料库。</key>
-	<string>Choose a .kinloguebackup restore point downloaded to this Mac. Kinlogue verifies it fully and will not change the current library before confirmation.</string>
+	<key>选择一个续页备份压缩包（.zip）。续页会先完整验证，确认之前不会修改当前资料库。</key>
+	<string>Choose a Kinlogue backup ZIP. Kinlogue verifies it completely first and does not change the current library before you confirm.</string>
+	<key>选择一个续页备份压缩包，完整验证后替换当前资料库。</key>
+	<string>Choose a Kinlogue backup ZIP, verify it completely and replace the current library with it.</string>
 	<key>选择一条记录</key>
 	<string>Select a Record</string>
 	<key>选择两条已确认记录进行比较</key>
@@ -1468,16 +1446,16 @@
 	<string>Select to view, reorder, or remove files in the detail area</string>
 	<key>选择后可查看检查摘要</key>
 	<string>Select to view the study summary</string>
-	<key>选择备份目录…</key>
+	<key>选择备份文件…</key>
+	<string>Choose Backup File…</string>
+	<key>选择备份文件夹</key>
+	<string>Choose Backup Folder</string>
+	<key>选择备份文件夹…</key>
 	<string>Choose Backup Folder…</string>
 	<key>选择家庭成员…</key>
 	<string>Select Family Member…</string>
 	<key>选择待确认资料</key>
 	<string>Select Pending Items</string>
-	<key>选择恢复点…</key>
-	<string>Choose Restore Point…</string>
-	<key>选择数据备份目录</key>
-	<string>Choose Data Backup Folder</string>
 	<key>选择界面语言</key>
 	<string>Select the interface language</string>
 	<key>选择记录后显示原件</key>
@@ -1488,16 +1466,12 @@
 	<string>General</string>
 	<key>部分原件暂时无法打开</key>
 	<string>Some originals are temporarily unavailable</string>
-	<key>部分原始文件已损坏或发生变化，导出未完成。</key>
-	<string>Some originals are damaged or changed, so the export did not finish.</string>
 	<key>部分资料无法读取</key>
 	<string>Some items couldn’t be read</string>
 	<key>采样日期</key>
 	<string>Collection Date</string>
 	<key>采纳</key>
 	<string>Accept</string>
-	<key>重新授权原备份目录…</key>
-	<string>Reauthorize Original Backup Folder…</string>
 	<key>重新检查</key>
 	<string>Check Again</string>
 	<key>重新识别失败，当前内容已保留</key>
@@ -1540,10 +1514,6 @@
 	<string>Restart Kinlogue</string>
 	<key>需要重试</key>
 	<string>Retry Needed</string>
-	<key>验证并启用备份</key>
-	<string>Verify and Enable Backup</string>
-	<key>验证并完成设置</key>
-	<string>Verify and Complete Setup</string>
 	<key>验证码</key>
 	<string>Verification Code</string>
 	<key>验证码 %@</key>

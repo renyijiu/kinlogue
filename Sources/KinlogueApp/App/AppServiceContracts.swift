@@ -16,50 +16,6 @@ enum AppServiceError: Error, Equatable, Sendable {
     case importFailed
 }
 
-enum OriginalExportServiceError: Error, Equatable, Sendable {
-    case emptyArchive
-    case invalidDestination
-    case insufficientSpace
-    case destinationAccessDenied
-    case sourceIntegrityFailure
-    case archiveIntegrityFailure
-    case publicationIndeterminate
-    case unavailable
-}
-
-enum AppOriginalExportPhase: Equatable, Sendable {
-    case preparing
-    case writing
-    case verifying
-    case committing
-}
-
-struct AppOriginalExportProgress: Equatable, Sendable {
-    let phase: AppOriginalExportPhase
-    let completedByteCount: Int
-    let totalByteCount: Int
-    let completedEntryCount: Int
-    let totalEntryCount: Int
-    let isCancellable: Bool
-}
-
-struct OriginalExportResult: Equatable, Sendable {
-    let destinationURL: URL
-    let entryCount: Int
-    let totalByteCount: Int
-}
-
-protocol OriginalExportServicing: Sendable {
-    func prepare(undatedToken: String) async throws
-    func export(
-        to destinationURL: URL,
-        undatedToken: String,
-        progress: @escaping @Sendable (AppOriginalExportProgress) -> Void
-    ) async throws -> OriginalExportResult
-    @discardableResult
-    func cancel() async -> Bool
-}
-
 enum AppFailureCode: String, Equatable, Sendable {
     case vaultUnavailable
     case importFailed

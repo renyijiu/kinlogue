@@ -110,7 +110,7 @@ struct KinlogueThemeSourceTests {
         // guaranteed to reach another, so each root opts in by itself.
         for (path, expectedRoots) in [
             ("Sources/KinlogueApp/Views/AssistantConsentSheet.swift", 1),
-            ("Sources/KinlogueApp/Views/BackupAndRestoreView.swift", 3),
+            ("Sources/KinlogueApp/Views/BackupAndRestoreView.swift", 1),
             ("Sources/KinlogueApp/Views/ComparisonView.swift", 1),
             ("Sources/KinlogueApp/Views/DICOMImportSheet.swift", 1),
             ("Sources/KinlogueApp/Views/DICOMStudyReviewView.swift", 1),
@@ -119,7 +119,7 @@ struct KinlogueThemeSourceTests {
             ("Sources/KinlogueApp/Views/LANReceiverSheet.swift", 1),
             ("Sources/KinlogueApp/Views/MemberSidebarView.swift", 1),
             ("Sources/KinlogueApp/Views/OriginalDocumentView.swift", 2),
-            ("Sources/KinlogueApp/Views/OriginalExportView.swift", 1),
+            ("Sources/KinlogueApp/Views/BackupExportView.swift", 1),
             ("Sources/KinlogueApp/Views/RecordEditView.swift", 1),
             ("Sources/KinlogueApp/Views/RecordRuleUpdateView.swift", 1),
         ] {
@@ -133,8 +133,8 @@ struct KinlogueThemeSourceTests {
         ].map(read).joined(separator: "\n")
         let presentedSheets = presenters.components(separatedBy: ".sheet(").count - 1
         // The two member editor sheets share one view and the two original
-        // viewers each back one sheet, so 16 presentations map to 15 roots.
-        #expect(presentedSheets == 16)
+        // viewers each back one sheet, so 14 presentations map to 13 roots.
+        #expect(presentedSheets == 14)
 
         for path in [
             "Sources/KinlogueApp/Views/AppShellView.swift",
@@ -516,7 +516,7 @@ struct KinlogueThemeSourceTests {
             "Sources/KinlogueApp/Views/LANReceiverSheet.swift",
             "Sources/KinlogueApp/Views/MemberSidebarView.swift",
             "Sources/KinlogueApp/Views/OriginalDocumentView.swift",
-            "Sources/KinlogueApp/Views/OriginalExportView.swift",
+            "Sources/KinlogueApp/Views/BackupExportView.swift",
             "Sources/KinlogueApp/Views/RecordDetailView.swift",
             "Sources/KinlogueApp/Views/RecordEditView.swift",
             "Sources/KinlogueApp/Views/SettingsView.swift",

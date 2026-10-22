@@ -7,13 +7,12 @@ struct SettingsView: View {
     @Binding var selectedLanguage: AppLanguage
     @ObservedObject var backupModel: BackupModel
     let exportButtonFocus: FocusState<Bool>.Binding
-    let onChooseBackupDirectory: () -> Void
+    let onChooseBackupFolder: () -> Void
     let onRestoreBackup: () -> Void
-    let onExportOriginals: () -> Void
+    let onExportBackup: () -> Void
     let onDeleteVault: () -> Void
     var integrityCoordinator: AppIntegrityCoordinator? = nil
     var assistantSettings: AssistantSettingsModel? = nil
-    @State private var isAbandonPendingBackupConfirmationPresented = false
 
     var body: some View {
         ScrollView {
@@ -62,11 +61,54 @@ struct SettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Label(AppLocalization.string("数据备份"), systemImage: "externaldrive.badge.timemachine")
+                    Label(AppLocalization.string("数据备份与导出"), systemImage: "externaldrive.badge.timemachine")
                         .font(.title2.weight(.semibold))
                         .foregroundStyle(KinlogueTheme.primary)
 
                     backupCard
+
+                    settingsCard {
+                        HStack(spacing: 24) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(AppLocalization.string("导出备份"))
+                                    .font(.headline)
+                                    .foregroundStyle(KinlogueTheme.onSurface)
+                                Text(AppLocalization.string("把同样的备份压缩包保存到任意位置。它不计入保留数量，续页之后也不会管理它。"))
+                                    .foregroundStyle(KinlogueTheme.onVariant)
+                            }
+
+                            Spacer(minLength: 24)
+
+                            Button(AppLocalization.string("导出备份到…")) {
+                                onExportBackup()
+                            }
+                            .buttonStyle(.kinlogueSecondary)
+                            .focused(exportButtonFocus)
+                            .fixedSize()
+                            .frame(width: Self.controlColumnWidth, alignment: .trailing)
+                            .accessibilityIdentifier("settings-export-backup")
+                        }
+                    }
+
+                    settingsCard {
+                        HStack(spacing: 24) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(AppLocalization.string("从备份恢复"))
+                                    .font(.headline)
+                                    .foregroundStyle(KinlogueTheme.onSurface)
+                                Text(AppLocalization.string("选择一个续页备份压缩包，完整验证后替换当前资料库。"))
+                                    .foregroundStyle(KinlogueTheme.onVariant)
+                            }
+
+                            Spacer(minLength: 24)
+
+                            Button(AppLocalization.string("从备份恢复…"), action: onRestoreBackup)
+                                .buttonStyle(.kinlogueSecondary)
+                                .fixedSize()
+                                .frame(width: Self.controlColumnWidth, alignment: .trailing)
+                                .accessibilityIdentifier("backup-restore")
+                        }
+                    }
                 }
 
                 if let assistantSettings {
@@ -80,31 +122,6 @@ struct SettingsView: View {
 
                     if let integrityCoordinator {
                         settingsCard { LibraryIntegrityStatusView(inspector: integrityCoordinator) }
-                    }
-
-                    settingsCard {
-                        HStack(spacing: 24) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(AppLocalization.string("导出全部原始文件"))
-                                    .font(.headline)
-                                    .foregroundStyle(KinlogueTheme.onSurface)
-                                Text(AppLocalization.string("将已确认报告和医学影像的原始文件按家庭成员与日期整理为一个 ZIP 压缩包。"))
-                                    .foregroundStyle(KinlogueTheme.onVariant)
-                                Text(AppLocalization.string("导出内容为未加密副本，不包含 OCR、备注或草稿。"))
-                                    .foregroundStyle(KinlogueTheme.onVariant)
-                            }
-
-                            Spacer(minLength: 24)
-
-                            Button(AppLocalization.string("导出原始文件…")) {
-                                onExportOriginals()
-                            }
-                            .buttonStyle(.kinlogueSecondary)
-                            .focused(exportButtonFocus)
-                            .fixedSize()
-                            .frame(width: Self.controlColumnWidth, alignment: .trailing)
-                            .accessibilityIdentifier("settings-export-originals")
-                        }
                     }
 
                     settingsCard {
@@ -140,17 +157,6 @@ struct SettingsView: View {
         .background(KinlogueTheme.surface)
         .navigationTitle(AppLocalization.string("设置"))
         .accessibilityIdentifier("settings-view")
-        .alert(
-            AppLocalization.string("放弃未完成的备份设置？"),
-            isPresented: $isAbandonPendingBackupConfirmationPresented
-        ) {
-            Button(AppLocalization.string("取消"), role: .cancel) {}
-            Button(AppLocalization.string("放弃并重新配置"), role: .destructive) {
-                Task { await backupModel.abandonPendingEnrollment() }
-            }
-        } message: {
-            Text(AppLocalization.string("这会移除本机保存的未完成备份身份。已有外部文件不会被删除；之后可以选择目录并生成新的恢复码。"))
-        }
     }
 
     @ViewBuilder
@@ -159,56 +165,32 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 24) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(AppLocalization.string("加密目录备份"))
+                        Text(AppLocalization.string("备份到文件夹"))
                             .font(.headline)
                             .foregroundStyle(KinlogueTheme.onSurface)
-                        Text(AppLocalization.string("续页会把加密恢复点写入你选择的具体目录。该目录可以由阿里云盘、百度网盘或其他桌面客户端同步。"))
-                            .foregroundStyle(KinlogueTheme.onVariant)
-                        Text(AppLocalization.string("续页只能验证所选目录里的本地恢复点，无法证明网盘客户端已经上传。"))
+                        Text(AppLocalization.string("续页把完整资料库写成 ZIP 压缩包，保存在你选择的文件夹里。文件夹可以在外置盘、NAS 上，也可以由阿里云盘、百度网盘等客户端同步。"))
                             .foregroundStyle(KinlogueTheme.onVariant)
                     }
                     Spacer(minLength: 24)
-                    if backupModel.status.enrollment == .notConfigured {
-                        Button(AppLocalization.string("选择备份目录…"), action: onChooseBackupDirectory)
+                    if !backupModel.status.isFolderConfigured {
+                        Button(AppLocalization.string("选择备份文件夹…"), action: onChooseBackupFolder)
                             .buttonStyle(.kinloguePrimary)
                             .fixedSize()
                             .frame(width: Self.controlColumnWidth, alignment: .trailing)
-                            .accessibilityIdentifier("backup-choose-directory")
+                            .accessibilityIdentifier("backup-choose-folder")
                     }
                 }
 
-                switch backupModel.status.enrollment {
-                case .notConfigured:
-                    Text(AppLocalization.string("自动备份默认关闭。设置时会生成一份必须独立保存的恢复码。"))
-                        .foregroundStyle(KinlogueTheme.onVariant)
-                case .pending:
-                    KinlogueWarningNotice(
-                        AppLocalization.string("备份设置尚未完成。若你仍保存原恢复码，可以继续完成；续页不会生成新的恢复码。")
-                    )
-                    HStack(spacing: 12) {
-                        Button(AppLocalization.string("放弃未完成的设置…"), role: .destructive) {
-                            isAbandonPendingBackupConfirmationPresented = true
-                        }
-                        .buttonStyle(.kinlogueDestructive)
-                        .disabled(backupModel.isPendingEnrollmentOperation)
-                        .accessibilityIdentifier("backup-abandon-pending-enrollment")
-                        Spacer()
-                        Button(AppLocalization.string("继续未完成的备份设置…")) {
-                            backupModel.presentPendingEnrollmentRecovery()
-                        }
-                        .buttonStyle(.kinloguePrimary)
-                        .disabled(backupModel.isPendingEnrollmentOperation)
-                        .accessibilityIdentifier("backup-resume-pending-enrollment")
-                    }
-                case .ready:
+                KinlogueWarningNotice(
+                    AppLocalization.string("备份文件不加密，包含全部健康资料。放在网盘同步文件夹里，网盘服务商和能登录该账号的人都能读取。")
+                )
+
+                if backupModel.status.isFolderConfigured {
                     configuredBackupControls
+                } else {
+                    Text(AppLocalization.string("自动备份默认关闭。选择文件夹后可以立即备份，或打开自动备份。"))
+                        .foregroundStyle(KinlogueTheme.onVariant)
                 }
-
-                Divider()
-                Button(AppLocalization.string("从恢复点恢复…"), action: onRestoreBackup)
-                    .buttonStyle(.kinlogueSecondary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .accessibilityIdentifier("backup-restore")
 
                 if let failure = backupModel.failureText {
                     KinlogueStatusLabel(failure, tone: .danger)
@@ -220,36 +202,28 @@ struct SettingsView: View {
 
     private var configuredBackupControls: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Button(AppLocalization.string("重新授权原备份目录…"), action: onChooseBackupDirectory)
-                .buttonStyle(.kinlogueSecondary)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .accessibilityIdentifier("backup-reauthorize-directory")
-            LabeledContent(AppLocalization.string("所选目录")) {
-                Text(backupModel.status.destinationDisplayName ?? AppLocalization.string("目录当前不可用"))
+            LabeledContent(AppLocalization.string("备份文件夹")) {
+                Text(backupModel.status.folderName ?? AppLocalization.string("文件夹当前不可用"))
             }
-            LabeledContent(AppLocalization.string("本地恢复点")) {
-                Text(backupModel.localCheckpointText)
-            }
-            LabeledContent(AppLocalization.string("网盘状态")) {
-                Text(backupModel.cloudStatusText)
-            }
-
-            if let verifiedAt = backupModel.status.lastLocalVerificationAt {
-                LabeledContent(AppLocalization.string("最近本地验证")) {
-                    Text(verifiedAt, format: Date.FormatStyle(date: .abbreviated, time: .shortened))
+            if let lastBackupAt = backupModel.status.lastBackupAt {
+                LabeledContent(AppLocalization.string("最近一次备份")) {
+                    Text(lastBackupAt, format: Date.FormatStyle(date: .abbreviated, time: .shortened))
                 }
             }
-            if let estimate = backupModel.status.estimate {
-                LabeledContent(AppLocalization.string("单个恢复点估算")) {
-                    Text(byteCount(estimate.singleCheckpointBytes))
-                }
-                LabeledContent(AppLocalization.string("保留空间估算")) {
-                    Text(byteCount(estimate.retainedBytes))
-                }
-                LabeledContent(AppLocalization.string("临时空间估算")) {
-                    Text(byteCount(estimate.temporaryBytes))
-                }
+            LabeledContent(AppLocalization.string("本机写入并管理的备份")) {
+                Text(String(backupModel.status.managedBackupCount))
+                    .monospacedDigit()
             }
+            HStack(spacing: 12) {
+                Spacer()
+                Button(AppLocalization.string("更改文件夹…"), action: onChooseBackupFolder)
+                    .accessibilityIdentifier("backup-change-folder")
+                Button(AppLocalization.string("在访达中显示")) {
+                    Task { await backupModel.showFolder() }
+                }
+                .accessibilityIdentifier("backup-show-in-finder")
+            }
+            .buttonStyle(.kinlogueSecondary)
 
             Divider()
 
@@ -263,12 +237,15 @@ struct SettingsView: View {
                 )
             )
             .accessibilityIdentifier("backup-automatic-toggle")
+            Text(AppLocalization.string("续页运行时，资料变化后自动备份，每天最多一次。"))
+                .font(.caption)
+                .foregroundStyle(KinlogueTheme.onVariant)
 
             HStack {
-                Text(AppLocalization.string("保留的恢复点数量"))
+                Text(AppLocalization.string("保留最近的备份份数"))
                 Spacer()
                 Picker(
-                    AppLocalization.string("保留的恢复点数量"),
+                    AppLocalization.string("保留最近的备份份数"),
                     selection: Binding(
                         get: { backupModel.retentionCount },
                         set: { count in Task { await backupModel.setRetentionCount(count) } }
@@ -282,44 +259,40 @@ struct SettingsView: View {
                 .frame(width: 90)
                 .accessibilityIdentifier("backup-retention-picker")
             }
+            Text(AppLocalization.string("超出份数时，续页只删除自己写入、之后没有被改名、移动或修改的备份；文件夹里的其他文件不会被删除。"))
+                .font(.caption)
+                .foregroundStyle(KinlogueTheme.onVariant)
+                .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: 12) {
-                Button {
-                    Task { await backupModel.backUpNow() }
-                } label: {
-                    if backupModel.phase == .backingUp {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text(AppLocalization.string("正在准备加密备份…"))
-                        }
-                    } else {
-                        Text(AppLocalization.string("立即备份"))
+            Button {
+                Task { await backupModel.backUpNow() }
+            } label: {
+                if backupModel.phase == .backingUp {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(AppLocalization.string("正在创建备份…"))
                     }
+                } else {
+                    Text(AppLocalization.string("立即备份"))
                 }
-                .accessibilityLabel(AppLocalization.string("立即创建加密恢复点"))
-                .accessibilityIdentifier("backup-now")
-
-                Button(AppLocalization.string("在访达中显示")) {
-                    Task { await backupModel.showBackupRepository() }
-                }
-                .accessibilityIdentifier("backup-show-in-finder")
             }
             .buttonStyle(.kinlogueSecondary)
             .frame(maxWidth: .infinity, alignment: .trailing)
             .disabled(backupModel.phase == .backingUp)
+            .accessibilityIdentifier("backup-now")
 
             if let completion = backupModel.completionText {
                 KinlogueStatusLabel(completion, tone: .success)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .accessibilityIdentifier("backup-status-complete")
             }
+            if let deferred = backupModel.cleanupDeferredText {
+                KinlogueStatusLabel(deferred, tone: .warning)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
         }
         .disabled(backupModel.isManualBackupInFlight)
-    }
-
-    private func byteCount(_ value: UInt64) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(clamping: value), countStyle: .file)
     }
 
     private func settingsCard<Content: View>(

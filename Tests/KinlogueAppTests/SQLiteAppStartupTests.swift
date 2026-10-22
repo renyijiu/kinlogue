@@ -22,7 +22,7 @@ struct SQLiteAppStartupTests {
         #expect(left.dataService === right.dataService)
         #expect(try await left.dataService.bootstrap().reportCount == 0)
         #expect(!FileManager.default.fileExists(atPath: fixture.identity.sourceVault.rootURL.appendingPathComponent("library.json").path))
-        #expect(!FileManager.default.fileExists(atPath: fixture.identity.backupIdentity.rootURL.path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.identity.backupIdentity.settingsRootURL.path))
         // Re-opening does not run restore reconciliation against its already-open database.
         #expect(try await startup.openEnvironment().dataService === left.dataService)
         let other = LibraryLaunchCoordinator(identity: fixture.identity)
@@ -49,11 +49,11 @@ struct SQLiteAppStartupTests {
         #expect(await model.createMember(displayName: "Synthetic launch member", disambiguationLabel: nil))
         #expect(Set(try FileManager.default.contentsOfDirectory(atPath: root.path)) == ["library.sqlite", "originals"])
         // A first launch is an ordinary start: nothing to restore, a private parent directory,
-        // and no backup identity until the user sets one up.
+        // and no backup settings until the person chooses a folder.
         #expect(first.composition?.restoreModel.phase == .idle && first.failure == nil)
         let parent = try FileManager.default.attributesOfItem(atPath: root.deletingLastPathComponent().path)
         #expect((parent[.posixPermissions] as? NSNumber)?.intValue == 0o700)
-        #expect(!FileManager.default.fileExists(atPath: fixture.identity.backupIdentity.rootURL.path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.identity.backupIdentity.settingsRootURL.path))
         await first.shutdown()
 
         let second = LibraryLaunchCoordinator(identity: fixture.identity)
@@ -226,16 +226,15 @@ struct SQLiteAppStartupTests {
 
     enum OldLibraryCircumstance: Sendable {
         case nothingElse
-        /// The old App left a backup profile that can no longer be read. The restore has to clear
-        /// it instead of stopping on it. A real migration stopped here: at the time a profile
-        /// stopped validating once its volume had been given another device number.
-        case anUnreadableBackupProfile
+        /// The backup settings can no longer be read. The restore has to clear them instead of
+        /// stopping on them; an earlier build's encrypted-backup profile is removed at launch.
+        case anUnreadableBackupSettings
         /// An earlier restore over the same library stopped right after recording its intent.
         /// The launch has to undo it and leave the old library in place for another attempt.
         case anInterruptedEarlierRestore
     }
 
-    @Test(arguments: [OldLibraryCircumstance.nothingElse, .anUnreadableBackupProfile, .anInterruptedEarlierRestore])
+    @Test(arguments: [OldLibraryCircumstance.nothingElse, .anUnreadableBackupSettings, .anInterruptedEarlierRestore])
     func restoringOverAnOldFormatLibraryReplacesItAndTheNextLaunchOpensTheRestoredOne(
         with circumstance: OldLibraryCircumstance
     ) async throws {
@@ -246,19 +245,9 @@ struct SQLiteAppStartupTests {
         let donor = try SQLiteLibraryStore(rootURL: donorParent.appendingPathComponent("Vault", isDirectory: true))
         let member = try FamilyMember(displayName: "Synthetic restored member")
         try await SQLiteReportRepository(store: donor).saveMember(member, replacing: nil)
-        let enrollment = try BackupKeyHierarchy.makeEnrollment()
-        let bytes = RestorePointBytes()
-        let snapshot = try await SQLiteLogicalBackupSource(store: donor).prepare()
-        _ = try await EncryptedBackupContainerWriter().write(
-            entries: snapshot.sources(), revisionPair: snapshot.revisionPair, sequence: 1,
-            signer: try BackupDeviceSigner(descriptor: enrollment.descriptor, authorization: enrollment.authorization,
-                                           deviceSigningSeed: enrollment.deviceSigningSeed),
-            sink: .init(write: bytes.append, readBackSource: bytes.source))
-        snapshot.release()
+        let restorePoint = fixture.base.appendingPathComponent("synthetic.zip")
+        _ = try await BackupArchiveWriter(store: donor).write(to: .file(restorePoint), content: BackupArchiveText.content())
         try donor.close()
-        let restorePoint = fixture.base.appendingPathComponent("synthetic.kinloguebackup")
-        try bytes.data.write(to: restorePoint)
-        #expect(chmod(restorePoint.path, 0o600) == 0)
 
         let root = fixture.identity.sourceVault.rootURL
         try FileManager.default.createDirectory(at: root.appendingPathComponent("objects", isDirectory: true),
@@ -266,22 +255,16 @@ struct SQLiteAppStartupTests {
         let oldManifest = Data("synthetic old JSON bytes".utf8)
         try oldManifest.write(to: root.appendingPathComponent("library.json"))
         try Data("synthetic old object".utf8).write(to: root.appendingPathComponent("objects/synthetic.bin"))
-        let profileRoot = fixture.identity.backupIdentity.rootURL
-        let profileRecord = profileRoot.appendingPathComponent("configuration.json")
-        if circumstance == .anUnreadableBackupProfile {
-            let profile = BackupLocalConfigurationStore(rootURL: profileRoot)
-            let material = try BackupKeyHierarchy.makeEnrollment()
-            let created = try await profile.createPending(try BackupPendingEnrollment(
-                bookmarkData: Data("opaque-bookmark".utf8),
-                selectedDirectoryIdentity: .init(device: 1, inode: 2),
-                repositoryDirectoryIdentity: .init(device: 1, inode: 3),
-                descriptor: material.descriptor, authorization: material.authorization,
-                deviceSigningSeed: material.deviceSigningSeed, writerEpoch: material.writerEpoch))
-            _ = try await profile.promotePending(enrollmentEpoch: created.enrollmentEpoch, expectedRevision: created.revision)
-            let handle = try FileHandle(forWritingTo: profileRecord)
-            try handle.truncate(atOffset: 40)
-            try handle.close()
-            await #expect(throws: BackupLocalConfigurationStoreError.invalidRecord) { _ = try await profile.load() }
+        let settingsRoot = fixture.identity.backupIdentity.settingsRootURL
+        let profileRecord = settingsRoot.appendingPathComponent("settings.json")
+        let legacy = fixture.identity.backupIdentity.legacyIdentityRootURL
+        if circumstance == .anUnreadableBackupSettings {
+            try FileManager.default.createDirectory(at: settingsRoot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try Data("{\"magic\":\"truncated".utf8).write(to: profileRecord)
+            #expect(chmod(profileRecord.path, 0o600) == 0)
+            #expect(throws: BackupSettingsStoreError.invalidRecord) { _ = try BackupSettingsStore(rootURL: settingsRoot).load() }
+            try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try Data("synthetic old profile".utf8).write(to: legacy.appendingPathComponent("configuration.json"))
         }
         func restoreLeftovers() throws -> [String] {
             try FileManager.default.contentsOfDirectory(atPath: root.deletingLastPathComponent().path)
@@ -290,8 +273,7 @@ struct SQLiteAppStartupTests {
         if circumstance == .anInterruptedEarlierRestore {
             // Scoped, so the owner is released before the launch takes it.
             let owner = try SQLiteLibraryOwner(rootURL: root)
-            let prepared = try await BackupRestoreVerifier(owner: owner)
-                .prepare(checkpointURL: restorePoint, recoveryCode: enrollment.recoveryCode)
+            let prepared = try await BackupRestoreVerifier(owner: owner).prepare(archiveURL: restorePoint)
             let interrupted = try BackupRestoreTransaction(owner: owner, failureInjector: { $0 == .afterIntent })
             await #expect(throws: BackupRestoreError.injectedFailure) {
                 _ = try await interrupted.activate(prepared: prepared, resetWriter: {})
@@ -304,11 +286,12 @@ struct SQLiteAppStartupTests {
         await #expect(throws: SQLiteLibraryError.unsupportedFormat) { try await startup.openEnvironment() }
         #expect(try Data(contentsOf: root.appendingPathComponent("library.json")) == oldManifest)
         #expect(try restoreLeftovers().isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
         do {
             // Scoped: the service keeps the library's owner, which the next launch has to take.
             let restore = try #require(startup.seedRestoreService)
-            #expect(try await restore.prepare(checkpointURL: restorePoint, recoveryCode: enrollment.recoveryCode).memberCount == 1)
-            // Checking the restore point replaces nothing; only the confirmed activation does.
+            #expect(try await restore.prepare(archiveURL: restorePoint).memberCount == 1)
+            // Checking the backup replaces nothing; only the confirmed activation does.
             #expect(try Data(contentsOf: root.appendingPathComponent("library.json")) == oldManifest)
             #expect(try await restore.activatePreparedRestore().requiresApplicationRestart)
         }
@@ -328,20 +311,6 @@ struct SQLiteAppStartupTests {
         #expect(try await next.openEnvironment().dataService.bootstrap().members.map(\.id) == [member.id])
         #expect(try setAsideDirectories().isEmpty)
         await next.shutdown()
-    }
-}
-
-private final class RestorePointBytes: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage = Data()
-    func append(_ bytes: Data) { lock.withLock { storage.append(bytes) } }
-    var data: Data { lock.withLock { storage } }
-    func source() -> BackupContainerByteSource {
-        let snapshot = data
-        return .init(byteCount: UInt64(snapshot.count)) { offset, count in
-            let start = Int(offset)
-            return Data(snapshot[start..<min(snapshot.count, start + count)])
-        }
     }
 }
 

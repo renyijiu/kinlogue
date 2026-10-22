@@ -80,7 +80,7 @@ protocol AssistantLibraryReading: Sendable {
 
 extension SQLiteReportRepository: AssistantLibraryReading {}
 
-/// Where conversations are kept: the library, so saved chats go into restore points and are
+/// Where conversations are kept: the library, so saved chats go into backups and are
 /// deleted with their member or the library (docs/plans/2026-10-15-feat-member-cli-chat-plan.md, 4.9).
 protocol AssistantConversationStoring: Sendable {
     func savedConversation(_ id: UUID) async throws -> AssistantConversation?

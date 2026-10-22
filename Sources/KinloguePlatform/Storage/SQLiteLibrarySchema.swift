@@ -4,7 +4,7 @@ import KinlogueCore
 
 /// The library format. Only the current version opens: before the first release there is no
 /// in-place migration, so an older library is refused like an unknown one and reaches the current
-/// version through a restore point (decisions.md, 2026-10-18). No JSON vault or other SQLite schema
+/// version through a backup restored by a newer build (decisions.md, 2026-10-18 and 2026-10-19). No JSON vault or other SQLite schema
 /// is migrated, rewritten or deleted.
 enum SQLiteLibrarySchema {
     static let applicationID = 0x4B4C4753 // KLGS

@@ -44,7 +44,7 @@ kind: pattern-reference
 ## 与代码的交叉核实
 
 - 备份 source（`Sources/KinloguePlatform/Backup/PlaintextLibraryBackupSource.swift`，已删除） 每打开一项调用全源 revision 验证；VaultRootBinding（`Sources/KinloguePlatform/Storage/VaultRootBinding.swift`，已删除） 路径重新解析 manifest。重复工作随条目数和 manifest 大小相乘。
-- [格式限制](../../Sources/KinlogueCore/Backup/BackupCheckpoint.swift) 不只有 2 GiB / 20,000 条目，还有限制 30,000 frames、16 MiB canonical manifest；writer、reader、trust verifier、repository、restore 的长度检查必须同步。
+- `格式限制` 不只有 2 GiB / 20,000 条目，还有限制 30,000 frames、16 MiB canonical manifest；writer、reader、trust verifier、repository、restore 的长度检查必须同步。
 - DuplicateDetector（`Sources/KinlogueCore/Import/DuplicateDetector.swift`，已删除） 逐记录调用 [ReportFingerprint](../../Sources/KinlogueCore/Import/ReportFingerprint.swift)，后者每次为全量附件重建字典。
 - [ImportDraftDocument](../../Sources/KinlogueCore/Import/ImportDraft.swift) 包含 blocks、candidates 和 reviewState；OCR 文档并非纯可丢弃缓存，复核保存必须进入同一元数据事务。
 

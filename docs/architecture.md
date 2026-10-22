@@ -70,22 +70,16 @@ Helper 的 descriptor contract、watchdog、资源打包、slice memory、Viewer
 3. `AppRuntimeIdentity.current()` 从系统 Application Support 和签名 bundle 信息解析生产或隔离验收身份，不接受任意环境变量或用户路径。
 4. 生产资料库根目录是 `~/Library/Application Support/Kinlogue/Vault`；验收根目录是 `~/Library/Application Support/Kinlogue/Acceptance/<runID>/SourceVault`。
 5. 用户接受存储说明后，`LibraryLaunchCoordinator` 取得资料库的单实例 owner，依次收敛未完成的恢复事务、备份捕获副本和已授权的删除，再打开数据库。
-6. `LiveAppServiceEnvironment.makeOpened` 在这一个 `SQLiteLibraryStore` 上组装 `SQLiteReportRepository`、报告 `ImportWorkflow`、`SQLiteDICOMRepository` 与 `DICOMImportWorkflow`、按 presentation 创建的 `DICOMSliceService`、本机 OCR、`LiveLANInboxService`、原件导出、整库删除和共享生命周期协调器，并由 `AppComposition.makeOpened` 发布给各窗口。
-7. `AppComposition` 同时构造 backup configuration store、`LiveBackupService` 和 seed-only restore stack，但不会因构造而创建备份身份；`AppStartupCoordinator` 负责资料库打开之后的启动次序：恢复收敛、存储就绪、由 composition 持有的 `AppProcessingCoordinator` 在后台恢复中断的报告 OCR，随后启动自动备份调度。启动不校验全部原件；原件在读取时校验，另有空闲时的[完整性巡检](sqlite-storage.md#启动与空闲完整性巡检)。
+6. `LiveAppServiceEnvironment.makeOpened` 在这一个 `SQLiteLibraryStore` 上组装 `SQLiteReportRepository`、报告 `ImportWorkflow`、`SQLiteDICOMRepository` 与 `DICOMImportWorkflow`、按 presentation 创建的 `DICOMSliceService`、本机 OCR、`LiveLANInboxService`、整库删除和共享生命周期协调器，并由 `AppComposition.makeOpened` 发布给各窗口。
+7. `AppComposition` 同时构造 `BackupSettingsStore`、`LiveBackupService`（它也承担“导出备份到…”）和 restore stack；构造不写任何设置。`SQLiteStartupContext` 在取得 owner 后移除早期加密备份留在 `BackupIdentity` 的本机文件。`AppStartupCoordinator` 负责资料库打开之后的启动次序：恢复收敛、存储就绪、由 composition 持有的 `AppProcessingCoordinator` 在后台恢复中断的报告 OCR，随后启动自动备份调度。启动不校验全部原件；原件在读取时校验，另有空闲时的[完整性巡检](sqlite-storage.md#启动与空闲完整性巡检)。
 
-### 全部原始文件导出链
+### 备份、导出与整库恢复链
 
-`SettingsView → AppModel → OriginalExportModel → LiveOriginalExportService → OriginalArchiveExporter → SQLiteOriginalArchiveSource` 保持 UI、生命周期、平台写入和领域规划的依赖方向。App 层先显示明文/非备份警告，再用 `NSSavePanel` 取得 `.zip` 目标；长期状态只保存语义 phase/error，不缓存已本地化错误。`LiveOriginalExportService` 把整个导出纳入 `LibraryLifecycleCoordinator.withActiveOperation`，删除资料库时 revocation hook 请求取消并等待 admitted export；Platform 报告 `.committing` 后 cancellation gate 拒绝新取消，避免把已原子发布的文件误报为取消。目标文件已同步、验证并原子发布后，父目录同步是 best-effort：Powerbox 文件级授权导致的目录权限错误不改变成功结果，真实目录 I/O 错误仍保持发布状态不确定。
+`SettingsView → BackupModel / BackupExportModel → LiveBackupService → BackupOperationCoordinator（+ BackupScheduler）→ BackupArchiveWriter → SQLiteLogicalBackupSource` 保持 UI、生命周期、平台写入和领域规划的依赖方向。Core 的 `BackupArchivePlan` 只消费从同一次逻辑捕获解码出的成员、来源、草稿、DICOM 与 LAN 投影和类型扩展映射，给每个原件分配 identifier-free 的安全路径；`BackupArchiveIndex` 定义索引的 JSON 与校验。Platform 的 writer 流式写入、完整读回后发布：文件夹备份排他重命名，导出经 `NSSavePanel` 目标原子替换。所有写入经同一个 coordinator 串行，并纳入 `LibraryLifecycleCoordinator.withActiveOperation`；删除资料库、恢复和完整性停机的 revocation hook 会取消并等待未发布的备份。导出在进入不可取消的提交后拒绝新的取消请求，避免把已发布的文件误报为取消。文件夹由 `BackupFolderAuthority` 解析 bookmark、在整个异步操作期间保持 security scope 并核对 inode；`FolderBackupRunner` 发布后把文件身份记入 `BackupSettingsStore` 的账本，再用 `BackupFolderRetention` 删除超出份数且仍未被改动的本机备份。状态加载只读设置并解析文件夹，不读取资料库来源。
 
-Core 的 `OriginalArchivePlan` 只消费成员、已确认报告来源和已确认 study 的投影以及类型扩展映射，负责稳定排序和 identifier-free 安全路径；Platform 在一次读取里取得这些投影并 pin 住涉及的原件，逐项打开并校验 descriptor、流式写入/复核 ZIP 并原子发布。成功前不暴露 `.zip` work item；进度 DTO 只有 phase、bytes 和 entry counts，不含成员名、文件名、路径或内部 ID。
+恢复由 `RestoreModel → LiveRestoreService → BackupRestoreService → BackupRestoreVerifier/BackupRestoreTransaction` 完成。verifier 用 `BackupArchiveReader` 按索引读取 ZIP，在 App-owned 同卷 staging 写入数据流与原件，把逻辑记录写入本应用新建的数据库，并严格验证完整领域图和原件；`LiveRestoreService` 取消并等待旧 preparation 退出，用 operation generation 隔离迟到结果。确认后 App composition 先撤销旧 App/LAN 状态与独立 Viewer，再由 destructive fence 与 `LibraryLifecycleCoordinator` 取消并等待报告 import/retry/OCR、LAN、DICOM 和备份活动操作，durable receipt 保护 whole-root replace/rollback，切换中关闭自动备份；成功与 activation 失败均进入 restart-only UI。`KinlogueStorageProcessFixture` 不复制 phase、rename、receipt、rollback 或 cleanup 算法，只通过不会进入 App composition 的 `Testing` SPI 在生产 transaction durable phase 强退子进程，并由下一子进程调用同一个 production reconcile。详细格式与产品边界见 [`backup-and-restore.md`](backup-and-restore.md)。
 
-### 加密备份与整库恢复链
-
-`SettingsView → BackupModel → LiveBackupService → BackupOperationCoordinator/BackupScheduler → BackupCheckpointPublisher → EncryptedCheckpointWriter → SQLiteLogicalBackupSource` 负责目录授权、进程内串行调度、跨进程 repository publication lease、同一提交上的逻辑快照、加密发布、完整正式文件回读和 durable witness。状态加载只读取配置/scheduler/destination metadata，不读取资料库来源；实际启用自动备份、scheduler 事件和 writer 仍在操作边界生成权威 source plan。`BackupCheckpointPublisher` 在固定 control leaf 的 cancellation-aware exclusive lease 内完成权威扫描、sequence 分配和 writer 全流程；retention 取得同一 lease 后以一次权威扫描形成批次，随后只对每个待删叶做 descriptor/identity/content 精确复核，并在同一配置锁临界区内串行执行最终 revision fence、删除与 witness 移除。若删除后配置写入失败，额外 witness 会保守保留，不会让其他恢复点获得删除资格。配置 witness 以稳定 writer identity 追加到配置锁内的最新记录，不因自动化、scheduler、bookmark 或其他 witness revision 改变而丢失并发状态。security scope 覆盖每次异步目录操作；配置只固定 repository identity、恢复根公钥和设备签名身份，不保存恢复 seed 或解密私钥。
-
-恢复由 `RestoreModel → LiveRestoreService → BackupRestoreService → BackupRestoreVerifier/BackupRestoreTransaction` 完成。verifier 在 App-owned 同卷 staging 解密，把逻辑记录写入本应用新建的数据库，并严格验证完整领域图和原件；`LiveRestoreService` 取消并等待旧 preparation 退出，用 operation generation 隔离迟到结果。确认后 App composition 先撤销旧 App/LAN 状态与独立 Viewer，再由 destructive fence 与 `LibraryLifecycleCoordinator` 取消并等待报告 import/retry/OCR、LAN、DICOM 和导出活动操作，durable receipt 保护 whole-root replace/rollback；成功与 activation 失败均进入 restart-only UI。`KinlogueStorageProcessFixture` 不复制 phase、rename、receipt、rollback 或 cleanup 算法，只通过不会进入 App composition 的 `Testing` SPI 在生产 transaction durable phase 强退子进程，并由下一子进程调用同一个 production reconcile。详细格式与产品边界见 [`backup-and-restore.md`](backup-and-restore.md)。
-
-App 层的服务 DTO、command、projection 和 protocol 集中在 `AppServiceContracts.swift`；生产组装与 `LiveAppService` 实现保留在 `AppServices.swift`，原件导出的生命周期适配与 Platform 错误/进度映射由 `LiveOriginalExportService.swift` 独立承载。View/ViewModel 只依赖这些 App-owned 契约，不直接创建或读取 Vault、LAN、OCR、DICOM descriptor 或解码器实现。
+App 层的服务 DTO、command、projection 和 protocol 集中在 `AppServiceContracts.swift`；生产组装与 `LiveAppService` 实现保留在 `AppServices.swift`，备份与导出的生命周期适配与 Platform 错误/进度映射由 `Backup/LiveBackupService.swift` 承载。View/ViewModel 只依赖这些 App-owned 契约，不直接创建或读取 Vault、LAN、OCR、DICOM descriptor 或解码器实现。
 
 界面文案由 `AppLocalization` 解析：`KinlogueApp` 用 `@AppStorage` 持久化“跟随系统 / 简体中文 / English”选择，显式选择优先于 main app bundle 的 preferred localization，并把解析后的 locale 注入 SwiftUI environment；正式 `.app` 只访问 main bundle 中的打包资源，非 App 的 SwiftPM 开发/测试目标才惰性回退到 `Bundle.module`。`MemberSidebarView` 的固定设置入口在 `AppShellView` 中切换到两栏 `SettingsView`，不创建存储、网络或 OCR 实例。String Catalog 和生成资源的职责、手机页面边界见 [`localization.md`](localization.md)。
 
@@ -174,11 +168,11 @@ sequenceDiagram
 - `LANInboxModel` 保留一秒的 receiver 存活心跳；`LiveLANInboxService` 把资料库提交代数的变化和进行中的上传折叠成不含内容的变更代数，模型只在它变化时刷新权威投影，并在 receiver 停止时无条件最终刷新。
 - `LANReceiver` 管理一个运行时 receiver、transport、HTTP handler、session、逐文件上传 lease 和当前会话文件状态；停止时先撤销 authority，再关闭 listener/连接、取消上传、停止 network monitor 和 session。
 - `LANSession` 的 pairing code、cookie、CSRF、计数器和 idle 状态都是 memory-only；stop 或 replacement session 会清空它们。
-- `LibraryLifecycleCoordinator` 是进程内的 whole-library revocation 前半段：恢复或删除 Vault 之前先关闭 LAN，取消并等待 admitted 报告 import/retry/OCR、DICOM 和导出任务，再撤销 publication guard，避免 whole-root 切换过程中仍有可写入口；普通只读查询不占用该 fence。
-- `BackupOperationCoordinator` 串行当前 App 中的手动/自动 writer、retention 和 destructive operation；repository-scoped publication lease 另行阻止升级残留进程或另一个 App 进程从同一历史分配重复 sequence，并与 retention 共用 `repository → configuration` 锁序。恢复/删除配置清除与 Vault root 切换都位于同一进程内 fence；稳定 writer identity 的两次校验仍让跨进程 reset/re-enrollment 在 publication 前或 witness 前失败关闭。跨启动的 scheduler 状态、full-reader witness 和 restore/preflight receipt 位于 Vault 外的 app-private sibling。
+- `LibraryLifecycleCoordinator` 是进程内的 whole-library revocation 前半段：恢复或删除 Vault 之前先关闭 LAN，取消并等待 admitted 报告 import/retry/OCR、DICOM 和备份/导出任务，再撤销 publication guard，避免 whole-root 切换过程中仍有可写入口；普通只读查询不占用该 fence。
+- `BackupOperationCoordinator` 串行当前 App 中的手动备份、自动备份、导出和保留清理，同一时间只写一份；它们同时登记为资料库的活动操作，恢复、删除和完整性停机会先取消并等待未发布的备份。备份设置与账本在 Vault 外的 app-private `Backup/settings.json`，每次修改在进程锁和 `flock` 下读改写，另一个 App 进程同时修改时互斥；文件夹里的备份只靠排他重命名发布，不与其他 Mac 或进程协调序号。restore/preflight receipt 同样位于 Vault 外的 app-private sibling。
 - `AppModel` 与 `LANInboxModel` 还各自维护不可逆的 UI lifecycle lock + generation fence；删除开始后，所有旧异步 service 结果都必须被拒绝，不能重新发布快照、队列、Viewer、预览或提交通知的回调。只有进程重启才重新建立普通访问。
 - PDF 原件 renderer 把 `PDFDocument`、`PDFPage`、metadata cache 和 raster 工作限制在单一 actor；open 只发布 `id + pageCount`，当前页 metadata 才按 `(sessionID, pageIndex)` 请求并最多缓存 200 项。SwiftUI 的 keyed state 拒绝切页或 release 后的迟到结果，render 仍独立重验页面与 media box 并执行像素上限。
-- `KinlogueStorageProcessFixture` 与相关测试覆盖第二 owner、进程强退后的恢复、整库替换各阶段的崩溃和备份仓库的并发发布；不能只依赖单进程内的串行化。
+- `KinlogueStorageProcessFixture` 与相关测试覆盖第二 owner、进程强退后的恢复、整库替换各阶段的崩溃和逻辑捕获临时数据库的进程强退；不能只依赖单进程内的串行化。
 
 ## 扩展规则
 

@@ -4,8 +4,9 @@ import KinlogueCore
 
 public enum BackupRestoreError: Error, Equatable, Sendable {
     case invalidSource
+    /// The file is not a Kinlogue backup archive.
+    case notABackup
     case sourceChanged
-    case authenticationFailed
     case unsupportedFormat
     case graphInvalid
     case capacityInsufficient
@@ -16,37 +17,42 @@ public enum BackupRestoreError: Error, Equatable, Sendable {
     case injectedFailure
 }
 
+/// What the person confirms before a restore: when the backup was made and how much it holds,
+/// never any health content.
 public struct BackupRestoreSummary: Equatable, Sendable {
-    public let checkpointID: BackupCheckpointID
+    public let backupID: UUID
     public let revisionPair: BackupRevisionPair
-    public let sequence: UInt64
+    public let createdAt: Date
+    public let creatorVersion: String
     public let memberCount: Int
     public let recordCount: Int
     public let inboxItemCount: Int
+    public let originalCount: Int
     public let plaintextByteCount: UInt64
-    public let formatVersion: BackupFormatVersion
     /// The digest of the logical stream this summary was validated against.
     package let logicalDigest: Data
 
     public init(
-        checkpointID: BackupCheckpointID,
+        backupID: UUID,
         revisionPair: BackupRevisionPair,
-        sequence: UInt64,
+        createdAt: Date,
+        creatorVersion: String,
         memberCount: Int,
         recordCount: Int,
         inboxItemCount: Int,
+        originalCount: Int,
         plaintextByteCount: UInt64,
-        formatVersion: BackupFormatVersion,
         logicalDigest: Data
     ) {
-        self.checkpointID = checkpointID
+        self.backupID = backupID
         self.revisionPair = revisionPair
-        self.sequence = sequence
+        self.createdAt = createdAt
+        self.creatorVersion = creatorVersion
         self.memberCount = memberCount
         self.recordCount = recordCount
         self.inboxItemCount = inboxItemCount
+        self.originalCount = originalCount
         self.plaintextByteCount = plaintextByteCount
-        self.formatVersion = formatVersion
         self.logicalDigest = logicalDigest
     }
 }
@@ -100,21 +106,19 @@ struct BackupRestorePreflightReceipt: Codable, Equatable {
     let version: Int
     let operationID: UUID
     let activeRootNameDigest: Data
+    /// The backup's identifier; the field keeps the name receipts were first written with.
     let checkpointID: Data
     let stagingName: String
     let stagingIdentity: BackupRestoreDirectoryIdentity
 }
 
-/// Performs seed-only checkpoint verification and reconstructs one complete
-/// plaintext root beneath the trusted Application Support parent. It has no
-/// dependency on a bookmark, local backup configuration, or device signer.
+/// Verifies a backup archive and reconstructs one complete library root beneath the trusted
+/// Application Support parent. It does not depend on a bookmark or on the backup settings.
 // SAFETY: The verifier stores only immutable URLs and a Sendable capacity
 // closure; each prepare call owns all descriptors and staging state it creates.
 public final class BackupRestoreVerifier: @unchecked Sendable {
     public typealias AvailableCapacity = @Sendable () throws -> UInt64
 
-    fileprivate static let maximumContainerByteCount =
-        BackupFormatLimits.maximumContainerByteCount(for: .current)
     private let stableParentURL: URL
     private let activeRootURL: URL
     private let availableCapacity: AvailableCapacity
@@ -163,58 +167,43 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
         try owner.validate()
     }
 
-    @concurrent public func prepare(checkpointURL: URL, recoveryCode: String) async throws -> BackupPreparedRestore {
+    @concurrent public func prepare(archiveURL: URL) async throws -> BackupPreparedRestore {
         try await LibraryStorageExecutor.run {
             let cancellation = SQLiteLogicalCancellation()
             return try await withTaskCancellationHandler {
-                try await prepare(checkpointURL: checkpointURL, recoveryCode: recoveryCode, cancellation: cancellation)
+                try prepareArchive(archiveURL, cancellation: cancellation)
             } onCancel: { cancellation.cancel() }
         }
     }
 
-    private func prepare(
-        checkpointURL: URL,
-        recoveryCode: String,
-        cancellation: SQLiteLogicalCancellation
-    ) async throws -> BackupPreparedRestore {
+    /// Reads the archive's index, stages its data stream and originals, and rebuilds and
+    /// strictly validates a complete library in private staging. The active library is not
+    /// touched; the returned summary is what the person confirms.
+    private func prepareArchive(_ archiveURL: URL, cancellation: SQLiteLogicalCancellation) throws -> BackupPreparedRestore {
         try Task.checkCancellation()
         try owner.validate()
-        let source = try BackupRestoreSource(url: checkpointURL)
-        defer { source.close() }
-        let sourceIdentity = try source.identity()
-        let recoverySeed: Data
-        do { recoverySeed = try BackupRecoveryCode.decode(recoveryCode) }
-        catch { throw BackupRestoreError.authenticationFailed }
-
-        let reader = BackupContainerReader()
-        let firstPass: BackupContainerReadResult
-        do {
-            firstPass = try reader.read(
-                source: source.byteSource,
-                recoverySeed: recoverySeed,
-                sink: .init { _ in { _ in } },
-                // A file-tree checkpoint cannot be restored; say so before decrypting all of it.
-                acceptManifest: { guard $0.isLogical else { throw BackupRestoreError.unsupportedFormat } }
-            )
-        } catch is CancellationError {
+        let reader: BackupArchiveReader
+        do { reader = try BackupArchiveReader(url: archiveURL) } catch is CancellationError {
             throw CancellationError()
-        } catch {
-            throw Self.map(error)
-        }
-        let capacity = try availableCapacity()
-        let logicalBytes = firstPass.manifest.entries.filter { $0.kind == .logicalSegment }.reduce(UInt64(0)) { $0 + $1.plaintextByteCount }
-        // First reserve streamed originals, the input logical spool and the later
-        // strict-validation spool. The App-schema budget is checked from authenticated
-        // per-domain records below, before inserting any rows.
-        let required = firstPass.manifest.totalPlaintextByteCount.addingReportingOverflow(
-            BackupFormatLimits.capacityHeadroomByteCount + logicalBytes + (logicalBytes > 0 ? 1_024 * 1_024 : 0)
+        } catch { throw Self.map(error) }
+        defer { reader.close() }
+        let index = reader.index
+        let logicalBytes = index.data.byteCount
+        // The staged originals and data stream, the strict-validation spool and headroom;
+        // the database itself is budgeted from the actual records below.
+        let required = index.totalByteCount.addingReportingOverflow(
+            BackupArchiveLimits.capacityHeadroomByteCount + logicalBytes + (logicalBytes > 0 ? 1_024 * 1_024 : 0)
         )
-        guard !required.overflow, capacity >= required.partialValue else {
+        guard !required.overflow, try availableCapacity() >= required.partialValue else {
             throw BackupRestoreError.capacityInsufficient
         }
-        guard try source.identity() == sourceIdentity else {
-            throw BackupRestoreError.sourceChanged
-        }
+        guard logicalBytes <= UInt64(Int.max) else { throw BackupRestoreError.capacityInsufficient }
+        let revisionPair: BackupRevisionPair
+        do {
+            revisionPair = try SQLiteLogicalBackupSource.revision(BackupLogicalHeaderV1(
+                libraryID: index.library.libraryID, generation: index.library.generation, commitID: index.library.commitID
+            ))
+        } catch { throw BackupRestoreError.graphInvalid }
 
         let operationID = UUID()
         let stagingName = Self.stagingName(for: operationID)
@@ -223,35 +212,24 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
         let receiptURL = stableParentURL.appendingPathComponent(receiptName, isDirectory: false)
         let parentDescriptor = try BackupRestoreFilesystem.openStrictDirectory(stableParentURL)
         defer { Darwin.close(parentDescriptor) }
-        guard mkdirat(parentDescriptor, stagingName, 0o700) == 0 else {
-            throw BackupRestoreError.stagingConflict
-        }
-        let stagingIdentity = try BackupRestoreFilesystem.directoryIdentity(
-            named: stagingName,
-            parentDescriptor: parentDescriptor
-        )
+        guard mkdirat(parentDescriptor, stagingName, 0o700) == 0 else { throw BackupRestoreError.stagingConflict }
+        let stagingIdentity = try BackupRestoreFilesystem.directoryIdentity(named: stagingName, parentDescriptor: parentDescriptor)
         let receipt = BackupRestorePreflightReceipt(
             magic: BackupRestorePreflightReceipt.magic,
             version: 1,
             operationID: operationID,
             activeRootNameDigest: ContentDigest.sha256(Data(activeRootURL.lastPathComponent.utf8)),
-            checkpointID: firstPass.publicVerification.checkpoint.checkpointID.bytes,
+            checkpointID: index.backupID.sqliteBytes,
             stagingName: stagingName,
             stagingIdentity: stagingIdentity
         )
         do {
-            try BackupRestoreFilesystem.writeExclusiveFile(
-                try CanonicalVaultJSON.encode(receipt),
-                named: receiptName,
-                parentDescriptor: parentDescriptor
-            )
+            try BackupRestoreFilesystem.writeExclusiveFile(try CanonicalVaultJSON.encode(receipt), named: receiptName,
+                                                           parentDescriptor: parentDescriptor)
             try BackupRestoreFilesystem.sync(parentDescriptor)
         } catch {
-            try? BackupRestoreFilesystem.removeDirectoryTree(
-                named: stagingName,
-                expectedIdentity: stagingIdentity,
-                parentDescriptor: parentDescriptor
-            )
+            try? BackupRestoreFilesystem.removeDirectoryTree(named: stagingName, expectedIdentity: stagingIdentity,
+                                                             parentDescriptor: parentDescriptor)
             throw Self.map(error)
         }
 
@@ -261,41 +239,46 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
             defer { logicalSpool.release() }
             let stagingStore = try SQLiteLibraryStore(rootURL: stagingURL)
             defer { try? stagingStore.close() }
-            let output = try BackupRestoreOutput(
-                parentDescriptor: parentDescriptor,
-                stagingName: stagingName,
-                expectedIdentity: stagingIdentity, logicalSpool: logicalSpool
-            )
-            let secondPass = try reader.read(
-                source: source.byteSource,
-                recoverySeed: recoverySeed,
-                sink: output.sink
-            )
-            try output.finish()
-            guard secondPass.manifest == firstPass.manifest,
-                  secondPass.publicVerification.checkpoint
-                    == firstPass.publicVerification.checkpoint,
-                  try source.identity() == sourceIdentity else {
-                throw BackupRestoreError.sourceChanged
+            let staging = try BackupRestoreOutput(parentDescriptor: parentDescriptor, stagingName: stagingName,
+                                                  expectedIdentity: stagingIdentity, logicalSpool: logicalSpool)
+            try reader.extract(index.data) { try logicalSpool.append($0) }
+            for original in index.originals {
+                try cancellation.check()
+                let writer = try staging.originalWriter(id: original.id, byteCount: original.entry.byteCount)
+                do {
+                    try reader.extract(original.entry) { try writer.append($0) }
+                    try writer.finish()
+                } catch { writer.close(); throw error }
             }
+            try staging.finish()
+            try reader.checkUnchanged()
             let databaseBytes = try SQLiteLogicalRestore.databaseBudget(spool: logicalSpool, check: cancellation.check)
-            let remaining = databaseBytes.addingReportingOverflow(logicalBytes + BackupFormatLimits.capacityHeadroomByteCount)
-            guard !remaining.overflow, try availableCapacity() >= remaining.partialValue else { throw BackupRestoreError.capacityInsufficient }
-            let validation = try SQLiteLogicalRestore.restore(spool: logicalSpool, manifest: secondPass.manifest,
-                store: stagingStore, check: cancellation.check)
+            let remaining = databaseBytes.addingReportingOverflow(logicalBytes + BackupArchiveLimits.capacityHeadroomByteCount)
+            guard !remaining.overflow, try availableCapacity() >= remaining.partialValue else {
+                throw BackupRestoreError.capacityInsufficient
+            }
+            let expected = Dictionary(uniqueKeysWithValues: index.originals.map {
+                ($0.id, SQLiteLogicalRestore.ExpectedOriginal(byteCount: $0.entry.byteCount, sha256: $0.entry.sha256, contentType: $0.contentType))
+            })
+            let validation = try SQLiteLogicalRestore.restore(spool: logicalSpool, originals: expected, revisionPair: revisionPair,
+                                                              store: stagingStore, check: cancellation.check)
+            guard validation.memberCount == index.counts.members, validation.recordCount == index.counts.records,
+                  validation.inboxItemCount == index.counts.inboxItems else { throw BackupRestoreError.graphInvalid }
             try stagingStore.close()
             try owner.validate()
             try BackupRestoreFilesystem.sync(parentDescriptor)
             return BackupPreparedRestore(
                 summary: .init(
-                    checkpointID: secondPass.publicVerification.checkpoint.checkpointID,
-                    revisionPair: secondPass.manifest.revisionPair,
-                    sequence: secondPass.publicVerification.checkpoint.sequence,
+                    backupID: index.backupID,
+                    revisionPair: revisionPair,
+                    createdAt: index.createdAt,
+                    creatorVersion: index.creator.version,
                     memberCount: validation.memberCount,
                     recordCount: validation.recordCount,
                     inboxItemCount: validation.inboxItemCount,
-                    plaintextByteCount: secondPass.manifest.totalPlaintextByteCount,
-                    formatVersion: secondPass.manifest.formatVersion, logicalDigest: validation.digest
+                    originalCount: index.originals.count,
+                    plaintextByteCount: index.totalByteCount,
+                    logicalDigest: validation.digest
                 ),
                 operationID: operationID,
                 stagingURL: stagingURL,
@@ -304,15 +287,9 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
                 activeRootName: activeRootURL.lastPathComponent
             )
         } catch {
-            try? BackupRestoreFilesystem.removeDirectoryTree(
-                named: stagingName,
-                expectedIdentity: stagingIdentity,
-                parentDescriptor: parentDescriptor
-            )
-            try? BackupRestoreFilesystem.removeRegularFile(
-                named: receiptName,
-                parentDescriptor: parentDescriptor
-            )
+            try? BackupRestoreFilesystem.removeDirectoryTree(named: stagingName, expectedIdentity: stagingIdentity,
+                                                             parentDescriptor: parentDescriptor)
+            try? BackupRestoreFilesystem.removeRegularFile(named: receiptName, parentDescriptor: parentDescriptor)
             try? BackupRestoreFilesystem.sync(parentDescriptor)
             if error is CancellationError { throw CancellationError() }
             throw Self.map(error)
@@ -446,6 +423,13 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
 
     private static func map(_ error: Error) -> BackupRestoreError {
         if case BackupRestoreError.ioFailure(ENOSPC) = error { return .capacityInsufficient }
+        if let error = error as? BackupArchiveError {
+            switch error {
+            case .unsupportedFormat: return .unsupportedFormat
+            case .resourceLimit: return .capacityInsufficient
+            case .invalidArchive: return .graphInvalid
+            }
+        }
         if case SQLiteLibraryError.ioFailure(ENOSPC) = error { return .capacityInsufficient }
         if let error = error as? BackupRestoreError { return error }
         if let error = error as? SQLiteLogicalBackupError {
@@ -456,107 +440,18 @@ public final class BackupRestoreVerifier: @unchecked Sendable {
             }
         }
         if error is SQLiteLibraryError || error is LibraryReportError || error is DICOMImportError || error is DICOMSliceServiceError { return .graphInvalid }
-        guard let error = error as? BackupContainerError else {
-            if error is VaultError || error is LANInboxError { return .graphInvalid }
-            return .ioFailure(EIO)
-        }
-        switch error {
-        case .authenticationFailed, .trustFailure:
-            return .authenticationFailed
-        case .unsupportedVersion, .unsupportedSuite:
-            return .unsupportedFormat
-        case .resourceLimit, .arithmeticOverflow:
-            return .capacityInsufficient
-        case .graphInvalid, .invalidFormat, .sourceIntegrityFailure, .trailingBytes:
-            return .graphInvalid
-        case .outputFailure, .counterOverflow:
-            return .ioFailure(EIO)
-        }
+        if error is VaultError || error is LANInboxError { return .graphInvalid }
+        return .ioFailure(EIO)
     }
 }
 
-// SAFETY: lock makes close idempotent; the byteSource closure is consumed only
-// within the structured verifier read and joins before that defer closes the FD.
-private final class BackupRestoreSource: @unchecked Sendable {
-    struct Identity: Equatable {
-        let device: UInt64
-        let inode: UInt64
-        let byteCount: UInt64
-        let modifiedSeconds: Int64
-        let modifiedNanoseconds: Int64
-    }
-
-    private let descriptor: Int32
-    let byteSource: BackupContainerByteSource
-    private let lock = NSLock()
-    private var closed = false
-
-    init(url: URL) throws {
-        guard url.isFileURL, url.pathExtension == "kinloguebackup" else {
-            throw BackupRestoreError.invalidSource
-        }
-        let descriptor = Darwin.open(url.path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
-        guard descriptor >= 0 else { throw BackupRestoreError.invalidSource }
-        self.descriptor = descriptor
-        do {
-            let identity = try Self.identity(of: descriptor)
-            guard identity.byteCount > 0,
-                  identity.byteCount <= BackupRestoreVerifier.maximumContainerByteCount else {
-                throw BackupRestoreError.invalidSource
-            }
-            byteSource = BackupContainerByteSource(byteCount: identity.byteCount) {
-                offset, maximumByteCount in
-                var bytes = [UInt8](repeating: 0, count: maximumByteCount)
-                let count = pread(descriptor, &bytes, maximumByteCount, off_t(offset))
-                guard count >= 0 else { throw BackupRestoreError.ioFailure(errno) }
-                return Data(bytes.prefix(count))
-            }
-        } catch {
-            Darwin.close(descriptor)
-            throw error
-        }
-    }
-
-    func identity() throws -> Identity { try Self.identity(of: descriptor) }
-
-    func close() {
-        let shouldClose = lock.withLock { () -> Bool in
-            guard !closed else { return false }
-            closed = true
-            return true
-        }
-        if shouldClose { Darwin.close(descriptor) }
-    }
-
-    deinit { close() }
-
-    private static func identity(of descriptor: Int32) throws -> Identity {
-        var metadata = stat()
-        guard fstat(descriptor, &metadata) == 0,
-              (metadata.st_mode & S_IFMT) == S_IFREG,
-              metadata.st_nlink == 1,
-              metadata.st_size >= 0 else {
-            throw BackupRestoreError.invalidSource
-        }
-        return Identity(
-            device: UInt64(metadata.st_dev),
-            inode: UInt64(metadata.st_ino),
-            byteCount: UInt64(metadata.st_size),
-            modifiedSeconds: Int64(metadata.st_mtimespec.tv_sec),
-            modifiedNanoseconds: Int64(metadata.st_mtimespec.tv_nsec)
-        )
-    }
-}
-
-// SAFETY: rootDescriptor is owned for one structured reader lifetime and lock
-// serializes the single active entry writer plus finish/close transitions.
-private final class BackupRestoreOutput: @unchecked Sendable {
+// SAFETY: rootDescriptor is owned for the lifetime of one preparation; lock guards `finished`.
+/// The staging root a restore writes originals into. Paths are built from identifiers only.
+final class BackupRestoreOutput: @unchecked Sendable {
     private let rootDescriptor: Int32
     private let lock = NSLock()
-    private var activeWriter: (path: String, writer: RestoreFileWriter)?
     private var finished = false
     private let logicalSpool: SQLiteLogicalSpool
-    private var activeLogical: (path: String, remaining: UInt64)?
 
     init(
         parentDescriptor: Int32,
@@ -577,76 +472,28 @@ private final class BackupRestoreOutput: @unchecked Sendable {
         rootDescriptor = descriptor
     }
 
-    lazy var sink = BackupContainerEntrySink({ [weak self] entry in
-        guard let self else { throw BackupRestoreError.ioFailure(EIO) }
-        if entry.kind == .logicalSegment {
-            try lock.withLock {
-                guard !finished, activeWriter == nil, activeLogical == nil else { throw BackupRestoreError.stagingConflict }
-                activeLogical = (entry.path, entry.plaintextByteCount)
-            }
-            return { bytes in
-                try self.lock.withLock {
-                    guard let active = self.activeLogical, active.path == entry.path, UInt64(bytes.count) <= active.remaining else { throw BackupRestoreError.graphInvalid }
-                    try self.logicalSpool.append(bytes)
-                    self.activeLogical = (active.path, active.remaining - UInt64(bytes.count))
-                }
-            }
-        }
-        guard entry.kind == .original else { throw BackupRestoreError.graphInvalid }
-        let writer = try RestoreFileWriter(rootDescriptor: rootDescriptor, entry: entry)
-        do {
-            try lock.withLock {
-                guard !finished, activeWriter == nil else {
-                    throw BackupRestoreError.stagingConflict
-                }
-                activeWriter = (entry.path, writer)
-            }
-        } catch {
-            writer.close()
-            throw error
-        }
-        return { bytes in try writer.append(bytes) }
-    }, finish: { [weak self] entry in
-        guard let self else { throw BackupRestoreError.ioFailure(EIO) }
-        if entry.kind == .logicalSegment {
-            try lock.withLock {
-                guard let activeLogical, activeLogical.path == entry.path, activeLogical.remaining == 0 else { throw BackupRestoreError.graphInvalid }
-                self.activeLogical = nil
-            }
-            return
-        }
-        let writer = try lock.withLock { () throws -> RestoreFileWriter in
-            guard !finished,
-                  let activeWriter,
-                  activeWriter.path == entry.path else {
-                throw BackupRestoreError.stagingConflict
-            }
-            self.activeWriter = nil
-            return activeWriter.writer
-        }
-        try writer.finish()
-    })
+    /// A writer for one original at `originals/<id>.data` in staging.
+    func originalWriter(id: UUID, byteCount: UInt64) throws -> RestoreFileWriter {
+        try lock.withLock { guard !finished else { throw BackupRestoreError.stagingConflict } }
+        return try RestoreFileWriter(rootDescriptor: rootDescriptor, path: "originals/\(id.uuidString.lowercased()).data",
+                                     byteCount: byteCount)
+    }
 
     func finish() throws {
-        let shouldSync = try lock.withLock { () throws -> Bool in
+        let shouldSync = lock.withLock { () -> Bool in
             guard !finished else { return false }
-            guard activeWriter == nil, activeLogical == nil else { throw BackupRestoreError.graphInvalid }
             finished = true
             return true
         }
         if shouldSync { try logicalSpool.seal(); try BackupRestoreFilesystem.sync(rootDescriptor) }
     }
 
-    deinit {
-        let current = lock.withLock { activeWriter?.writer }
-        current?.close()
-        Darwin.close(rootDescriptor)
-    }
+    deinit { Darwin.close(rootDescriptor) }
 }
 
 // SAFETY: lock serializes byteCount, writes, sync, and the idempotent close of
 // both exclusively owned descriptors; no operation uses them after close.
-private final class RestoreFileWriter: @unchecked Sendable {
+final class RestoreFileWriter: @unchecked Sendable {
     private let descriptor: Int32
     private let parentDescriptor: Int32
     private let expectedByteCount: UInt64
@@ -654,8 +501,8 @@ private final class RestoreFileWriter: @unchecked Sendable {
     private var byteCount: UInt64 = 0
     private var closed = false
 
-    init(rootDescriptor: Int32, entry: BackupManifestEntry) throws {
-        let components = entry.path.split(separator: "/").map(String.init)
+    init(rootDescriptor: Int32, path: String, byteCount: UInt64) throws {
+        let components = path.split(separator: "/").map(String.init)
         guard let leaf = components.last, !leaf.isEmpty else {
             throw BackupRestoreError.graphInvalid
         }
@@ -685,7 +532,7 @@ private final class RestoreFileWriter: @unchecked Sendable {
             }
             self.descriptor = descriptor
             parentDescriptor = parent
-            expectedByteCount = entry.plaintextByteCount
+            expectedByteCount = byteCount
         } catch {
             Darwin.close(parent)
             throw error

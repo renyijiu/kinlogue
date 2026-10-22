@@ -161,7 +161,9 @@ is_prohibited_historical_path() {
   esac
   case "${candidate:l}" in
     *.dcm|*.dicom|*.nii|*.nii.gz|*.pdf|*.png|*.jpg|*.jpeg|*.heic|*.tif|*.tiff \
-      |*.kinloguebackup|*.key|*.p8|*.p12|*.pfx|*.mobileprovision) return 0 ;;
+      |*.kinloguebackup|*.key|*.p8|*.p12|*.pfx|*.mobileprovision \
+      |kinlogue-backup.json|*/kinlogue-backup.json|续页备份*.zip|*/续页备份*.zip \
+      |kinlogue\ backup*.zip|*/kinlogue\ backup*.zip) return 0 ;;
     *) return 1 ;;
   esac
 }

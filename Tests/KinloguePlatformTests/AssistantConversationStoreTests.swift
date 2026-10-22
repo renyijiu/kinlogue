@@ -4,7 +4,7 @@ import Testing
 @testable import KinlogueCore
 @testable import KinloguePlatform
 
-/// Saved member chats in the SQLite library: rows, limits, deletion, integrity and restore points.
+/// Saved member chats in the SQLite library: rows, limits, deletion, integrity and backups.
 @Suite(.serialized)
 struct AssistantConversationStoreTests {
     @Test
@@ -124,7 +124,7 @@ struct AssistantConversationStoreTests {
     }
 
     @Test
-    func restorePointsCarryConversations() async throws {
+    func backupStreamsCarryConversations() async throws {
         let library = try AssistantTestLibrary()
         defer { library.close() }
         let member = try await library.member("Synthetic member")
@@ -203,43 +203,35 @@ private func conversation(member: UUID, pack: AssistantContextPack, questions: [
     return value
 }
 
-/// Restores a captured snapshot into an empty store the way an encrypted restore point would.
 /// Restores a stream without originals into an empty store.
 private func restoreStream(_ stream: Data, into store: SQLiteLibraryStore) throws -> SQLiteLogicalValidation {
     let spool = try SQLiteLogicalSpool(parent: store.rootURL.deletingLastPathComponent())
     defer { spool.release() }
     try spool.append(stream); try spool.seal()
     let header = try SQLiteLogicalStream.read(byteCount: stream.count, read: spool.read) { _ in }
-    let entry = try BackupManifestEntry(kind: .logicalSegment, path: "logical/00000000.data", plaintextByteCount: UInt64(stream.count),
-        plaintextDigest: ContentDigest.sha256(stream), firstFrameIndex: 0,
-        frameCount: BackupManifestEntry.requiredFrameCount(for: UInt64(stream.count)))
-    return try SQLiteLogicalRestore.restore(spool: spool, manifest: BackupManifest(revisionPair: SQLiteLogicalBackupSource.revision(header), entries: [entry]), store: store)
+    return try SQLiteLogicalRestore.restore(spool: spool, originals: [:],
+        revisionPair: SQLiteLogicalBackupSource.revision(header), store: store)
 }
 
+/// Restores a captured snapshot into an empty store the way a backup archive would: the originals
+/// are staged under their identifiers and must match the stream's original records.
 private func restoreSnapshot(_ snapshot: SQLiteLogicalBackupSnapshot, into store: SQLiteLibraryStore) throws -> SQLiteLogicalValidation {
     let stream = try snapshot.spool.read(offset: 0, count: snapshot.spool.byteCount)
     let spool = try SQLiteLogicalSpool(parent: store.rootURL.deletingLastPathComponent())
     defer { spool.release() }
     try spool.append(stream); try spool.seal()
-    var entries: [BackupManifestEntry] = []
-    var frame: UInt64 = 0
-    func entry(_ kind: BackupManifestEntry.Kind, _ path: String, _ data: Data) throws {
-        let count = try BackupManifestEntry.requiredFrameCount(for: UInt64(data.count))
-        entries.append(try BackupManifestEntry(kind: kind, path: path, plaintextByteCount: UInt64(data.count),
-            plaintextDigest: ContentDigest.sha256(data), firstFrameIndex: frame, frameCount: count))
-        frame += UInt64(count)
-    }
-    try entry(.logicalSegment, "logical/00000000.data", stream)
-    for original in snapshot.pins.originals.values.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
+    var expected: [UUID: SQLiteLogicalRestore.ExpectedOriginal] = [:]
+    let declared = try SQLiteLogicalStream.recordsForTesting(stream)
+        .filter { $0.kind == .original }.map { try $0.decode(BackupLogicalOriginalV1.self) }
+    for original in declared {
         let reader = try snapshot.pins.open(original.id)
         let bytes = try reader.read(offset: 0, maximumByteCount: original.byteCount)
         reader.close()
-        let path = "originals/\(original.id.uuidString.lowercased()).data"
-        let url = store.rootURL.appendingPathComponent(path)
+        let url = store.rootURL.appendingPathComponent("originals/\(original.id.uuidString.lowercased()).data")
         try bytes.write(to: url, options: .withoutOverwriting)
         #expect(chmod(url.path, 0o600) == 0)
-        try entry(.original, path, bytes)
+        expected[original.id] = .init(byteCount: UInt64(original.byteCount), sha256: original.sha256, contentType: original.contentType)
     }
-    return try SQLiteLogicalRestore.restore(spool: spool,
-        manifest: BackupManifest(revisionPair: SQLiteLogicalBackupSource.revision(snapshot.header), entries: entries), store: store)
+    return try SQLiteLogicalRestore.restore(spool: spool, originals: expected,
+        revisionPair: SQLiteLogicalBackupSource.revision(snapshot.header), store: store)
 }

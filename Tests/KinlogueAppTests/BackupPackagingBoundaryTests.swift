@@ -21,7 +21,7 @@ struct BackupPackagingBoundaryTests {
     }
 
     @Test
-    func verificationReportSeparatesPlaintextVaultFromEncryptedLocalCheckpoints() throws {
+    func verificationReportStatesThatTheLibraryAndItsBackupsArePlaintext() throws {
         let verifier = try contents("scripts/verify-app.sh")
         let acceptance = try contents("scripts/run-acceptance.sh")
 
@@ -29,15 +29,15 @@ struct BackupPackagingBoundaryTests {
             #expect(script.contains("storage.confidentiality"))
             #expect(script.contains("storage.applicationLayerEncryption"))
             #expect(script.contains("storage.backupContainerEncryption"))
-            #expect(script.contains("storage.backupRecoveryPrivateKeyPersisted"))
-            #expect(script.contains("storage.backupDeviceIdentityCanDecrypt"))
+            #expect(script.contains("storage.backupFormat"))
+            #expect(!script.contains("storage.backupRecoveryPrivateKeyPersisted"))
+            #expect(!script.contains("storage.backupDeviceIdentityCanDecrypt"))
             #expect(script.contains("storage.keychainDependency"))
             #expect(script.contains("storage.cloudSync"))
             #expect(script.contains("storage.builtInBackupRestore"))
         }
-        #expect(verifier.contains(
-            #"storage.backupContainerEncryption -string "hpke-x25519-chacha20poly1305+aes-256-gcm""#
-        ))
+        #expect(verifier.contains(#"storage.backupContainerEncryption -string "none""#))
+        #expect(verifier.contains(#"storage.backupFormat -string "zip+kinlogue-backup-v1""#))
         #expect(verifier.contains("storage.builtInBackupRestore -bool true"))
         #expect(verifier.contains("storage.cloudSync -bool false"))
         #expect(verifier.contains("storage.keychainDependency -bool false"))

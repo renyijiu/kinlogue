@@ -72,7 +72,7 @@ struct AssistantSettingsSection: View {
                     Text(AppLocalization.string("已保存的对话"))
                         .font(.headline)
                         .foregroundStyle(KinlogueTheme.onSurface)
-                    Text(AppLocalization.string("对话和报告一样以明文保存在本机资料库中，并随加密恢复点备份；删除成员时一并删除。关闭 AI 对话不会删除它们。"))
+                    Text(AppLocalization.string("对话和报告一样以明文保存在本机资料库中，也包含在不加密的备份压缩包里；删除成员时一并删除。关闭 AI 对话不会删除它们。"))
                         .foregroundStyle(KinlogueTheme.onVariant)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -97,7 +97,7 @@ struct AssistantSettingsSection: View {
             }
             Button(AppLocalization.string("保留"), role: .cancel) {}
         } message: {
-            Text(AppLocalization.string("所有成员保存的对话都会从本机资料库中删除；已写入的恢复点仍包含它们，已发送给 Codex 服务的内容也不受影响。"))
+            Text(AppLocalization.string("所有成员保存的对话都会从本机资料库中删除；已写入的备份仍包含它们，已发送给 Codex 服务的内容也不受影响。"))
         }
     }
 

@@ -29,7 +29,7 @@ enum SQLiteLogicalStream {
             try appendBytes(SQLiteLogicalStream.magic + SQLiteLogicalStream.integer(UInt32(encoded.count)) + encoded)
         }
         private func appendBytes(_ data: Data) throws {
-            guard UInt64(data.count) <= BackupFormatLimits.maximumPlaintextByteCount - bytes else { throw SQLiteLogicalBackupError.resourceLimit }
+            guard UInt64(data.count) <= BackupArchiveLimits.maximumPlaintextByteCount - bytes else { throw SQLiteLogicalBackupError.resourceLimit }
             try write(data); hash.update(data: data); bytes += UInt64(data.count)
         }
         func append(_ record: SQLiteLogicalRecord) throws {
@@ -98,5 +98,12 @@ enum SQLiteLogicalStream {
             counts[index] += 1; previous = (tag, key)
             try consume(SQLiteLogicalRecord(kind: kind, key: key, payload: take(length)))
         }
+    }
+
+    /// Every record of a complete stream held in memory; tests and small fixtures only.
+    static func recordsForTesting(_ stream: Data) throws -> [SQLiteLogicalRecord] {
+        var records: [SQLiteLogicalRecord] = []
+        _ = try read(byteCount: stream.count, read: { offset, count in stream.subdata(in: offset..<(offset + count)) }) { records.append($0) }
+        return records
     }
 }
