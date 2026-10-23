@@ -241,25 +241,6 @@ struct BackupSettingsStoreTests {
         #expect(try store.load() == BackupSettings())
     }
 
-    @Test
-    func legacyEncryptedBackupIdentityIsRemovedButUnknownFilesStay() throws {
-        let parent = try privateDirectory()
-        defer { try? FileManager.default.removeItem(at: parent) }
-        let legacy = parent.appendingPathComponent("BackupIdentity", isDirectory: true)
-        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        for name in ["configuration.json", ".configuration.lock", ".configuration.ABC.work"] {
-            try Data("synthetic".utf8).write(to: legacy.appendingPathComponent(name))
-        }
-        try LegacyBackupIdentityCleanup.run(rootURL: legacy)
-        #expect(!FileManager.default.fileExists(atPath: legacy.path))
-        try LegacyBackupIdentityCleanup.run(rootURL: legacy)
-
-        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        try Data("synthetic".utf8).write(to: legacy.appendingPathComponent("configuration.json"))
-        try Data("keep".utf8).write(to: legacy.appendingPathComponent("something-else"))
-        try LegacyBackupIdentityCleanup.run(rootURL: legacy)
-        #expect(try FileManager.default.contentsOfDirectory(atPath: legacy.path) == ["something-else"])
-    }
 }
 
 @Suite("Backup folder retention")

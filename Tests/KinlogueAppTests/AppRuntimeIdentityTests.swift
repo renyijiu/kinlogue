@@ -19,8 +19,6 @@ struct AppRuntimeIdentityTests {
             == "/Users/acceptance/Library/Application Support/Kinlogue/Vault")
         #expect(identity.backupIdentity.settingsRootURL.path
             == "/Users/acceptance/Library/Application Support/Kinlogue/Backup")
-        #expect(identity.backupIdentity.legacyIdentityRootURL.path
-            == "/Users/acceptance/Library/Application Support/Kinlogue/BackupIdentity")
         #expect(identity.backupIdentity.settingsRootURL.deletingLastPathComponent()
             == identity.sourceVault.rootURL.deletingLastPathComponent())
         #expect(!identity.syntheticSmokeRequested)
@@ -64,8 +62,6 @@ struct AppRuntimeIdentityTests {
             == "/Users/acceptance/Library/Application Support/Kinlogue/Acceptance/\(runID)/SourceVault")
         #expect(identity.backupIdentity.settingsRootURL.path
             == "/Users/acceptance/Library/Application Support/Kinlogue/Acceptance/\(runID)/Backup")
-        #expect(identity.backupIdentity.legacyIdentityRootURL.path
-            == "/Users/acceptance/Library/Application Support/Kinlogue/Acceptance/\(runID)/BackupIdentity")
         #expect(identity.backupIdentity.settingsRootURL.deletingLastPathComponent()
             == identity.sourceVault.rootURL.deletingLastPathComponent())
     }

@@ -27,12 +27,12 @@ struct LANInboxObservationOptimizationMeasurementTests {
 }
 
 private actor LANObservationMeasurementService: LANInboxServicing {
-    private let screen: LANInboxScreenSnapshot
+    private let screen: LANInboxQueueScreen
     private var receiving = false
     private(set) var refreshCallCount = 0
 
     init() throws {
-        screen = LANInboxScreenSnapshot(
+        screen = LANInboxQueueScreen(
             snapshot: try LANInboxSnapshot(
                 vaultID: UUID(),
                 generation: 1,
@@ -54,11 +54,11 @@ private actor LANObservationMeasurementService: LANInboxServicing {
     }
 
     func loadItems(ids: [UUID]) async throws -> [LANInboxItem] { [] }
-    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxScreenSnapshot { screen }
+    func loadPage(cursor: LANInboxPageCursor) async throws -> LANInboxQueueScreen { screen }
     func processingPage(cursor: LANInboxPageCursor?) async throws -> LANInboxPage { screen.page }
-    func initialize() async throws -> LANInboxScreenSnapshot { screen }
+    func initialize() async throws -> LANInboxQueueScreen { screen }
 
-    func refresh() async throws -> LANInboxScreenSnapshot {
+    func refresh() async throws -> LANInboxQueueScreen {
         refreshCallCount += 1
         return screen
     }
@@ -90,7 +90,7 @@ private actor LANObservationMeasurementService: LANInboxServicing {
         expectedRevisions: [UInt64]?,
         memberID: FamilyMember.ID,
         canonicalReportDate: Date
-    ) async throws -> LANReportArchiveResult {
+    ) async throws -> LANArchiveOutcome {
         throw LANInboxError.invalidState
     }
 

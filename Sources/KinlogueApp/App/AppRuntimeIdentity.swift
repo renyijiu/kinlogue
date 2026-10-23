@@ -23,12 +23,9 @@ struct RuntimeVaultIdentity: Equatable, Sendable {
 struct RuntimeBackupIdentity: Equatable, Sendable {
     /// App-private backup settings and the ledger of backups this Mac wrote.
     let settingsRootURL: URL
-    /// Where earlier builds kept their encrypted-backup keys; removed at startup.
-    let legacyIdentityRootURL: URL
 
     init(parentURL: URL) {
         settingsRootURL = parentURL.appendingPathComponent("Backup", isDirectory: true)
-        legacyIdentityRootURL = parentURL.appendingPathComponent("BackupIdentity", isDirectory: true)
     }
 }
 

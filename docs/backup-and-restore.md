@@ -68,7 +68,7 @@
 
 - 早期写入的加密 `.kinloguebackup` 恢复点不能被当前版本读取；需要时使用旧版本 App。
 - 用户文件夹里的隐藏 `.kinlogue-backup-v1` 目录不会被续页改动。
-- 旧版本在 `Application Support/Kinlogue/BackupIdentity/` 保存的设备签名私钥、恢复公钥和验证记录，会在启动时由 [`LegacyBackupIdentityCleanup`](../Sources/KinloguePlatform/Backup/BackupSettingsStore.swift) 移除：只删除那几个已知文件名的本人普通文件，目录里有其他内容时目录保留。
+- 发布前的开发版本在 `Application Support/Kinlogue/BackupIdentity/` 保存的设备签名私钥、恢复公钥和验证记录，当前版本不读取也不清理（2026-10-22 起删除了启动时的清理代码），需要时由用户自行删除。
 
 ## 安全边界
 

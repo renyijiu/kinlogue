@@ -12,7 +12,6 @@ public enum VaultError: Error, Equatable, Sendable {
     case objectMissing
     case vaultMissing
     case partialInitialization
-    case legacyEncryptedVault
     case vaultIDMismatch
     case mutationConflict
     case ioFailure(Int32)

@@ -4189,12 +4189,12 @@
         }
       }
     },
-    "续页不会覆盖无法识别的内容。若这里是旧版加密资料库，当前简化版不会自动迁移；请保留原目录，等待后续迁移工具。": {
+    "续页不会覆盖无法识别的内容。请保留原目录，或从数据备份恢复。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kinlogue will not overwrite unrecognized content. If this is an older encrypted library, this version will not migrate it automatically. Keep the original folder for a future migration tool."
+            "value": "Kinlogue will not overwrite unrecognized content. Keep the original folder, or restore from a data backup."
           }
         }
       }

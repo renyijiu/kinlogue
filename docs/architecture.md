@@ -71,7 +71,7 @@ Helper 的 descriptor contract、watchdog、资源打包、slice memory、Viewer
 4. 生产资料库根目录是 `~/Library/Application Support/Kinlogue/Vault`；验收根目录是 `~/Library/Application Support/Kinlogue/Acceptance/<runID>/SourceVault`。
 5. 用户接受存储说明后，`LibraryLaunchCoordinator` 取得资料库的单实例 owner，依次收敛未完成的恢复事务、备份捕获副本和已授权的删除，再打开数据库。
 6. `LiveAppServiceEnvironment.makeOpened` 在这一个 `SQLiteLibraryStore` 上组装 `SQLiteReportRepository`、报告 `ImportWorkflow`、`SQLiteDICOMRepository` 与 `DICOMImportWorkflow`、按 presentation 创建的 `DICOMSliceService`、本机 OCR、`LiveLANInboxService`、整库删除和共享生命周期协调器，并由 `AppComposition.makeOpened` 发布给各窗口。
-7. `AppComposition` 同时构造 `BackupSettingsStore`、`LiveBackupService`（它也承担“导出备份到…”）和 restore stack；构造不写任何设置。`SQLiteStartupContext` 在取得 owner 后移除早期加密备份留在 `BackupIdentity` 的本机文件。`AppStartupCoordinator` 负责资料库打开之后的启动次序：恢复收敛、存储就绪、由 composition 持有的 `AppProcessingCoordinator` 在后台恢复中断的报告 OCR，随后启动自动备份调度。启动不校验全部原件；原件在读取时校验，另有空闲时的[完整性巡检](sqlite-storage.md#启动与空闲完整性巡检)。
+7. `AppComposition` 同时构造 `BackupSettingsStore`、`LiveBackupService`（它也承担“导出备份到…”）和 restore stack；构造不写任何设置。`AppStartupCoordinator` 负责资料库打开之后的启动次序：恢复收敛、存储就绪、由 composition 持有的 `AppProcessingCoordinator` 在后台恢复中断的报告 OCR，随后启动自动备份调度。启动不校验全部原件；原件在读取时校验，另有空闲时的[完整性巡检](sqlite-storage.md#启动与空闲完整性巡检)。
 
 ### 备份、导出与整库恢复链
 

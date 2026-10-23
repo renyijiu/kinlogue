@@ -2072,3 +2072,11 @@
 - **测试**：`sqliteLogicalArchiveRestoreReopensAndEditsActualRepositories` 在资料库里加入一段保存的对话，经 ZIP 写出、整根恢复后逐字段相等。合并后主清单 1251 tests / 118 suites（由 `swift test list` 与 `primary-test-shards.rb` 计算）。
 - **验证**：macOS 27.0.1 / Xcode 27.1 / Swift 6.4 上，合并后的完整 `scripts/test.sh` 退出码 0，主清单 1251 tests / 118 suites（由测试内的 `verify-docs.sh` 核对），隔离门禁一并通过；`scripts/lint.sh`、`scripts/verify-docs.sh`、`scripts/privacy-guard.sh`、`scripts/compile-localizations.sh --check` 与 `git diff --check` 通过。完整运行前，合并涉及的备份、对话与断言源码文字的测试套件已过滤运行并通过。签名沙盒 XPC 的 `scripts/verify-assistant-xpc.sh` 没有在合并后重跑。
 - **未验证**：与上一条相同；另外，用户现有资料库若仍是 schema 版本 1、2，升级要经过上述两步，这条路径没有在真实资料库上走过。
+
+## [2026-10-22] cleanup | 首发前删除兼容代码
+
+- **起因**：用户要求在产品发布前整理代码、去掉兼容类代码。
+- **删除**：`LegacyBackupIdentityCleanup` 与 `RuntimeBackupIdentity.legacyIdentityRootURL`（启动时清理早期加密备份留在 `BackupIdentity` 的密钥文件）；从未使用的 `VaultError.legacyEncryptedVault`；改名遗留的类型别名 `LANReportArchiveResult`（即 `LANArchiveOutcome`）、`LANInboxScreenSnapshot`（即 `LANInboxQueueScreen`）和 App 里重导出 `LANSessionLifecycle*` 的 `LANSessionLifecycleMonitor.swift`。
+- **文案**：资料库锁定页不再提“旧版加密资料库”和“后续迁移工具”，改为“请保留原目录，或从数据备份恢复”；中英资源由 `compile-localizations.sh --write` 重新生成。
+- **文档**：`PRIVACY.md`、[`privacy-and-security.md`](privacy-and-security.md)、[`backup-and-restore.md`](backup-and-restore.md)、[`architecture.md`](architecture.md)、[`decisions.md`](decisions.md) 改为“当前版本不读取也不清理 `BackupIdentity`，由用户自行删除”；对无法识别的资料库仍不迁移、覆盖或删除。删去一项清理测试后主清单 1250 tests / 118 suites。
+- **保留未动**：存储格式里的兼容读取（`HealthRecord` 缺省 `revision` 不写出、`SourceField.entryMethod` 为 `nil`、`SourceReference` 无来源标识、`ImportDraftDocument` 缺省抽取版本）会改变资料库与备份数据流的字节，涉及用户现有资料库，需另行决定；锁文件的旧路径键与 CI 基线检查名兼容也未改动。

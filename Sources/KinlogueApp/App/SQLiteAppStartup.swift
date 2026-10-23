@@ -33,8 +33,6 @@ struct SQLiteStartupContext: Sendable {
             try Task.checkCancellation()
             try LibraryParentDirectoryPreparation.ensureParentDirectory(for: identity.sourceVault.rootURL)
             let owner = try SQLiteLibraryOwner(rootURL: identity.sourceVault.rootURL)
-            // Keys and witnesses of the earlier encrypted backups have no use any more.
-            try? LegacyBackupIdentityCleanup.run(rootURL: identity.backupIdentity.legacyIdentityRootURL)
             return try Self(owner: owner, verifier: BackupRestoreVerifier(owner: owner),
                 transaction: BackupRestoreTransaction(owner: owner), lifecycle: LibraryLifecycleCoordinator(),
                 backupSettings: BackupSettingsStore(rootURL: identity.backupIdentity.settingsRootURL))
