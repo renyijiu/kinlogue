@@ -43,6 +43,7 @@ type phoneFlow struct {
 	refreshCancel                                 context.CancelFunc
 	items                                         []library.InboxItem
 	selected                                      []library.InboxSelection
+	selectionAnchor                               string
 	interfaces                                    []macos.LANInterface
 	interfaceID, memberID, title, date            string
 	status                                        app.LANStatus
@@ -117,10 +118,17 @@ func (s *screen) showPhone() {
 	s.phonePage = true
 	s.message = ""
 	s.phone.generation++
+	s.ensurePhoneDate()
 	// No member is preselected: filing a report to the wrong person is easy
 	// to miss, so the Swift picker starts at "Select Family Member…" too.
 	s.startPhoneRefresh()
 	s.refreshPhone()
+}
+
+func (s *screen) ensurePhoneDate() {
+	if s.phone.date == "" {
+		s.phone.date = time.Now().Format("2006-01-02")
+	}
 }
 
 // openReceiver is the Swift "receive from phone" action: it presents the
@@ -226,6 +234,50 @@ func (s *screen) applyPhoneItems(items []library.InboxItem) {
 func (s *screen) phoneSelected(id string) bool {
 	return slices.ContainsFunc(s.phone.selected, func(sel library.InboxSelection) bool { return sel.ID == id })
 }
+
+func (s *screen) selectPhoneItem(item library.InboxItem, mods ui.Modifiers) {
+	if s.busy != "" || item.Status != "reviewable" {
+		return
+	}
+	anchor := slices.IndexFunc(s.phone.items, func(i library.InboxItem) bool { return i.ID == s.phone.selectionAnchor })
+	end := slices.IndexFunc(s.phone.items, func(i library.InboxItem) bool { return i.ID == item.ID })
+	if mods&ui.Shift != 0 && anchor >= 0 && end >= 0 {
+		ids := make(map[string]bool)
+		if mods&ui.Cmd != 0 {
+			for _, sel := range s.phone.selected {
+				ids[sel.ID] = true
+			}
+		}
+		for _, row := range s.phone.items[min(anchor, end) : max(anchor, end)+1] {
+			if row.Status == "reviewable" {
+				ids[row.ID] = true
+			}
+		}
+		if len(ids) > document.MaxSources {
+			s.message = "sources_limit"
+			return
+		}
+		s.phone.selected = slices.DeleteFunc(s.phone.selected, func(sel library.InboxSelection) bool { return !ids[sel.ID] })
+		for _, row := range s.phone.items {
+			if ids[row.ID] && !s.phoneSelected(row.ID) {
+				s.phone.selected = append(s.phone.selected, library.InboxSelection{ID: row.ID, Revision: row.Revision})
+			}
+		}
+	} else if mods&ui.Cmd != 0 {
+		s.togglePhoneItem(item)
+		s.phone.selectionAnchor = item.ID
+		return
+	} else {
+		s.phone.selected = []library.InboxSelection{{ID: item.ID, Revision: item.Revision}}
+		s.phone.selectionAnchor = item.ID
+	}
+	s.phone.notice = nil
+	if !s.phoneSelected(s.phone.preview.ID) {
+		s.clearPhonePreview()
+	}
+	s.ensurePhonePreview()
+}
+
 func (s *screen) togglePhoneItem(item library.InboxItem) {
 	if s.busy != "" || item.Status != "reviewable" {
 		return
@@ -347,6 +399,7 @@ func (s *screen) archivePhone() {
 	if s.phoneBackend == nil || len(s.phone.selected) == 0 || s.phone.memberID == "" || s.composing {
 		return
 	}
+	s.ensurePhoneDate()
 	selected := append([]library.InboxSelection(nil), s.phone.selected...)
 	title := ""
 	if first, ok := s.phoneItem(selected[0].ID); ok {
@@ -376,7 +429,7 @@ func (s *screen) archivePhone() {
 				return
 			}
 			s.phone.selected = nil
-			s.phone.date = ""
+			s.phone.selectionAnchor = ""
 			s.clearPhonePreview()
 			if loadErr == nil {
 				s.apply(data)
@@ -477,6 +530,9 @@ func (s *screen) ensurePhonePreview() {
 func (s *screen) previewPhone(item library.InboxItem, page int) {
 	if s.phoneBackend == nil || item.Status != "reviewable" || page < 1 {
 		return
+	}
+	if s.phone.preview.ID != item.ID || s.phone.preview.Revision != item.Revision {
+		s.phoneZoom, s.phoneRotation = 1, 0
 	}
 	s.phone.previewGeneration++
 	generation := s.phone.previewGeneration

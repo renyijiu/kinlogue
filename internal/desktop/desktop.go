@@ -84,12 +84,27 @@ type screen struct {
 	newMember, deletePrompt, showRaw bool
 	deleteTarget                     string
 	focusSearch                      bool
+	searchCancel                     context.CancelFunc
+	searchBusy                       bool
+	searchGeneration                 uint64
+	sidebarSize, timelineSize        float32
+	summaryHeight, reviewWidth       float32
+	sidebarHidden                    bool
+	originalViewer                   string
+	viewerClose                      func()
+	viewerZoom                       float32
+	viewerRotation                   int
+	viewerViewport                   ui.Rect
+	originalZoom, phoneZoom          float32
+	originalRotation, phoneRotation  int
+	dateMode                         string
 	inboxCount                       int
 	memberName                       string
 	editingConfirmed                 bool
 	selectedReport                   int
 	importPaths                      []string
-	composing                        bool
+	composing, wasComposing          bool
+	defaultAction                    bool
 	saveRequested                    bool
 	navigationRequested              func()
 	shutdownRequested                func()
@@ -113,7 +128,7 @@ var slowAfter = 4 * time.Second
 
 func newScreen(backend Backend, systemLanguage string) *screen {
 	ctx, stop := context.WithCancel(context.Background())
-	result := &screen{backend: backend, ctx: ctx, stop: stop, language: "system", systemLanguage: systemLanguage, memberID: allMembers, page: 1, selectedReport: -1, previewGate: make(chan struct{}, 1)}
+	result := &screen{backend: backend, ctx: ctx, stop: stop, language: "system", systemLanguage: systemLanguage, memberID: allMembers, page: 1, selectedReport: -1, previewGate: make(chan struct{}, 1), sidebarSize: sidebarWidth, timelineSize: timelineWidth, summaryHeight: 280, reviewWidth: 480, originalZoom: 1, phoneZoom: 1}
 	result.phoneBackend, _ = backend.(LANBackend)
 	return result
 }
@@ -138,7 +153,7 @@ func (s *screen) run() error {
 			return mygo.App.Locale()
 		}
 		s.updateChrome()
-		s.win = mygo.NewWindow(mygo.WindowOptions{Title: s.t("app"), Width: 1240, Height: 880, MinWidth: 1080, MinHeight: 700, Content: ui.View(s.view)})
+		s.win = mygo.NewWindow(mygo.WindowOptions{Title: s.t("app"), Width: 1240, Height: 880, MinWidth: 1080, MinHeight: 700, TitleBarStyle: mygo.TitleBarHiddenInset, BackgroundColor: "#FFF8F5", Content: ui.View(s.view)})
 		s.post = s.win.Update
 		s.copyText = mygo.Clipboard.WriteText
 		if s.phoneBackend != nil {
@@ -329,6 +344,7 @@ func (s *screen) load(language bool) {
 	if s.recoveryOnly || s.restartOnly || s.activating {
 		return
 	}
+	s.cancelSearch()
 	member, query := s.memberID, s.query
 	s.job("loading", false, func(ctx context.Context) func() {
 		data, err := s.read(ctx, member, query, language)
@@ -338,29 +354,47 @@ func (s *screen) load(language bool) {
 				return
 			}
 			s.apply(data)
-			s.autoSelect()
 		}
 	})
 }
 
-// autoSelect opens the newest record when a timeline loads with nothing
-// open, so the detail column is never an empty pair of panes.
-func (s *screen) autoSelect() {
-	if s.report.ID != "" || s.phonePage || s.backupPage || s.recoveryOnly || s.restartOnly || s.activating || s.shutdown != nil || len(s.records) == 0 || s.busy != "" {
-		return
+func (s *screen) searchRecords() {
+	if s.searchCancel != nil {
+		s.searchCancel()
 	}
-	id := s.records[0].ID
-	s.job("loading", false, func(ctx context.Context) func() {
-		report, err := s.backend.Get(ctx, id)
-		return func() {
-			// The user may have opened something else or left the timeline.
-			if err != nil || s.report.ID != "" || s.phonePage || s.backupPage {
+	ctx, cancel := context.WithCancel(s.ctx)
+	s.searchCancel = cancel
+	s.searchGeneration++
+	s.searchBusy = true
+	generation, member, query := s.searchGeneration, s.memberID, s.query
+	go func() {
+		defer cancel()
+		id := member
+		if id == allMembers {
+			id = ""
+		}
+		records, err := s.backend.Search(ctx, id, query)
+		s.post(func() {
+			if s.ctx.Err() != nil || s.closed || generation != s.searchGeneration || member != s.memberID || query != s.query || s.phonePage || s.backupPage || s.activating || s.restartOnly {
 				return
 			}
-			s.accept(report)
-			s.preview(1)
-		}
-	})
+			s.searchBusy = false
+			if err != nil {
+				s.message = "load_failed"
+				return
+			}
+			s.records = records
+		})
+	}()
+}
+
+func (s *screen) cancelSearch() {
+	s.searchGeneration++
+	s.searchBusy = false
+	if s.searchCancel != nil {
+		s.searchCancel()
+		s.searchCancel = nil
+	}
 }
 
 func (s *screen) dirty() bool {
@@ -401,7 +435,7 @@ func (s *screen) consumeRequests() bool {
 		s.requestShutdown(shutdown)
 	case navigation != nil:
 		// Like a Swift sheet, the review and receiver sheets block navigation.
-		if !s.modalOpen() && !s.reviewOpen() && !s.phone.receiverOpen {
+		if !s.modalOpen() && !s.reviewOpen() && !s.phone.receiverOpen && s.backup.step == "" && s.originalViewer == "" {
 			s.leave(navigation)
 		}
 	case save:
@@ -413,7 +447,7 @@ func (s *screen) consumeRequests() bool {
 }
 
 func (s *screen) saveShortcut() {
-	if s.busy != "" || s.modalOpen() || s.composing || s.backupPage || s.recoveryOnly || s.restartOnly || s.activating {
+	if s.busy != "" || s.modalOpen() || s.composing || s.backupPage || s.recoveryOnly || s.restartOnly || s.activating || s.originalViewer != "" {
 		return
 	}
 	if s.report.Status == "review" || s.editingConfirmed {
@@ -498,6 +532,11 @@ func (s *screen) selectMember(id string) {
 }
 
 func (s *screen) clearReport() {
+	s.cancelSearch()
+	s.clearReportView()
+}
+
+func (s *screen) clearReportView() {
 	s.previewGeneration++
 	if s.previewCancel != nil {
 		s.previewCancel()
@@ -507,11 +546,14 @@ func (s *screen) clearReport() {
 	s.sourcePage, s.sourceText = 0, ""
 	s.sourceID, s.cachedSourceID, s.editingConfirmed = "", "", false
 	s.previewPaused = false
+	s.originalViewer, s.dateMode = "", ""
+	s.originalZoom, s.originalRotation = 1, 0
 }
 
 func (s *screen) accept(report library.Report) {
 	previousReport, previousSource := s.report.ID, s.sourceID
-	s.report, s.edit = report, cloneEdit(report.Review)
+	s.report = report
+	s.resetEdit()
 	s.found, s.located = candidate.Extract(s.extractions()), nil
 	s.sourceID = ""
 	if previousReport == report.ID {
@@ -659,6 +701,7 @@ func (s *screen) selectSource(id string) {
 	for _, source := range s.report.Sources {
 		if source.ID == id {
 			s.sourceID = id
+			s.originalZoom, s.originalRotation = 1, 0
 			s.preview(1)
 			return
 		}
@@ -678,14 +721,27 @@ func (s *screen) moveSource(delta int) {
 
 func (s *screen) startEditing() {
 	if s.report.Status == "confirmed" && s.busy == "" {
-		s.edit = cloneEdit(s.report.Review)
+		s.resetEdit()
 		s.editingConfirmed = true
 		s.message = ""
 	}
 }
 
+func (s *screen) resetEdit() {
+	s.edit = cloneEdit(s.report.Review)
+	s.dateMode = ""
+	if s.edit.Date != "" {
+		s.dateMode = "manual"
+	}
+}
+
+func (s *screen) discardEditing() {
+	s.resetEdit()
+	s.editingConfirmed, s.message = false, ""
+}
+
 func (s *screen) cancelEditing() {
-	s.leave(func() { s.edit = cloneEdit(s.report.Review); s.editingConfirmed = false; s.message = "" })
+	s.leave(s.discardEditing)
 }
 
 func (s *screen) initialText() string {
@@ -714,7 +770,7 @@ func (s *screen) open(id string) {
 					s.message = "load_failed"
 					return
 				}
-				s.clearReport()
+				s.clearReportView()
 				s.accept(report)
 				s.message = ""
 				s.preview(1)

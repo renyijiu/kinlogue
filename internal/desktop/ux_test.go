@@ -22,30 +22,15 @@ func confirmedTimeline(t *testing.T, member string) (*screen, *fakeBackend, func
 	return s, f, drain
 }
 
-func TestTimelineOpensNewestRecordWhenNothingIsOpen(t *testing.T) {
-	s, f, drain := confirmedTimeline(t, allMembers)
-	s.autoSelect()
-	drain()
-	if s.report.ID != "report-a" || s.report.Status != "confirmed" {
-		t.Fatal("newest record was not opened")
-	}
-	// An open record is never replaced by a later load.
-	f.report.ID = "report-b"
-	s.autoSelect()
-	if s.busy != "" || s.report.ID != "report-a" {
-		t.Fatal("auto selection replaced the open record")
-	}
-}
-
-func TestEmptyDetailIsOneState(t *testing.T) {
+func TestEmptyDetailKeepsSummaryAndOriginalPanes(t *testing.T) {
 	s, _, _ := confirmedTimeline(t, allMembers)
 	tt := ui.NewTester(s.view, 1240, 900)
-	if !tt.HasText(s.t("select_record")) || tt.HasText(s.t("original_placeholder")) {
-		t.Fatal("empty detail must be a single state without an empty original pane")
+	if !tt.HasText(s.t("select_record")) || !tt.HasText(s.t("original_placeholder")) {
+		t.Fatal("empty detail must retain both Swift summary and original panes")
 	}
 }
 
-func TestMemberChipOnlyInAllRecords(t *testing.T) {
+func TestMemberChipRemainsInMemberTimeline(t *testing.T) {
 	count := func(member string) int {
 		s, _, _ := confirmedTimeline(t, member)
 		tt := ui.NewTester(s.view, 1240, 900)
@@ -59,13 +44,13 @@ func TestMemberChipOnlyInAllRecords(t *testing.T) {
 	}
 	// The sidebar row counts twice, as its label and its visible text.
 	// All Records: the sidebar row plus a chip on each of the two cards.
-	// A member's timeline: the sidebar row and the toolbar title only.
-	if all, own := count(allMembers), count("member-a"); all != 4 || own != 3 {
+	// A member's timeline also keeps the chips, plus its toolbar title.
+	if all, own := count(allMembers), count("member-a"); all != 4 || own != 5 {
 		t.Fatalf("member chips: all records %d, own timeline %d", all, own)
 	}
 }
 
-func TestDetailHeaderKeepsEditAndMovesOtherActionsToMenu(t *testing.T) {
+func TestDetailHeaderKeepsSwiftEditDeleteAndDateOrder(t *testing.T) {
 	s, f, _ := testScreen(t)
 	f.report.Status = "confirmed"
 	f.report.Review.Date = "2025-11-22"
@@ -74,16 +59,15 @@ func TestDetailHeaderKeepsEditAndMovesOtherActionsToMenu(t *testing.T) {
 	if _, ok := tt.Find(s.t("edit_record")); !ok {
 		t.Fatal("Edit must stay visible")
 	}
-	if tt.HasText(s.t("delete_report")) || tt.HasText(s.t("export")) {
-		t.Fatal("export and delete belong in the more menu")
+	edit, _ := tt.Find(s.t("edit_record"))
+	del, ok := tt.Find(s.t("delete_report"))
+	if !ok || del.X <= edit.X {
+		t.Fatal("Delete must be visible immediately after Edit")
 	}
 	if !tt.HasText("November 22, 2025") {
 		t.Fatal("date belongs under the title")
 	}
-	if err := tt.Click(s.t("more_actions")); err != nil {
-		t.Fatal(err)
-	}
-	if err := tt.ChooseMenuItem(s.t("delete_report")); err != nil {
+	if err := tt.Click(s.t("delete_report")); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -92,7 +76,7 @@ func TestDetailHeaderKeepsEditAndMovesOtherActionsToMenu(t *testing.T) {
 	}
 }
 
-func TestSidebarNamesEachWaitingDraft(t *testing.T) {
+func TestSidebarUsesSwiftWaitingDraftLabels(t *testing.T) {
 	s, _, _ := testScreen(t)
 	s.clearReport()
 	s.drafts = []library.Report{
@@ -100,18 +84,24 @@ func TestSidebarNamesEachWaitingDraft(t *testing.T) {
 		{ID: "draft-b", Status: "review", FileName: "synthetic-b.pdf"},
 	}
 	tt := ui.NewTester(s.view, 1240, 900)
-	if !tt.HasText("Synthetic blood test") || !tt.HasText("synthetic-b.pdf") || !tt.HasText(s.t("awaiting_review_count", 2)) {
-		t.Fatal("waiting drafts are not distinguishable")
+	if tt.HasText("Synthetic blood test") || tt.HasText("synthetic-b.pdf") || !tt.HasText(s.t("drafts")) {
+		t.Fatal("waiting drafts must use the Swift section and status labels")
 	}
 }
 
-func TestSuccessMessagesBecomeToasts(t *testing.T) {
+func TestSuccessMessagesRequireAcknowledgement(t *testing.T) {
 	s, _, _ := confirmedTimeline(t, allMembers)
 	s.message = "exported"
 	tt := ui.NewTester(s.view, 1240, 900)
 	tt.Frame()
+	if s.message != "exported" || !tt.HasText(s.t("exported")) {
+		t.Fatal("a successful result must remain until acknowledged")
+	}
+	if err := tt.Click(s.t("ok")); err != nil {
+		t.Fatal(err)
+	}
 	if s.message != "" {
-		t.Fatal("a shown success toast must not linger as a status line")
+		t.Fatal("acknowledging a result did not dismiss it")
 	}
 	s.message = "export_failed"
 	tt.Frame()
@@ -140,19 +130,25 @@ func TestCommandReturnConfirmsReview(t *testing.T) {
 	}
 }
 
-func TestDateFieldChoosesAndClearsWithoutTyping(t *testing.T) {
+func TestTimelineDateMenuChoosesManualAndUnknown(t *testing.T) {
 	s, f, _ := testScreen(t)
 	f.report.Review.Date = ""
 	s.accept(f.report)
 	tt := ui.NewTester(s.view, 1240, 900)
-	if err := tt.Click(s.t("date_choose")); err != nil {
+	if err := tt.Click(s.t("unknown_date")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click(s.t("date_manual")); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	if s.edit.Date != time.Now().Format("2006-01-02") {
 		t.Fatalf("choosing a date did not set today: %q", s.edit.Date)
 	}
-	if err := tt.Click(s.t("date_clear")); err != nil {
+	if err := tt.Click(s.t("date_manual")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click(s.t("unknown_date")); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -161,13 +157,13 @@ func TestDateFieldChoosesAndClearsWithoutTyping(t *testing.T) {
 	}
 }
 
-func TestPhoneArchiveBarWaitsForSelectionAndNoMemberIsPreselected(t *testing.T) {
+func TestPhoneArchiveBarRemainsVisibleWithoutPreselectingMember(t *testing.T) {
 	s, _, _ := phoneScreen(t)
 	s.phone.memberID = ""
 	s.showPhone()
 	tt := ui.NewTester(s.view, 1240, 900)
-	if tt.HasText(s.t("phone_archive")) || !tt.HasText(s.t("phone_select_hint")) {
-		t.Fatal("archive form must wait for a selection")
+	if !tt.HasText(s.t("phone_archive")) || s.phone.memberID != "" {
+		t.Fatal("archive form must remain visible without choosing a member")
 	}
 	s.togglePhoneItem(s.phone.items[0])
 	tt.Frame()

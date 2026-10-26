@@ -29,7 +29,7 @@ func TestConfirmedEditingIsExplicitAndUpdatesInsteadOfReconfirming(t *testing.T)
 	if err := tt.Click("Edit"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.Click("Report Title"); err != nil {
+	if err := tt.Click("Title"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Key(ui.Cmd, ui.KeyA)
@@ -165,7 +165,7 @@ func TestNewMemberAutofocusAndEnter(t *testing.T) {
 	s, f, drain := testScreen(t)
 	s.newMember = true
 	tt := ui.NewTester(s.view, 1240, 1000)
-	if !tt.Focused("Member name") {
+	if !tt.Focused("Display Name") {
 		t.Fatal("member name must receive focus")
 	}
 	tt.Type("Synthetic keyboard member")
@@ -308,7 +308,7 @@ func TestExportCancelIsNormalAndOnlyConfirmedSnapshotCanExport(t *testing.T) {
 }
 
 func TestNativeSaveIncludesTextQueuedBeforeTheFrame(t *testing.T) {
-	for _, label := range []string{"Report Title", "Findings (Verbatim)", "My Notes (Optional)"} {
+	for _, label := range []string{"Title", "Findings (Verbatim)", "My Notes (Optional)"} {
 		t.Run(label, func(t *testing.T) {
 			s, f, drain := testScreen(t)
 			saveBeforeFrame := false
@@ -330,7 +330,7 @@ func TestNativeSaveIncludesTextQueuedBeforeTheFrame(t *testing.T) {
 			drain()
 			var got string
 			switch label {
-			case "Report Title":
+			case "Title":
 				got = f.saved.Title
 			case "Findings (Verbatim)":
 				got = f.saved.Text
@@ -354,7 +354,7 @@ func TestNativeSaveWaitsForPendingComposition(t *testing.T) {
 		}
 		s.view(c)
 	}, 1240, 1100)
-	if err := tt.Click("Report Title"); err != nil {
+	if err := tt.Click("Title"); err != nil {
 		t.Fatal(err)
 	}
 	saveBeforeFrame = true
@@ -404,7 +404,11 @@ func TestNativeNavigationWaitsForPendingFirstEdit(t *testing.T) {
 					}
 					s.view(c)
 				}, 1240, 1100)
-				if err := clickField(tt, "My Notes (Optional)"); err != nil {
+				notesLabel := "My Notes (Optional)"
+				if confirmed {
+					notesLabel = "My Notes"
+				}
+				if err := clickField(tt, notesLabel); err != nil {
 					t.Fatal(err)
 				}
 				beforeFrame = true
@@ -536,7 +540,7 @@ func TestSaveCapturesSourceOrderBeforeBackgroundWrite(t *testing.T) {
 }
 
 func TestEditorCommandsAndCompositionStayScopedToCurrentReport(t *testing.T) {
-	for _, label := range []string{"Report Title", "Findings (Verbatim)", "My Notes (Optional)"} {
+	for _, label := range []string{"Title", "Findings (Verbatim)", "My Notes (Optional)"} {
 		t.Run(label, func(t *testing.T) {
 			s, _, _ := testScreen(t)
 			tt := ui.NewTester(s.view, 1240, 1100)
@@ -577,7 +581,7 @@ func TestDiscardedConfirmedEditDoesNotLeakIntoNextUndoHistory(t *testing.T) {
 	s.accept(f.report)
 	tt := ui.NewTester(s.view, 1240, 1100)
 	_ = tt.Click("Edit")
-	_ = tt.Click("Report Title")
+	_ = tt.Click("Title")
 	tt.Command("selectAll")
 	tt.Type("Synthetic discarded title")
 	tt.Command("selectAll")
@@ -586,7 +590,7 @@ func TestDiscardedConfirmedEditDoesNotLeakIntoNextUndoHistory(t *testing.T) {
 	tt.Frame()
 	_ = tt.Click("Discard changes")
 	_ = tt.Click("Edit")
-	_ = tt.Click("Report Title")
+	_ = tt.Click("Title")
 	tt.Command("undo")
 	if s.edit.Title != "Synthetic report" || s.dirty() {
 		t.Fatal("new editing session inherited discarded undo history")

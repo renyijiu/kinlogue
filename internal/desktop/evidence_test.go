@@ -131,6 +131,7 @@ func TestUIEvidence(t *testing.T) {
 		s, _, drain := testScreen(t)
 		s.clearReport()
 		s.backend = service
+		s.phoneBackend = service
 		s.load(true)
 		drain()
 		s.language = "zh-Hans"
@@ -155,6 +156,10 @@ func TestUIEvidence(t *testing.T) {
 	s.startEditing()
 	settle(tt, drain)
 	write(tt, "03-confirmed-edit")
+	s.editingConfirmed = false
+	s.originalViewer = "report"
+	settle(tt, drain)
+	write(tt, "11-original-viewer")
 
 	s, drain, tt = screenFor()
 	s.open(draft)
@@ -171,6 +176,18 @@ func TestUIEvidence(t *testing.T) {
 	s.showBackup()
 	settle(tt, drain)
 	write(tt, "06-settings")
+	s.backup.step = "restore_code"
+	settle(tt, drain)
+	write(tt, "13-restore-code-empty")
+	s.backup.step = "prepared"
+	s.backup.prepared = &app.RestorePreparation{Summary: library.SnapshotSummary{Members: 4, Reports: 9, Sources: 9, Inbox: 2, OriginalBytes: 2048}}
+	settle(tt, drain)
+	write(tt, "14-restore-summary")
+
+	s, drain, tt = screenFor()
+	s.newMember = true
+	settle(tt, drain)
+	write(tt, "12-add-member")
 
 	p, f, _ := phoneScreen(t)
 	p.language = "zh-Hans"

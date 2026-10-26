@@ -99,7 +99,7 @@ func testScreen(t *testing.T) (*screen, *fakeBackend, func()) {
 	drain := func() {
 		t.Helper()
 		deadline := time.After(3 * time.Second)
-		for s.busy != "" || s.previewBusy {
+		for s.busy != "" || s.previewBusy || s.searchBusy {
 			select {
 			case fn := <-updates:
 				fn()

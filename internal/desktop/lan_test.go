@@ -136,13 +136,91 @@ func TestPhoneSelectionOrderAndRevisionFreeze(t *testing.T) {
 		t.Fatal("refresh silently adopted changed revision")
 	}
 }
+
+func TestPhoneRowSelectionMatchesNativeListModifiers(t *testing.T) {
+	s, f, _ := phoneScreen(t)
+	f.items = append(f.items,
+		library.InboxItem{ID: "inbox-c", FileName: "synthetic-c.pdf", Status: "failed", Revision: 3},
+		library.InboxItem{ID: "inbox-d", FileName: "synthetic-d.pdf", Status: "reviewable", Revision: 4})
+	s.phone.items = f.items
+	tt := ui.NewTester(s.view, 1240, 900)
+	click := func(index int, modifiers ui.Modifiers) {
+		t.Helper()
+		item := f.items[index]
+		if err := tt.ClickWith(modifiers, s.t("phone_row_label", item.FileName, s.t(phoneStatusKey(item.Status)))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := func(want ...string) {
+		t.Helper()
+		got := make([]string, len(s.phone.selected))
+		for i, item := range s.phone.selected {
+			got[i] = item.ID
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("selected IDs: got %v, want %v", got, want)
+		}
+	}
+	click(0, 0)
+	click(1, 0)
+	ids("inbox-b")
+	click(0, ui.Cmd)
+	ids("inbox-b", "inbox-a")
+	click(1, ui.Cmd)
+	ids("inbox-a")
+	click(0, 0)
+	click(3, ui.Shift)
+	ids("inbox-a", "inbox-b", "inbox-d")
+}
+
+func TestPhoneArchiveFormShowsDefaultDateBeforeSelection(t *testing.T) {
+	s, _, _ := phoneScreen(t)
+	s.phone.memberID = ""
+	tt := ui.NewTester(s.view, 1240, 900)
+	if !tt.HasText(s.t("phone_archive")) || !tt.HasText(s.t("phone_selected_summary", 0)) {
+		t.Fatal("the archive form must remain visible before selection")
+	}
+	if s.phone.date != time.Now().Format("2006-01-02") || s.phone.memberID != "" {
+		t.Fatal("phone filing should default to today without preselecting a member")
+	}
+}
+
+func TestPhonePreviewDoesNotChangeFilingSelection(t *testing.T) {
+	for _, hasSelection := range []bool{false, true} {
+		t.Run(map[bool]string{false: "empty", true: "selected"}[hasSelection], func(t *testing.T) {
+			s, f, _ := phoneScreen(t)
+			if hasSelection {
+				s.togglePhoneItem(f.items[0])
+			}
+			selected := append([]library.InboxSelection(nil), s.phone.selected...)
+			tt := ui.NewTester(s.view, 1240, 900)
+			if err := tt.Click(s.t("phone_preview_item", f.items[1].FileName)); err != nil {
+				t.Fatal(err)
+			}
+			tt.Frame()
+			if s.originalViewer != "phone" || !slices.Equal(selected, s.phone.selected) {
+				t.Fatal("preview must open independently of the filing selection")
+			}
+			tt.Key(0, ui.KeyEscape)
+			tt.Frame()
+			if s.originalViewer != "" || !slices.Equal(selected, s.phone.selected) {
+				t.Fatal("closing the viewer must retain the filing selection")
+			}
+			if hasSelection && s.phone.preview.ID != f.items[0].ID {
+				t.Fatal("the inline preview must return to a selected original after closing the viewer")
+			}
+		})
+	}
+}
+
 func TestPhoneArchiveFailureKeepsSelection(t *testing.T) {
 	s, f, drain := phoneScreen(t)
+	s.phone.date = "2025-11-22"
 	f.archiveError = errors.New("synthetic failure")
 	s.togglePhoneItem(s.phone.items[0])
 	s.archivePhone()
 	drain()
-	if len(s.phone.selected) != 1 || !s.phonePage || s.message != "phone_archive_failed" {
+	if len(s.phone.selected) != 1 || !s.phonePage || s.message != "phone_archive_failed" || s.phone.date != "2025-11-22" {
 		t.Fatal("failed archive lost selection")
 	}
 	f.archiveError = nil
@@ -155,6 +233,9 @@ func TestPhoneArchiveFailureKeepsSelection(t *testing.T) {
 	}
 	if f.archiveEdit.MemberID != "member-a" || f.archiveEdit.Title != "synthetic-a.pdf" || f.archived[0].Revision != 1 {
 		t.Fatal("archive did not freeze selection and metadata")
+	}
+	if s.phone.date != "2025-11-22" || f.archiveEdit.Date != "2025-11-22" {
+		t.Fatal("filing must use and retain the chosen report date")
 	}
 	tt := ui.NewTester(s.view, 1240, 900)
 	if !tt.HasText(s.t("phone_notice_added")) {
@@ -180,27 +261,35 @@ func TestPhoneStartRequiresExplicitTrust(t *testing.T) {
 
 func TestPhoneMinimumWindowLayout(t *testing.T) {
 	for _, lang := range []string{"en", "zh-Hans"} {
-		s, f, _ := phoneScreen(t)
-		s.phone.interfaces, _ = f.LANInterfaces(context.Background())
-		s.phone.interfaceID = phoneInterfaceID(s.phone.interfaces[0])
-		s.togglePhoneItem(s.phone.items[0])
-		s.language = lang
-		tt := ui.NewTester(s.view, 1080, 700)
-		for _, key := range []string{"phone_uploads", "phone_receive", "phone_queue_title", "phone_delete_selected", "phone_archive", "phone_as_one_report", "phone_page_order"} {
-			box, ok := tt.Find(s.t(key))
-			if !ok || box.X < 0 || box.Y < 0 || box.X+box.W > 1081 || box.Y+box.H > 701 {
-				t.Fatalf("minimum window control clipped: %s", key)
+		for selectionCount := range 3 {
+			s, f, _ := phoneScreen(t)
+			s.phone.interfaces, _ = f.LANInterfaces(context.Background())
+			s.phone.interfaceID = phoneInterfaceID(s.phone.interfaces[0])
+			for _, item := range s.phone.items[:selectionCount] {
+				s.togglePhoneItem(item)
 			}
-		}
-		if dir := os.Getenv("KINLOGUE_LAN_UI_EVIDENCE"); dir != "" {
-			file, err := os.Create(filepath.Join(dir, "phone-"+lang+".png"))
-			if err != nil {
-				t.Fatal(err)
+			s.language = lang
+			tt := ui.NewTester(s.view, 1080, 700)
+			keys := []string{"phone_uploads", "phone_receive", "phone_queue_title", "phone_delete_selected", "phone_archive", "phone_file_for", "phone_report_date"}
+			if selectionCount > 0 {
+				keys = append(keys, "phone_as_one_report", "phone_page_order")
 			}
-			err = png.Encode(file, tt.Image())
-			closeErr := file.Close()
-			if err != nil || closeErr != nil {
-				t.Fatal("could not write synthetic UI evidence")
+			for _, key := range keys {
+				box, ok := tt.Find(s.t(key))
+				if !ok || box.X < 0 || box.Y < 0 || box.X+box.W > 1081 || box.Y+box.H > 701 {
+					t.Fatalf("%s, %d selected: minimum window control clipped: %s", lang, selectionCount, key)
+				}
+			}
+			if dir := os.Getenv("KINLOGUE_LAN_UI_EVIDENCE"); dir != "" && selectionCount == 1 {
+				file, err := os.Create(filepath.Join(dir, "phone-"+lang+".png"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = png.Encode(file, tt.Image())
+				closeErr := file.Close()
+				if err != nil || closeErr != nil {
+					t.Fatal("could not write synthetic UI evidence")
+				}
 			}
 		}
 	}
@@ -382,6 +471,7 @@ func TestPhoneReceiverSheetStartsAndClosesWithoutStopping(t *testing.T) {
 		t.Fatal("receive action did not present the receiver sheet")
 	}
 	_ = tt.Click(s.t("phone_start"))
+	tt.Key(0, ui.KeyEnter)
 	if f.starts != 0 {
 		t.Fatal("started before the trusted network confirmation")
 	}
@@ -389,17 +479,13 @@ func TestPhoneReceiverSheetStartsAndClosesWithoutStopping(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if err := tt.Click(s.t("phone_start")); err != nil {
-		t.Fatal(err)
-	}
+	tt.Key(0, ui.KeyEnter)
 	drain()
 	tt.Frame()
 	if f.starts != 1 || !s.phone.status.Active || !tt.HasText("http://192.0.2.2:1234/") {
 		t.Fatal("receiver did not start from the sheet")
 	}
-	if err := tt.Click(s.t("close")); err != nil {
-		t.Fatal(err)
-	}
+	tt.Key(0, ui.KeyEscape)
 	tt.Frame()
 	if s.phone.receiverOpen || !s.phone.status.Active || f.stops != 0 || !tt.HasText(s.t("phone_receiving")) {
 		t.Fatal("closing the sheet must keep receiving, like Swift")

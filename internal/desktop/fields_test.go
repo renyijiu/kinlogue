@@ -16,8 +16,8 @@ import (
 // since it gained the verbatim fields, so the fields at its end need scrolling
 // into view first.
 func clickField(tt *ui.Tester, label string) error {
-	if label == "My Notes (Optional)" || label == "Conclusion (Verbatim)" {
-		if title, ok := tt.Find("Report Title"); ok {
+	if label == "My Notes (Optional)" || label == "My Notes" || label == "Conclusion (Verbatim)" {
+		if title, ok := tt.Find("Title"); ok {
 			tt.Scroll(title.X+title.W/2, title.Y+title.H/2, 0, 2000)
 		}
 	}
@@ -225,18 +225,24 @@ func TestPrintedDatesAreOfferedAndNeverChosenAutomatically(t *testing.T) {
 	f.report.Sources = []library.Source{labeledSource("source-a", "Synthetic Hospital")}
 	s.accept(f.report)
 	tt := ui.NewTester(s.view, 1240, 900)
-	if s.edit.Date != "" || !tt.HasText("Study Date 2026-01-02") || !tt.HasText("Report Date 2026-01-03") {
-		t.Fatal("printed dates must be offered while the date stays unknown")
+	if s.edit.Date != "" || tt.HasText("January 3, 2026 · Report Date") {
+		t.Fatal("dates must stay in the closed menu until the user chooses")
 	}
-	if err := tt.Click("Report Date 2026-01-03"); err != nil {
+	if err := tt.Click(s.t("unknown_date")); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("January 2, 2026 · Study Date") {
+		t.Fatal("detected date menu lost its source category")
+	}
+	if err := tt.Click("January 3, 2026 · Report Date"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	if s.edit.Date != "2026-01-03" || !s.dirty() {
 		t.Fatalf("choosing a printed date did not set it: %q", s.edit.Date)
 	}
-	if tt.HasText("Report Date 2026-01-03") || !tt.HasText("Study Date 2026-01-02") {
-		t.Fatal("the chosen date must leave the offers and the other stay")
+	if !tt.HasText("January 3, 2026 · Report Date") || tt.HasText(s.t("manual_date")) {
+		t.Fatal("a detected selection must not be presented as a manual date")
 	}
 }
 

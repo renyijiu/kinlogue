@@ -11,6 +11,7 @@ import (
 // phoneQueue is the Swift LANInboxView: header with the receive action, the
 // pending list, and the archive bar at the bottom.
 func (s *screen) phoneQueue(c *ui.Context) {
+	s.ensurePhoneDate()
 	ui.Column(c).Fill().Gap(0).Children(func() {
 		ui.Column(c).FillWidth().Padding(16).Gap(10).Children(func() {
 			ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
@@ -80,50 +81,38 @@ func (s *screen) phoneQueue(c *ui.Context) {
 	})
 }
 
-// phoneRow mirrors LANInboxItemRow: state icon, name, state/size/time, and
-// preview, retry and delete actions. Selecting a row adds it to the report.
 func (s *screen) phoneRow(c *ui.Context, item library.InboxItem) {
 	selected := s.phoneSelected(item.ID)
-	ui.Row(c).FillWidth().Padding(2, 8).AlignItems(ui.Center).Background(c.Theme().Background).Children(func() {
-		row := ui.ButtonBase(c.Key(item.ID)).Label(s.t("phone_row_label", item.FileName, s.t(phoneStatusKey(item.Status)))).Selected(selected).Grow(1).MinWidth(0).Padding(8).Radius(8).Gap(10).AlignItems(ui.Center).Disabled(s.busy != "" || item.Status != "reviewable")
-		if selected {
-			row.Background(tokenContainer)
-		} else if row.Hovered() && item.Status == "reviewable" {
+	background := c.Theme().Background
+	if selected {
+		background = tokenContainer
+	}
+	ui.Row(c).FillWidth().Padding(2, 8).AlignItems(ui.Center).Background(background).Children(func() {
+		row := ui.ButtonBase(c.Key(item.ID)).Label(s.t("phone_row_label", item.FileName, s.t(phoneStatusKey(item.Status)))).Selected(selected).Background(background).TextColor(c.Theme().Text).Grow(1).MinWidth(0).Padding(8).Radius(8).Gap(10).AlignItems(ui.Center).Disabled(s.busy != "" || item.Status != "reviewable")
+		if !selected && row.Hovered() && item.Status == "reviewable" {
 			row.Background(tokenHover)
 		}
 		row.Children(func() {
-			if item.Status == "reviewable" {
-				// A visible check circle shows that rows can be selected, and
-				// which are, without relying on the row tint alone.
-				circle := ui.Box(c).Size(18, 18).Shrink(0).Radius(9).Border(1.5, c.Theme().Border).Center()
-				if selected {
-					circle.Background(c.Theme().Accent).Border(1.5, c.Theme().Accent)
-				}
-				circle.Children(func() {
-					if selected {
-						icon(c, iconTick, 12, ui.Hex("#FFFFFF"))
-					}
-				})
-			} else {
-				glyph, color := phoneStatusIcon(item.Status), c.Theme().TextMuted
-				switch item.Status {
-				case "failed":
-					color = tokenDanger
-				case "unsupported":
-					color = ui.Hex("#B8661F")
-				}
-				icon(c, glyph, 18, color)
+			glyph, color := phoneStatusIcon(item.Status), c.Theme().TextMuted
+			switch item.Status {
+			case "reviewable":
+				color = c.Theme().Accent
+			case "failed":
+				color = tokenDanger
+			case "unsupported":
+				color = ui.Hex("#B8661F")
 			}
+			icon(c, glyph, 18, color)
 			ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
 				ui.Text(c, item.FileName).TextColor(c.Theme().Text).MaxLines(2)
 				ui.Text(c, s.t(phoneStatusKey(item.Status))+"  "+s.formatBytes(item.ByteCount)+"  "+s.formatReceived(item.CreatedAt)).FontSize(11).TextColor(c.Theme().TextMuted).SingleLine()
 			})
 		})
 		if row.Clicked() {
-			s.togglePhoneItem(item)
+			s.selectPhoneItem(item, row.ClickModifiers())
 		}
 		if item.Status == "reviewable" && s.iconButton(c, iconEye, s.t("phone_preview_item", item.FileName), s.busy != "") {
-			s.previewPhone(item, 1)
+			s.showPhoneOriginal(item.ID)
 		}
 		if (item.Status == "stored" || item.Status == "failed" || item.Status == "unsupported") && s.iconButton(c, iconRetry, s.t("phone_retry_item", item.FileName), s.busy != "") {
 			s.retryPhone(item)
@@ -138,15 +127,6 @@ func (s *screen) phoneRow(c *ui.Context, item library.InboxItem) {
 
 func (s *screen) phoneArchiveBar(c *ui.Context) {
 	divider(c, false)
-	if len(s.phone.selected) == 0 {
-		// The archive form appears once something is selected; until then a
-		// single line explains how to start, leaving room for the queue.
-		ui.Row(c).FillWidth().Padding(12, 16).Gap(8).AlignItems(ui.Center).Background(tokenContainer).Children(func() {
-			icon(c, iconTick, 14, c.Theme().TextMuted)
-			ui.Text(c, s.t("phone_select_hint")).FontSize(12).TextColor(c.Theme().TextMuted).MaxLines(2)
-		})
-		return
-	}
 	ui.Column(c).FillWidth().Gap(10).Padding(12).Background(tokenContainer).Children(func() {
 		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, s.t("phone_selected_summary", len(s.phone.selected))).TextColor(c.Theme().TextMuted).Grow(1).MinWidth(0).MaxLines(2)
@@ -159,7 +139,12 @@ func (s *screen) phoneArchiveBar(c *ui.Context) {
 			options = append(options, choice{member.ID, member.Name})
 		}
 		ui.Field(c, s.t("phone_file_for"), func() { picker(c, &s.phone.memberID, options, s.t("phone_file_for"), s.busy != "") }).FillWidth()
-		ui.Field(c, s.t("phone_report_date"), func() { s.dateField(c, &s.phone.date, s.t("phone_report_date"), s.busy != "") }).FillWidth()
+		ui.Field(c, s.t("phone_report_date"), func() {
+			date, _ := time.Parse("2006-01-02", s.phone.date)
+			if ui.DateInput(c, &date).Label(s.t("phone_report_date")).Disabled(s.busy != "").Changed() {
+				s.phone.date = date.Format("2006-01-02")
+			}
+		}).FillWidth()
 		ui.Row(c).FillWidth().Children(func() {
 			ui.Box(c).Grow(1)
 			if ui.PrimaryButton(c, s.t("phone_archive")).Disabled(s.busy != "" || len(s.phone.selected) == 0 || s.phone.memberID == "").Clicked() {
@@ -181,7 +166,7 @@ func (s *screen) phoneSelection(c *ui.Context) {
 		return
 	}
 	ui.Scroll(c).Fill().Children(func() {
-		ui.Column(c).FillWidth().Padding(24).Gap(16).Children(func() {
+		ui.Column(c).FillWidth().Padding(24).Gap(18).Children(func() {
 			ui.Column(c).Gap(4).Children(func() {
 				ui.Text(c, s.t("phone_as_one_report")).FontSize(21).Bold()
 				ui.Text(c, s.t("phone_order_summary", len(s.phone.selected))).TextColor(c.Theme().TextMuted)
@@ -190,12 +175,17 @@ func (s *screen) phoneSelection(c *ui.Context) {
 			ui.Text(c, s.t("phone_page_order")).Bold()
 			for index, selected := range s.phone.selected {
 				item, _ := s.phoneItem(selected.ID)
-				ui.Row(c.Key(selected.ID)).FillWidth().Gap(10).AlignItems(ui.Center).Padding(6, 8).Radius(8).Children(func() {
-					ui.Text(c, fmt.Sprint(index+1)).FontSize(12).TextColor(c.Theme().TextMuted).Width(22)
-					b := ui.ButtonBase(c).Label(s.t("phone_view_original", index+1)).Grow(1).MinWidth(0).Padding(4, 6).Radius(6)
+				row := ui.Row(c.Key(selected.ID)).FillWidth().Gap(12).AlignItems(ui.Center).Padding(6, 8).Radius(8)
+				if s.phone.preview.ID == selected.ID {
+					row.Background(tokenContainer)
+				}
+				row.Children(func() {
+					ui.Text(c, fmt.Sprint(index+1)).FontSize(12).TextColor(c.Theme().TextMuted).Width(24)
+					background := c.Theme().Background
 					if s.phone.preview.ID == selected.ID {
-						b.Background(tokenContainer)
+						background = tokenContainer
 					}
+					b := ui.ButtonBase(c).Label(s.t("phone_view_original", index+1)).Selected(s.phone.preview.ID == selected.ID).Background(background).TextColor(c.Theme().Text).Grow(1).MinWidth(0).Padding(4, 6).Radius(6).Disabled(s.busy != "")
 					b.Children(func() {
 						ui.Column(c).FillWidth().Gap(3).Children(func() {
 							ui.Text(c, item.FileName).TextColor(c.Theme().Text).SingleLine()
@@ -205,6 +195,9 @@ func (s *screen) phoneSelection(c *ui.Context) {
 					if b.Clicked() {
 						s.previewPhone(item, 1)
 					}
+					if s.iconButton(c, iconEye, s.t("phone_preview_item", item.FileName), s.busy != "") {
+						s.showPhoneOriginal(item.ID)
+					}
 					if s.iconButton(c, iconUp, s.t("phone_move_forward", item.FileName), s.busy != "" || index == 0) {
 						s.movePhoneItem(index, -1)
 					}
@@ -212,6 +205,9 @@ func (s *screen) phoneSelection(c *ui.Context) {
 						s.movePhoneItem(index, 1)
 					}
 				})
+				if index < len(s.phone.selected)-1 {
+					divider(c, false)
+				}
 			}
 			divider(c, false)
 			if s.phone.preview.ID != "" {
@@ -223,27 +219,7 @@ func (s *screen) phoneSelection(c *ui.Context) {
 						}
 					}
 				})
-				ui.Column(c).FillWidth().Height(380).Padding(8).Background(c.Theme().Surface).Border(1, c.Theme().Border).Radius(12).Children(func() {
-					switch {
-					case s.phone.bitmap != nil:
-						ui.Image(c, s.phone.bitmap).Label(s.t("original")).Fill().Fit(ui.Contain)
-					case s.phone.previewFailed:
-						ui.Column(c).Fill().Center().Children(func() { ui.Text(c, s.t("original_unavailable")).TextColor(c.Theme().TextMuted) })
-					default:
-						ui.Column(c).Fill().Center().Children(func() { ui.Text(c, s.t("preparing_original")).TextColor(c.Theme().TextMuted) })
-					}
-				})
-				if pages := s.phone.preview.Extraction.PageCount; pages > 1 {
-					ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-						if s.iconButton(c, iconBack, s.t("previous_page"), s.phone.page <= 1) {
-							s.previewPhone(s.phone.preview, s.phone.page-1)
-						}
-						ui.Text(c, s.t("page", s.phone.page, pages)).FontSize(12).TextColor(c.Theme().TextMuted)
-						if s.iconButton(c, iconChevron, s.t("next_page"), s.phone.page >= pages) {
-							s.previewPhone(s.phone.preview, s.phone.page+1)
-						}
-					})
-				}
+				s.phonePreview(c)
 				divider(c, false)
 			}
 			ui.Text(c, s.t("phone_archive_help")).FontSize(12).TextColor(c.Theme().TextMuted)
@@ -258,6 +234,9 @@ func (s *screen) receiverSheet(c *ui.Context) {
 	}
 	open := true
 	ui.Modal(c, &open, func() {
+		// The sheet owns its default action before a focused checkbox can
+		// interpret Return as toggling the trusted-network acknowledgement.
+		startRequested := c.Shortcut(0, ui.KeyEnter)
 		ui.Column(c).FillWidth().Gap(18).Disabled(s.modalOpen()).Children(func() {
 			ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 				icon(c, iconPhone, 22, c.Theme().Text)
@@ -265,7 +244,7 @@ func (s *screen) receiverSheet(c *ui.Context) {
 				if s.phone.status.Active {
 					ui.Row(c).Gap(6).AlignItems(ui.Center).Label(s.t("phone_receiving_a11y")).Children(func() {
 						icon(c, iconWaves, 16, c.Theme().Accent)
-						ui.Text(c, s.t("phone_receiving")).TextColor(c.Theme().Accent)
+						ui.Text(c, s.t("phone_receiving_status")).TextColor(c.Theme().Accent)
 					})
 				}
 			})
@@ -284,20 +263,24 @@ func (s *screen) receiverSheet(c *ui.Context) {
 			}
 			divider(c, false)
 			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-				if ui.Button(c, s.t("close")).Disabled(s.phone.stopping || s.busy == "phone_starting").Clicked() {
+				canClose := !s.phone.stopping && s.busy != "phone_starting"
+				if ui.Button(c, s.t("close")).Disabled(!canClose).Clicked() || (canClose && c.Shortcut(0, ui.KeyEscape)) {
 					s.closeReceiver()
 				}
 				ui.Box(c).Grow(1)
 				if s.phone.status.Active {
-					if ui.Button(c, s.t("phone_stop")).TextColor(tokenDanger).Disabled(s.phone.stopping).Clicked() {
+					if ui.Button(c, s.t("phone_stop")).TextColor(tokenDanger).Tooltip(s.t("phone_stop_hint")).Disabled(s.phone.stopping).Clicked() {
 						s.stopPhone()
 					}
-				} else if ui.PrimaryButton(c, s.t("phone_start")).Disabled(s.busy != "" || s.phone.stopping || !s.phone.trusted || !s.phone.lifecycleReady || s.phone.interfaceID == "").Clicked() {
-					s.startPhone()
+				} else {
+					ready := s.busy == "" && !s.phone.stopping && s.phone.trusted && s.phone.lifecycleReady && s.phone.interfaceID != "" && !s.composing
+					if ui.PrimaryButton(c, s.t("phone_start")).Disabled(!ready).Clicked() || (ready && startRequested) {
+						s.startPhone()
+					}
 				}
 			})
 		})
-	}).Width(620).Label(s.t("phone_receive_title"))
+	}).Width(620).Padding(26).Label(s.t("phone_receive_title"))
 	if !open && !s.phone.stopping && s.busy != "phone_starting" {
 		s.closeReceiver()
 	}
@@ -342,12 +325,16 @@ func (s *screen) phoneActive(c *ui.Context) {
 	ui.Row(c).FillWidth().Gap(22).Children(func() {
 		if bitmap := s.phoneQR(s.phone.status.Address); bitmap != nil {
 			ui.Image(c, bitmap).Label(s.t("phone_qr_label")).Size(190, 190).Shrink(0).Fit(ui.Contain)
+		} else {
+			ui.Column(c).Size(190, 190).Shrink(0).Center().Children(func() {
+				ui.Text(c, s.t("phone_qr_unavailable")).TextColor(c.Theme().TextMuted)
+			})
 		}
-		ui.Column(c).Grow(1).MinWidth(0).Gap(10).Children(func() {
+		ui.Column(c).Grow(1).MinWidth(0).Gap(14).Children(func() {
 			ui.Text(c, s.t("phone_open_in_browser")).TextColor(c.Theme().TextMuted)
 			ui.Text(c, s.phone.status.Address).Font("monospace").Bold().Selectable()
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				if ui.Button(c, s.t("phone_copy_address")).Clicked() {
+				if ui.Button(c, s.t("phone_copy_address")).Tooltip(s.t("phone_copy_hint")).Clicked() {
 					s.copyPhoneAddress()
 				}
 				if s.phone.copied {

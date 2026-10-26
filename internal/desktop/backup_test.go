@@ -79,6 +79,13 @@ func TestBackupRequiresHiddenCodeReentryAndPanelCancelAbandonsIdentity(t *testin
 	if !tt.HasText(code[:48]) {
 		t.Fatal("generated code was not displayed")
 	}
+	if !tt.HasText("Language") {
+		t.Fatal("backup sheet replaced the settings page instead of keeping it behind the modal")
+	}
+	_ = tt.Click("All Records")
+	if !s.backupPage || s.backup.code != code {
+		t.Fatal("navigation escaped the backup sheet or discarded its recovery code")
+	}
 	if err := tt.Click("Copy recovery code"); err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +243,7 @@ func TestPreparedSummaryRequiresConfirmationAndCancelUsesBackend(t *testing.T) {
 	s.prepareRestore()
 	drain()
 	tt := ui.NewTester(s.view, 1240, 1000)
-	if !tt.HasText("Members: 2 · Reports: 3 · Originals: 4") || f.activations != 0 || s.backup.input != "" {
+	if !tt.HasText(s.t("restore_summary_members")) || !tt.HasText("2") || !tt.HasText(s.t("restore_summary_reports")) || !tt.HasText("3") || !tt.HasText(s.t("restore_summary_sources")) || !tt.HasText("4") || f.activations != 0 || s.backup.input != "" {
 		t.Fatal("unvalidated or automatic activation")
 	}
 	if err := tt.Click("Cancel"); err != nil {
@@ -245,6 +252,33 @@ func TestPreparedSummaryRequiresConfirmationAndCancelUsesBackend(t *testing.T) {
 	drain()
 	if f.cancellations != 1 || s.backup.prepared != nil || s.backup.step != "" {
 		t.Fatal("prepared cancel did not retire stage")
+	}
+}
+
+func TestBackupSheetsKeepActionsReachableAtMinimumWindow(t *testing.T) {
+	for _, language := range []string{"en", "zh-Hans"} {
+		for _, step := range []string{"generated", "reentry", "restore_code", "prepared"} {
+			t.Run(language+"/"+step, func(t *testing.T) {
+				s, _, _ := backupScreen(t)
+				s.language = language
+				s.backup.step = step
+				s.backup.code = strings.Repeat("synthetic-only-", 20)
+				s.backup.publicID = "synthetic-only"
+				s.backup.prepared = &app.RestorePreparation{Summary: library.SnapshotSummary{Members: 2, Reports: 3, Sources: 4}}
+				tt := ui.NewTester(s.view, 1080, 700)
+				tt.SetLocale(language)
+				if !tt.HasText(s.t("language")) {
+					t.Fatal("backup step removed the settings page")
+				}
+				action := map[string]string{"generated": "backup_saved_code", "reentry": "backup_choose_destination", "restore_code": "restore_validate", "prepared": "restore_replace"}[step]
+				for _, key := range []string{"cancel", action} {
+					bounds, ok := tt.Find(s.t(key))
+					if !ok || bounds.X < 0 || bounds.Y < 0 || bounds.X+bounds.W > 1080 || bounds.Y+bounds.H > 700 {
+						t.Fatalf("sheet action is outside the minimum window: %s %+v", key, bounds)
+					}
+				}
+			})
+		}
 	}
 }
 
@@ -260,7 +294,7 @@ func TestRestoreActivationFailureLocksNavigationAndQuitWaits(t *testing.T) {
 	s.prepareRestore()
 	drain()
 	tt := ui.NewTester(s.view, 1240, 1000)
-	if err := tt.Click("Replace entire library"); err != nil {
+	if err := tt.Click(s.t("restore_replace")); err != nil {
 		t.Fatal(err)
 	}
 	<-f.activateStarted
@@ -439,7 +473,7 @@ func TestBackupAndRestoreViewUsesRealController(t *testing.T) {
 	if s.backup.prepared == nil || s.backup.prepared.Summary.Members != 1 {
 		t.Fatal("view did not receive fully validated snapshot")
 	}
-	if err := tt.Click("Replace entire library"); err != nil {
+	if err := tt.Click(s.t("restore_replace")); err != nil {
 		t.Fatal(err)
 	}
 	drain()

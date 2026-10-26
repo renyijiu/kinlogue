@@ -78,7 +78,6 @@ func TestAllRecordsSearchAndMemberFilterUseRealLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The timeline opens its newest record, which renders the original.
 	service := app.New(store, evidenceProcessor{}, nil, nil)
 	t.Cleanup(func() { _ = service.Close() })
 	ctx := context.Background()
@@ -111,19 +110,21 @@ func TestAllRecordsSearchAndMemberFilterUseRealLibrary(t *testing.T) {
 	s.backend = service
 	s.load(true)
 	drain()
+	if s.report.ID != "" {
+		t.Fatal("loading a timeline must wait for the user to select a record")
+	}
 	tt := ui.NewTester(s.view, 1240, 880)
 	if err := tt.Click("Search Confirmed Records"); err != nil {
 		t.Fatal(err)
 	}
-	tt.Type("needle")
-	tt.Key(0, ui.KeyEnter)
+	tt.Type("A record")
 	drain()
 	tt.Frame()
 	found := func(title string) bool {
 		return slices.ContainsFunc(s.records, func(r library.Report) bool { return r.Review.Title == title })
 	}
-	if !tt.HasText("Synthetic A record") || !tt.HasText("Synthetic B record") || found("Synthetic draft record") {
-		t.Fatal("all-records search did not aggregate confirmed members only")
+	if !tt.HasText("Synthetic A record") || tt.HasText("Synthetic B record") || found("Synthetic draft record") {
+		t.Fatal("typing did not filter confirmed records without Enter")
 	}
 	if err := tt.Click("Synthetic A"); err != nil {
 		t.Fatal(err)
