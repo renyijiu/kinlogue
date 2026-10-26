@@ -17,7 +17,7 @@ import (
 func TestOriginalViewerZoomAndRotationDoNotEditReport(t *testing.T) {
 	s, f, _ := testScreen(t)
 	f.report.Status = "confirmed"
-	f.report.Sources[0].Extraction.Kind = "image"
+	f.report.Sources[0].Extraction.Kind = "png"
 	s.accept(f.report)
 	s.bitmap = ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 200, 400)))
 	before := cloneEdit(s.edit)
@@ -62,6 +62,34 @@ func TestOriginalViewerInitiallyFitsTheWholePage(t *testing.T) {
 	page, ok := tt.Find(s.t("original"))
 	if !ok || page.X < viewport.X || page.Y < viewport.Y || page.X+page.W > viewport.X+viewport.W+1 || page.Y+page.H > viewport.Y+viewport.H+1 {
 		t.Fatalf("whole-page fit failed: page=%+v canvas=%+v", page, viewport)
+	}
+}
+
+func TestPreviewControlsUseStoredDocumentKinds(t *testing.T) {
+	for _, kind := range []string{"png", "jpeg", "heic", "tiff", "pdf"} {
+		for _, phone := range []bool{false, true} {
+			for _, viewer := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/phone=%v/viewer=%v", kind, phone, viewer), func(t *testing.T) {
+					s, f, _ := testScreen(t)
+					f.report.Status = "confirmed"
+					f.report.Sources[0].Extraction.Kind = kind
+					s.accept(f.report)
+					s.phone.preview.Extraction.Kind = kind
+					tt := ui.NewTester(func(c *ui.Context) { s.previewControls(c, phone, viewer) }, 800, 100)
+					tt.Frame()
+					for _, key := range []string{"rotate_left", "rotate_right"} {
+						_, found := tt.Find(s.t(key))
+						if found != (kind != "pdf") {
+							t.Fatalf("%s availability for %s: %v", key, kind, found)
+						}
+					}
+					_, pages := tt.Find(s.t("previous_page"))
+					if pages != (kind == "pdf") {
+						t.Fatalf("page navigation for %s: %v", kind, pages)
+					}
+				})
+			}
+		}
 	}
 }
 

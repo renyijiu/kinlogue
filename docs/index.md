@@ -6,6 +6,8 @@
 
 ## 从哪里开始
 
+2026-10-26 的 [Mac 窗口续验](go-native-preview.md#本轮验证状态)已在隔离合成测试包中复验当前 mygo 的真实拼音、保存重启、日期和原件操作，并修复具体图片格式未显示旋转按钮的问题；用户确认分隔条手动拖动正常，以及未启用界面捕获重开后原生红黄绿按钮恢复。测试包不具备生产沙盒身份，VoiceOver、完整键盘、安装式沙盒流程及真实手机仍未完成。
+
 - 新贡献者或 Agent：先读 [`../AGENTS.md`](../AGENTS.md)，再读 [`project-overview.md`](project-overview.md)。
 - 准备 issue、PR 或安全报告：读 [`../CONTRIBUTING.md`](../CONTRIBUTING.md) 和 [`../SECURITY.md`](../SECURITY.md)，只使用合成数据。
 - 想理解模块与调用链：读 [`architecture.md`](architecture.md)。

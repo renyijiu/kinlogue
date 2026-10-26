@@ -111,11 +111,12 @@ func (s *screen) previewControls(c *ui.Context, phone, viewer bool) {
 	if viewer {
 		zoom, rotation = &s.viewerZoom, &s.viewerRotation
 	}
+	imageSource := kind == "png" || kind == "jpeg" || kind == "heic" || kind == "tiff"
 	if *zoom == 0 {
 		*zoom = 1
 	}
 	ui.Row(c).FillWidth().Gap(4).AlignItems(ui.Center).Children(func() {
-		if kind == "image" {
+		if imageSource {
 			key := "image_preview"
 			if viewer {
 				key = "original_image"
@@ -131,7 +132,7 @@ func (s *screen) previewControls(c *ui.Context, phone, viewer bool) {
 			}
 		}
 		ui.Box(c).Grow(1)
-		if kind == "image" {
+		if imageSource {
 			if s.iconButton(c, iconRotateLeft, s.t("rotate_left"), busy) {
 				*rotation = (*rotation + 3) % 4
 			}
@@ -142,7 +143,7 @@ func (s *screen) previewControls(c *ui.Context, phone, viewer bool) {
 		minimum, maximum := float32(.6), float32(2.4)
 		if viewer {
 			maximum = s.viewerMaximumZoom(bitmap, *rotation)
-			if kind == "image" {
+			if imageSource {
 				minimum = .4
 			}
 			*zoom = min(*zoom, maximum)
