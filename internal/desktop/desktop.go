@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	_ "github.com/egoist/mygo/locales/zh-Hans"
 	"github.com/egoist/mygo/ui"
 	"kinlogue/internal/candidate"
 	"kinlogue/internal/document"
@@ -43,6 +44,7 @@ const allMembers = "all"
 type screen struct {
 	phoneBackend                     LANBackend
 	copyText                         func(string)
+	setLocale                        func(string) string
 	phonePage                        bool
 	phone                            phoneFlow
 	backend                          Backend
@@ -130,6 +132,12 @@ func (s *screen) run() error {
 	defer s.clearBackupSecrets()
 	mygo.App.WhenReady(func() {
 		mygo.Theme.SetSource(mygo.ThemeLight)
+		mygo.App.SetLanguages("en", "zh-Hans")
+		s.setLocale = func(locale string) string {
+			mygo.App.SetLocale(locale)
+			return mygo.App.Locale()
+		}
+		s.updateChrome()
 		s.win = mygo.NewWindow(mygo.WindowOptions{Title: s.t("app"), Width: 1240, Height: 880, MinWidth: 1080, MinHeight: 700, Content: ui.View(s.view)})
 		s.post = s.win.Update
 		s.copyText = mygo.Clipboard.WriteText
@@ -190,6 +198,16 @@ func (s *screen) lang() string {
 }
 
 func (s *screen) updateChrome() {
+	if s.setLocale != nil {
+		locale := s.language
+		if locale == "system" {
+			locale = ""
+		}
+		shown := s.setLocale(locale)
+		if s.language == "system" {
+			s.systemLanguage = shown
+		}
+	}
 	if s.win == nil {
 		return
 	}
@@ -581,17 +599,6 @@ func (s *screen) sourceHint(key, value string) string {
 		}
 	}
 	return s.t("source_parts", strings.Join(parts, s.t("part_separator"))) + unsure
-}
-
-// calendarText words the date picker in the interface language.
-func (s *screen) calendarText() ui.CalendarText {
-	text := ui.CalendarText{PreviousMonth: s.t("calendar_previous"), NextMonth: s.t("calendar_next")}
-	copy(text.Weekdays[:], strings.Fields(s.t("calendar_weekdays")))
-	if s.lang() != "en" {
-		text.Month = func(t time.Time) string { return s.t("calendar_month", t.Year(), int(t.Month())) }
-		text.Day = func(t time.Time) string { return s.formatDate(t.Format("2006-01-02")) }
-	}
-	return text
 }
 
 // proposals pairs each field recognition can propose with its proposal.

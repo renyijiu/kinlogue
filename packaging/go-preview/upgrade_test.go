@@ -52,8 +52,7 @@ func goFixture(t *testing.T) (string, string) {
 		put(t, filepath.Join(root, name), data, 0600)
 	}
 	run(t, root, goPath, "mod", "edit", "-dropreplace=github.com/egoist/mygo")
-	// Root tidy may omit the replaced module's checksum. The legacy fixture
-	// explicitly fetches the locked upstream version into its own go.sum.
+	// Keep the fixture's dependency checksums available for its locked version.
 	run(t, root, goPath, "mod", "download", "github.com/egoist/mygo@"+mygoPin)
 	for _, name := range []string{"Info.plist", "Entitlements.plist", "en.lproj/InfoPlist.strings", "zh-Hans.lproj/InfoPlist.strings"} {
 		data, err := os.ReadFile(name)
@@ -73,13 +72,13 @@ func main() {}
 	return root, goPath
 }
 
-// mygoPin is the upstream version the preview links through its local
-// replacement. Older pins are accepted only for preserving previous bundles.
-const mygoPin = "v0.4.8"
+// mygoPin is the upstream version linked by the current preview.
+// Older pins are accepted only for preserving previous bundles.
+const mygoPin = "v0.6.4"
 
 func addLocalMygo(t *testing.T, root, goPath, replacement string) {
 	t.Helper()
-	put(t, filepath.Join(root, replacement, "go.mod"), []byte("module github.com/egoist/mygo\n\ngo 1.27.2\n"), 0600)
+	put(t, filepath.Join(root, replacement, "go.mod"), []byte("module github.com/egoist/mygo\n\ngo 1.27.3\n"), 0600)
 	put(t, filepath.Join(root, replacement, "ui", "fixture.go"), []byte("package ui\n"), 0600)
 	put(t, filepath.Join(root, replacement, "LICENSE"), []byte("synthetic local replacement license\n"), 0600)
 	run(t, root, goPath, "mod", "edit", "-replace=github.com/egoist/mygo=./"+replacement)
@@ -128,7 +127,7 @@ func assembleFixture(t *testing.T, root, goPath, permission string) string {
 			put(t, filepath.Join(resources, "ThirdPartyLicenses", name), []byte("synthetic dependency license\n"), 0600)
 		}
 	}
-	put(t, filepath.Join(resources, "ThirdPartyLicenses", "go1.27.2.txt"), []byte("synthetic runtime license\n"), 0600)
+	put(t, filepath.Join(resources, "ThirdPartyLicenses", "go1.27.3.txt"), []byte("synthetic runtime license\n"), 0600)
 	sign(t, root, app, permission)
 	return app
 }
@@ -136,7 +135,7 @@ func assembleFixture(t *testing.T, root, goPath, permission string) string {
 func TestBuildPreservesLegacyAppAndUsesSelectedToolchain(t *testing.T) {
 	// The earlier bundle was built against the mygo version pinned before,
 	// first from upstream and later through the local replacement.
-	for _, version := range []string{"v0.2.15", "v0.3.7"} {
+	for _, version := range []string{"v0.2.15", "v0.3.7", "v0.4.8"} {
 		for name, replaced := range map[string]bool{"upstream": false, "local replacement": true} {
 			t.Run(version+"/"+name, func(t *testing.T) { buildPreservesLegacyApp(t, version, replaced) })
 		}
@@ -157,8 +156,7 @@ func buildPreservesLegacyApp(t *testing.T, legacyMygoPin string, replaced bool) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	run(t, root, goPath, "mod", "edit", "-require=github.com/egoist/mygo@"+mygoPin)
-	addLocalMygo(t, root, goPath, "third_party/mygo")
+	run(t, root, goPath, "mod", "edit", "-require=github.com/egoist/mygo@"+mygoPin, "-dropreplace=github.com/egoist/mygo")
 	put(t, filepath.Join(root, "cmd", "kinlogue", "backup.go"), []byte("package main\nimport _ \"filippo.io/age\"\n"), 0600)
 	// A setup-go-like directory is deliberately absent from the builder's fixed
 	// PATH. The wrapper forwards to the actual pinned compiler, without eval.
@@ -186,8 +184,10 @@ func buildPreservesLegacyApp(t *testing.T, legacyMygoPin string, replaced bool) 
 		t.Fatal("the earlier signed binary was not preserved exactly")
 	}
 	license, err := os.ReadFile(filepath.Join(app, "Contents", "Resources", "ThirdPartyLicenses", "github.com_egoist_mygo@"+mygoPin+".txt"))
-	if err != nil || string(license) != "synthetic local replacement license\n" {
-		t.Fatalf("local replacement license not included: %v", err)
+	moduleDir := strings.TrimSpace(string(run(t, root, goPath, "list", "-m", "-f", "{{.Dir}}", "github.com/egoist/mygo")))
+	want, readErr := os.ReadFile(filepath.Join(moduleDir, "LICENSE"))
+	if err != nil || readErr != nil || !bytes.Equal(license, want) {
+		t.Fatalf("upstream license not included: %v %v", err, readErr)
 	}
 }
 
@@ -204,32 +204,32 @@ func TestCurrentVerifierRejectsLegacyPermission(t *testing.T) {
 	rejected(t, root, "verify-go-preview.sh", entitlementContract)
 }
 
-func TestCurrentVerifierRequiresLocalMygo(t *testing.T) {
+func TestCurrentVerifierRequiresUpstreamMygo(t *testing.T) {
 	root, goPath := goFixture(t)
+	addLocalMygo(t, root, goPath, "third_party/mygo")
+	put(t, filepath.Join(root, "cmd", "kinlogue", "backup.go"), []byte("package main\nimport _ \"filippo.io/age\"\n"), 0600)
 	assembleFixture(t, root, goPath, "read-write")
 	rejected(t, root, "verify-go-preview.sh", "module replacements differ from the preview contract")
 }
 
 func TestCurrentVerifierRequiresBackupCrypto(t *testing.T) {
 	root, goPath := goFixture(t)
-	addLocalMygo(t, root, goPath, "third_party/mygo")
 	assembleFixture(t, root, goPath, "read-write")
 	rejected(t, root, "verify-go-preview.sh", "backup crypto pin is incorrect")
 }
 
 func TestCurrentVerifierRejectsPreviousMygo(t *testing.T) {
 	root, goPath := goFixture(t)
-	run(t, root, goPath, "mod", "edit", "-require=github.com/egoist/mygo@v0.3.7")
+	run(t, root, goPath, "mod", "edit", "-require=github.com/egoist/mygo@v0.4.8")
 	addLocalMygo(t, root, goPath, "third_party/mygo")
 	put(t, filepath.Join(root, "cmd", "kinlogue", "backup.go"), []byte("package main\nimport _ \"filippo.io/age\"\n"), 0600)
 	assembleFixture(t, root, goPath, "read-write")
 	rejected(t, root, "verify-go-preview.sh", "direct dependency pin is incorrect")
 }
 
-func TestBuilderRejectsAdditionalReplacementBeforePublishing(t *testing.T) {
+func TestBuilderRejectsReplacementBeforePublishing(t *testing.T) {
 	root, goPath := goFixture(t)
-	addLocalMygo(t, root, goPath, "third_party/mygo")
-	put(t, filepath.Join(root, "third_party", "other", "go.mod"), []byte("module github.com/ebitengine/purego\n\ngo 1.27.2\n"), 0600)
+	put(t, filepath.Join(root, "third_party", "other", "go.mod"), []byte("module github.com/ebitengine/purego\n\ngo 1.27.3\n"), 0600)
 	run(t, root, goPath, "mod", "edit", "-replace=github.com/ebitengine/purego=./third_party/other")
 	rejected(t, root, "build-go-preview.sh", "module replacements differ from the preview contract")
 	if _, err := os.Lstat(filepath.Join(root, "dist", "GoPreview", "KinlogueGoPreview.app")); !os.IsNotExist(err) {

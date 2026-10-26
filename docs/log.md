@@ -1381,3 +1381,15 @@
 - **文档同步**：更新 AGENTS 中的依赖版本、Go 专题、索引、来源导航和本日志。核对实际 entitlement 后，更正 PRIVACY 中仍称“没有服务端权限”的旧句，与同页已有的 Go 手机入站说明一致；本次没有扩权。其余既有产品承诺不变。
 - **提交前复核**：隐私与文档门禁再次通过。暂存全部新文件后，`git diff --cached --check` 仅报告上游 `ui/editor/patch_test.go` 的三行 diff 样本上下文前缀（空格后接 Tab）；已确认该文件与官方源码逐字节一致，保留必要样本格式，其余文件通过空白检查。
 - **未执行**：未启动或操作本机实际资料库、未重新验收真实输入法/VoiceOver/完整键盘、真实手机、其他 macOS/Intel、Swift 全量和正式分发；v0.2.15 时代的输入验收不能沿用。实现验收结束时尚未提交或推送；随后用户要求整理提交并推送，原主工作区已有改动保持。
+
+## 2026-10-26：mygo 升至官方 v0.6.4，退役本地日历补丁
+
+- **范围**：用户要求升级到最新版本；官方 latest 与 tag 均为 v0.6.4，固定 commit、模块摘要和上游变化见 [来源追加](sources/mygo-0.6.4-upgrade-2026-10-26.md)。继续在 Go 重写分支工作，主工作区已有修改保留。
+- **实现**：移除本地 replace 和 598 个受 Git 管理的旧源码文件，保留来源记录与 MIT 许可；官方中文资源与 App.SetLocale 接替 CalendarText。资料库语言设置仍为主，跟随系统清除上游覆盖；日期显示按区域格式，存储仍为 YYYY-MM-DD。新版输入时序由现有保存、关闭、组字和撤销回归覆盖，不恢复旧输入补丁。
+- **依赖与打包**：Go 锁定 1.27.3；mygo 所需 x/net/x/text 及 x/net 要求的 x/crypto v0.57.0 进入锁定图，age/SQLite/purego 等版本不变。当前构建和包拒绝所有模块替换，旧包保留兼容已知 v0.2.15/v0.3.7/v0.4.8 及旧 Go 工具链。测试先证明旧校验器仍会接受本地替换，再收紧规则；保留旧二进制和官方许可的回归通过。
+- **自动化**：当前 Mac 的 `CGO_ENABLED=0 go test -count=1 ./...`、`go test -race -count=1 ./internal/desktop ./internal/backup`、`go vet ./...`、官方 v0.6.4 `mygo vet .`、`go mod verify`、`go test -count=1 github.com/egoist/mygo/ui` 通过。旧临时模块缓存存在被清空的目录，首次基线测试无法解析依赖；改用全新缓存下载原锁定版本后，升级前截图测试通过，未通过修改依赖版本规避该环境问题。
+- **上游 race 限制**：额外的完整 `go test -race -count=1 -timeout 5m github.com/egoist/mygo/ui` 在约 260 秒后失败，唯一失败是 `TestDiffFrameAllocs` 的每帧最多 2 次分配断言（steady=3、warm=4），输出没有数据竞争报告。非 race 单独复验同一测试为 2/2 并通过；据此判断与 race 下的分配测量有关，未修改上游源码或放宽断言。上游该用例显式在 short 模式跳过；short 模式还减少两个随机布局/绘制用例的种子数量，不能冒充完整 race 通过。补跑 `go test -race -short -count=1 github.com/egoist/mygo/ui` 在约 82 秒后通过，上游 UI vet 也通过。
+- **布局与包**：10 张升级前后合成截图中 9 张逐字节一致，编辑页仅日期控件区域有像素变化（区域日期格式替代 ISO 显示），已查看核对。签名预览构建与独立复验通过；原 v0.4.8 签名二进制在 Previous 目录逐字节保留，不作为资料库回滚承诺。
+- **文档**：同步 README、AGENTS、Go 专题、索引和来源导航；历史日历源码链接固定到原提交，来源原始结论作为历史保留。当前编译使用上游控件本地化，旧文档称“仍需本地日历补丁”的当前态描述已更新。
+- **收尾门禁**：`scripts/privacy-guard.sh`、`scripts/verify-docs.sh`、`git diff --check`、应用 Go 文件的 gofmt 和 `go mod tidy -diff` 通过；没有临时截图或构建产物进入改动范围。
+- **边界**：未启动或操作真实资料库，未重新验收真实输入法/VoiceOver/完整键盘、真实手机、其他 macOS/Intel、Swift 全量或正式分发。升级验收后，用户要求将本轮改动整理为本地提交；未推送。

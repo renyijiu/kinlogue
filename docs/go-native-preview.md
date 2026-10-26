@@ -19,7 +19,7 @@ Kinlogue 在同一仓库内开发独立的 Go 预览版。报告整理闭环已�
 
 原生保存、关闭、退出和导入入口先等待当前帧将排队输入写入字段，再检查保存或未保存修改保护；同帧关闭优先于导入和保存。输入法仍在组字时，本次原生操作不执行，也不在组字结束后自动重放，用户须在提交或取消候选后重新操作。对应时序回归见 [`daily_test.go`](../internal/desktop/daily_test.go)。实际窗口已检查英文编辑的撤销/重做、未保存时 Cmd+W 的取消保护、Cmd+S 保存及 Cmd+Q 后重开；真实拼音输入的候选取消、提交和撤销，以及组字期间 Cmd+S/W 保护也已通过。首字符后立即导航的完整矩阵仍待验收。
 
-2026-10-10 升级到 mygo v0.3.7 后，组字行为改用上游语义；2026-10-13 升至 v0.4.8 继续使用上游输入实现，不恢复旧补丁：在选中文字上开始组字会立即替换选中内容，绑定的字段值随之变化；取消组字不会恢复这段文字，按一次撤销可以取回；组字与提交是一步撤销。此前“取消组字不改动原文”由本地输入补丁提供，该补丁没有移植。上一段中 2026-10-08 的实际窗口拼音验收是在 v0.2.15 加本地补丁上完成的，**不适用于当前版本**，真实输入法下的取消、提交、撤销和组字期间的保存/关闭保护需要重新验收。
+2026-10-10 升级到 mygo v0.3.7 后，组字行为改用上游语义；2026-10-13 升至 v0.4.8、2026-10-26 升至 v0.6.4 均继续使用上游输入实现，不恢复旧补丁：在选中文字上开始组字会立即替换选中内容，绑定的字段值随之变化；取消组字不会恢复这段文字，按一次撤销可以取回；组字与提交是一步撤销。此前“取消组字不改动原文”由本地输入补丁提供，该补丁没有移植。上一段中 2026-10-08 的实际窗口拼音验收是在 v0.2.15 加本地补丁上完成的，**不适用于当前版本**，真实输入法下的取消、提交、撤销和组字期间的保存/关闭保护需要重新验收。
 
 [手机上传](go-lan-upload.md)已按 Swift 基线开启：入站网络权限、二维码与一次性验证码配对、15 分钟无活动超时、生命周期与网络变化撤销、持久队列和多选删除均已接通；真实手机和网络切换仍待验收，锁屏不保证停止接收。尚未实现自动备份、整库明文导出、DICOM、指标比较、检验表格重建与“报告自带标记”、成员归档或大模型接入。[手动加密备份恢复计划](plans/2026-10-08-1702-feat-go-backup-restore-plan.md)保留设计约束；底层测试不能替代完整应用验收。暂时不要把预览版作为真实资料的唯一保存位置。
 
@@ -79,7 +79,7 @@ Kinlogue 在同一仓库内开发独立的 Go 预览版。报告整理闭环已�
 
 ## 模块与运行时
 
-应用逻辑和界面代码使用 Go。mygo 的 native UI 是 GPU 自绘控件；窗口和系统文件面板使用平台能力，不能据此宣称每个控件都是 AppKit 控件或已经达到 SwiftUI 的无障碍效果。[mygo v0.4.8 说明](https://github.com/egoist/mygo/tree/v0.4.8)及[上游路线图](https://github.com/egoist/mygo/issues/105)仍将文本/集合无障碍、控件本地化和原生视图嵌入列为完善方向。
+应用逻辑和界面代码使用 Go。mygo 的 native UI 是 GPU 自绘控件；窗口和系统文件面板使用平台能力，不能据此宣称每个控件都是 AppKit 控件或已经达到 SwiftUI 的无障碍效果。[mygo v0.6.4](https://github.com/egoist/mygo/tree/v0.6.4) 已内置控件本地化，但本应用的真实输入法、键盘和 VoiceOver 仍须独立验收。
 
 ```mermaid
 flowchart TD
@@ -104,7 +104,9 @@ flowchart TD
 | [`internal/app/`](../internal/app/) | 串行命令、识别状态推进、重试、取消、备份恢复控制器和退出等待。 |
 | [`internal/desktop/`](../internal/desktop/) | 主窗口、复核表单、原件预览、未保存修改处理和中英文文案；不在 UI 中创建存储或识别器。 |
 
-依赖固定在 [`go.mod`](../go.mod) 和 [`go.sum`](../go.sum)：mygo `v0.4.8`、purego `v0.11.1`、modernc SQLite `v1.60.1`、age `v1.3.2`、hpke `v0.4.0`、`golang.org/x/crypto v0.55.0` 与 `golang.org/x/sys v0.48.0`；打包工具链固定 Go `1.27.2`。mygo 通过唯一的本地 `replace` 使用仓库内 [`third_party/mygo/`](../third_party/mygo/) 的锁定源码，**不是未修改的上游 v0.4.8**；来源、修改清单和 MIT 许可见 [`SOURCE.md`](../third_party/mygo/SOURCE.md)。2026-10-13 的锁定版本与升级范围见 [v0.4.8 来源追加](sources/mygo-0.4.8-upgrade-2026-10-13.md)。本地补丁只有一处：让日历的月份、星期和按钮名称由应用按界面语言提供（[来源追加](sources/mygo-calendar-text-2026-10-10.md)）。v0.2.15 时期的输入补丁在 2026-10-10 升级时没有移植，依据见[升级来源追加](sources/mygo-0.3.7-upgrade-2026-10-10.md)；不能把无窗口事件测试写成真实中文输入法或 VoiceOver 已验收。
+依赖固定在 [`go.mod`](../go.mod) 和 [`go.sum`](../go.sum)：mygo `v0.6.4`、purego `v0.11.1`、modernc SQLite `v1.60.1`、age `v1.3.2`、hpke `v0.4.0`、`golang.org/x/crypto v0.57.0` 与 `golang.org/x/sys v0.48.0`；打包工具链固定 Go `1.27.3`。mygo 使用官方模块及校验和，不再使用本地 `replace`；新版已提供简体中文日历，旧源码副本及日历补丁退役，保留 [来源与历史记录](../third_party/mygo/SOURCE.md)和许可。锁定 commit、摘要、必要的间接依赖变化与输入时序变化见 [v0.6.4 来源追加](sources/mygo-0.6.4-upgrade-2026-10-26.md)。v0.2.15 的输入补丁仍未恢复。
+
+应用继续以资料库内的语言设置为准，声明 `en`/`zh-Hans` 并加载上游简体中文控件资源。启动读取设置、成功保存语言选择时通过 `App.SetLocale` 同步控件和原生菜单；“跟随系统”清除上游语言覆盖并重新读取解析后的语言。上游同时将显示语言写入 macOS 的应用语言偏好；下次启动仍由资料库设置重新同步。日历月份、星期、日期读屏标签及按钮采用上游翻译，日期栏和星期起始日遵循系统区域格式；存储格式仍为 `YYYY-MM-DD`。
 
 生产包以 `CGO_ENABLED=0` 构建，不包含 Swift helper；系统识别仍依赖 macOS，当前应用不是跨平台实现。预览包声明最低 macOS 14，声明本身不等于已完成该系统的运行验证。
 
@@ -162,13 +164,13 @@ Vision 使用 `VNRecognizeTextRequest` revision 3、accurate 模式、`zh-Hans` 
 
 ## 构建和验证
 
-在 macOS、Go 1.27.2 和 Xcode Command Line Tools 环境，从仓库根目录执行：
+在 macOS、Go 1.27.3 和 Xcode Command Line Tools 环境，从仓库根目录执行：
 
 ```sh
 CGO_ENABLED=0 go test ./...
 go test -race ./internal/lan ./internal/library ./internal/backup ./internal/app ./internal/desktop ./internal/macos
 go vet ./...
-(cd third_party/mygo && go test ./ui && go test -race ./ui && go vet ./ui)
+go test github.com/egoist/mygo/ui
 scripts/build-go-preview.sh
 scripts/verify-go-preview.sh
 scripts/privacy-guard.sh
@@ -177,9 +179,9 @@ scripts/verify-docs.sh
 
 `-race` 是开发验证，生产包仍使用 `CGO_ENABLED=0`。构建脚本生成 `dist/GoPreview/KinlogueGoPreview.app`，使用当前 Mac 架构和 ad-hoc 签名，并关闭 mygo inspector。直接 `go run ./cmd/kinlogue` 不具备预期 bundle 身份，不能用它绕过生产资料根目录校验。
 
-构建器只发布经过校验的预览包，保留前一次生成程序；验证脚本检查独立身份、精确 entitlement、签名、Go 构建设置、唯一 mygo 本地替换、固定模块版本、许可证和包内文件范围。替换旧包时允许验证既有只读权限预览，最终新包必须精确使用读写权限。它不构建或覆盖 `dist/Kinlogue.app`，没有加入 Swift 候选分发，也没有 Developer ID 签名或 notarization。
+构建器只发布经过校验的预览包，保留前一次生成程序；验证脚本检查独立身份、精确 entitlement、签名、Go 构建设置、无模块替换、固定官方模块版本、许可证和包内文件范围。保留旧包时允许已知旧版的 mygo 本地替换、工具链和只读权限，最终新包必须使用当前版本及精确权限。它不构建或覆盖 `dist/Kinlogue.app`，没有加入 Swift 候选分发，也没有 Developer ID 签名或 notarization。
 
-独立 [Go CI workflow](../.github/workflows/go-ci.yml) 配置 macOS 26 / arm64、Go 1.27.2 和完整 commit SHA 固定的 actions，执行格式、锁定依赖、vet、生产 CGO 关闭测试、核心 race、签名预览构建以及隐私/文档门禁。根模块的 `go test ./...` 不进入嵌套的 mygo 模块，因此其 `ui` 测试和 vet 在 CI 单独执行。本机等价命令的结果不证明 GitHub 托管 runner 已执行成功。
+独立 [Go CI workflow](../.github/workflows/go-ci.yml) 配置 macOS 26 / arm64、Go 1.27.3 和完整 commit SHA 固定的 actions，执行格式、锁定依赖、vet、生产 CGO 关闭测试、核心 race、签名预览构建以及隐私/文档门禁。旧 mygo 嵌套模块已移除；CI 验证官方依赖校验和及应用回归，不再构建本地补丁。本机等价命令的结果不证明 GitHub 托管 runner 已执行成功。
 
 自动化来源包括 [`store_test.go`](../internal/library/store_test.go) 的真实 SQLite 重启/确认/成员隔离/路径约束、[`service_test.go`](../internal/app/service_test.go) 的真实存储用例及取消退出、[`native_darwin_test.go`](../internal/macos/native_darwin_test.go) 的运行时生成 PDF/图片与系统框架调用，以及 [`desktop_test.go`](../internal/desktop/desktop_test.go) 的无窗口编辑/确认/语言状态测试。自动化资料均为合成资料，不将真实报告写进仓库或构建产物。
 
@@ -187,7 +189,7 @@ scripts/verify-docs.sh
 
 ## 本轮验证状态
 
-截至 2026-10-09，界面对齐、日常报告操作及手动备份恢复的阶段性验证如下；自动化、当前 Mac 的实际窗口流程和仍待人工完成的矩阵分开记账。详细执行记录见 [`log.md`](log.md)。
+下表保留 2026-10-09 的阶段性验证，并按日期追加后续变更；当前依赖升级以 2026-10-26 的 v0.6.4 行为准。自动化、当前 Mac 的实际窗口流程和仍待人工完成的矩阵分开记账，旧版窗口结果不能沿用为新版验收。详细执行记录见 [`log.md`](log.md)。
 
 | 验证范围 | 本轮结果与边界 |
 | --- | --- |
@@ -206,6 +208,7 @@ scripts/verify-docs.sh
 | 字段建议（2026-10-10） | 抽取规则按 Swift 用例移植：标签、装饰标题、各类结论标题、日期标签与类别、非法日期与闰日、同行拆分日期、水印数字、输入顺序无关和多原件顺序均有回归，并覆盖“无标签不产生建议”和超长建议整条放弃。真实 SQLite 验证部分识别时不写入、全部完成时与进入待确认同一事务写入、不选择日期、未确认前不可搜、重开后保留，以及手机归档保留给定标题。界面验证只填空白项、日期点选、来源提示随文字变化和多原件编号，并核对合成截图。根模块测试/vet、六包 race、签名预览构建与校验、隐私和文档门禁在当前 Mac 通过；规则没有用真实报告样本评估准确率，也未在实际窗口中操作。 |
 | mygo v0.3.7 升级（2026-10-10） | 用上游 `mygo migrate-ui` 迁移界面代码后，根模块全部测试、七包 race、`go vet`、上游 `mygo vet`、嵌套 mygo `ui` 测试/race/vet、打包回归（含保留仍链接 v0.2.15 的旧包）和签名预览构建与校验在当前 Mac 通过；合成截图与升级前逐屏对照，修正了原件预览溢出卡片的一处布局变化并加了回归。新包在当前 Mac 能启动。没有在实际窗口中操作任何流程；真实输入法、VoiceOver 和键盘矩阵在此版本上均未验收。 |
 | mygo v0.4.8 升级（2026-10-13） | 根模块 `CGO_ENABLED=0 go test -count=1 ./...`、desktop race、根模块 vet、上游 `mygo vet`、嵌套 mygo `ui` 测试/race/vet 及两模块完整性检查通过。打包回归覆盖 v0.2.15/v0.3.7 的旧包保留，并拒绝把旧版本当作当前包；签名预览构建通过。10 张合成界面图与 v0.3.7 逐字节一致；没有修改应用 UI 调用或资料格式。保留日历补丁，另有一处纯 gofmt 对齐，见 [来源追加](sources/mygo-0.4.8-upgrade-2026-10-13.md)。没有启动本机实际资料库，也未执行真实输入法、VoiceOver、其他 macOS/Intel、手机网络或正式分发验收。 |
+| mygo v0.6.4 升级（2026-10-26） | 根模块全部测试、desktop/backup race、vet、官方 `mygo vet`、`go mod verify` 和上游 UI 普通测试/vet/short race 在当前 Mac 通过；额外完整上游 race 因 `TestDiffFrameAllocs` 的 3/4 次分配超过 2 次上限而失败，同用例非 race 为 2/2，未报告数据竞争，见日志。语言回归覆盖英文、中文日历选日及返回跟随系统。打包回归覆盖 v0.2.15/v0.3.7/v0.4.8 的上游及本地替换旧包，并拒绝当前包使用本地替换；签名构建与复验通过，实际旧 v0.4.8 二进制逐字节保留。10 张合成界面图中 9 张逐字节一致，编辑页差异仅在日期栏的区域格式显示。官方日历替代本地补丁，资料格式、OCR、LAN 和备份协议未变。未启动真实资料库，真实输入法/VoiceOver/完整键盘、真实手机、其他系统与分发未验收。 |
 | 仍待人工与基线 | VoiceOver、完整键盘矩阵仍待验收。既有合成资料重开正常，但没有执行完整的安装式 v1 升级验收。File Provider、其他 macOS/Intel 和正式分发仍未执行；Swift 构建和测试本轮未重跑。 |
 | 文档与隐私 | 专题、公开 API 来源、导航和日志同步；文档、隐私、格式及 diff 门禁作为提交前检查。运行时资料、导出文件和截图不加入仓库。 |
 

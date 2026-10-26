@@ -359,12 +359,21 @@ func TestLongImportShowsProgressAndExplainsTheWait(t *testing.T) {
 }
 
 func TestDatePickerFollowsTheInterfaceLanguage(t *testing.T) {
-	t.Cleanup(func() { ui.SetCalendarText(ui.CalendarText{}) })
 	s, f, drain := testScreen(t)
 	f.report.Review.Date = "2026-07-10"
 	s.accept(f.report)
 	tt := ui.NewTester(s.view, 1240, 900)
-	if err := tt.Click("2026-07-10"); err != nil {
+	var requested string
+	s.setLocale = func(locale string) string {
+		requested = locale
+		if locale == "" {
+			locale = "en"
+		}
+		tt.SetLocale(locale)
+		return locale
+	}
+	s.updateChrome()
+	if err := tt.Click("7/10/2026"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -383,6 +392,17 @@ func TestDatePickerFollowsTheInterfaceLanguage(t *testing.T) {
 	tt.Frame()
 	if s.edit.Date != "2026-07-21" {
 		t.Fatalf("choosing a day in the Chinese calendar set %q", s.edit.Date)
+	}
+	s.changeLanguage("system")
+	drain()
+	if requested != "" || s.lang() != "en" || s.edit.Date != "2026-07-21" {
+		t.Fatal("following the system must clear the locale override without changing the date")
+	}
+	if err := tt.Click("7/21/2026"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("July 2026") || tt.HasText("2026年7月") {
+		t.Fatal("returning to the system language did not update the calendar")
 	}
 }
 

@@ -63,8 +63,8 @@ case "$(/usr/bin/uname -m)" in
   x86_64) export GOARCH=amd64 ;;
   *) fail "unsupported build host architecture" ;;
 esac
-[[ "$("$GO_EXECUTABLE" version)" == "go version go1.27.2 darwin/$GOARCH" ]] \
-  || fail "Go 1.27.2 is required"
+[[ "$("$GO_EXECUTABLE" version)" == "go version go1.27.3 darwin/$GOARCH" ]] \
+  || fail "Go 1.27.3 is required"
 if [[ -d "$APP_BUNDLE" ]]; then
   # Only this preservation check accepts the earlier read-only permission set.
   /bin/zsh "$SCRIPT_DIR/verify-go-preview.sh" --previous --go "$GO_EXECUTABLE" >/dev/null \
@@ -80,9 +80,7 @@ RESOURCES="$STAGED_APP/Contents/Resources"
 /bin/mkdir -p "$STAGED_APP/Contents/MacOS" "$RESOURCES/en.lproj" "$RESOURCES/zh-Hans.lproj" "$RESOURCES/ThirdPartyLicenses"
 cd "$REPO_DIR"
 REPLACEMENTS="$("$GO_EXECUTABLE" list -mod=readonly -m -f '{{if .Replace}}{{.Path}} {{.Version}} => {{.Replace.Path}} {{.Replace.Version}}{{end}}' all | /usr/bin/sed '/^$/d')"
-[[ "$REPLACEMENTS" == 'github.com/egoist/mygo v0.4.8 => ./third_party/mygo ' \
-    && -d "$REPO_DIR/third_party" && ! -L "$REPO_DIR/third_party" \
-    && -d "$REPO_DIR/third_party/mygo" && ! -L "$REPO_DIR/third_party/mygo" ]] \
+[[ -z "$REPLACEMENTS" ]] \
   || fail "module replacements differ from the preview contract"
 "$GO_EXECUTABLE" build -mod=readonly -trimpath -buildvcs=false -tags mygo_noinspector \
   -ldflags '-s -w' -o "$STAGED_APP/Contents/MacOS/KinlogueGoPreview" ./cmd/kinlogue
@@ -92,7 +90,7 @@ REPLACEMENTS="$("$GO_EXECUTABLE" list -mod=readonly -m -f '{{if .Replace}}{{.Pat
 /bin/cp "$REPO_DIR/LICENSE" "$RESOURCES/LICENSE"
 
 # Copy the licenses of modules actually linked into this binary. The complete
-# build information records pinned versions and the relative mygo replacement,
+# build information records pinned upstream versions and module checksums,
 # without absolute workstation paths.
 "$GO_EXECUTABLE" version -m "$STAGED_APP/Contents/MacOS/KinlogueGoPreview" \
   | /usr/bin/sed '1d' > "$RESOURCES/BUILD_INFO.txt"
@@ -117,7 +115,7 @@ if [[ ! -f "$GO_RUNTIME_LICENSE" && "${GO_RUNTIME_ROOT:t}" == libexec ]]; then
   GO_RUNTIME_LICENSE="${GO_RUNTIME_ROOT:h}/LICENSE"
 fi
 [[ -f "$GO_RUNTIME_LICENSE" && ! -L "$GO_RUNTIME_LICENSE" ]] || fail "Go runtime license is unavailable"
-/bin/cp "$GO_RUNTIME_LICENSE" "$RESOURCES/ThirdPartyLicenses/go1.27.2.txt"
+/bin/cp "$GO_RUNTIME_LICENSE" "$RESOURCES/ThirdPartyLicenses/go1.27.3.txt"
 /bin/chmod 755 "$STAGED_APP/Contents/MacOS/KinlogueGoPreview"
 /usr/bin/codesign --force --sign - --entitlements "$SOURCE_DIR/Entitlements.plist" "$STAGED_APP" 2>/dev/null
 /bin/zsh "$SCRIPT_DIR/verify-go-preview.sh" --bundle "$STAGED_APP" --go "$GO_EXECUTABLE"

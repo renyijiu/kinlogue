@@ -42,7 +42,6 @@ func warmTheme() *ui.Theme {
 }
 
 func (s *screen) view(c *ui.Context) {
-	ui.SetCalendarText(s.calendarText())
 	theme := warmTheme()
 	if c.Preferences().HighContrast {
 		theme.Border = theme.TextMuted

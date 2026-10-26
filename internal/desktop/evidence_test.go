@@ -134,7 +134,9 @@ func TestUIEvidence(t *testing.T) {
 		s.load(true)
 		drain()
 		s.language = "zh-Hans"
-		return s, drain, ui.NewTester(s.view, 1366, 768)
+		tt := ui.NewTester(s.view, 1366, 768)
+		tt.SetLocale(s.lang())
+		return s, drain, tt
 	}
 	settle := func(tt *ui.Tester, drain func()) {
 		for range 3 {
@@ -175,6 +177,7 @@ func TestUIEvidence(t *testing.T) {
 	p.phone.interfaces, _ = f.LANInterfaces(ctx)
 	p.phone.interfaceID = phoneInterfaceID(p.phone.interfaces[0])
 	ptt := ui.NewTester(p.view, 1366, 768)
+	ptt.SetLocale(p.lang())
 	ptt.Frame()
 	write(ptt, "07-phone-queue")
 	var mu sync.Mutex

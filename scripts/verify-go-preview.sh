@@ -89,23 +89,26 @@ case "$(/usr/bin/uname -m)" in
   x86_64) HOST_ARCH=amd64 ;;
   *) fail "unsupported build host architecture" ;;
 esac
-[[ "$("$GO_EXECUTABLE" version)" == "go version go1.27.2 darwin/$HOST_ARCH" ]] \
-  || fail "Go 1.27.2 is required"
+[[ "$("$GO_EXECUTABLE" version)" == "go version go1.27.3 darwin/$HOST_ARCH" ]] \
+  || fail "Go 1.27.3 is required"
 BUILD_INFO="$("$GO_EXECUTABLE" version -m "$EXECUTABLE")" || fail "Go build information is unavailable"
-RUNTIME_VERSION='go1.27.2'
+RUNTIME_VERSION='go1.27.3'
 # Earlier verified preview bundles are preserved, never treated as the new build.
-if [[ "$PREVIOUS" -eq 1 && "${BUILD_INFO%%$'\n'*}" == *': go1.27.1' ]]; then
-  RUNTIME_VERSION='go1.27.1'
+if [[ "$PREVIOUS" -eq 1 ]]; then
+  case "${BUILD_INFO%%$'\n'*}" in
+    *': go1.27.1') RUNTIME_VERSION='go1.27.1' ;;
+    *': go1.27.2') RUNTIME_VERSION='go1.27.2' ;;
+  esac
 fi
 [[ "${BUILD_INFO%%$'\n'*}" == *": $RUNTIME_VERSION" \
     && "$BUILD_INFO" == *$'\n\tpath\tkinlogue/cmd/kinlogue\n'* \
     && "$BUILD_INFO" == *$'\n\tbuild\tCGO_ENABLED=0\n'* \
     && "$BUILD_INFO" == *$'\n\tbuild\t-trimpath=true\n'* \
     && "$BUILD_INFO" == *$'\n\tbuild\t-tags=mygo_noinspector\n'* ]] || fail "Go build settings differ from the preview contract"
-MYGO_PIN=$'github.com/egoist/mygo\tv0.4.8'
+MYGO_PIN=$'github.com/egoist/mygo\tv0.6.4'
 # A preserved earlier bundle may still link the mygo version pinned before.
 if [[ "$PREVIOUS" -eq 1 ]] && print -r -- "$BUILD_INFO" \
-    | /usr/bin/awk -F '\t' '$2 == "dep" && $3 == "github.com/egoist/mygo" && ($4 == "v0.2.15" || $4 == "v0.3.7") { found = 1 } END { exit !found }'; then
+    | /usr/bin/awk -F '\t' '$2 == "dep" && $3 == "github.com/egoist/mygo" && ($4 == "v0.2.15" || $4 == "v0.3.7" || $4 == "v0.4.8") { found = 1 } END { exit !found }'; then
   MYGO_PIN="$(print -r -- "$BUILD_INFO" | /usr/bin/awk -F '\t' '$2 == "dep" && $3 == "github.com/egoist/mygo" { print $3 "\t" $4 }')"
 fi
 for pin in "$MYGO_PIN" $'github.com/ebitengine/purego\tv0.11.1' $'modernc.org/sqlite\tv1.60.1'; do
@@ -113,14 +116,14 @@ for pin in "$MYGO_PIN" $'github.com/ebitengine/purego\tv0.11.1' $'modernc.org/sq
     || fail "direct dependency pin is incorrect"
 done
 # A replacement record belongs to its immediately preceding dependency. Only
-# the in-repo mygo patch is accepted; every other module keeps its locked source.
+# known older previews may retain the retired mygo patch; new builds use upstream.
 print -r -- "$BUILD_INFO" | /usr/bin/awk -F '\t' -v previous="$PREVIOUS" -v mygo="$MYGO_PIN" '
   $2 == "=>" {
     count++
-    if (dependency != mygo || $3 != "./third_party/mygo" || $4 != "(devel)" || $5 != "") invalid = 1
+    if (!previous || mygo == "github.com/egoist/mygo\tv0.6.4" || dependency != mygo || $3 != "./third_party/mygo" || $4 != "(devel)" || $5 != "") invalid = 1
   }
   { dependency = ($2 == "dep") ? $3 "\t" $4 : "" }
-  END { exit (invalid || count > 1 || (!previous && count != 1)) }
+  END { exit (invalid || count > 1) }
 ' || fail "module replacements differ from the preview contract"
 if [[ "$PREVIOUS" -eq 0 ]]; then
   print -r -- "$BUILD_INFO" | /usr/bin/awk -F '\t' '$2 == "dep" && $3 == "filippo.io/age" && $4 == "v1.3.2" { found = 1 } END { exit !found }' \
