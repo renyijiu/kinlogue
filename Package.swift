@@ -18,11 +18,11 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/ThalesMMS/DICOM-Swift.git",
-            exact: "1.5.0"
+            exact: "3.0.1"
         ),
         .package(
             url: "https://github.com/apple/swift-nio.git",
-            exact: "2.101.3"
+            exact: "2.104.0"
         ),
         .package(
             url: "https://github.com/weichsel/ZIPFoundation.git",

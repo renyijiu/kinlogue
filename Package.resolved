@@ -1,22 +1,13 @@
 {
-  "originHash" : "c176fb44bc7f676be8fe795b64b8784c166b9d64ef2d53ffc565e5d808c406e3",
+  "originHash" : "beb6074497568a01be0b69efbf6474ed85c8eb323a580037d814d3e7c31d13da",
   "pins" : [
-    {
-      "identity" : "compressionfamily",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Raster-Lab/CompressionFamily.git",
-      "state" : {
-        "revision" : "36ef2c94e28a3b74ba395ce6397ba2ae7b041c5e",
-        "version" : "1.0.1"
-      }
-    },
     {
       "identity" : "dicom-swift",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ThalesMMS/DICOM-Swift.git",
       "state" : {
-        "revision" : "8f3605a33ed070160b4e023eacd87f32eae8e913",
-        "version" : "1.5.0"
+        "revision" : "2cb82e44c1041a2c1e85319fb5661f442d0b1ee9",
+        "version" : "3.0.1"
       }
     },
     {
@@ -26,33 +17,6 @@
       "state" : {
         "revision" : "b83108d10f42680d78f23fe4d4d80fc88dab3212",
         "version" : "7.11.1"
-      }
-    },
-    {
-      "identity" : "j2kswift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Raster-Lab/J2KSwift.git",
-      "state" : {
-        "revision" : "b1949084eeedaafb40bff8f1745bbab19e4bc36d",
-        "version" : "11.0.2"
-      }
-    },
-    {
-      "identity" : "jlswift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Raster-Lab/JLSwift.git",
-      "state" : {
-        "revision" : "53d902fec538e5c12f4ed9864c026be5da66b5dd",
-        "version" : "0.9.0"
-      }
-    },
-    {
-      "identity" : "jxlswift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Raster-Lab/JXLSwift.git",
-      "state" : {
-        "revision" : "760697a54dd253da8e8466c3fd09ecf2c2d89aec",
-        "version" : "1.4.0"
       }
     },
     {
@@ -87,8 +51,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-nio.git",
       "state" : {
-        "revision" : "0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b",
-        "version" : "2.101.3"
+        "revision" : "6db9d9abd92ad7399b8a564cafbb87d3507245fa",
+        "version" : "2.104.0"
       }
     },
     {
